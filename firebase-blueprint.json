@@ -1,0 +1,110 @@
+{
+  "entities": {
+    "StockTab": {
+      "title": "Stock Tab",
+      "description": "Represents a user's stock tracking tab.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "symbol": { "type": "string" },
+        "companyName": { "type": "string" },
+        "status": { "type": "string", "enum": ["ACTIVE", "COMPLETED"] },
+        "finalPnL": { "type": "number" },
+        "currentPrice": { "type": "number" },
+        "isFavoriteHighlight": { "type": "boolean" },
+        "tradeType": { "type": "string", "enum": ["simulated", "real"] },
+        "recommendation": { "type": "string" },
+        "rating": { "type": "number" },
+        "sentiment": { "type": "number" },
+        "volatility": { "type": "string" },
+        "shortTermImpact": { "type": "string", "enum": ["看多", "觀察", "看空"] },
+        "longTermOutlook": { "type": "string", "enum": ["看多", "觀察", "看空"] },
+        "createdAt": { "type": "string", "format": "timestamp" },
+        "updatedAt": { "type": "string", "format": "timestamp" }
+      },
+      "required": ["userId", "symbol", "status", "tradeType", "createdAt", "updatedAt"]
+    },
+    "Trade": {
+      "title": "Trade",
+      "description": "A single trade record.",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["BUY", "SELL"] },
+        "price": { "type": "number" },
+        "quantity": { "type": "number" },
+        "tradeDate": { "type": "string", "format": "timestamp" },
+        "fees": { "type": "number" },
+        "tags": { "type": "array" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "timestamp" }
+      },
+      "required": ["type", "price", "quantity", "tradeDate", "createdAt"]
+    },
+    "PlannedOrder": {
+      "title": "Planned Order",
+      "description": "A planned future trade.",
+      "type": "object",
+      "properties": {
+        "direction": { "type": "string", "enum": ["BUY", "SELL"] },
+        "price": { "type": "number" },
+        "quantity": { "type": "number" },
+        "conditions": { "type": "string" },
+        "status": { "type": "string", "enum": ["PENDING", "CANCELLED", "COMPLETED"] },
+        "category": { "type": "string" },
+        "purpose": { "type": "string" },
+        "notes": { "type": "string" },
+        "isManualHighlight": { "type": "boolean" },
+        "plannedDate": { "type": "string", "format": "timestamp" },
+        "createdAt": { "type": "string", "format": "timestamp" }
+      },
+      "required": ["direction", "price", "quantity", "status", "createdAt"]
+    },
+    "StrategyConfig": {
+      "title": "Strategy Configuration",
+      "description": "Strategy notes, entry plans, and targets for a tab.",
+      "type": "object",
+      "properties": {
+        "entries": { "type": "array" },
+        "tp1": { "type": "number" },
+        "tp2": { "type": "number" },
+        "tp3": { "type": "number" },
+        "sl": { "type": "number" },
+        "slConditions": { "type": "string" },
+        "strategyNotes": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "timestamp" }
+      },
+      "required": ["updatedAt"]
+    },
+    "SocratesData": {
+      "title": "Socrates Data",
+      "description": "Market signal data for a specific date.",
+      "type": "object",
+      "properties": {
+        "strong": { "type": "array" },
+        "weak": { "type": "array" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}/socratesData/{dateKey}": {
+      "schema": "SocratesData",
+      "description": "User-specific market signal data by date."
+    },
+    "/stockTabs/{tabId}": {
+      "schema": "StockTab",
+      "description": "Root collection for user's stock tabs."
+    },
+    "/stockTabs/{tabId}/trades/{tradeId}": {
+      "schema": "Trade",
+      "description": "Trades associated with a stock tab."
+    },
+    "/stockTabs/{tabId}/plannedOrders/{orderId}": {
+      "schema": "PlannedOrder",
+      "description": "Planned orders for a stock tab."
+    },
+    "/stockTabs/{tabId}/strategy/{strategyId}": {
+      "schema": "StrategyConfig",
+      "description": "Strategy and targets. Usually just one document per tab (e.g. ID 'main')."
+    }
+  }
+}
