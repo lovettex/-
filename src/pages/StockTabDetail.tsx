@@ -191,28 +191,28 @@ export default function StockTabDetail() {
               </div>
 
               <div className="flex flex-col gap-1">
-                <span className="text-[10px] font-semibold text-white/30 uppercase tracking-widest leading-tight">建議</span>
-                <Select value={tab.recommendation || '保持觀望'} onValueChange={(val: any) => updateTab(tab.id, { recommendation: val })}>
-                  <SelectTrigger className="h-7 w-20 bg-white/5 border-white/10 text-white font-bold text-[10px] ring-0 focus:ring-emerald-500/50 rounded-md px-1.5 overflow-hidden">
-                    <SelectValue placeholder="建議" />
+                <span className="text-[10px] font-semibold text-white/30 uppercase tracking-widest leading-tight">Buy Rate</span>
+                <Select value={String(tab.buyRate || 5)} onValueChange={(val) => updateTab(tab.id, { buyRate: Number(val) })}>
+                  <SelectTrigger className="h-7 w-12 bg-white/5 border-white/10 text-white font-bold text-[11px] ring-0 focus:ring-emerald-500/50 rounded-md p-1">
+                    <SelectValue placeholder="-" />
                   </SelectTrigger>
-                  <SelectContent className="glass-panel border-white/10 text-white">
-                    <SelectItem value="推薦買進" className="text-xs text-emerald-400 focus:bg-white/10">推薦買進</SelectItem>
-                    <SelectItem value="保持觀望" className="text-xs text-amber-400 focus:bg-white/10">保持觀望</SelectItem>
-                    <SelectItem value="推薦看跌" className="text-xs text-red-400 focus:bg-white/10">推薦看跌</SelectItem>
+                  <SelectContent className="glass-panel border-white/10 text-white min-w-[50px]">
+                    {[...Array(10)].map((_, i) => (
+                      <SelectItem key={i+1} value={String(i+1)} className="text-xs focus:bg-white/10">{i+1}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
 
               <div className="flex flex-col gap-1">
-                <span className="text-[10px] font-semibold text-white/30 uppercase tracking-widest leading-tight">情緒</span>
-                <Select value={String(tab.sentiment || 50)} onValueChange={(val) => updateTab(tab.id, { sentiment: Number(val) })}>
-                  <SelectTrigger className="h-7 w-14 bg-white/5 border-white/10 text-white font-bold text-[10px] ring-0 focus:ring-emerald-500/50 rounded-md p-1">
+                <span className="text-[10px] font-semibold text-white/30 uppercase tracking-widest leading-tight">Sell Rate</span>
+                <Select value={String(tab.sellRate || 5)} onValueChange={(val) => updateTab(tab.id, { sellRate: Number(val) })}>
+                  <SelectTrigger className="h-7 w-12 bg-white/5 border-white/10 text-white font-bold text-[11px] ring-0 focus:ring-red-500/50 rounded-md p-1">
                     <SelectValue placeholder="-" />
                   </SelectTrigger>
-                  <SelectContent className="glass-panel border-white/10 text-white min-w-[60px]">
-                    {[10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((val) => (
-                      <SelectItem key={val} value={String(val)} className="text-xs focus:bg-white/10">{val}%</SelectItem>
+                  <SelectContent className="glass-panel border-white/10 text-white min-w-[50px]">
+                    {[...Array(10)].map((_, i) => (
+                      <SelectItem key={i+1} value={String(i+1)} className="text-xs focus:bg-white/10">{i+1}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>

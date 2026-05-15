@@ -11,31 +11,33 @@ service cloud.firestore {
     function incoming() { return request.resource.data; }
     function existing() { return resource.data; }
     function isSignedIn() { 
-      return request.auth != null && request.auth.token.email_verified == true; 
+      return request.auth != null; 
     }
 
     // Validation for StockTab
     function isValidStockTab(data) {
       return data.keys().hasAll(['userId', 'symbol'])
         && data.userId == request.auth.uid
-        && data.symbol is string && data.symbol.size() > 0 && data.symbol.size() <= 20
-        && ( !('status' in data) || data.status in ['ACTIVE', 'COMPLETED'] )
+        && data.symbol is string && data.symbol.size() > 0 && data.symbol.size() <= 50
+        && ( !('status' in data) || data.status is string )
         && ( !('tradeType' in data) || data.tradeType in ['simulated', 'real'] )
-        && ( !('companyName' in data) || (data.companyName is string && data.companyName.size() <= 100) )
+        && ( !('companyName' in data) || data.companyName is string )
         && ( !('finalPnL' in data) || data.finalPnL is number )
         && ( !('currentPrice' in data) || data.currentPrice is number )
-        && ( !('tags' in data) || (data.tags is list && data.tags.size() <= 20) )
+        && ( !('tags' in data) || data.tags is list )
         && ( !('isFavoriteHighlight' in data) || data.isFavoriteHighlight is bool )
         && ( !('isHidden' in data) || data.isHidden is bool )
         && ( !('sortOrder' in data) || data.sortOrder is number )
-        && ( !('recommendation' in data) || (data.recommendation is string && data.recommendation.size() <= 100) )
-        && ( !('rating' in data) || data.rating is number )
-        && ( !('sentiment' in data) || data.sentiment is number )
-        && ( !('volatility' in data) || (data.volatility is string && data.volatility.size() <= 100) )
-        && ( !('shortTermImpact' in data) || (data.shortTermImpact is string && data.shortTermImpact.size() <= 100) )
-        && ( !('longTermOutlook' in data) || (data.longTermOutlook is string && data.longTermOutlook.size() <= 100) )
-        && ( !('createdAt' in data) || data.createdAt is timestamp )
-        && ( !('updatedAt' in data) || data.updatedAt is timestamp );
+        && ( !('buyRate' in data) || data.buyRate is number || data.buyRate is string )
+        && ( !('sellRate' in data) || data.sellRate is number || data.sellRate is string )
+        && ( !('rating' in data) || data.rating is number || data.rating is string )
+        && ( !('volatility' in data) || data.volatility is string )
+        && ( !('shortTermImpact' in data) || data.shortTermImpact is string )
+        && ( !('longTermOutlook' in data) || data.longTermOutlook is string )
+        && ( !('holdingStatus' in data) || data.holdingStatus is string )
+        && ( !('isOperationConfirmed' in data) || data.isOperationConfirmed is bool )
+        && ( !('createdAt' in data) || data.createdAt is timestamp || data.createdAt == request.time )
+        && ( !('updatedAt' in data) || data.updatedAt is timestamp || data.updatedAt == request.time );
     }
 
     // Validation for Trade
@@ -45,7 +47,7 @@ service cloud.firestore {
         && data.price is number && data.price >= 0
         && data.quantity is number && data.quantity > 0
         && data.tradeDate is timestamp
-        && data.createdAt is timestamp
+        && (data.createdAt is timestamp || data.createdAt == request.time)
         && ( !('fees' in data) || (data.fees is number && data.fees >= 0) )
         && ( !('tags' in data) || (data.tags is list && data.tags.size() <= 10) )
         && ( !('notes' in data) || (data.notes is string && data.notes.size() <= 2000) );
@@ -58,7 +60,7 @@ service cloud.firestore {
         && data.price is number && data.price >= 0
         && data.quantity is number && data.quantity >= 0
         && data.status in ['PENDING', 'CANCELLED', 'COMPLETED']
-        && data.createdAt is timestamp
+        && (data.createdAt is timestamp || data.createdAt == request.time)
         && ( !('category' in data) || (data.category is string && data.category.size() <= 100) )
         && ( !('purpose' in data) || (data.purpose is string && data.purpose.size() <= 100) )
         && ( !('conditions' in data) || (data.conditions is string && data.conditions.size() <= 2000) )
@@ -70,25 +72,28 @@ service cloud.firestore {
     // Validation for StrategyConfig
     function isValidStrategyConfig(data) {
       return data.keys().hasAll(['updatedAt'])
-        && data.updatedAt is timestamp
-        && ( !('entries' in data) || (data.entries is list && data.entries.size() <= 20) )
-        && ( !('resistanceZones' in data) || (data.resistanceZones is list && data.resistanceZones.size() <= 10) )
-        && ( !('supportZones' in data) || (data.supportZones is list && data.supportZones.size() <= 10) )
-        && ( !('tp1' in data) || data.tp1 is number )
-        && ( !('tp2' in data) || data.tp2 is number )
-        && ( !('tp3' in data) || data.tp3 is number )
-        && ( !('tpTargets' in data) || (data.tpTargets is list && data.tpTargets.size() <= 10) )
-        && ( !('slTargets' in data) || (data.slTargets is list && data.slTargets.size() <= 10) )
-        && ( !('sl' in data) || data.sl is number )
-        && ( !('slConditions' in data) || (data.slConditions is string && data.slConditions.size() <= 2000) )
-        && ( !('strategyNotes' in data) || (data.strategyNotes is string && data.strategyNotes.size() <= 5000) )
-        && ( !('tags' in data) || (data.tags is list && data.tags.size() <= 20) );
+        && (data.updatedAt is timestamp || data.updatedAt == request.time)
+        && ( !('entries' in data) || data.entries is list )
+        && ( !('resistanceZones' in data) || data.resistanceZones is list )
+        && ( !('supportZones' in data) || data.supportZones is list )
+        && ( !('tp1' in data) || data.tp1 is number || data.tp1 is string )
+        && ( !('tp2' in data) || data.tp2 is number || data.tp2 is string )
+        && ( !('tp3' in data) || data.tp3 is number || data.tp3 is string )
+        && ( !('tpTargets' in data) || data.tpTargets is list )
+        && ( !('slTargets' in data) || data.slTargets is list )
+        && ( !('sl' in data) || data.sl is number || data.sl is string )
+        && ( !('slPercentage' in data) || data.slPercentage is number || data.slPercentage is string )
+        && ( !('slConditions' in data) || data.slConditions is string )
+        && ( !('strategyNotes' in data) || data.strategyNotes is string )
+        && ( !('operationNote' in data) || data.operationNote is string )
+        && ( !('tags' in data) || data.tags is list )
+        && ( !('id' in data) || data.id is string );
     }
 
     // Validation for DailyReport
     function isValidDailyReport(data) {
       return data.keys().hasAll(['updatedAt'])
-        && data.updatedAt is timestamp
+        && (data.updatedAt is timestamp || data.updatedAt == request.time)
         && ( !('pdfUrl1' in data) || (data.pdfUrl1 is string && data.pdfUrl1.size() <= 2000) )
         && ( !('pdfUrl2' in data) || (data.pdfUrl2 is string && data.pdfUrl2.size() <= 2000) );
     }
@@ -102,7 +107,8 @@ service cloud.firestore {
     match /users/{userId}/socratesData/{dateKey} {
       allow list: if isSignedIn() && userId == request.auth.uid;
       allow get: if isSignedIn() && userId == request.auth.uid;
-      allow write: if isSignedIn() && userId == request.auth.uid && isValidId(dateKey) && isValidSocratesData(incoming());
+      allow create, update: if isSignedIn() && userId == request.auth.uid && isValidId(dateKey) && isValidSocratesData(incoming());
+      allow delete: if isSignedIn() && userId == request.auth.uid && isValidId(dateKey);
     }
 
     match /stockTabs/{tabId} {
@@ -110,14 +116,14 @@ service cloud.firestore {
       allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
       
       allow create: if isSignedIn() && isValidId(tabId) && isValidStockTab(incoming())
-        && ( !('createdAt' in incoming()) || incoming().createdAt is timestamp )
-        && ( !('updatedAt' in incoming()) || incoming().updatedAt is timestamp );
+        && ( !('createdAt' in incoming()) || incoming().createdAt is timestamp || incoming().createdAt == request.time )
+        && ( !('updatedAt' in incoming()) || incoming().updatedAt is timestamp || incoming().updatedAt == request.time );
         
       allow update: if isSignedIn() && isValidId(tabId) && isValidStockTab(incoming())
         && resource.data.userId == request.auth.uid
         && incoming().userId == resource.data.userId
         && (!('createdAt' in resource.data) || incoming().createdAt == resource.data.createdAt)
-        && (!('updatedAt' in incoming()) || incoming().updatedAt is timestamp);
+        && (!('updatedAt' in incoming()) || incoming().updatedAt is timestamp || incoming().updatedAt == request.time );
         
       allow delete: if isSignedIn() && isValidId(tabId) && resource.data.userId == request.auth.uid;
 
@@ -159,11 +165,11 @@ service cloud.firestore {
         
         allow create: if isSignedIn() && isValidId(tabId) && isValidId(strategyId) && isValidStrategyConfig(incoming())
           && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid
-          && ( !('updatedAt' in incoming()) || incoming().updatedAt is timestamp );
+          && ( !('updatedAt' in incoming()) || incoming().updatedAt is timestamp || incoming().updatedAt == request.time );
           
         allow update: if isSignedIn() && isValidId(tabId) && isValidId(strategyId) && isValidStrategyConfig(incoming())
           && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid
-          && (!('updatedAt' in incoming()) || incoming().updatedAt is timestamp);
+          && (!('updatedAt' in incoming()) || incoming().updatedAt is timestamp || incoming().updatedAt == request.time);
           
         allow delete: if isSignedIn() && isValidId(tabId) && isValidId(strategyId) 
           && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid;
@@ -175,7 +181,7 @@ service cloud.firestore {
         
         allow create, update: if isSignedIn() && isValidId(tabId) && isValidId(reportId) && isValidDailyReport(incoming())
           && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid
-          && ( !('updatedAt' in incoming()) || incoming().updatedAt is timestamp );
+          && ( !('updatedAt' in incoming()) || incoming().updatedAt is timestamp || incoming().updatedAt == request.time );
           
         allow delete: if isSignedIn() && isValidId(tabId) && isValidId(reportId) 
           && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid;

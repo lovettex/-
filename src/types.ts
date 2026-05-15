@@ -8,17 +8,17 @@ export interface StockTab {
   status: 'ACTIVE' | 'COMPLETED';
   isHidden?: boolean;
   sortOrder?: number; // Added sortOrder
-  holdingStatus?: '持有中' | '觀察中' | '候選名單';
+  holdingStatus?: '觀察中' | '候選名單' | '買進操作' | '賣出操作' | '平倉操作';
   finalPnL?: number;
   currentPrice?: number;
   tags?: string[];
   tradeType: 'simulated' | 'real';
-  recommendation?: '推薦買進' | '保持觀望' | '推薦看跌';
+  buyRate?: number; // 1-10
+  sellRate?: number; // 1-10
   rating?: number; // 1-10
   qualityScore?: number; // 1-10
   valueScore?: number; // 1-10
   isOperationConfirmed?: boolean;
-  sentiment?: number; // 10-100
   volatility?: '低' | '中等' | '高';
   shortTermImpact?: '看多' | '觀察' | '看空';
   longTermOutlook?: '看多' | '觀察' | '看空';
