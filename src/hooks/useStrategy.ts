@@ -63,22 +63,34 @@ export function useStrategy(tabId: string | undefined) {
           sanitizedData[key] = stripUndefined((data as any)[key]);
         }
       });
-      await setDoc(doc(db, `stockTabs/${tabId}/strategy`, 'main'), {
-        ...sanitizedData,
-        updatedAt: serverTimestamp()
-      }, { merge: true });
+      try {
+        await setDoc(doc(db, `stockTabs/${tabId}/strategy`, 'main'), {
+          ...sanitizedData,
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+      } catch (error) {
+        toast.error('保存策略失敗');
+        handleFirestoreError(error, OperationType.WRITE, `stockTabs/${tabId}/strategy/main`);
+        return;
+      }
       
       if (sanitizedData.tags !== undefined && sanitizedData.tags !== deleteField()) {
-        await updateDoc(doc(db, 'stockTabs', tabId), {
-          tags: sanitizedData.tags,
-          updatedAt: serverTimestamp()
-        });
+        try {
+          await updateDoc(doc(db, 'stockTabs', tabId), {
+            tags: sanitizedData.tags,
+            updatedAt: serverTimestamp()
+          });
+        } catch (error) {
+          toast.error('保存標籤失敗');
+          handleFirestoreError(error, OperationType.WRITE, `stockTabs/${tabId}`);
+          return;
+        }
       }
 
       toast.success('策略已儲存');
     } catch (error) {
-      toast.error('儲存失敗');
-      handleFirestoreError(error, OperationType.WRITE, `stockTabs/${tabId}/strategy/main`);
+      toast.error('系統錯誤');
+      console.error(error);
     }
   };
 

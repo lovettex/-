@@ -127,13 +127,18 @@ export default function StockTabDetail() {
                 >
                   {tab.symbol}
                 </motion.h1>
-                {tab.status === 'ACTIVE' ? (
-                  <Badge variant="outline" className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 font-bold text-[10px] px-2 py-0 rounded-full">ACTIVE</Badge>
-                ) : (
+                {tab.status === 'COMPLETED' && (
                   <Badge variant="outline" className="bg-blue-500/10 text-blue-400 border-blue-500/20 font-bold text-[10px] px-2 py-0 rounded-full">COMPLETED</Badge>
                 )}
               </div>
-              <p className="text-white/40 text-[10px] tracking-wider truncate max-w-[120px]">{tab.companyName}</p>
+              <div className="flex flex-col">
+                <p className="text-white/40 text-[10px] tracking-wider truncate max-w-[120px]">{tab.companyName}</p>
+                {tab.updatedAt && (
+                  <p className="text-white/20 text-[8px] mt-0.5 tracking-widest">
+                    UPD: {typeof tab.updatedAt.toDate === 'function' ? format(tab.updatedAt.toDate(), 'yyyy/MM/dd HH:mm') : ''}
+                  </p>
+                )}
+              </div>
             </div>
 
             <div className="h-8 w-px bg-white/10 hidden md:block" />
@@ -233,31 +238,17 @@ export default function StockTabDetail() {
               </div>
 
               <div className="flex flex-col gap-1">
-                <span className="text-[10px] font-semibold text-white/30 uppercase tracking-widest leading-tight">短期影響</span>
-                <Select value={tab.shortTermImpact || '觀察'} onValueChange={(val: any) => updateTab(tab.id, { shortTermImpact: val })}>
-                  <SelectTrigger className="h-7 w-14 bg-white/5 border-white/10 text-white font-bold text-[10px] ring-0 focus:ring-emerald-500/50 rounded-md p-1">
-                    <SelectValue placeholder="-" />
-                  </SelectTrigger>
-                  <SelectContent className="glass-panel border-white/10 text-white">
-                    <SelectItem value="看多" className="text-xs text-emerald-400 focus:bg-white/10">看多</SelectItem>
-                    <SelectItem value="觀察" className="text-xs text-amber-400 focus:bg-white/10">觀察</SelectItem>
-                    <SelectItem value="看空" className="text-xs text-red-400 focus:bg-white/10">看空</SelectItem>
-                  </SelectContent>
-                </Select>
+                <span className="text-[10px] font-semibold text-white/30 uppercase tracking-widest leading-tight">Pos Value</span>
+                <div className="h-7 w-12 bg-white/5 border border-white/10 text-emerald-400 font-bold text-[11px] rounded-md flex items-center justify-center">
+                  {Math.max(0, Number(tab.rating||5) - 5) + Math.max(0, Number(tab.qualityScore||5) - 5) + Math.max(0, Number(tab.valueScore||5) - 5) + Number(tab.buyRate||5)}
+                </div>
               </div>
 
               <div className="flex flex-col gap-1">
-                <span className="text-[10px] font-semibold text-white/30 uppercase tracking-widest leading-tight">長期展望</span>
-                <Select value={tab.longTermOutlook || '觀察'} onValueChange={(val: any) => updateTab(tab.id, { longTermOutlook: val })}>
-                  <SelectTrigger className="h-7 w-14 bg-white/5 border-white/10 text-white font-bold text-[10px] ring-0 focus:ring-emerald-500/50 rounded-md p-1">
-                    <SelectValue placeholder="-" />
-                  </SelectTrigger>
-                  <SelectContent className="glass-panel border-white/10 text-white">
-                    <SelectItem value="看多" className="text-xs text-emerald-400 focus:bg-white/10">看多</SelectItem>
-                    <SelectItem value="觀察" className="text-xs text-amber-400 focus:bg-white/10">觀察</SelectItem>
-                    <SelectItem value="看空" className="text-xs text-red-400 focus:bg-white/10">看空</SelectItem>
-                  </SelectContent>
-                </Select>
+                <span className="text-[10px] font-semibold text-white/30 uppercase tracking-widest leading-tight">Neg Value</span>
+                <div className="h-7 w-12 bg-white/5 border border-white/10 text-red-400 font-bold text-[11px] rounded-md flex items-center justify-center">
+                  {Math.max(0, 5 - Number(tab.rating||5)) + Math.max(0, 5 - Number(tab.qualityScore||5)) + Math.max(0, 5 - Number(tab.valueScore||5)) + Number(tab.sellRate||5)}
+                </div>
               </div>
             </div>
           </div>

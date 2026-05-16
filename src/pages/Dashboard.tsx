@@ -13,6 +13,7 @@ import {
   query,
   where,
   getDocs,
+  getDoc,
   deleteDoc,
   doc,
   setDoc,
@@ -79,8 +80,10 @@ import {
   Star,
   CheckCircle2,
   SlidersHorizontal,
+  Sparkles,
 } from "lucide-react";
 import { calculateStats } from "../lib/calculations";
+import { format } from "date-fns";
 import { StockCardVisualizer } from "../components/StockCardVisualizer";
 
 enum OperationType {
@@ -136,6 +139,34 @@ const getDisplayHoldingStatus = (
   return "候選名單";
 };
 
+const calculatePositiveValue = (
+  rating: number = 5,
+  qualityScore: number = 5,
+  valueScore: number = 5,
+  buyRate: number = 5
+) => {
+  return (
+    Math.max(0, rating - 5) +
+    Math.max(0, qualityScore - 5) +
+    Math.max(0, valueScore - 5) +
+    buyRate
+  );
+};
+
+const calculateNegativeValue = (
+  rating: number = 5,
+  qualityScore: number = 5,
+  valueScore: number = 5,
+  sellRate: number = 5
+) => {
+  return (
+    Math.max(0, 5 - rating) +
+    Math.max(0, 5 - qualityScore) +
+    Math.max(0, 5 - valueScore) +
+    sellRate
+  );
+};
+
 export default function Dashboard() {
   const {
     tabs,
@@ -156,6 +187,7 @@ export default function Dashboard() {
   const [activeTabTrades, setActiveTabTrades] = useState<Record<string, any[]>>(
     {},
   );
+  const [isGeneratingSuggestion, setIsGeneratingSuggestion] = useState(false);
   const [activeViewTab, setActiveViewTab] = useState<
     "active" | "completed" | "socrates" | "alerts"
   >("active");
@@ -448,7 +480,16 @@ export default function Dashboard() {
               newItem.name = value;
             }
             if (
-              (normalizedKey === "CURRENTPRICE" ||
+              (normalizedKey.includes("AISCORE") ||
+                normalizedKey.includes("AI分數") ||
+                normalizedKey.includes("AI評分") ||
+                normalizedKey === "RATING") &&
+              newItem.rating === undefined
+            ) {
+              newItem.rating = value;
+            }
+            if (
+              (normalizedKey.includes("CURRENTPRICE") ||
                 normalizedKey === "PRICE" ||
                 normalizedKey === "現價") &&
               newItem.price === undefined
@@ -457,12 +498,46 @@ export default function Dashboard() {
             }
             if (
               (normalizedKey.includes("ECM") ||
-                normalizedKey.includes("訊號")) &&
+                normalizedKey.includes("訊號") ||
+                normalizedKey.includes("週期狀態") ||
+                normalizedKey.includes("週期") ||
+                normalizedKey.includes("簡評")) &&
               newItem.ecmStatus === undefined
             ) {
               newItem.ecmStatus = value;
             }
+            if (
+              (normalizedKey.includes("POSITIVE") ||
+                normalizedKey.includes("P+")) &&
+              newItem.positiveValue === undefined
+            ) {
+              newItem.positiveValue = value;
+            }
+            if (
+              (normalizedKey.includes("NEGATIVE") ||
+                normalizedKey.includes("N-")) &&
+              newItem.negativeValue === undefined
+            ) {
+              newItem.negativeValue = value;
+            }
           });
+          
+          if (newItem.positiveValue === undefined) {
+            newItem.positiveValue = calculatePositiveValue(
+              Number(newItem.rating ?? 5), 
+              Number(newItem.qualityScore || 5), 
+              Number(newItem.valueScore || 5), 
+              Number(newItem.buyScore || 5)
+            );
+          }
+          if (newItem.negativeValue === undefined) {
+            newItem.negativeValue = calculateNegativeValue(
+              Number(newItem.rating ?? 5), 
+              Number(newItem.qualityScore || 5), 
+              Number(newItem.valueScore || 5), 
+              Number(newItem.sellScore || 5)
+            );
+          }
 
           return newItem;
         });
@@ -1362,6 +1437,89 @@ export default function Dashboard() {
 
   const completedTabs = tabs.filter((t) => t.status === "COMPLETED");
 
+  const handleSmartSuggestion = async (tab: any) => {
+    if (!tab) return;
+
+    setIsGeneratingSuggestion(true);
+    toast.loading("AI 正在動態分析並更新策略...", {
+      id: "ai-smart-suggestion",
+    });
+
+    try {
+      const { GoogleGenAI } = await import("@google/genai");
+      // @ts-ignore
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+      // Fetch the strategy
+      const strategyDocRef = doc(db, `stockTabs/${tab.id}/strategy`, 'main');
+      const strategySnap = await getDoc(strategyDocRef);
+      const strategyData = strategySnap.exists() ? strategySnap.data() : { entries: [], tpTargets: [], slTargets: [], slConditions: "", resistanceZones: [], supportZones: [] };
+
+      const currentPriceStr = tab.currentPrice
+        ? `$${tab.currentPrice}`
+        : "未知";
+
+      const prompt = `
+        你是一個量化與風控並重的選股模型設計顧問，協助建立可實際交易的選股框架。
+        請根據以下的股票資訊及使用者的交易計畫，給出「執行操作備註」的建議。
+        請善用你內建的 Google Search 能力尋找該股票 (${tab.symbol}) 最新的新聞、財報數據或技術分析，
+        然後「融合」當前計畫（分批進出場規劃、止盈/止損、關鍵價格門檻）和最新現價（${currentPriceStr}），動態給予建議（例如：距離目標價多遠、潛在風險、進出場執行細節）。
+        請保持專業簡潔，條理分明。輸出格式為純文字即可。
+
+        [當前狀態]
+        股票代號: ${tab.symbol}
+        目前現價: ${currentPriceStr}
+        
+        [交易計畫與策略紀錄]
+        分批進場規劃: ${JSON.stringify(strategyData.entries)}
+        止盈設定: ${JSON.stringify(strategyData.tpTargets)}
+        止損設定: ${JSON.stringify(strategyData.slTargets)}
+        止損條件: ${strategyData.slConditions || "無"}
+        上方壓力區: ${JSON.stringify(strategyData.resistanceZones)}
+        下方支撐區: ${JSON.stringify(strategyData.supportZones)}
+      `;
+
+      const result = await ai.models.generateContent({
+        model: "gemini-2.5-pro",
+        contents: prompt,
+      });
+
+      const resultText = result.text;
+
+      // Update the strategy with the new operationNote
+      function stripUndefined(obj: any): any {
+        if (obj === null || obj === undefined) return obj;
+        if (Array.isArray(obj)) {
+          return obj.map(stripUndefined);
+        }
+        if (typeof obj === 'object') {
+          if (obj.constructor && obj.constructor.name !== 'Object') return obj;
+          const newObj: any = {};
+          for (const key in obj) {
+            if (Object.prototype.hasOwnProperty.call(obj, key) && obj[key] !== undefined) {
+              newObj[key] = stripUndefined(obj[key]);
+            }
+          }
+          return newObj;
+        }
+        return obj;
+      }
+
+      const updatedStrategy = { ...strategyData, operationNote: resultText, updatedAt: serverTimestamp() };
+      const sanitizedData = stripUndefined(updatedStrategy);
+
+      await setDoc(doc(db, `stockTabs/${tab.id}/strategy`, 'main'), sanitizedData, { merge: true });
+
+      toast.success("AI 已產生並更新策略建議", { id: "ai-smart-suggestion" });
+      setIsActionDialogOpen(false);
+    } catch (error) {
+      console.error(error);
+      toast.error("AI 產生失敗，請稍後再試", { id: "ai-smart-suggestion" });
+    } finally {
+      setIsGeneratingSuggestion(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-[50vh] flex items-center justify-center font-mono">
@@ -2040,6 +2198,31 @@ export default function Dashboard() {
                 </div>
                 <ChevronRight className="w-4 h-4 text-white/20 transition-all group-hover:translate-x-1 group-hover:text-purple-400" />
               </button>
+
+              <button
+                onClick={() => {
+                  if (selectedActionTab && !isGeneratingSuggestion) {
+                    handleSmartSuggestion(selectedActionTab);
+                  }
+                }}
+                disabled={isGeneratingSuggestion}
+                className="w-full py-4 px-4 border rounded-xl flex items-center justify-between transition-all group bg-emerald-500/10 border-emerald-500/30 hover:bg-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform bg-emerald-500/20">
+                    <Sparkles className="w-5 h-5 text-emerald-400" />
+                  </div>
+                  <div className="text-left">
+                    <p className="font-black text-sm text-emerald-400">
+                      {isGeneratingSuggestion ? "分析中..." : "AI 智能建議"}
+                    </p>
+                    <p className="text-[10px] font-bold text-emerald-400/60">
+                      動態取得操作備註分析並更新策略
+                    </p>
+                  </div>
+                </div>
+                <ChevronRight className="w-4 h-4 text-emerald-400/50 transition-all group-hover:translate-x-1 group-hover:text-emerald-400" />
+              </button>
             </div>
           </DialogContent>
         </Dialog>
@@ -2208,10 +2391,17 @@ export default function Dashboard() {
                                                 <h4 className="font-black text-xl text-white/90 leading-tight">
                                                   {tab.symbol}
                                                 </h4>
-                                                <p className="text-[10px] text-white/40 uppercase tracking-widest truncate max-w-[150px]">
-                                                  {tab.companyName ||
-                                                    "Unknown Corp"}
-                                                </p>
+                                                <div className="flex items-center gap-2">
+                                                  <p className="text-[10px] text-white/40 uppercase tracking-widest truncate max-w-[150px]">
+                                                    {tab.companyName ||
+                                                      "Unknown Corp"}
+                                                  </p>
+                                                  {tab.updatedAt && (
+                                                    <p className="text-[8px] text-white/20 tracking-wider">
+                                                      {typeof tab.updatedAt.toDate === 'function' ? format(tab.updatedAt.toDate(), 'yyyy/MM/dd HH:mm') : ''}
+                                                    </p>
+                                                  )}
+                                                </div>
 
                                                 <div className="flex flex-wrap gap-1 mt-1.5">
                                                   <span className="text-[9px] font-black bg-white/5 border border-white/10 px-1.5 py-0.5 rounded shadow-sm text-yellow-500 flex items-center gap-0.5">
@@ -2257,24 +2447,22 @@ export default function Dashboard() {
                                                     {tab.volatility || "中等"}
                                                   </span>
                                                   <span
-                                                    className="text-[9px] font-black bg-white/5 border border-white/10 px-1.5 py-0.5 rounded shadow-sm text-purple-400 flex items-center gap-0.5"
-                                                    title="短期影響"
+                                                    className="text-[9px] font-black bg-white/5 border border-white/10 px-1.5 py-0.5 rounded shadow-sm text-emerald-400 flex items-center gap-0.5"
+                                                    title="Positive Value"
                                                   >
                                                     <span className="opacity-60">
-                                                      ⏱️
+                                                      P+
                                                     </span>
-                                                    {tab.shortTermImpact ||
-                                                      "觀察"}
+                                                    {calculatePositiveValue(Number(tab.rating||5), Number(tab.qualityScore||5), Number(tab.valueScore||5), Number(tab.buyRate||5))}
                                                   </span>
                                                   <span
-                                                    className="text-[9px] font-black bg-white/5 border border-white/10 px-1.5 py-0.5 rounded shadow-sm text-fuchsia-400 flex items-center gap-0.5"
-                                                    title="長期展望"
+                                                    className="text-[9px] font-black bg-white/5 border border-white/10 px-1.5 py-0.5 rounded shadow-sm text-red-400 flex items-center gap-0.5"
+                                                    title="Negative Value"
                                                   >
                                                     <span className="opacity-60">
-                                                      🔭
+                                                      N-
                                                     </span>
-                                                    {tab.longTermOutlook ||
-                                                      "觀察"}
+                                                    {calculateNegativeValue(Number(tab.rating||5), Number(tab.qualityScore||5), Number(tab.valueScore||5), Number(tab.sellRate||5))}
                                                   </span>
                                                 </div>
                                               </div>
@@ -2821,6 +3009,11 @@ export default function Dashboard() {
                                                     >
                                                       {tab.symbol}
                                                     </span>
+                                                    {tab.updatedAt && (
+                                                      <span className={`text-[9px] tracking-widest ml-1 ${tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "text-[#0F0F0F]/40" : "text-white/30"}`}>
+                                                        {typeof tab.updatedAt.toDate === 'function' ? format(tab.updatedAt.toDate(), 'yyyy/MM/dd HH:mm') : ''}
+                                                      </span>
+                                                    )}
                                                     {tab.currentPrice !== undefined && (
                                                       <div className="flex items-baseline gap-2">
                                                         <span className={`text-lg font-black tabular-nums ${tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "text-[#0F0F0F]" : "text-white"}`}>
@@ -2921,26 +3114,24 @@ export default function Dashboard() {
                                                       </div>
                                                       <div
                                                         className={`px-1.5 h-full flex items-center border-r ${tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "bg-black/5 border-black/10" : "bg-white/5 border-white/10"}`}
-                                                        title="短期影響"
+                                                        title="Positive Value"
                                                       >
                                                         <span
-                                                          className={`text-[10px] font-black ${tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "text-purple-700" : "text-purple-400"}`}
+                                                          className={`text-[10px] font-black ${tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "text-emerald-700" : "text-emerald-400"}`}
                                                         >
-                                                          ⏱️{" "}
-                                                          {tab.shortTermImpact ||
-                                                            "觀察"}
+                                                          P+{" "}
+                                                          {calculatePositiveValue(Number(tab.rating||5), Number(tab.qualityScore||5), Number(tab.valueScore||5), Number(tab.buyRate||5))}
                                                         </span>
                                                       </div>
                                                       <div
                                                         className={`px-1.5 h-full flex items-center ${tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "bg-black/5" : "bg-white/5"}`}
-                                                        title="長期展望"
+                                                        title="Negative Value"
                                                       >
                                                         <span
-                                                          className={`text-[10px] font-black ${tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "text-fuchsia-700" : "text-fuchsia-400"}`}
+                                                          className={`text-[10px] font-black ${tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "text-red-700" : "text-red-400"}`}
                                                         >
-                                                          🔭{" "}
-                                                          {tab.longTermOutlook ||
-                                                            "觀察"}
+                                                          N-{" "}
+                                                          {calculateNegativeValue(Number(tab.rating||5), Number(tab.qualityScore||5), Number(tab.valueScore||5), Number(tab.sellRate||5))}
                                                         </span>
                                                       </div>
                                                     </div>
@@ -3641,7 +3832,7 @@ export default function Dashboard() {
         {activeViewTab === "socrates" && (
           <div
             id="socrates-calendar-section"
-            className="flex flex-col gap-8 w-full max-w-7xl mx-auto animate-in fade-in duration-700 pb-12"
+            className="flex flex-col gap-4 w-[calc(100vw-2rem)] sm:w-[calc(100vw-3rem)] lg:w-[calc(100vw-6rem)] max-w-[1920px] relative left-1/2 -translate-x-1/2 animate-in fade-in duration-700 pb-4"
           >
             <ScrollIn delay={0.1} translateY={20}>
               <div className="rounded-[2rem] border border-white/5 bg-[#0F0F12]/80 backdrop-blur-xl overflow-hidden shadow-[0_20px_60px_-15px_rgba(0,0,0,0.5)] relative group/calendar">
@@ -3649,7 +3840,7 @@ export default function Dashboard() {
                 <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[300px] bg-purple-600/20 blur-[120px] rounded-full pointer-events-none transition-opacity duration-1000"></div>
 
                 <div
-                  className="px-8 py-6 flex flex-col sm:flex-row sm:items-center justify-between border-b border-white/5 gap-4 relative z-10 cursor-pointer group/header"
+                  className="px-4 py-4 sm:px-6 sm:py-5 flex flex-col sm:flex-row sm:items-center justify-between border-b border-white/5 gap-4 relative z-10 cursor-pointer group/header"
                   onClick={() =>
                     setIsSocratesCalendarOpen(!isSocratesCalendarOpen)
                   }
@@ -3726,8 +3917,8 @@ export default function Dashboard() {
                       transition={{ duration: 0.4, ease: "easeInOut" }}
                       className="overflow-hidden"
                     >
-                      <div className="p-8 relative z-10">
-                        <div className="grid grid-cols-7 gap-2 sm:gap-4 text-center mb-4">
+                      <div className="py-2 px-0 sm:px-2 relative z-10">
+                        <div className="grid grid-cols-7 gap-1 sm:gap-2 text-center mb-2">
                           {[
                             "Sun",
                             "Mon",
@@ -3747,7 +3938,7 @@ export default function Dashboard() {
                         </div>
 
                         {/* Calendar Grid */}
-                        <div className="grid grid-cols-7 gap-2 sm:gap-4 relative">
+                        <div className="grid grid-cols-7 gap-1 sm:gap-2 relative">
                           {Array.from({
                             length: new Date(
                               socratesCurrentDate.getFullYear(),
@@ -3757,7 +3948,7 @@ export default function Dashboard() {
                           }).map((_, i) => (
                             <div
                               key={`empty-${i}`}
-                              className="h-20 sm:h-32 opacity-10"
+                              className="h-16 sm:h-24 opacity-10"
                             ></div>
                           ))}
 
@@ -3796,7 +3987,7 @@ export default function Dashboard() {
                               <div
                                 key={d}
                                 onClick={() => setSelectedSocratesDate(dateObj)}
-                                className={`h-20 sm:h-32 rounded-2xl flex flex-col p-3 sm:p-4 cursor-pointer transition-all duration-500 relative overflow-hidden group/day
+                                className={`h-16 sm:h-24 rounded-2xl flex flex-col p-2 sm:p-3 cursor-pointer transition-all duration-500 relative overflow-hidden group/day
                                   ${isSelected ? "bg-purple-900/40 shadow-[0_0_30px_rgba(168,85,247,0.2)] border border-purple-500/50 scale-[1.02] z-10" : "bg-white/[0.02] hover:bg-white/[0.06] border border-white/5 hover:border-white/10"}
                                   ${isToday && !isSelected ? "ring-1 ring-purple-500/30" : ""}
                                 `}
@@ -3889,7 +4080,7 @@ export default function Dashboard() {
                   {/* Subtle connecting line anchor */}
                   <div className="absolute -top-4 left-1/2 -translate-x-1/2 w-px h-8 bg-gradient-to-b from-purple-500/0 via-purple-500/50 to-purple-500/0"></div>
 
-                  <div className="px-8 py-6 flex flex-col sm:flex-row items-center justify-between border-b border-white/5 bg-white/[0.01]">
+                  <div className="px-4 py-4 sm:px-6 sm:py-5 flex flex-col sm:flex-row items-center justify-between border-b border-white/5 bg-white/[0.01]">
                     <div className="flex items-center gap-4">
                       <div className="p-3 bg-purple-500/10 rounded-2xl border border-purple-500/20">
                         <TrendingUp className="w-6 h-6 text-purple-400" />
@@ -3909,7 +4100,7 @@ export default function Dashboard() {
                     </div>
                   </div>
 
-                  <div className="flex px-6 pt-4">
+                  <div className="flex px-4 pt-4 sm:px-6">
                     <div className="flex p-1 bg-white/[0.03] rounded-xl border border-white/5 backdrop-blur-sm">
                       <button
                         onClick={() => setSocratesSubTab("strong")}
@@ -4034,11 +4225,12 @@ export default function Dashboard() {
                               <Trash2 className="w-3.5 h-3.5" /> 移除此清單
                             </button>
                           </div>
-                          <table className="w-full text-left border-collapse">
+                          <div className="overflow-x-auto pb-4 w-full">
+                            <table className="w-full text-left border-collapse">
                             <thead>
                               <tr className="border-b border-white/10">
                                 <th
-                                  className="py-4 px-5 font-black text-white/40 text-xs tracking-wider uppercase hover:text-white/80 cursor-pointer transition-colors"
+                                  className="py-1.5 px-2 font-black text-white/40 text-[10px] tracking-wider uppercase whitespace-nowrap hover:text-white/80 cursor-pointer transition-colors"
                                   onClick={() => handleSocratesSort("symbol")}
                                 >
                                   代碼{" "}
@@ -4051,7 +4243,7 @@ export default function Dashboard() {
                                   )}
                                 </th>
                                 <th
-                                  className="py-4 px-5 font-black text-white/40 text-xs tracking-wider uppercase hover:text-white/80 cursor-pointer transition-colors"
+                                  className="py-1.5 px-2 font-black text-white/40 text-[10px] tracking-wider uppercase whitespace-nowrap hover:text-white/80 cursor-pointer transition-colors"
                                   onClick={() => handleSocratesSort("name")}
                                 >
                                   名稱{" "}
@@ -4064,7 +4256,7 @@ export default function Dashboard() {
                                   )}
                                 </th>
                                 <th
-                                  className="py-4 px-5 font-black text-white/40 text-xs tracking-wider uppercase text-right hover:text-white/80 cursor-pointer transition-colors"
+                                  className="py-1.5 px-2 font-black text-white/40 text-[10px] tracking-wider uppercase text-right whitespace-nowrap hover:text-white/80 cursor-pointer transition-colors"
                                   onClick={() => handleSocratesSort("price")}
                                 >
                                   現價{" "}
@@ -4077,7 +4269,20 @@ export default function Dashboard() {
                                   )}
                                 </th>
                                 <th
-                                  className="py-4 px-5 font-black text-emerald-500/50 text-xs tracking-wider uppercase text-right whitespace-nowrap hover:text-emerald-400 cursor-pointer transition-colors"
+                                  className="py-1.5 px-2 font-black text-fuchsia-400/50 text-[10px] tracking-wider uppercase text-right whitespace-nowrap hover:text-fuchsia-400 cursor-pointer transition-colors"
+                                  onClick={() => handleSocratesSort("rating")}
+                                >
+                                  AI分析{" "}
+                                  {socratesSortConfig?.key === "rating" && (
+                                    <span className="text-fuchsia-400">
+                                      {socratesSortConfig.direction === "asc"
+                                        ? "↑"
+                                        : "↓"}
+                                    </span>
+                                  )}
+                                </th>
+                                <th
+                                  className="py-1.5 px-2 font-black text-emerald-500/50 text-[10px] tracking-wider uppercase text-right whitespace-nowrap hover:text-emerald-400 cursor-pointer transition-colors"
                                   onClick={() => handleSocratesSort("buyScore")}
                                 >
                                   Buy{" "}
@@ -4090,7 +4295,7 @@ export default function Dashboard() {
                                   )}
                                 </th>
                                 <th
-                                  className="py-4 px-5 font-black text-rose-400/50 text-xs tracking-wider uppercase text-right whitespace-nowrap hover:text-rose-400 cursor-pointer transition-colors"
+                                  className="py-1.5 px-2 font-black text-rose-400/50 text-[10px] tracking-wider uppercase text-right whitespace-nowrap hover:text-rose-400 cursor-pointer transition-colors"
                                   onClick={() =>
                                     handleSocratesSort("sellScore")
                                   }
@@ -4105,12 +4310,12 @@ export default function Dashboard() {
                                   )}
                                 </th>
                                 <th
-                                  className="py-4 px-5 font-black text-cyan-400/50 text-xs tracking-wider uppercase text-right whitespace-nowrap hover:text-cyan-400 cursor-pointer transition-colors"
+                                  className="py-1.5 px-2 font-black text-cyan-400/50 text-[10px] tracking-wider uppercase text-right whitespace-nowrap hover:text-cyan-400 cursor-pointer transition-colors"
                                   onClick={() =>
                                     handleSocratesSort("crashSimilarity")
                                   }
                                 >
-                                  崩盤相似度{" "}
+                                  風險{" "}
                                   {socratesSortConfig?.key ===
                                     "crashSimilarity" && (
                                     <span className="text-cyan-400">
@@ -4121,12 +4326,12 @@ export default function Dashboard() {
                                   )}
                                 </th>
                                 <th
-                                  className="py-4 px-5 font-black text-white/40 text-xs tracking-wider uppercase text-right hover:text-white/80 cursor-pointer transition-colors"
+                                  className="py-1.5 px-2 font-black text-white/40 text-[10px] tracking-wider uppercase text-right whitespace-nowrap hover:text-white/80 cursor-pointer transition-colors"
                                   onClick={() =>
                                     handleSocratesSort("qualityScore")
                                   }
                                 >
-                                  Quality{" "}
+                                  Qual{" "}
                                   {socratesSortConfig?.key ===
                                     "qualityScore" && (
                                     <span className="text-purple-400">
@@ -4137,12 +4342,12 @@ export default function Dashboard() {
                                   )}
                                 </th>
                                 <th
-                                  className="py-4 px-5 font-black text-white/40 text-xs tracking-wider uppercase text-right hover:text-white/80 cursor-pointer transition-colors"
+                                  className="py-1.5 px-2 font-black text-white/40 text-[10px] tracking-wider uppercase text-right whitespace-nowrap hover:text-white/80 cursor-pointer transition-colors"
                                   onClick={() =>
                                     handleSocratesSort("valueScore")
                                   }
                                 >
-                                  Value{" "}
+                                  Val{" "}
                                   {socratesSortConfig?.key === "valueScore" && (
                                     <span className="text-purple-400">
                                       {socratesSortConfig.direction === "asc"
@@ -4152,7 +4357,37 @@ export default function Dashboard() {
                                   )}
                                 </th>
                                 <th
-                                  className="py-4 px-5 font-black text-white/40 text-xs tracking-wider uppercase text-left hover:text-white/80 cursor-pointer transition-colors"
+                                  className="py-1.5 px-2 font-black text-emerald-400/40 text-[10px] tracking-wider uppercase text-right whitespace-nowrap hover:text-emerald-400/80 cursor-pointer transition-colors"
+                                  onClick={() =>
+                                    handleSocratesSort("positiveValue")
+                                  }
+                                >
+                                  Pos Val{" "}
+                                  {socratesSortConfig?.key === "positiveValue" && (
+                                    <span className="text-emerald-400">
+                                      {socratesSortConfig.direction === "asc"
+                                        ? "↑"
+                                        : "↓"}
+                                    </span>
+                                  )}
+                                </th>
+                                <th
+                                  className="py-1.5 px-2 font-black text-rose-400/40 text-[10px] tracking-wider uppercase text-right whitespace-nowrap hover:text-rose-400/80 cursor-pointer transition-colors"
+                                  onClick={() =>
+                                    handleSocratesSort("negativeValue")
+                                  }
+                                >
+                                  Neg Val{" "}
+                                  {socratesSortConfig?.key === "negativeValue" && (
+                                    <span className="text-rose-400">
+                                      {socratesSortConfig.direction === "asc"
+                                        ? "↑"
+                                        : "↓"}
+                                    </span>
+                                  )}
+                                </th>
+                                <th
+                                  className="py-1.5 px-2 font-black text-white/40 text-[10px] tracking-wider uppercase text-left whitespace-nowrap hover:text-white/80 cursor-pointer transition-colors"
                                   onClick={() =>
                                     handleSocratesSort("ecmStatus")
                                   }
@@ -4174,49 +4409,64 @@ export default function Dashboard() {
                                   key={idx}
                                   className="hover:bg-white/[0.04] transition-all duration-300 group/row ease-out hover:-translate-y-0.5 hover:shadow-lg relative"
                                 >
-                                  <td className="py-4 px-5 font-bold text-white group-hover/row:text-purple-300 transition-colors">
-                                    <div className="flex items-center gap-3">
+                                  <td className="py-1.5 px-2 font-bold text-white whitespace-nowrap text-xs group-hover/row:text-purple-300 transition-colors">
+                                    <div className="flex items-center gap-1.5">
                                       <div
-                                        className={`w-1 h-6 rounded-full ${socratesSubTab === "strong" ? "bg-emerald-500/50" : "bg-rose-500/50"} opacity-0 group-hover/row:opacity-100 transition-opacity`}
+                                        className={`w-1 h-5 rounded-full ${socratesSubTab === "strong" ? "bg-emerald-500/50" : "bg-rose-500/50"} opacity-0 group-hover/row:opacity-100 transition-opacity`}
                                       ></div>
                                       {item.symbol}
                                     </div>
                                   </td>
-                                  <td className="py-4 px-5 text-white/70 font-medium text-sm">
+                                  <td className="py-1.5 px-2 text-white/70 font-medium text-[11px] truncate max-w-[80px] sm:max-w-[120px] xl:max-w-[160px]" title={item.name}>
                                     {item.name || "-"}
                                   </td>
-                                  <td className="py-4 px-5 text-white/90 text-sm font-bold text-right tabular-nums">
+                                  <td className="py-1.5 px-2 text-white/90 text-[11px] font-bold text-right tabular-nums whitespace-nowrap">
                                     {item.price ? "$" + item.price : "-"}
                                   </td>
-                                  <td className="py-4 px-5 text-emerald-400 font-extrabold text-right tabular-nums group-hover/row:text-emerald-300 transition-colors">
+                                  <td className="py-1.5 px-2 text-fuchsia-400 font-extrabold text-[11px] text-right tabular-nums whitespace-nowrap group-hover/row:text-fuchsia-300 transition-colors">
+                                    {item.rating !== undefined
+                                      ? item.rating
+                                      : "-"}
+                                  </td>
+                                  <td className="py-1.5 px-2 text-emerald-400 font-extrabold text-[11px] text-right tabular-nums whitespace-nowrap group-hover/row:text-emerald-300 transition-colors">
                                     {item.buyScore !== undefined
                                       ? item.buyScore
                                       : "-"}
                                   </td>
-                                  <td className="py-4 px-5 text-rose-400 font-extrabold text-right tabular-nums group-hover/row:text-rose-300 transition-colors">
+                                  <td className="py-1.5 px-2 text-rose-400 font-extrabold text-[11px] text-right tabular-nums whitespace-nowrap group-hover/row:text-rose-300 transition-colors">
                                     {item.sellScore !== undefined
                                       ? item.sellScore
                                       : "-"}
                                   </td>
-                                  <td className="py-4 px-5 text-cyan-400 font-extrabold text-right tabular-nums group-hover/row:text-cyan-300 transition-colors">
+                                  <td className="py-1.5 px-2 text-cyan-400 font-extrabold text-[11px] text-right tabular-nums whitespace-nowrap group-hover/row:text-cyan-300 transition-colors">
                                     {item.crashSimilarity !== undefined
                                       ? item.crashSimilarity
                                       : "-"}
                                   </td>
-                                  <td className="py-4 px-5 text-indigo-400 font-extrabold text-right tabular-nums group-hover/row:text-indigo-300 transition-colors">
+                                  <td className="py-1.5 px-2 text-indigo-400 font-extrabold text-[11px] text-right tabular-nums whitespace-nowrap group-hover/row:text-indigo-300 transition-colors">
                                     {item.qualityScore !== undefined
                                       ? item.qualityScore
                                       : "-"}
                                   </td>
-                                  <td className="py-4 px-5 text-amber-400 font-extrabold text-right tabular-nums group-hover/row:text-amber-300 transition-colors">
+                                  <td className="py-1.5 px-2 text-amber-400 font-extrabold text-[11px] text-right tabular-nums whitespace-nowrap group-hover/row:text-amber-300 transition-colors">
                                     {item.valueScore !== undefined
                                       ? item.valueScore
                                       : "-"}
                                   </td>
-                                  <td className="py-4 px-5 text-white/50 text-sm text-left group-hover/row:text-white/80 transition-colors font-medium">
-                                    <div className="flex items-center gap-2">
+                                  <td className="py-1.5 px-2 text-emerald-400 font-extrabold text-[11px] text-right tabular-nums whitespace-nowrap group-hover/row:text-emerald-300 transition-colors">
+                                    {item.positiveValue !== undefined
+                                      ? item.positiveValue
+                                      : "-"}
+                                  </td>
+                                  <td className="py-1.5 px-2 text-rose-400 font-extrabold text-[11px] text-right tabular-nums whitespace-nowrap group-hover/row:text-rose-300 transition-colors">
+                                    {item.negativeValue !== undefined
+                                      ? item.negativeValue
+                                      : "-"}
+                                  </td>
+                                  <td className="py-1.5 px-2 text-white/50 text-[11px] text-left group-hover/row:text-white/80 transition-colors font-medium">
+                                    <div className="flex items-center gap-1">
                                       {item.ecmStatus ? (
-                                        <span className="inline-flex items-center px-2.5 py-1 rounded-md bg-white/5 border border-white/5 text-xs">
+                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-white/5 border border-white/5 whitespace-nowrap overflow-hidden text-ellipsis">
                                           {item.ecmStatus}
                                         </span>
                                       ) : (
@@ -4228,6 +4478,7 @@ export default function Dashboard() {
                               ))}
                             </tbody>
                           </table>
+                          </div>
                         </div>
                       );
                     })()}
