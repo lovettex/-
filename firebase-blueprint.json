@@ -15,13 +15,14 @@
         "tradeType": { "type": "string", "enum": ["simulated", "real"] },
         "buyRate": { "type": "number" },
         "sellRate": { "type": "number" },
-        "holdingStatus": { "type": "string", "enum": ["觀察中", "候選名單", "買進操作", "賣出操作", "平倉操作"] },
+        "holdingStatus": { "type": "string", "enum": ["觀察中", "候選名單", "買進操作", "賣出操作", "平倉操作", "乖離名單"] },
         "rating": { "type": "number" },
         "volatility": { "type": "string" },
         "shortTermImpact": { "type": "string", "enum": ["看多", "觀察", "看空"] },
         "longTermOutlook": { "type": "string", "enum": ["看多", "觀察", "看空"] },
         "createdAt": { "type": "string", "format": "timestamp" },
-        "updatedAt": { "type": "string", "format": "timestamp" }
+        "updatedAt": { "type": "string", "format": "timestamp" },
+        "chartAnnotations": { "type": "array" }
       },
       "required": ["userId", "symbol", "status", "tradeType", "createdAt", "updatedAt"]
     },

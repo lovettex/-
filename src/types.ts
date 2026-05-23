@@ -7,8 +7,10 @@ export interface StockTab {
   companyName?: string;
   status: 'ACTIVE' | 'COMPLETED';
   isHidden?: boolean;
+  groupId?: string; // For grouping multiple tabs
   sortOrder?: number; // Added sortOrder
-  holdingStatus?: '觀察中' | '候選名單' | '買進操作' | '賣出操作' | '平倉操作';
+  tradeDirection?: '看漲' | '看跌';
+  holdingStatus?: '觀察中' | '候選名單' | '買進操作' | '賣出操作' | '平倉操作' | '乖離名單';
   finalPnL?: number;
   currentPrice?: number;
   tags?: string[];
@@ -18,6 +20,7 @@ export interface StockTab {
   rating?: number; // 1-10
   qualityScore?: number; // 1-10
   valueScore?: number; // 1-10
+  crashSimilarity?: number; // 1-10
   isOperationConfirmed?: boolean;
   volatility?: '低' | '中等' | '高';
   shortTermImpact?: '看多' | '觀察' | '看空';
@@ -25,12 +28,43 @@ export interface StockTab {
   createdAt: Timestamp;
   updatedAt: Timestamp;
   isFavoriteHighlight?: boolean;
+  isDeviationConfirmed?: boolean;
+  chartAnnotations?: ChartAnnotation[];
+  priceAlerts?: {
+    id: string;
+    targetPrice: number;
+    condition: 'above_or_equal' | 'below_or_equal';
+    notifyBrowser: boolean;
+    notifyEmail: boolean;
+    emailAddress?: string;
+    isEnabled: boolean;
+    triggeredAt?: string;
+    createdAt: string;
+  }[];
+}
+
+export interface ChartAnnotation {
+  id: string;
+  type: 'box' | 'text' | 'line' | 'arrow';
+  color: string;
+  strokeWidth: number;
+  x1?: number;
+  y1?: number;
+  x2?: number;
+  y2?: number;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  text?: string;
+  fontSize?: number;
 }
 
 export interface Trade {
   id: string;
   type: 'BUY' | 'SELL';
   purpose?: '加碼' | '平倉';
+  operator?: '機器' | '人';
   price: number;
   quantity: number;
   tradeDate: Timestamp;

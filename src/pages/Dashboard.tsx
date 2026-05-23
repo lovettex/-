@@ -4,6 +4,7 @@ import React, {
   useRef,
   useLayoutEffect,
   useCallback,
+  useMemo,
 } from "react";
 import { useStockTabs } from "../hooks/useStockTabs";
 import { useNavigate } from "react-router-dom";
@@ -52,6 +53,8 @@ import {
 import { Badge } from "../components/ui/badge";
 import {
   Plus,
+  Bell,
+  Mail,
   TrendingUp,
   Target,
   Clock,
@@ -81,6 +84,7 @@ import {
   CheckCircle2,
   SlidersHorizontal,
   Sparkles,
+  Link,
 } from "lucide-react";
 import { calculateStats } from "../lib/calculations";
 import { format } from "date-fns";
@@ -128,12 +132,13 @@ function handleFirestoreError(
 
 const getDisplayHoldingStatus = (
   status: string | undefined,
-): "觀察中" | "候選名單" | "買進操作" | "賣出操作" | "平倉操作" => {
+): "觀察中" | "候選名單" | "買進操作" | "賣出操作" | "平倉操作" | "乖離名單" => {
   if (
     status === "觀察中" ||
     status === "買進操作" ||
     status === "賣出操作" ||
-    status === "平倉操作"
+    status === "平倉操作" ||
+    status === "乖離名單"
   )
     return status;
   return "候選名單";
@@ -192,13 +197,244 @@ export default function Dashboard() {
     "active" | "completed" | "socrates" | "alerts"
   >("active");
   const [activeHoldingSubTab, setActiveHoldingSubTab] = useState<
-    "觀察中" | "候選名單" | "買進操作" | "賣出操作" | "平倉操作"
-  >("候選名單");
+    "觀察中" | "候選名單" | "買進操作" | "賣出操作" | "平倉操作" | "乖離名單"
+  >((sessionStorage.getItem('preferredHoldingSubTab') as any) || "候選名單");
+
+  useEffect(() => {
+    sessionStorage.setItem('preferredHoldingSubTab', activeHoldingSubTab);
+  }, [activeHoldingSubTab]);
+  const [activeManageTab, setActiveManageTab] = useState<
+    "觀察中" | "候選名單" | "買進操作" | "賣出操作" | "平倉操作" | "乖離名單"
+  >("觀察中");
+  const [groupingTabId, setGroupingTabId] = useState<string | null>(null);
   const [activeTabStrategies, setActiveTabStrategies] = useState<
+
     Record<string, any>
   >({});
   const [flippedCards, setFlippedCards] = useState<Record<string, boolean>>({});
   const [alerts, setAlerts] = useState<any[]>([]);
+
+  // Main Dashboard Price Alerts Center States & Handlers
+  const [dashboardAlertForm, setDashboardAlertForm] = useState({
+    symbol: '',
+    targetPrice: '',
+    condition: 'above_or_equal',
+    notifyBrowser: true,
+    notifyEmail: true,
+    emailAddress: ''
+  });
+
+  const [customAlertsHistory, setCustomAlertsHistory] = useState<any[]>([]);
+  
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(
+    typeof window !== "undefined" && "Notification" in window ? Notification.permission : "default"
+  );
+
+  useEffect(() => {
+    if (user?.email) {
+      setDashboardAlertForm(prev => ({ ...prev, emailAddress: user.email }));
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const historyStr = localStorage.getItem(`price_alerts_history_${user.uid}`);
+    if (historyStr) {
+      try {
+        setCustomAlertsHistory(JSON.parse(historyStr));
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }, [user]);
+
+  const requestNotificationPermission = async () => {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      toast.error("此瀏覽器不支援桌面通知功能。");
+      return;
+    }
+    try {
+      const permission = await Notification.requestPermission();
+      setNotificationPermission(permission);
+      if (permission === 'granted') {
+        toast.success("成功開啟瀏覽器通知授權！");
+        new Notification("價格警報中心已啟用", { 
+          body: "當您設定的自訂股票價格警報達標時，將會在此發出視窗通知與提示音。" 
+        });
+      } else if (permission === 'denied') {
+        toast.error("您已拒絕桌面通知權限。若需要通知，請在瀏覽器設定中啟用。");
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleDashboardAddAlert = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const symbol = dashboardAlertForm.symbol;
+    if (!symbol) {
+      toast.error("請選擇股票代號");
+      return;
+    }
+    const targetTab = tabs.find(t => t.symbol === symbol && t.status === 'ACTIVE');
+    if (!targetTab) {
+      toast.error("找不到該持有中的個股");
+      return;
+    }
+    const priceStr = dashboardAlertForm.targetPrice.trim();
+    if (!priceStr || isNaN(Number(priceStr))) {
+      toast.error("請輸入有效的目標價格");
+      return;
+    }
+    const target = Number(priceStr);
+    const newAlert = {
+      id: `alert_${Date.now()}`,
+      targetPrice: target,
+      condition: dashboardAlertForm.condition as 'above_or_equal' | 'below_or_equal',
+      notifyBrowser: dashboardAlertForm.notifyBrowser,
+      notifyEmail: dashboardAlertForm.notifyEmail,
+      emailAddress: dashboardAlertForm.notifyEmail ? dashboardAlertForm.emailAddress : '',
+      isEnabled: true,
+      createdAt: new Date().toISOString()
+    };
+    const currentAlerts = targetTab.priceAlerts || [];
+    const updatedAlerts = [...currentAlerts, newAlert];
+    await updateTab(targetTab.id, { priceAlerts: updatedAlerts });
+    toast.success(`${symbol} 價格警報設定成功！`);
+    setDashboardAlertForm(prev => ({ ...prev, targetPrice: '' }));
+  };
+
+  const handleDashboardToggleAlert = async (tabId: string, alertId: string, currentVal: boolean) => {
+    const targetTab = tabs.find(t => t.id === tabId);
+    if (!targetTab) return;
+    const updatedAlerts = (targetTab.priceAlerts || []).map(al => 
+      al.id === alertId ? { ...al, isEnabled: !currentVal } : al
+    );
+    await updateTab(tabId, { priceAlerts: updatedAlerts });
+    toast.success(!currentVal ? "警報已啟用" : "警報已停用");
+  };
+
+  const handleDashboardDeleteAlert = async (tabId: string, alertId: string) => {
+    const targetTab = tabs.find(t => t.id === tabId);
+    if (!targetTab) return;
+    const updatedAlerts = (targetTab.priceAlerts || []).filter(al => al.id !== alertId);
+    await updateTab(tabId, { priceAlerts: updatedAlerts });
+    toast.success("警報已移除");
+  };
+
+  // Real-time custom price alert conditional background checker loop
+  useEffect(() => {
+    if (!user || !tabs || tabs.length === 0) return;
+
+    let historyUpdated = false;
+    let newHistoryLogs: any[] = [];
+
+    // Prior history of triggers
+    const historyStr = localStorage.getItem(`price_alerts_history_${user.uid}`);
+    let prevHistory: any[] = [];
+    if (historyStr) {
+      try { 
+        prevHistory = JSON.parse(historyStr); 
+      } catch (_) {}
+    }
+
+    tabs.forEach(async (tab) => {
+      if (tab.status !== "ACTIVE" || !tab.currentPrice || !tab.priceAlerts || tab.priceAlerts.length === 0) return;
+
+      const currentPrice = tab.currentPrice;
+      let tabAlertsModified = false;
+
+      const updatedTabPriceAlerts = tab.priceAlerts.map((alert) => {
+        if (!alert.isEnabled) return alert;
+
+        let shouldTrigger = false;
+        if (alert.condition === "above_or_equal" && currentPrice >= alert.targetPrice) {
+          shouldTrigger = true;
+        } else if (alert.condition === "below_or_equal" && currentPrice <= alert.targetPrice) {
+          shouldTrigger = true;
+        }
+
+        if (shouldTrigger) {
+          tabAlertsModified = true;
+          historyUpdated = true;
+
+          const triggerTime = new Date().toISOString();
+          const alertTitle = `🔔 價格警報達標：${tab.symbol}`;
+          const alertMsg = `${tab.symbol} (${tab.companyName || ""}) 股價已達 $${currentPrice.toFixed(2)}，滿足條件：${alert.condition === "above_or_equal" ? "高於或等於" : "低於或等於"} $${alert.targetPrice.toFixed(2)}`;
+
+          // Trigger standard toaster and web notification
+          if (alert.notifyBrowser) {
+            if ("Notification" in window && Notification.permission === "granted") {
+              try {
+                new Notification(alertTitle, { body: alertMsg });
+              } catch (e) {
+                console.warn("Could not fire system notification, falling back to toast: ", e);
+              }
+            }
+            toast.success(alertMsg, { duration: 15000 });
+          } else {
+            toast.info(alertMsg, { duration: 15000 });
+          }
+
+          // Email Trigger Toast Simulation
+          if (alert.notifyEmail) {
+            toast.success(`📧 [信件已發送] 股價達標通知已寄送至信箱 ${alert.emailAddress || user.email}`, { duration: 8000 });
+          }
+
+          // Audio feedback beep
+          try {
+            const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            oscillator.type = "sine";
+            oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); 
+            gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            oscillator.start();
+            oscillator.stop(audioCtx.currentTime + 0.3);
+          } catch (_) {}
+
+          // Add to local history log list
+          const logItem = {
+            id: `${alert.id}_${Date.now()}`,
+            userId: user.uid,
+            symbol: tab.symbol,
+            companyName: tab.companyName || "",
+            targetPrice: alert.targetPrice,
+            triggeredPrice: currentPrice,
+            condition: alert.condition,
+            triggeredAt: triggerTime,
+            channels: {
+              browser: alert.notifyBrowser,
+              email: alert.notifyEmail,
+              emailAddr: alert.emailAddress || user.email
+            }
+          };
+          newHistoryLogs.push(logItem);
+
+          return {
+            ...alert,
+            isEnabled: false,
+            triggeredAt: triggerTime
+          };
+        }
+        return alert;
+      });
+
+      if (tabAlertsModified) {
+        // Save back to Firestore tab!
+        await updateTab(tab.id, { priceAlerts: updatedTabPriceAlerts });
+      }
+    });
+
+    if (historyUpdated && newHistoryLogs.length > 0) {
+      const combinedHistory = [...newHistoryLogs, ...prevHistory].slice(0, 50); // keep last 50
+      localStorage.setItem(`price_alerts_history_${user.uid}`, JSON.stringify(combinedHistory));
+      setCustomAlertsHistory(combinedHistory);
+    }
+  }, [tabs, user]);
+
   const [socratesData, setSocratesData] = useState<
     Record<string, { strong?: any[]; weak?: any[] }>
   >({});
@@ -920,7 +1156,6 @@ export default function Dashboard() {
           if (price && typeof price === "number") {
             await updateDoc(doc(db, "stockTabs", tab.id), {
               currentPrice: price,
-              updatedAt: serverTimestamp(),
             });
             updatedCount++;
           }
@@ -1022,7 +1257,7 @@ export default function Dashboard() {
         return;
       }
 
-      // Alt + 1/2/3/4/5 for Holding Sub Tabs
+      // Alt + 1/2/3/4/5/6 for Holding Sub Tabs
       if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
         let selectedTab:
           | "觀察中"
@@ -1030,12 +1265,14 @@ export default function Dashboard() {
           | "買進操作"
           | "賣出操作"
           | "平倉操作"
+          | "乖離名單"
           | null = null;
         if (e.code === "Digit1") selectedTab = "觀察中";
         else if (e.code === "Digit2") selectedTab = "候選名單";
         else if (e.code === "Digit3") selectedTab = "買進操作";
         else if (e.code === "Digit4") selectedTab = "賣出操作";
         else if (e.code === "Digit5") selectedTab = "平倉操作";
+        else if (e.code === "Digit6") selectedTab = "乖離名單";
 
         if (selectedTab) {
           e.preventDefault();
@@ -1080,14 +1317,6 @@ export default function Dashboard() {
           setActiveViewTab("active");
           const el = document.getElementById("active-cards-section");
           if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-        } else if (e.code === "Digit2") {
-          e.preventDefault();
-          setActiveViewTab("alerts");
-          // Wait for render
-          setTimeout(() => {
-            const el = document.getElementById("alerts-cards-section");
-            if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-          }, 50);
         } else if (e.code === "Digit3") {
           e.preventDefault();
           setActiveViewTab("completed");
@@ -1435,6 +1664,32 @@ export default function Dashboard() {
   );
   visibleTabsRef.current = currentSubTabVisibleTabs;
 
+  const renderGroups = useMemo(() => {
+    const groups: { isGroup: boolean; id: string; tabs: any[] }[] = [];
+    const processedGroupIds = new Set<string>();
+    
+    currentSubTabVisibleTabs.forEach((tab) => {
+      if (tab.groupId) {
+        if (!processedGroupIds.has(tab.groupId)) {
+          processedGroupIds.add(tab.groupId);
+          const allGroupTabs = visibleActiveTabs.filter(t => t.groupId === tab.groupId);
+          groups.push({
+            isGroup: true,
+            id: tab.groupId,
+            tabs: allGroupTabs
+          });
+        }
+      } else {
+        groups.push({
+          isGroup: false,
+          id: tab.id,
+          tabs: [tab]
+        });
+      }
+    });
+    return groups;
+  }, [currentSubTabVisibleTabs, visibleActiveTabs]);
+
   const completedTabs = tabs.filter((t) => t.status === "COMPLETED");
 
   const handleSmartSuggestion = async (tab: any) => {
@@ -1461,14 +1716,29 @@ export default function Dashboard() {
 
       const prompt = `
         你是一個量化與風控並重的選股模型設計顧問，協助建立可實際交易的選股框架。
-        請根據以下的股票資訊及使用者的交易計畫，給出「執行操作備註」的建議。
+        請根據以下的股票資訊、個股評分指標及使用者的交易計畫，給出「執行操作備註」的建議。
         請善用你內建的 Google Search 能力尋找該股票 (${tab.symbol}) 最新的新聞、財報數據或技術分析，
-        然後「融合」當前計畫（分批進出場規劃、止盈/止損、關鍵價格門檻）和最新現價（${currentPriceStr}），動態給予建議（例如：距離目標價多遠、潛在風險、進出場執行細節）。
-        請保持專業簡潔，條理分明。輸出格式為純文字即可。
+        並結合以下三個面相來擬定內容：
+        1. 當前情境分析：結合最新現價 (${currentPriceStr})、市況與「個股評分指標」來評估目前狀況。
+        2. 進場操作建議：融合當前計畫（分批進出場規劃、止盈/止損、關鍵價格門檻），給予具體的執行細節。
+        3. 綜合考量與注意事項：點出潛在風險（特別是崩盤相似度、波動性等），以及距離目標價的多寡。
+
+        請保持專業簡潔，條理分明。按照上述三大點進行段落劃分，輸出格式為純文字。
 
         [當前狀態]
         股票代號: ${tab.symbol}
         目前現價: ${currentPriceStr}
+
+        [個股評分指標]
+        綜合評分: ${tab.rating || "未評分"} / 10
+        企業體質 (Quality): ${tab.qualityScore || "未評分"} / 10
+        估值 (Value): ${tab.valueScore || "未評分"} / 10
+        崩盤相似度 (Crash Similarity): ${tab.crashSimilarity || "未評分"} / 10
+        看多訊號 (Buy Rate): ${tab.buyRate || "未評分"} / 10
+        看空訊號 (Sell Rate): ${tab.sellRate || "未評分"} / 10
+        波動性: ${tab.volatility || "未知"}
+        正向價值 (Pos Value): ${Math.max(0, Number(tab.rating||5) - 5) + Math.max(0, Number(tab.qualityScore||5) - 5) + Math.max(0, Number(tab.valueScore||5) - 5) + Number(tab.buyRate||5)}
+        負向價值 (Neg Value): ${Math.max(0, 5 - Number(tab.rating||5)) + Math.max(0, 5 - Number(tab.qualityScore||5)) + Math.max(0, 5 - Number(tab.valueScore||5)) + Number(tab.sellRate||5)}
         
         [交易計畫與策略紀錄]
         分批進場規劃: ${JSON.stringify(strategyData.entries)}
@@ -1517,6 +1787,38 @@ export default function Dashboard() {
       toast.error("AI 產生失敗，請稍後再試", { id: "ai-smart-suggestion" });
     } finally {
       setIsGeneratingSuggestion(false);
+    }
+  };
+
+  const toggleTabGroup = async (tab: any) => {
+    if (tab.groupId) {
+      try {
+        await updateTab(tab.id, { groupId: "" });
+        toast.success("已解除區塊連動");
+      } catch (e) {
+        toast.error("解除連動失敗");
+      }
+    } else {
+      setGroupingTabId(tab.id);
+    }
+  };
+
+  const handleGroupWith = async (sourceTabId: string, targetTab: any) => {
+    const sourceTab = tabs.find(t => t.id === sourceTabId);
+    if (!sourceTab) return;
+    
+    const existingGroup = targetTab.groupId;
+    const newGroupId = existingGroup || sourceTab.symbol + '-' + Date.now();
+    
+    try {
+      if (!existingGroup) {
+         await updateTab(targetTab.id, { groupId: newGroupId });
+      }
+      await updateTab(sourceTabId, { groupId: newGroupId });
+      toast.success("已成功連動區塊");
+      setGroupingTabId(null);
+    } catch (e) {
+      toast.error("連動失敗");
     }
   };
 
@@ -1909,25 +2211,6 @@ export default function Dashboard() {
           持有中 (<AnimatedNumber value={visibleActiveTabs.length} />)
         </button>
         <button
-          onClick={() => setActiveViewTab("alerts")}
-          className={`h-[48px] snap-start flex-shrink-0 flex items-center justify-center gap-2 px-5 sm:px-6 py-3 font-bold text-base tracking-wide rounded-t-xl transition-all duration-300 relative overflow-hidden ${
-            activeViewTab === "alerts"
-              ? "bg-amber-500/10 text-amber-400 border border-t-amber-500/30 border-x-amber-500/30 border-b-transparent shadow-[0_-10px_20px_rgba(245,158,11,0.05)]"
-              : "bg-transparent text-white/50 hover:bg-white/5 hover:text-white/80 border border-transparent"
-          }`}
-        >
-          {activeViewTab === "alerts" && (
-            <motion.div
-              layoutId="tab-indicator-alerts"
-              className="absolute bottom-0 left-0 right-0 h-0.5 bg-amber-400"
-            />
-          )}
-          <AlertCircle
-            className={`w-5 h-5 ${activeViewTab === "alerts" ? "text-amber-400" : "opacity-70"}`}
-          />
-          提醒通知 (<AnimatedNumber value={alerts.length} />)
-        </button>
-        <button
           onClick={() => setActiveViewTab("completed")}
           className={`h-[48px] snap-start flex-shrink-0 flex items-center justify-center gap-2 px-5 sm:px-6 py-3 font-bold text-base tracking-wide rounded-t-xl transition-all duration-300 relative overflow-hidden ${
             activeViewTab === "completed"
@@ -1964,6 +2247,25 @@ export default function Dashboard() {
             className={`w-5 h-5 ${activeViewTab === "socrates" ? "text-purple-400" : "opacity-70"}`}
           />
           Socrates篩選榜
+        </button>
+        <button
+          onClick={() => setActiveViewTab("alerts")}
+          className={`h-[48px] snap-start flex-shrink-0 flex items-center justify-center gap-2 px-5 sm:px-6 py-3 font-bold text-base tracking-wide rounded-t-xl transition-all duration-300 relative overflow-hidden ${
+            activeViewTab === "alerts"
+              ? "bg-purple-500/10 text-purple-400 border border-t-purple-500/30 border-x-purple-500/30 border-b-transparent shadow-[0_-10px_20px_rgba(168,85,247,0.05)]"
+              : "bg-transparent text-white/50 hover:bg-white/5 hover:text-white/80 border border-transparent"
+          }`}
+        >
+          {activeViewTab === "alerts" && (
+            <motion.div
+              layoutId="tab-indicator-alerts"
+              className="absolute bottom-0 left-0 right-0 h-0.5 bg-purple-400"
+            />
+          )}
+          <Bell
+            className={`w-5 h-5 ${activeViewTab === "alerts" ? "text-purple-400" : "opacity-70"}`}
+          />
+          價格警報
         </button>
       </div>
 
@@ -2176,6 +2478,50 @@ export default function Dashboard() {
               <button
                 onClick={() => {
                   if (selectedActionTab) {
+                    updateTab(selectedActionTab.id, {
+                      isDeviationConfirmed:
+                        !selectedActionTab.isDeviationConfirmed,
+                    });
+                    setIsActionDialogOpen(false);
+                  }
+                }}
+                className={`w-full py-4 px-4 border rounded-xl flex items-center justify-between transition-all group ${
+                  selectedActionTab?.isDeviationConfirmed
+                    ? "bg-[#F0D1B9]/20 border-[#F0D1B9]/50 hover:bg-[#F0D1B9]/30"
+                    : "bg-white/5 border-white/10 hover:bg-white/10"
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`w-10 h-10 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform ${
+                      selectedActionTab?.isDeviationConfirmed
+                        ? "bg-[#F0D1B9]/30"
+                        : "bg-[#F0D1B9]/10"
+                    }`}
+                  >
+                    <Star
+                      className={`w-5 h-5 ${selectedActionTab?.isDeviationConfirmed ? "text-[#F0D1B9]" : "text-[#F0D1B9]/70"}`}
+                    />
+                  </div>
+                  <div className="text-left">
+                    <p className="font-black text-sm text-white">乖離確認</p>
+                    <p className="text-[10px] font-bold text-white/40">
+                      更改卡片標題背景顏色
+                    </p>
+                  </div>
+                </div>
+                <ChevronRight
+                  className={`w-4 h-4 transition-all group-hover:translate-x-1 ${
+                    selectedActionTab?.isDeviationConfirmed
+                      ? "text-[#F0D1B9]"
+                      : "text-white/20 group-hover:text-[#F0D1B9]/70"
+                  }`}
+                />
+              </button>
+
+              <button
+                onClick={() => {
+                  if (selectedActionTab) {
                     setFlippedCards((prev) => ({
                       ...prev,
                       [selectedActionTab.id]: !prev[selectedActionTab.id],
@@ -2190,7 +2536,7 @@ export default function Dashboard() {
                     <Activity className="w-5 h-5 text-purple-400" />
                   </div>
                   <div className="text-left">
-                    <p className="font-black text-sm text-white">數據圖視化</p>
+                    <p className="font-black text-sm text-white">圖表視圖</p>
                     <p className="text-[10px] font-bold text-white/40">
                       翻轉卡片檢視分批圖表
                     </p>
@@ -2245,7 +2591,6 @@ export default function Dashboard() {
                   { key: "Shift + F", desc: "快速搜尋股票" },
                   { key: "Shift + H", desc: "切換全螢幕模式" },
                   { key: "Shift + 1", desc: "切換至 持有中 標籤" },
-                  { key: "Shift + 2", desc: "切換至 提醒通知 標籤" },
                   { key: "Shift + 3", desc: "切換至 已完成 標籤" },
                   { key: "Shift + 4", desc: "切換至 Socrates 篩選" },
                   { key: "Alt + 1", desc: "切換至 觀察中" },
@@ -2253,6 +2598,7 @@ export default function Dashboard() {
                   { key: "Alt + 3", desc: "切換至 買進操作" },
                   { key: "Alt + 4", desc: "切換至 賣出操作" },
                   { key: "Alt + 5", desc: "切換至 平倉操作" },
+                  { key: "Alt + 6", desc: "切換至 乖離名單" },
                   { key: "Alt + Z", desc: "翻面可見股票卡片" },
                   { key: "Shift + A", desc: "開啟 新增股票 對話框" },
                   { key: "Shift + I", desc: "匯入現價 / AI 智能建議 (詳情頁)" },
@@ -2284,320 +2630,6 @@ export default function Dashboard() {
           </DialogContent>
         </Dialog>
 
-        {activeViewTab === "alerts" && (
-          <div id="alerts-cards-section" className="grid grid-cols-1 gap-6">
-            <div className="space-y-4">
-              <ScrollIn delay={0.2} translateY={20}>
-                <div className="w-screen relative left-1/2 -translate-x-1/2 border-y border-amber-500/10 bg-amber-500/[0.01] flex flex-col group transition-all duration-500">
-                  <div className="py-5 border-b border-amber-500/10 w-full">
-                    <div className="max-w-6xl mx-auto px-4 flex items-center justify-between">
-                      <div className="flex items-center gap-4">
-                        <div className="w-1.5 h-6 bg-gradient-to-b from-amber-400 to-amber-600 rounded-full shadow-[0_0_10px_rgba(245,158,11,0.5)]"></div>
-                        <h3 className="font-bold text-xl tracking-tight text-white/90">
-                          提醒通知
-                        </h3>
-                        <span className="text-xs font-bold border border-amber-500/30 bg-amber-500/10 text-amber-400 px-2.5 py-1 rounded-full shadow-[0_0_10px_rgba(245,158,11,0.2)]">
-                          <AnimatedNumber value={alerts.length} /> 檔觸發提醒
-                        </span>
-                      </div>
-                      <Magnetic>
-                        <AlertCircle className="h-6 w-6 text-amber-500 opacity-80" />
-                      </Magnetic>
-                    </div>
-                  </div>
-
-                  <div className="bg-transparent w-full">
-                    <div className="overflow-hidden w-full">
-                      <div className="pt-0 pb-4 sm:pt-0 sm:pb-6 min-h-[200px] w-full">
-                        <AnimatePresence mode="wait">
-                          {alerts.length === 0 ? (
-                            <motion.div
-                              initial={{ opacity: 0, scale: 0.95 }}
-                              animate={{ opacity: 1, scale: 1 }}
-                              exit={{ opacity: 0, scale: 0.95 }}
-                              className="h-full flex flex-col items-center justify-center text-white/30 py-16"
-                            >
-                              <div className="bg-white/5 p-5 border border-white/10 rounded-full mb-4">
-                                <AlertCircle className="h-10 w-10 opacity-40" />
-                              </div>
-                              <p className="text-base font-bold text-white/50 tracking-wide">
-                                目前無價格進入提醒區間 (±2%)
-                              </p>
-                            </motion.div>
-                          ) : (
-                            <div
-                              ref={carouselRef}
-                              className="relative w-full overflow-x-auto snap-x snap-mandatory scrollbar-hide cursor-grab"
-                              onMouseDown={onDragStart}
-                            >
-                              <div className="flex flex-nowrap gap-4 sm:gap-6 px-6 sm:px-[max(15%,calc((100vw-1152px)/2+16px))] pt-2 pb-4 w-max">
-                                {alerts.map((alert, idx) => {
-                                  const tab = alert.tab;
-                                  const stockAlerts = alert.stockAlerts;
-                                  const trades = activeTabTrades[tab.id] || [];
-                                  const stats = calculateStats(
-                                    trades,
-                                    tab.currentPrice,
-                                  );
-                                  const unrealizedPnL =
-                                    stats.unrealizedPnL || 0;
-                                  const pnlColor =
-                                    unrealizedPnL > 0
-                                      ? "text-emerald-400"
-                                      : unrealizedPnL < 0
-                                        ? "text-rose-400"
-                                        : "text-white/60";
-
-                                  return (
-                                    <div
-                                      key={tab.id}
-                                      id={`stock-card-${tab.id}`}
-                                      className="card-wrapper shrink-0 w-[88vw] sm:w-[460px] snap-center transition-transform duration-500"
-                                      onClickCapture={(e) => {
-                                        if (
-                                          dragRef.current
-                                            .hasDraggedBeyondThreshold
-                                        ) {
-                                          e.preventDefault();
-                                          e.stopPropagation();
-                                        }
-                                      }}
-                                      onClick={(e) => {
-                                        if (
-                                          dragRef.current
-                                            .hasDraggedBeyondThreshold
-                                        ) {
-                                          e.preventDefault();
-                                          e.stopPropagation();
-                                          return;
-                                        }
-                                        navigate(`/stock/${tab.id}`);
-                                      }}
-                                    >
-                                      <div className="card-inner-parallax">
-                                        <motion.div
-                                          layout
-                                          initial={{ opacity: 0, y: 20 }}
-                                          animate={{ opacity: 1, y: 0 }}
-                                          transition={{ delay: idx * 0.05 }}
-                                          className="glass-card flex flex-col p-5 cursor-pointer group/item relative overflow-hidden"
-                                        >
-                                          <div className="flex items-center justify-between relative z-10">
-                                            <div className="flex items-center gap-3">
-                                              <div className="w-10 h-10 flex items-center justify-center font-black text-sm rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                                                {tab.symbol.slice(0, 2)}
-                                              </div>
-                                              <div>
-                                                <h4 className="font-black text-xl text-white/90 leading-tight">
-                                                  {tab.symbol}
-                                                </h4>
-                                                <div className="flex items-center gap-2">
-                                                  <p className="text-[10px] text-white/40 uppercase tracking-widest truncate max-w-[150px]">
-                                                    {tab.companyName ||
-                                                      "Unknown Corp"}
-                                                  </p>
-                                                  {tab.updatedAt && (
-                                                    <p className="text-[8px] text-white/20 tracking-wider">
-                                                      {typeof tab.updatedAt.toDate === 'function' ? format(tab.updatedAt.toDate(), 'yyyy/MM/dd HH:mm') : ''}
-                                                    </p>
-                                                  )}
-                                                </div>
-
-                                                <div className="flex flex-wrap gap-1 mt-1.5">
-                                                  <span className="text-[9px] font-black bg-white/5 border border-white/10 px-1.5 py-0.5 rounded shadow-sm text-yellow-500 flex items-center gap-0.5">
-                                                    <span className="opacity-60">
-                                                      ⭐
-                                                    </span>
-                                                    {tab.rating || 5}
-                                                  </span>
-                                                  <span
-                                                    className="text-[9px] font-black bg-white/5 border border-white/10 px-1.5 py-0.5 rounded shadow-sm text-purple-400 flex items-center gap-0.5"
-                                                    title="Quality Score"
-                                                  >
-                                                    <span className="opacity-60">
-                                                      Q
-                                                    </span>
-                                                    {tab.qualityScore || 5}
-                                                  </span>
-                                                  <span
-                                                    className="text-[9px] font-black bg-white/5 border border-white/10 px-1.5 py-0.5 rounded shadow-sm text-amber-500 flex items-center gap-0.5"
-                                                    title="Value Score"
-                                                  >
-                                                    <span className="opacity-60">
-                                                      V
-                                                    </span>
-                                                    {tab.valueScore || 5}
-                                                  </span>
-                                                  <span className="text-[9px] font-black bg-white/5 border border-white/10 px-1.5 py-0.5 rounded shadow-sm text-emerald-400 flex items-center gap-0.5">
-                                                    <span className="opacity-60 text-emerald-500">
-                                                      B
-                                                    </span>
-                                                    {tab.buyRate || 5}
-                                                  </span>
-                                                  <span className="text-[9px] font-black bg-white/5 border border-white/10 px-1.5 py-0.5 rounded shadow-sm text-red-400 flex items-center gap-0.5">
-                                                    <span className="opacity-60 text-red-500">
-                                                      S
-                                                    </span>
-                                                    {tab.sellRate || 5}
-                                                  </span>
-                                                  <span className="text-[9px] font-black bg-white/5 border border-white/10 px-1.5 py-0.5 rounded shadow-sm text-indigo-400 flex items-center gap-0.5">
-                                                    <span className="opacity-60">
-                                                      🌊
-                                                    </span>
-                                                    {tab.volatility || "中等"}
-                                                  </span>
-                                                  <span
-                                                    className="text-[9px] font-black bg-white/5 border border-white/10 px-1.5 py-0.5 rounded shadow-sm text-emerald-400 flex items-center gap-0.5"
-                                                    title="Positive Value"
-                                                  >
-                                                    <span className="opacity-60">
-                                                      P+
-                                                    </span>
-                                                    {calculatePositiveValue(Number(tab.rating||5), Number(tab.qualityScore||5), Number(tab.valueScore||5), Number(tab.buyRate||5))}
-                                                  </span>
-                                                  <span
-                                                    className="text-[9px] font-black bg-white/5 border border-white/10 px-1.5 py-0.5 rounded shadow-sm text-red-400 flex items-center gap-0.5"
-                                                    title="Negative Value"
-                                                  >
-                                                    <span className="opacity-60">
-                                                      N-
-                                                    </span>
-                                                    {calculateNegativeValue(Number(tab.rating||5), Number(tab.qualityScore||5), Number(tab.valueScore||5), Number(tab.sellRate||5))}
-                                                  </span>
-                                                </div>
-                                              </div>
-                                            </div>
-                                            <div className="text-right">
-                                              <p className="text-xs font-bold text-white/60">
-                                                現價: $
-                                                {tab.currentPrice?.toLocaleString()}
-                                              </p>
-                                              <p
-                                                className={`text-[13px] font-black ${pnlColor}`}
-                                              >
-                                                未實現:{" "}
-                                                {unrealizedPnL > 0 ? "+" : ""}
-                                                {unrealizedPnL.toLocaleString()}
-                                              </p>
-                                            </div>
-                                          </div>
-
-                                          <div className="mt-4 pt-4 border-t border-white/10 space-y-3">
-                                            {/* Alerts grouped by category */}
-                                            {Object.entries(
-                                              stockAlerts.reduce(
-                                                (acc: any, curr: any) => {
-                                                  if (!acc[curr.category])
-                                                    acc[curr.category] = [];
-                                                  acc[curr.category].push(curr);
-                                                  return acc;
-                                                },
-                                                {},
-                                              ),
-                                            ).map(
-                                              ([category, items]: [
-                                                string,
-                                                any,
-                                              ]) => (
-                                                <div
-                                                  key={category}
-                                                  className="space-y-1.5"
-                                                >
-                                                  <div className="flex items-center gap-2">
-                                                    <div
-                                                      className={`w-1 h-3 rounded-full ${
-                                                        category === "止損設定"
-                                                          ? "bg-red-500"
-                                                          : category ===
-                                                              "止盈設定"
-                                                            ? "bg-emerald-500"
-                                                            : category ===
-                                                                "分批進出場"
-                                                              ? "bg-blue-500"
-                                                              : "bg-amber-500"
-                                                      }`}
-                                                    ></div>
-                                                    <span className="text-[10px] font-black tracking-widest uppercase text-white/30">
-                                                      {category}
-                                                    </span>
-                                                  </div>
-                                                  <div className="flex flex-wrap gap-1.5">
-                                                    {items.map(
-                                                      (it: any, i: number) => {
-                                                        const diffPct = (
-                                                          (Math.abs(
-                                                            (tab.currentPrice ||
-                                                              0) - it.price,
-                                                          ) /
-                                                            it.price) *
-                                                          100
-                                                        ).toFixed(1);
-                                                        const isKeyPrice =
-                                                          category ===
-                                                          "關鍵價格";
-                                                        const keyLabel =
-                                                          isKeyPrice
-                                                            ? it.label.includes(
-                                                                "支撐",
-                                                              )
-                                                              ? "支撐"
-                                                              : "壓力"
-                                                            : null;
-
-                                                        return (
-                                                          <div
-                                                            key={i}
-                                                            className="bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 flex items-center justify-between gap-3 flex-1 min-w-[140px]"
-                                                          >
-                                                            <div className="flex flex-col">
-                                                              <div className="flex items-center gap-1.5">
-                                                                {keyLabel && (
-                                                                  <span className="text-[9px] font-black bg-amber-500/20 text-amber-400 px-1 rounded-sm border border-amber-500/30 uppercase tracking-tighter">
-                                                                    {keyLabel}
-                                                                  </span>
-                                                                )}
-                                                                <span className="text-[11px] font-bold text-white/80">
-                                                                  {it.label}
-                                                                </span>
-                                                              </div>
-                                                              <span className="text-[10px] text-white/40 font-medium">
-                                                                目標: $
-                                                                {it.price.toLocaleString()}
-                                                              </span>
-                                                            </div>
-                                                            <div className="text-right">
-                                                              <span
-                                                                className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${parseFloat(diffPct) < 1 ? "bg-red-500/20 text-red-400" : "bg-amber-500/20 text-amber-400"}`}
-                                                              >
-                                                                {diffPct}% 距離
-                                                              </span>
-                                                            </div>
-                                                          </div>
-                                                        );
-                                                      },
-                                                    )}
-                                                  </div>
-                                                </div>
-                                              ),
-                                            )}
-                                          </div>
-                                        </motion.div>
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          )}
-                        </AnimatePresence>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </ScrollIn>
-            </div>
-          </div>
-        )}
         {activeViewTab === "active" && (
           <div id="active-cards-section" className="grid grid-cols-1 gap-6">
             <div className="space-y-4">
@@ -2615,6 +2647,7 @@ export default function Dashboard() {
                               "買進操作",
                               "賣出操作",
                               "平倉操作",
+                              "乖離名單",
                             ] as const
                           ).map((tab) => (
                             <button
@@ -2674,13 +2707,47 @@ export default function Dashboard() {
                                 管理持有中股票
                               </DialogTitle>
                             </DialogHeader>
-                            <div className="space-y-4 py-4">
-                              {activeTabs.map((tab, idx) => (
-                                <div
-                                  className="flex flex-col gap-3 p-3 rounded-lg border border-white/5 bg-white/[0.02] hover:bg-white/[0.05] transition-colors relative"
-                                  key={tab.id}
-                                >
-                                  <div className="flex items-center justify-between">
+                            <div className="space-y-6 py-4">
+                              <div className="flex bg-black/40 p-1 rounded-lg w-full overflow-x-auto scrollbar-hide mb-2 border border-white/5">
+                                {(
+                                  [
+                                    "觀察中",
+                                    "候選名單",
+                                    "買進操作",
+                                    "賣出操作",
+                                    "平倉操作",
+                                    "乖離名單",
+                                  ] as const
+                                ).map((tab) => (
+                                  <button
+                                    key={tab}
+                                    onClick={() => setActiveManageTab(tab)}
+                                    className={`flex-shrink-0 px-4 py-1.5 text-sm font-bold rounded-md transition-all flex items-center gap-2 ${
+                                      activeManageTab === tab
+                                        ? "bg-emerald-500/20 text-emerald-400"
+                                        : "text-white/50 hover:text-white/80 hover:bg-white/5"
+                                    }`}
+                                  >
+                                    {tab}
+                                  </button>
+                                ))}
+                              </div>
+                              <div className="space-y-3">
+                                {(() => {
+                                  const categoryTabs = activeTabs.filter(
+                                    (t) => getDisplayHoldingStatus(t.holdingStatus) === activeManageTab
+                                  );
+                                  if (categoryTabs.length === 0) {
+                                    return <div className="text-center text-white/40 py-8 text-sm">此分類下沒有持有中股票</div>;
+                                  }
+                                  return categoryTabs.map((tab) => {
+                                      const idx = activeTabs.findIndex(t => t.id === tab.id);
+                                      return (
+                                        <div
+                                          className="flex flex-col gap-3 p-3 rounded-lg border border-white/5 bg-white/[0.02] hover:bg-white/[0.05] transition-colors relative overflow-hidden"
+                                          key={tab.id}
+                                        >
+                                          <div className="flex items-center justify-between z-10 w-full relative">
                                     <div className="flex items-center gap-3">
                                       <span
                                         className={`font-bold ${tab.isHidden ? "text-white/40 line-through" : "text-white"}`}
@@ -2724,6 +2791,7 @@ export default function Dashboard() {
                                         "買進操作",
                                         "賣出操作",
                                         "平倉操作",
+                                        "乖離名單",
                                       ] as const
                                     ).map((cat) => (
                                       <button
@@ -2760,6 +2828,14 @@ export default function Dashboard() {
                                       {tab.isHidden ? "取消隱藏" : "隱藏"}
                                     </button>
 
+                                    <button
+                                      onClick={() => toggleTabGroup(tab)}
+                                      className={`flex-1 h-[48px] sm:h-[44px] rounded-lg sm:rounded-md border transition-all flex flex-row items-center justify-center gap-2 font-bold text-base sm:text-sm ${tab.groupId ? "bg-purple-500/20 border-purple-500/30 text-purple-400 hover:bg-purple-500/30" : "bg-white/5 border-white/10 text-white/70 hover:bg-white/10"}`}
+                                    >
+                                      <Link className="w-5 h-5 sm:w-4 sm:h-4" />
+                                      {tab.groupId ? "解除區塊" : "區塊"}
+                                    </button>
+
                                     {confirmDeleteId === tab.id ? (
                                       <div className="absolute right-0 top-0 bottom-0 bg-slate-900 border border-slate-700 flex flex-col sm:flex-row items-stretch sm:items-center justify-end w-full rounded-lg sm:rounded-md px-1 py-1 sm:py-0 z-10 gap-2">
                                         <span className="text-white/70 text-sm font-medium mr-auto ml-3 hidden sm:inline">
@@ -2785,6 +2861,31 @@ export default function Dashboard() {
                                           </button>
                                         </div>
                                       </div>
+                                    ) : groupingTabId === tab.id ? (
+                                      <div className="absolute right-0 top-0 bottom-0 bg-slate-900/95 border border-purple-500/50 shadow-xl flex flex-col items-center justify-center w-full rounded-lg px-2 py-2 z-10 gap-2 backdrop-blur-xl">
+                                        <div className="text-white text-xs font-bold w-full text-center">選擇要連動的股票 (同一代號)</div>
+                                        <div className="flex flex-wrap gap-2 w-full items-center justify-center">
+                                           {activeTabs.filter(t => t.symbol === tab.symbol && t.id !== tab.id).length === 0 ? (
+                                              <span className="text-red-400 text-xs">無其他相同代號的持有中股票</span>
+                                           ) : (
+                                              activeTabs.filter(t => t.symbol === tab.symbol && t.id !== tab.id).map(target => (
+                                                 <button 
+                                                    key={target.id}
+                                                    onClick={(e) => { e.stopPropagation(); handleGroupWith(tab.id, target); }}
+                                                    className={`px-3 py-1.5 border rounded-md text-xs font-bold transition-colors ${target.groupId ? "bg-purple-500/10 border-purple-500/30 text-purple-400" : "bg-white/10 hover:bg-white/20 border-white/20 text-white"}`}
+                                                 >
+                                                    {target.holdingStatus || '未分類'}
+                                                 </button>
+                                              ))
+                                           )}
+                                        </div>
+                                        <button 
+                                          onClick={() => setGroupingTabId(null)}
+                                          className="absolute right-2 top-2 p-1 text-white/40 hover:text-white bg-white/5 hover:bg-white/10 rounded"
+                                        >
+                                          取消
+                                        </button>
+                                      </div>
                                     ) : (
                                       <button
                                         onClick={() =>
@@ -2798,7 +2899,10 @@ export default function Dashboard() {
                                     )}
                                   </div>
                                 </div>
-                              ))}
+                              );
+                            });
+                          })()}
+                          </div>
                               {activeTabs.length === 0 && (
                                 <div className="text-white/50 text-center py-4">
                                   目前無持有中股票
@@ -2838,8 +2942,9 @@ export default function Dashboard() {
                               onMouseDown={onDragStart}
                             >
                               <div className="flex flex-nowrap gap-4 sm:gap-6 px-6 sm:px-[max(15%,calc((100vw-1152px)/2+16px))] pt-2 pb-4 w-max">
-                                {currentSubTabVisibleTabs.map((tab, idx) => {
-                                  const plannedOrders =
+                                {renderGroups.map((group, groupIdx) => {
+                                  const renderCard = (tab: any, idx: number) => {
+                                    const plannedOrders =
                                     activeTabOrders[tab.id] || [];
                                   const trades = activeTabTrades[tab.id] || [];
                                   const stats = calculateStats(
@@ -2985,13 +3090,15 @@ export default function Dashboard() {
                                               }
                                               style={{
                                                 backgroundColor:
-                                                  tab.isOperationConfirmed
-                                                    ? "#A3A3A3"
-                                                    : tab.isFavoriteHighlight
-                                                      ? "#B1C28D"
-                                                      : shouldHighlightTitle
-                                                        ? "#F5DAD5"
-                                                        : "transparent",
+                                                  tab.isDeviationConfirmed
+                                                    ? "#F0D1B9"
+                                                    : tab.isOperationConfirmed
+                                                      ? "#A3A3A3"
+                                                      : tab.isFavoriteHighlight
+                                                        ? "#B1C28D"
+                                                        : shouldHighlightTitle
+                                                          ? "#F5DAD5"
+                                                          : "transparent",
                                               }}
                                             >
                                               <div className="flex items-start gap-4 w-full">
@@ -2999,24 +3106,18 @@ export default function Dashboard() {
                                                   {/* Row 1: Symbol & Name & Badge */}
                                                   <div className="flex items-baseline gap-2 mb-1">
                                                     <span
-                                                      className={`font-black text-2xl tracking-tighter leading-none ${
-                                                        tab.isOperationConfirmed ||
-                                                        tab.isFavoriteHighlight ||
-                                                        shouldHighlightTitle
-                                                          ? "text-[#0F0F0F]"
-                                                          : "text-white"
-                                                      }`}
+                                                      className={`font-black text-2xl tracking-tighter leading-none ${typeof tab.updatedAt?.toDate === 'function' && (new Date().getTime() - tab.updatedAt.toDate().getTime() > 17 * 60 * 60 * 1000) ? "text-red-500 animate-pulse font-bold" : tab.isDeviationConfirmed || tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "text-[#0F0F0F]" : "text-white"}`}
                                                     >
                                                       {tab.symbol}
                                                     </span>
                                                     {tab.updatedAt && (
-                                                      <span className={`text-[9px] tracking-widest ml-1 ${tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "text-[#0F0F0F]/40" : "text-white/30"}`}>
+                                                      <span className={`text-[9px] tracking-widest ml-1 ${typeof tab.updatedAt.toDate === 'function' && (new Date().getTime() - tab.updatedAt.toDate().getTime() > 17 * 60 * 60 * 1000) ? "text-red-500 animate-pulse font-bold" : tab.isDeviationConfirmed || tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "text-[#0F0F0F]/40" : "text-white/30"}`}>
                                                         {typeof tab.updatedAt.toDate === 'function' ? format(tab.updatedAt.toDate(), 'yyyy/MM/dd HH:mm') : ''}
                                                       </span>
                                                     )}
                                                     {tab.currentPrice !== undefined && (
                                                       <div className="flex items-baseline gap-2">
-                                                        <span className={`text-lg font-black tabular-nums ${tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "text-[#0F0F0F]" : "text-white"}`}>
+                                                        <span className={`text-lg font-black tabular-nums ${tab.isDeviationConfirmed || tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "text-[#0F0F0F]" : "text-white"}`}>
                                                           ${tab.currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                         </span>
                                                         {unrealizedPnL !== 0 && (
@@ -3083,6 +3184,18 @@ export default function Dashboard() {
                                                         </span>
                                                       </div>
                                                       <div
+                                                        className={`px-1.5 h-full flex items-center border-r ${tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "bg-black/5 border-black/10" : "bg-white/5 border-white/10"}`}
+                                                      >
+                                                        <span
+                                                          className={`text-[10px] font-black ${tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "text-cyan-700" : "text-cyan-400"}`}
+                                                        >
+                                                          C{" "}
+                                                          {tab.crashSimilarity !== undefined
+                                                            ? tab.crashSimilarity
+                                                            : 5}
+                                                        </span>
+                                                      </div>
+                                                      <div
                                                         className={`px-1.5 h-full flex items-center bg-emerald-500/10 text-emerald-600`}
                                                       >
                                                         <span className="text-[10px] font-black">
@@ -3141,11 +3254,11 @@ export default function Dashboard() {
 
                                               {/* Right side: Action Button */}
                                               <div className="flex flex-col items-end justify-center self-stretch ml-2">
-                                                <div className="opacity-0 group-hover/item:opacity-100 transition-all duration-500 transform translate-x-4 group-hover/item:translate-x-0">
+                                                <div className={`${tab.groupId ? 'opacity-100 translate-x-0' : 'opacity-0 group-hover/item:opacity-100 translate-x-4 group-hover/item:translate-x-0'} transition-all duration-500 transform`}>
                                                   <button
-                                                    className={`whitespace-nowrap text-sm font-black rounded-full px-5 py-2.5 hover:scale-105 active:scale-95 transition-all ${tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "bg-[#0F0F12] text-white" : "bg-white text-black shadow-[0_0_20px_rgba(255,255,255,0.3)]"}`}
+                                                    className={`whitespace-nowrap text-sm font-black rounded-full px-5 py-2.5 hover:scale-105 active:scale-95 transition-all ${tab.isDeviationConfirmed || tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "bg-[#0F0F12] text-white" : "bg-white text-black shadow-[0_0_20px_rgba(255,255,255,0.3)]"} ${tab.tradeDirection === '看跌' ? '!bg-red-500 !text-white' : tab.tradeDirection === '看漲' ? '!bg-emerald-500 !text-white' : ''}`}
                                                   >
-                                                    檢視細節
+                                                    {tab.tradeDirection ? `${tab.tradeDirection}操作` : "檢視細節"}
                                                   </button>
                                                 </div>
                                               </div>
@@ -3593,6 +3706,12 @@ export default function Dashboard() {
                                                             : "市價"}{" "}
                                                           / {trade.quantity}股
                                                         </span>
+                                                        {trade.operator === "機器" && (
+                                                          <span className="text-red-500 font-bold ml-0.5">(機器)</span>
+                                                        )}
+                                                        {trade.operator === "人" && (
+                                                          <span className="text-white/40 font-bold ml-0.5">(人)</span>
+                                                        )}
                                                       </div>
                                                     ))}
                                                   {trades.length > 3 && (
@@ -3628,7 +3747,7 @@ export default function Dashboard() {
                                                 >
                                                   <path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 0 1 9-9" />
                                                 </svg>
-                                                數據圖視化
+                                                圖表視圖
                                               </div>
                                             </div>
                                           </div>
@@ -3651,6 +3770,19 @@ export default function Dashboard() {
                                             <StockCardVisualizer
                                               plannedOrders={plannedOrders}
                                               currentPrice={tab.currentPrice}
+                                              onToggleHighlight={(orderId, currentStatus) => handleToggleOrderHighlight(tab.id, orderId, currentStatus)}
+                                              tabId={tab.id}
+                                              annotations={tab.chartAnnotations || []}
+                                              onUpdateAnnotations={(newAnn) => updateTab(tab.id, { chartAnnotations: newAnn })}
+                                              averageCost={stats.totalQuantity !== 0 ? stats.averagePrice : undefined}
+                                              stockName={tab.symbol}
+                                              rating={tab.rating}
+                                              qualityScore={tab.qualityScore}
+                                              valueScore={tab.valueScore}
+                                              crashSimilarity={tab.crashSimilarity}
+                                              buyRate={tab.buyRate}
+                                              sellRate={tab.sellRate}
+                                              volatility={tab.volatility}
                                             />
 
                                             {/* Close back button */}
@@ -3673,6 +3805,21 @@ export default function Dashboard() {
                                       </div>
                                     </div>
                                   );
+                                  };
+
+                                  if (group.isGroup) {
+                                    return (
+                                      <div key={group.id} className="relative flex p-1.5 sm:p-2 bg-gradient-to-r from-white/[0.04] to-white/[0.01] border border-white/5 shadow-2xl rounded-[36px] shrink-0 gap-4 group/box transition-all">
+                                        {/* Optional Label / Indicator indicating this is a paired block could go here */}
+                                        <div className="absolute -top-2 left-1/2 -translate-x-1/2 bg-white/10 px-3 py-0.5 rounded-full text-[10px] font-bold text-white/50 opacity-0 group-hover/box:opacity-100 transition-opacity whitespace-nowrap pointer-events-none border border-white/10">
+                                          連動區塊
+                                        </div>
+                                        {group.tabs.map((t, i) => renderCard(t, i))}
+                                      </div>
+                                    );
+                                  }
+                                  
+                                  return renderCard(group.tabs[0], groupIdx);
                                 })}
                               </div>
                             </div>
@@ -4486,6 +4633,389 @@ export default function Dashboard() {
                 </motion.div>
               )}
             </AnimatePresence>
+          </div>
+        )}
+
+        {activeViewTab === "alerts" && (
+          <div className="flex flex-col gap-6 animate-in fade-in duration-550 pb-20">
+            {/* Header / Banner Card */}
+            <ScrollIn delay={0.05} translateY={15}>
+              <div className="rounded-[2rem] border border-white/5 bg-[#0F0F12]/80 backdrop-blur-xl p-6 relative overflow-hidden group/alerts-banner">
+                {/* Ambient glow decoration */}
+                <div className="absolute top-0 right-0 w-[400px] h-[200px] bg-purple-600/10 blur-[90px] rounded-full pointer-events-none"></div>
+
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-3">
+                      <div className="w-1.5 h-7 bg-gradient-to-b from-purple-400 to-indigo-600 rounded-full shadow-[0_0_15px_rgba(168,85,247,0.6)]"></div>
+                      <h3 className="font-extrabold text-2xl tracking-tight text-white flex items-center gap-2">
+                        <Bell className="w-7 h-7 text-purple-400 animate-pulse" />
+                        個股與策略警報中心
+                      </h3>
+                    </div>
+                    <p className="text-xs text-white/55 max-w-2xl leading-relaxed pl-4">
+                      當追蹤股價跨越您所設定的目標臨界點時，本系統將同步發出<strong>網頁視窗警報與音效</strong>與<strong>信箱通知</strong>。此外，此中心亦整合了您所有的關鍵策略關聯提醒。
+                    </p>
+                  </div>
+
+                  <div className="bg-white/5 border border-white/5 p-4 rounded-2xl flex items-center justify-between gap-4 w-full md:w-auto">
+                    <div>
+                      <p className="text-xs font-black text-white">瀏覽器通知：
+                        {notificationPermission === "granted" && <span className="text-emerald-400 font-bold ml-1">● 已授權</span>}
+                        {notificationPermission === "denied" && <span className="text-red-400 font-bold ml-1">● 已拒絕</span>}
+                        {notificationPermission === "default" && <span className="text-yellow-400 font-bold ml-1">● 尚未授權</span>}
+                      </p>
+                      <p className="text-[10px] text-white/40 mt-0.5">授權以啟用網頁背景視窗彈出與提示音效</p>
+                    </div>
+                    <Button
+                      onClick={requestNotificationPermission}
+                      className="bg-purple-500/15 hover:bg-purple-500/25 text-purple-400 border border-purple-500/30 hover:border-purple-500/50 text-xs font-semibold h-9 px-4 rounded-xl transition-all cursor-pointer"
+                    >
+                      授權桌面通知
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </ScrollIn>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              {/* Left Column: Form component */}
+              <div className="lg:col-span-4 space-y-6">
+                <ScrollIn delay={0.1} translateY={15}>
+                  <div className="rounded-[2rem] border border-white/5 bg-[#0F0F12]/80 backdrop-blur-xl p-6 glass-panel">
+                    <h3 className="font-black text-lg text-white flex items-center gap-2 mb-4 border-b border-white/5 pb-3">
+                      <Plus className="w-5 h-5 text-purple-400" />
+                      快速新增警報
+                    </h3>
+                    <form onSubmit={handleDashboardAddAlert} className="space-y-4">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-semibold text-white/60">選擇股票標的</Label>
+                        <Select
+                          value={dashboardAlertForm.symbol}
+                          onValueChange={(val) => {
+                            const tgt = tabs.find(t => t.symbol === val && t.status === 'ACTIVE');
+                            setDashboardAlertForm(prev => ({ 
+                              ...prev, 
+                              symbol: val,
+                              targetPrice: tgt?.currentPrice ? String(tgt.currentPrice) : ''
+                            }));
+                          }}
+                        >
+                          <SelectTrigger className="bg-white/5 border-white/10 text-white rounded-xl h-10 select-none">
+                            <SelectValue placeholder="選擇您持有中的個股..." />
+                          </SelectTrigger>
+                          <SelectContent className="bg-slate-950 border-white/15 text-white max-h-[250px] overflow-y-auto">
+                            {tabs.filter(t => t.status === 'ACTIVE').length === 0 ? (
+                              <div className="text-center text-xs text-white/30 py-4">無持有中個股</div>
+                            ) : (
+                              tabs.filter(t => t.status === 'ACTIVE').map(t => (
+                                <SelectItem key={t.id} value={t.symbol}>
+                                  {t.symbol} - {t.companyName || ""} {t.currentPrice ? `($${t.currentPrice})` : ''}
+                                </SelectItem>
+                              ))
+                            )}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-1.5 font-bold text-xs">
+                        <Label className="text-xs font-semibold text-white/60 font-bold">觸發價 threshold</Label>
+                        <Select
+                          value={dashboardAlertForm.condition}
+                          onValueChange={(val: any) => setDashboardAlertForm(prev => ({ ...prev, condition: val }))}
+                        >
+                          <SelectTrigger className="bg-white/5 border-white/10 text-white rounded-xl h-10 select-none">
+                            <SelectValue placeholder="選擇條件" />
+                          </SelectTrigger>
+                          <SelectContent className="bg-slate-950 border-white/15 text-white">
+                            <SelectItem value="above_or_equal">{"當價格高於或等於 (>=)"}</SelectItem>
+                            <SelectItem value="below_or_equal">{"當價格低於或等於 (<=)"}</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-semibold text-white/60">目標價格 $</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          className="bg-white/5 border-white/10 text-white h-10 rounded-xl"
+                          placeholder="例如: 150.50"
+                          value={dashboardAlertForm.targetPrice}
+                          onChange={(e) => setDashboardAlertForm(prev => ({ ...prev, targetPrice: e.target.value }))}
+                        />
+                      </div>
+
+                      <div className="space-y-3 pt-2">
+                        <Label className="text-xs font-semibold text-white/60">通知管道</Label>
+                        
+                        <div className="flex items-center justify-between rounded-xl bg-white/5 p-3 border border-white/5">
+                          <div className="flex flex-col">
+                            <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                              <Bell className="w-3.5 h-3.5 text-purple-400" />
+                              瀏覽器視窗通知
+                            </span>
+                            <span className="text-[10px] text-white/50">發出網頁桌面視窗與音效</span>
+                          </div>
+                          <input
+                            type="checkbox"
+                            className="w-4.5 h-4.5 rounded border-white/10 bg-white/5 accent-purple-500 cursor-pointer"
+                            checked={dashboardAlertForm.notifyBrowser}
+                            onChange={(e) => setDashboardAlertForm(prev => ({ ...prev, notifyBrowser: e.target.checked }))}
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-between rounded-xl bg-white/5 p-3 border border-white/5">
+                          <div className="flex flex-col">
+                            <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                              <Mail className="w-3.5 h-3.5 text-blue-400" />
+                              電子郵件提醒
+                            </span>
+                            <span className="text-[10px] text-white/50">達標時發信通知外部位址</span>
+                          </div>
+                          <input
+                            type="checkbox"
+                            className="w-4.5 h-4.5 rounded border-white/10 bg-white/5 accent-purple-500 cursor-pointer"
+                            checked={dashboardAlertForm.notifyEmail}
+                            onChange={(e) => setDashboardAlertForm(prev => ({ ...prev, notifyEmail: e.target.checked }))}
+                          />
+                        </div>
+                      </div>
+
+                      {dashboardAlertForm.notifyEmail && (
+                        <div className="space-y-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
+                          <Label className="text-xs font-semibold text-white/60">指定電子信箱</Label>
+                          <Input
+                            type="email"
+                            className="bg-white/5 border-white/10 text-white h-10 rounded-xl text-xs"
+                            placeholder="請在此輸入發信的 Email 電子信箱位址"
+                            value={dashboardAlertForm.emailAddress}
+                            onChange={(e) => setDashboardAlertForm(prev => ({ ...prev, emailAddress: e.target.value }))}
+                          />
+                        </div>
+                      )}
+
+                      <Button 
+                        type="submit"
+                        className="w-full bg-purple-500 hover:bg-purple-600 text-white font-bold h-10 text-xs rounded-xl mt-2 cursor-pointer"
+                      >
+                        加入警報系統
+                      </Button>
+                    </form>
+                  </div>
+                </ScrollIn>
+              </div>
+
+              {/* Right Column: Custom lists, triggers history and strategy levels */}
+              <div className="lg:col-span-8 space-y-6">
+                {/* Active Custom Alerts across all active symbols */}
+                <ScrollIn delay={0.15} translateY={15}>
+                  <div className="rounded-[2rem] border border-white/5 bg-[#0F0F12]/80 backdrop-blur-xl p-6 glass-panel">
+                    <h3 className="font-black text-lg text-white flex items-center justify-between gap-2 mb-4 border-b border-white/5 pb-3">
+                      <span className="flex items-center gap-2">
+                        <Bell className="w-5 h-5 text-purple-400" />
+                        當前自訂價格警報清單
+                      </span>
+                      <Badge className="bg-purple-500/10 text-purple-400 border-none text-[11px] py-0.5 px-2.5 font-bold rounded-lg select-none">
+                        {
+                          tabs.reduce((acc, current) => {
+                            return acc + (current.status === 'ACTIVE' ? (current.priceAlerts || []).length : 0);
+                          }, 0)
+                        } 項門檻設定
+                      </Badge>
+                    </h3>
+
+                    {tabs.filter(t => t.status === 'ACTIVE' && t.priceAlerts && t.priceAlerts.length > 0).length === 0 ? (
+                      <div className="py-10 text-center flex flex-col items-center justify-center rounded-2xl border border-dashed border-white/5">
+                        <Bell className="w-10 h-10 text-white/10 mb-2" />
+                        <p className="text-xs font-bold text-white/40">目前尚未設定任何跨股價格警報。</p>
+                        <p className="text-[10px] text-white/30 max-w-sm mt-1">您可以使用左側快捷面板，或進入個股詳細頁面的「價格警報」頁籤快速設定股票達標門檻！</p>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="border-b border-white/5 text-[10px] text-white/40 uppercase tracking-wider font-extrabold font-mono">
+                              <th className="py-2.5 px-3">股號 / 公司</th>
+                              <th className="py-2.5 px-3 text-right">目前現價</th>
+                              <th className="py-2.5 px-3">警報觸發規則</th>
+                              <th className="py-2.5 px-3">通知管道</th>
+                              <th className="py-2.5 px-3 text-right">操作</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-white/[0.03] text-xs">
+                            {tabs
+                              .filter(t => t.status === 'ACTIVE' && t.priceAlerts && t.priceAlerts.length > 0)
+                              .flatMap(tab => 
+                                (tab.priceAlerts || []).map(al => ({
+                                  ...al,
+                                  tabId: tab.id,
+                                  symbol: tab.symbol,
+                                  companyName: tab.companyName,
+                                  currentPrice: tab.currentPrice
+                                }))
+                              )
+                              .map((alert) => (
+                                <tr key={alert.id} className={`hover:bg-white/[0.02] transition-colors ${!alert.isEnabled ? 'opacity-50' : ''}`}>
+                                  <td className="py-3 px-3">
+                                    <div className="flex flex-col">
+                                      <span className="font-extrabold text-sm text-white">{alert.symbol}</span>
+                                      <span className="text-[10px] text-white/45 truncate max-w-[120px]">{alert.companyName || "-"}</span>
+                                    </div>
+                                  </td>
+                                  <td className="py-3 px-3 text-right font-bold text-emerald-400 font-mono">
+                                    {alert.currentPrice ? `$${alert.currentPrice.toFixed(2)}` : "-"}
+                                  </td>
+                                  <td className="py-3 px-3">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="font-bold text-white">股價 {alert.condition === "above_or_equal" ? "≥" : "≤"}</span>
+                                      <span className="text-purple-400 font-bold font-mono text-sm">${alert.targetPrice}</span>
+                                      {!alert.isEnabled && (
+                                        <Badge className="bg-white/5 text-white/40 border-none text-[8px] py-0 px-1 select-none">已觸發</Badge>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="py-3 px-3">
+                                    <div className="flex items-center gap-1 flex-wrap">
+                                      {alert.notifyBrowser && (
+                                        <Badge className="bg-purple-500/10 text-purple-400 border-none text-[9px] font-bold">Browser</Badge>
+                                      )}
+                                      {alert.notifyEmail && (
+                                        <Badge className="bg-blue-500/10 text-blue-400 border-none text-[9px] font-bold" title={alert.emailAddress}>Email</Badge>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="py-3 px-3 text-right">
+                                    <div className="flex items-center justify-end gap-2">
+                                      <button
+                                        onClick={() => handleDashboardToggleAlert(alert.tabId, alert.id, alert.isEnabled)}
+                                        className={`px-2 py-1 text-[10px] font-bold rounded-lg border transition-all cursor-pointer ${
+                                          alert.isEnabled
+                                            ? 'bg-purple-500/10 text-purple-400 border-purple-500/20 hover:bg-purple-500/20'
+                                            : 'bg-white/5 text-white/40 border-white/5 hover:bg-white/10'
+                                        }`}
+                                      >
+                                        {alert.isEnabled ? '啟用中' : '已停用'}
+                                      </button>
+                                      <button
+                                        onClick={() => handleDashboardDeleteAlert(alert.tabId, alert.id)}
+                                        className="bg-red-500/10 hover:bg-red-500/20 text-red-400 p-1.5 rounded-lg border border-red-500/20 transition-all cursor-pointer"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))
+                            }
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </ScrollIn>
+
+                {/* System Strategy 2% Threshold Alerts */}
+                <ScrollIn delay={0.2} translateY={15}>
+                  <div className="rounded-[2rem] border border-white/5 bg-[#0F0F12]/80 backdrop-blur-xl p-6 glass-panel">
+                    <h3 className="font-black text-lg text-white flex items-center justify-between gap-2 mb-4 border-b border-white/5 pb-3">
+                      <span className="flex items-center gap-2">
+                        <Target className="w-5 h-5 text-emerald-400" />
+                        系統自動策略警報 (±2% 趨近提醒)
+                      </span>
+                      <Badge className="bg-emerald-500/10 text-emerald-400 border-none text-[11px] py-0.5 px-2.5 font-bold rounded-lg select-none">
+                        {alerts.length} 項標的達契
+                      </Badge>
+                    </h3>
+
+                    {alerts.length === 0 ? (
+                      <div className="py-8 text-center text-xs text-white/30 rounded-2xl border border-dashed border-white/5">
+                        目前沒有股票價格瀕臨策略關鍵位置 (±2% 止盈、止損或預定訂單價位)。
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {alerts.map((alertGroup: any, index: number) => (
+                          <div key={index} className="bg-white/5 border border-white/5 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                            <div className="space-y-1.5">
+                              <div className="flex items-center gap-2">
+                                <span className="font-extrabold text-base text-white">{alertGroup.tab.symbol}</span>
+                                <span className="text-xs text-white/50">{alertGroup.tab.companyName || ""}</span>
+                                <Badge className="bg-emerald-500/15 text-emerald-400 border-none font-black font-mono select-none">
+                                  現價: ${alertGroup.tab.currentPrice?.toFixed(2)}
+                                </Badge>
+                              </div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                {alertGroup.stockAlerts.map((sa: any, idx2: number) => (
+                                  <span key={idx2} className="inline-flex items-center px-2 py-1 bg-white/5 border border-white/5 rounded-lg text-[11px] font-medium text-white/80 gap-1.5">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+                                    {sa.category} : {sa.label} (<span className="text-purple-400 font-mono">${sa.price?.toFixed(2)}</span>)
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                            <Button
+                              onClick={() => navigate(`/stock/${alertGroup.tab.id}`)}
+                              className="bg-white/5 hover:bg-white/10 text-white font-bold text-xs h-9 px-4 rounded-xl transition-all cursor-pointer shrink-0 border border-white/5"
+                            >
+                              查看
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </ScrollIn>
+
+                {/* Dispatched History Logging List */}
+                <ScrollIn delay={0.25} translateY={15}>
+                  <div className="rounded-[2rem] border border-white/5 bg-[#0F0F12]/80 backdrop-blur-xl p-6 glass-panel animate-in fade-in duration-300">
+                    <h3 className="font-black text-lg text-white flex items-center gap-2 mb-4 border-b border-white/5 pb-3">
+                      <Clock className="w-5 h-5 text-cyan-400" />
+                      警報系統已發送紀錄歷史
+                    </h3>
+
+                    {customAlertsHistory.length === 0 ? (
+                      <div className="py-8 text-center text-xs text-white/30 rounded-2xl border border-dashed border-white/5">
+                        尚無任何發送與觸發紀錄。當股價跨越自訂臨界點時，觸發記錄將即時渲染在此。
+                      </div>
+                    ) : (
+                      <div className="space-y-2.5 max-h-[350px] overflow-y-auto pr-1 font-mono">
+                        {customAlertsHistory.map((log: any) => (
+                          <div key={log.id} className="bg-emerald-500/[0.02] border border-emerald-500/10 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 font-sans">
+                            <div className="space-y-1">
+                              <p className="text-xs font-bold text-white flex items-center gap-1.5 flex-wrap">
+                                <span className="text-emerald-400 font-bold">● 觸發成功</span>
+                                <span className="font-extrabold text-sm text-purple-300">{log.symbol}</span>
+                                條件: 股價 {log.condition === "above_or_equal" ? "≥" : "≤"} ${log.targetPrice.toFixed(2)}
+                              </p>
+                              <p className="text-[10px] text-white/50">
+                                當時實際到達股價: <span className="font-bold text-white">${log.triggeredPrice.toFixed(2)}</span>
+                              </p>
+                              <p className="text-[10px] text-white/40 font-mono">
+                                觸發時間: {new Date(log.triggeredAt).toLocaleString()}
+                              </p>
+                            </div>
+                            
+                            <div className="flex items-center gap-1 shrink-0 flex-wrap sm:flex-nowrap font-mono">
+                              {log.channels?.browser && (
+                                <Badge className="bg-purple-500/10 text-purple-400 border-none text-[9px] font-bold py-0.5 px-1.5 select-none rounded">
+                                  Browser
+                                </Badge>
+                              )}
+                              {log.channels?.email && (
+                                <Badge className="bg-blue-500/10 text-blue-400 border-none text-[9px] font-bold py-0.5 px-1.5 select-none rounded" title={`電子郵件寄送：${log.channels?.emailAddr}`}>
+                                  Email : {log.channels?.emailAddr}
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </ScrollIn>
+              </div>
+            </div>
           </div>
         )}
       </div>

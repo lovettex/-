@@ -95,8 +95,7 @@ export function useStockTabs() {
   const updateCurrentPrice = async (id: string, price: number) => {
     try {
       await updateDoc(doc(db, 'stockTabs', id), {
-        currentPrice: price,
-        updatedAt: serverTimestamp()
+        currentPrice: price
       });
       toast.success('現價已更新');
     } catch (error) {
@@ -120,8 +119,7 @@ export function useStockTabs() {
     try {
       const promises = updates.map(update => 
         updateDoc(doc(db, 'stockTabs', update.id), {
-          sortOrder: update.sortOrder,
-          updatedAt: serverTimestamp()
+          sortOrder: update.sortOrder
         })
       );
       await Promise.all(promises);

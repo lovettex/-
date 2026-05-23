@@ -59,12 +59,12 @@ export default function StrategyTab({
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
-    entries: false,
-    tp: false,
-    sl: false,
-    keyPrices: false,
-    notes: false,
-    operation: false,
+    entries: true,
+    tp: true,
+    sl: true,
+    keyPrices: true,
+    notes: true,
+    operation: true,
   });
 
   const handleGenerateOperationNote = async () => {
@@ -86,14 +86,29 @@ export default function StrategyTab({
 
       const prompt = `
         你是一個量化與風控並重的選股模型設計顧問，協助建立可實際交易的選股框架。
-        請根據以下的股票資訊及使用者的交易計畫，給出「執行操作備註」的建議。
+        請根據以下的股票資訊、個股評分指標及使用者的交易計畫，給出「執行操作備註」的建議。
         請善用你內建的 Google Search 能力尋找該股票 (${currentTab.symbol}) 最新的新聞、財報數據或技術分析，
-        然後「融合」當前計畫（分批進出場規劃、止盈/止損、關鍵價格門檻）和最新現價（${currentPriceStr}），動態給予建議（例如：距離目標價多遠、潛在風險、進出場執行細節）。
-        請保持專業簡潔，條理分明。輸出格式為純文字即可。
+        並結合以下三個面相來擬定內容：
+        1. 當前情境分析：結合最新現價 (${currentPriceStr})、市況與「個股評分指標」來評估目前狀況。
+        2. 進場操作建議：融合當前計畫（分批進出場規劃、止盈/止損、關鍵價格門檻），給予具體的執行細節。
+        3. 綜合考量與注意事項：點出潛在風險（特別是崩盤相似度、波動性等），以及距離目標價的多寡。
+
+        請保持專業簡潔，條理分明。按照上述三大點進行段落劃分，輸出格式為純文字。
 
         [當前狀態]
         股票代號: ${currentTab.symbol}
         目前現價: ${currentPriceStr}
+
+        [個股評分指標]
+        綜合評分: ${currentTab.rating || "未評分"} / 10
+        企業體質 (Quality): ${currentTab.qualityScore || "未評分"} / 10
+        估值 (Value): ${currentTab.valueScore || "未評分"} / 10
+        崩盤相似度 (Crash Similarity): ${currentTab.crashSimilarity || "未評分"} / 10
+        看多訊號 (Buy Rate): ${currentTab.buyRate || "未評分"} / 10
+        看空訊號 (Sell Rate): ${currentTab.sellRate || "未評分"} / 10
+        波動性: ${currentTab.volatility || "未知"}
+        正向價值 (Pos Value): ${Math.max(0, Number(currentTab.rating||5) - 5) + Math.max(0, Number(currentTab.qualityScore||5) - 5) + Math.max(0, Number(currentTab.valueScore||5) - 5) + Number(currentTab.buyRate||5)}
+        負向價值 (Neg Value): ${Math.max(0, 5 - Number(currentTab.rating||5)) + Math.max(0, 5 - Number(currentTab.qualityScore||5)) + Math.max(0, 5 - Number(currentTab.valueScore||5)) + Number(currentTab.sellRate||5)}
         
         [交易計畫與策略紀錄]
         分批進場規劃: ${JSON.stringify(form.entries)}
