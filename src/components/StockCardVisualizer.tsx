@@ -14,10 +14,10 @@ interface Props {
   rating?: number;
   qualityScore?: number;
   valueScore?: number;
-  crashSimilarity?: number;
   buyRate?: number;
   sellRate?: number;
-  volatility?: "低" | "中等" | "高";
+  volatility?: string;
+  crashSimilarity?: number;
 }
 
 function resolveCollisions<T extends { rawY: number; isFixed?: boolean }>(
@@ -99,11 +99,21 @@ export const StockCardVisualizer: React.FC<Props> = ({
   rating,
   qualityScore,
   valueScore,
-  crashSimilarity,
   buyRate,
   sellRate,
   volatility,
+  crashSimilarity,
 }) => {
+  const ratingVal = rating !== undefined ? rating : 5;
+  const qualityVal = qualityScore !== undefined ? qualityScore : 5;
+  const valueVal = valueScore !== undefined ? valueScore : 5;
+  const buyVal = buyRate !== undefined ? buyRate : 5;
+  const sellVal = sellRate !== undefined ? sellRate : 5;
+  const crashVal = crashSimilarity !== undefined ? crashSimilarity : 5;
+
+  const posValue = Math.max(0, ratingVal - 5) + Math.max(0, qualityVal - 5) + Math.max(0, valueVal - 5) + buyVal;
+  const negValue = Math.max(0, 5 - ratingVal) + Math.max(0, 5 - qualityVal) + Math.max(0, 5 - valueVal) + sellVal;
+
   const [hoveredLabel, setHoveredLabel] = useState<any>(null);
   const longPressTimers = useRef<{ [key: string]: NodeJS.Timeout }>({});
 
@@ -712,47 +722,61 @@ export const StockCardVisualizer: React.FC<Props> = ({
     );
   };
 
-  const posValue = Math.max(0, Number(rating||5) - 5) + Math.max(0, Number(qualityScore||5) - 5) + Math.max(0, Number(valueScore||5) - 5) + Number(buyRate||5);
-  const negValue = Math.max(0, 5 - Number(rating||5)) + Math.max(0, 5 - Number(qualityScore||5)) + Math.max(0, 5 - Number(valueScore||5)) + Number(sellRate||5);
-
   return (
     <div
       className="w-full h-full p-2 relative flex flex-col rounded-xl pointer-events-auto"
       style={{ isolation: "isolate" }}
       onClick={(e) => e.stopPropagation()}
     >
-      {/* Score Header */}
-      <div className="flex flex-wrap justify-center items-center gap-2 mb-1 shrink-0">
-        <div className="flex items-center border rounded-md overflow-hidden h-[18px] border-white/10 bg-white/5">
+      <div className="flex flex-wrap items-center justify-center gap-1.5 mb-2 shrink-0 select-none">
+        <div className="flex items-center border border-white/10 rounded overflow-hidden h-5 bg-white/5">
           <div className="px-1.5 h-full flex items-center border-r border-white/10">
-            <span className="text-[9px] font-black text-yellow-500">★ {rating || 5}</span>
-          </div>
-          <div className="px-1.5 h-full flex items-center border-r border-white/10">
-            <span className="text-[9px] font-black text-purple-400">Q {qualityScore || 5}</span>
+            <span className="text-[10px] font-black text-yellow-500">
+              ★ {ratingVal}
+            </span>
           </div>
           <div className="px-1.5 h-full flex items-center border-r border-white/10">
-            <span className="text-[9px] font-black text-amber-500">V {valueScore || 5}</span>
+            <span className="text-[10px] font-black text-purple-400">
+              Q {qualityVal}
+            </span>
           </div>
           <div className="px-1.5 h-full flex items-center border-r border-white/10">
-            <span className="text-[9px] font-black text-cyan-400">C {crashSimilarity !== undefined ? crashSimilarity : 5}</span>
+            <span className="text-[10px] font-black text-amber-500">
+              V {valueVal}
+            </span>
           </div>
-          <div className="px-1.5 h-full flex items-center bg-emerald-500/10 text-emerald-600 border-r border-white/10">
-            <span className="text-[9px] font-black">B {buyRate || 5}</span>
+          <div className="px-1.5 h-full flex items-center border-r border-white/10 bg-emerald-500/10 text-emerald-400">
+            <span className="text-[10px] font-black">
+              B {buyVal}
+            </span>
           </div>
-          <div className="px-1.5 h-full flex items-center bg-rose-500/10 text-rose-600">
-            <span className="text-[9px] font-black">S {sellRate || 5}</span>
+          <div className="px-1.5 h-full flex items-center border-r border-white/10 bg-rose-500/10 text-rose-400">
+            <span className="text-[10px] font-black">
+              S {sellVal}
+            </span>
+          </div>
+          <div className="px-1.5 h-full flex items-center bg-cyan-500/10 text-cyan-400 border-none">
+            <span className="text-[10px] font-black">
+              C {crashVal}
+            </span>
           </div>
         </div>
 
-        <div className="flex items-center border rounded-md overflow-hidden h-[18px] border-white/10 bg-white/5">
-          <div className="px-1.5 h-full flex items-center border-r border-white/10">
-            <span className="text-[9px] font-black text-indigo-400">🌊 {volatility || "中"}</span>
+        <div className="flex items-center border border-white/10 rounded overflow-hidden h-5 bg-white/5">
+          <div className="px-1.5 h-full flex items-center border-r border-white/10 text-indigo-400">
+            <span className="text-[10px] font-black">
+              🌊 {volatility || "中等"}
+            </span>
           </div>
-          <div className="px-1.5 h-full flex items-center border-r border-white/10">
-            <span className="text-[9px] font-black text-emerald-400">P +{posValue}</span>
+          <div className="px-1.5 h-full flex items-center border-r border-white/10 bg-emerald-500/10 text-emerald-400" title="Positive Value">
+            <span className="text-[10px] font-black">
+              P+ {posValue}
+            </span>
           </div>
-          <div className="px-1.5 h-full flex items-center">
-            <span className="text-[9px] font-black text-rose-400">N -{negValue}</span>
+          <div className="px-1.5 h-full flex items-center bg-rose-500/10 text-rose-400" title="Negative Value">
+            <span className="text-[10px] font-black">
+              N- {negValue}
+            </span>
           </div>
         </div>
       </div>

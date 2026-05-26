@@ -14,11 +14,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
 import { format } from 'date-fns';
 import { Timestamp } from 'firebase/firestore';
-import { Trash2, BarChart3, ChevronDown, ChevronUp, Gamepad2, ShieldCheck, Upload, Bell, Mail, Plus, AlertCircle } from 'lucide-react';
+import { Trash2, BarChart3, ChevronDown, ChevronUp, Gamepad2, ShieldCheck, Upload } from 'lucide-react';
 import { toast } from "sonner";
 import { motion, AnimatePresence } from 'motion/react';
 import { ScrollIn, InteractiveButton, Magnetic } from '../components/MotionWrappers';
-import { useAuth } from '../lib/AuthContext';
 import StrategyTab from '../components/StrategyTab';
 import PlannedOrdersTab from '../components/PlannedOrdersTab';
 import ReportsTab from '../components/ReportsTab';
@@ -28,79 +27,8 @@ export default function StockTabDetail() {
   const navigate = useNavigate();
   const { tabs, updateTabStatus, updateCurrentPrice, updateTradeType, updateTab, deleteTab } = useStockTabs();
   const { trades, addTrade, deleteTrade } = useTrades(id);
-  const { user } = useAuth();
 
   const tab = tabs.find(t => t.id === id);
-
-  const [alertForm, setAlertForm] = useState({
-    targetPrice: '',
-    condition: 'above_or_equal',
-    notifyBrowser: true,
-    notifyEmail: true,
-    emailAddress: ''
-  });
-
-  React.useEffect(() => {
-    if (user?.email) {
-      setAlertForm(prev => ({ ...prev, emailAddress: user.email }));
-    }
-  }, [user]);
-
-  const [alertHistory, setAlertHistory] = useState<any[]>([]);
-  React.useEffect(() => {
-    if (user) {
-      const historyStr = localStorage.getItem(`price_alerts_history_${user.uid}`);
-      if (historyStr) {
-        try {
-          setAlertHistory(JSON.parse(historyStr));
-        } catch (e) {
-          console.error(e);
-        }
-      }
-    }
-  }, [user]);
-
-  const handleAddAlert = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!tab) return;
-    const priceStr = alertForm.targetPrice.trim();
-    if (!priceStr || isNaN(Number(priceStr))) {
-      toast.error("請輸入有效的目標價格");
-      return;
-    }
-    const target = Number(priceStr);
-    const newAlert = {
-      id: `alert_${Date.now()}`,
-      targetPrice: target,
-      condition: alertForm.condition as 'above_or_equal' | 'below_or_equal',
-      notifyBrowser: alertForm.notifyBrowser,
-      notifyEmail: alertForm.notifyEmail,
-      emailAddress: alertForm.notifyEmail ? alertForm.emailAddress : '',
-      isEnabled: true,
-      createdAt: new Date().toISOString()
-    };
-    const currentAlerts = tab.priceAlerts || [];
-    const updatedAlerts = [...currentAlerts, newAlert];
-    await updateTab(tab.id, { priceAlerts: updatedAlerts });
-    toast.success("價格警報設定成功！");
-    setAlertForm(prev => ({ ...prev, targetPrice: '' }));
-  };
-
-  const handleToggleAlert = async (alertId: string, currentVal: boolean) => {
-    if (!tab) return;
-    const updatedAlerts = (tab.priceAlerts || []).map(al => 
-      al.id === alertId ? { ...al, isEnabled: !currentVal } : al
-    );
-    await updateTab(tab.id, { priceAlerts: updatedAlerts });
-    toast.success(!currentVal ? "警報已啟用" : "警報已停用");
-  };
-
-  const handleDeleteAlert = async (alertId: string) => {
-    if (!tab) return;
-    const updatedAlerts = (tab.priceAlerts || []).filter(al => al.id !== alertId);
-    await updateTab(tab.id, { priceAlerts: updatedAlerts });
-    toast.success("警報已刪除");
-  };
 
   const [tradeForm, setTradeForm] = useState({
     type: 'BUY',
@@ -647,12 +575,11 @@ export default function StockTabDetail() {
       </ScrollIn>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="flex w-full bg-white/5 border border-white/10 p-1 rounded-xl glass-panel gap-1 overflow-x-auto scrollbar-hide">
+          <TabsList className="flex w-full bg-white/5 border border-white/10 p-1 rounded-xl glass-panel gap-1">
             <TabsTrigger value="trades" className="flex-1 py-1.5 text-xs font-bold rounded-lg data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/30 transition-all">交易紀錄</TabsTrigger>
             <TabsTrigger value="strategy" className="flex-1 py-1.5 text-xs font-bold rounded-lg data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/30 transition-all">策略計畫</TabsTrigger>
             <TabsTrigger value="orders" className="flex-1 py-1.5 text-xs font-bold rounded-lg data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/30 transition-all">預定訂單</TabsTrigger>
             <TabsTrigger value="reports" className="flex-1 py-1.5 text-xs font-bold rounded-lg data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/30 transition-all">技術與關鍵報告</TabsTrigger>
-            <TabsTrigger value="alerts" className="flex-1 py-1.5 text-xs font-bold rounded-lg data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/30 transition-all">價格警報</TabsTrigger>
           </TabsList>
 
         <TabsContent value="trades" className="pt-4 space-y-4 pb-20 outline-none">
@@ -858,250 +785,6 @@ export default function StockTabDetail() {
         
         <TabsContent value="reports" className="pt-4">
            {id && <ReportsTab tabId={id} />}
-        </TabsContent>
-
-        <TabsContent value="alerts" className="pt-4 space-y-6 pb-20 outline-none">
-          <div className="flex justify-between items-center border-b border-white/10 pb-2 mb-4">
-            <h2 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
-              <Bell className="w-5 h-5 text-purple-400" />
-              設定價格警報 {(tab?.priceAlerts || []).filter((al: any) => al.isEnabled).length > 0 && (
-                <span className="w-2.5 h-2.5 rounded-full bg-purple-500 animate-pulse" />
-              )}
-            </h2>
-            {tab?.currentPrice && (
-              <div className="text-xs text-white/50 bg-white/5 px-3 py-1.5 rounded-lg border border-white/5">
-                目前現價: <span className="font-bold text-emerald-400 font-mono">${tab.currentPrice}</span>
-              </div>
-            )}
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            {/* Left Column: Form to set alert */}
-            <div className="lg:col-span-4 rounded-2xl bg-white/5 border border-white/10 p-5 glass-panel">
-              <h3 className="font-bold text-sm text-white flex items-center gap-2 mb-4">
-                <Plus className="w-4 h-4 text-purple-400" />
-                新增警報條件
-              </h3>
-              <form onSubmit={handleAddAlert} className="space-y-4">
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-medium text-white/60">觸發條件</Label>
-                  <Select 
-                    value={alertForm.condition} 
-                    onValueChange={(val: any) => setAlertForm(prev => ({ ...prev, condition: val }))}
-                  >
-                    <SelectTrigger className="bg-white/5 border-white/10 text-white rounded-lg h-9">
-                      <SelectValue placeholder="選擇條件" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-slate-950 border-white/15 text-white">
-                      <SelectItem value="above_or_equal">{"當價格高於或等於 (>=)"}</SelectItem>
-                      <SelectItem value="below_or_equal">{"當價格低於或等於 (<=)"}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-medium text-white/60">目標價格 $</Label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    className="bg-white/5 border-white/10 text-white h-9 rounded-lg"
-                    placeholder={tab?.currentPrice ? `例如: ${(tab.currentPrice * 1.05).toFixed(2)}` : "輸入目標價格"}
-                    value={alertForm.targetPrice}
-                    onChange={(e) => setAlertForm(prev => ({ ...prev, targetPrice: e.target.value }))}
-                  />
-                </div>
-
-                <div className="space-y-3 pt-2">
-                  <Label className="text-xs font-medium text-white/60">警報管道</Label>
-                  
-                  <div className="flex items-center justify-between rounded-lg bg-white/5 p-2.5 border border-white/5">
-                    <div className="flex flex-col">
-                      <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                        <Bell className="w-3.5 h-3.5 text-purple-400" />
-                        瀏覽器桌面通知
-                      </span>
-                      <span className="text-[10px] text-white/50">網頁開啟時發出通知與音效</span>
-                    </div>
-                    <input
-                      type="checkbox"
-                      className="w-4 h-4 rounded border-white/10 bg-white/5 accent-purple-500 cursor-pointer"
-                      checked={alertForm.notifyBrowser}
-                      onChange={(e) => setAlertForm(prev => ({ ...prev, notifyBrowser: e.target.checked }))}
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between rounded-lg bg-white/5 p-2.5 border border-white/5">
-                    <div className="flex flex-col">
-                      <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                        <Mail className="w-3.5 h-3.5 text-blue-400" />
-                        電子信箱警報
-                      </span>
-                      <span className="text-[10px] text-white/50">發送警報郵件至指定信箱</span>
-                    </div>
-                    <input
-                      type="checkbox"
-                      className="w-4 h-4 rounded border-white/10 bg-white/5 accent-purple-500 cursor-pointer"
-                      checked={alertForm.notifyEmail}
-                      onChange={(e) => setAlertForm(prev => ({ ...prev, notifyEmail: e.target.checked }))}
-                    />
-                  </div>
-                </div>
-
-                {alertForm.notifyEmail && (
-                  <div className="space-y-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
-                    <Label className="text-xs font-medium text-white/60">電子信箱位址</Label>
-                    <Input
-                      type="email"
-                      className="bg-white/5 border-white/10 text-white h-9 rounded-lg text-xs"
-                      placeholder="請輸入 Email"
-                      value={alertForm.emailAddress}
-                      onChange={(e) => setAlertForm(prev => ({ ...prev, emailAddress: e.target.value }))}
-                    />
-                  </div>
-                )}
-
-                <Button 
-                  type="submit"
-                  className="w-full bg-purple-500 hover:bg-purple-600 text-white font-bold h-9 text-xs rounded-lg mt-2 cursor-pointer"
-                >
-                  設定警報
-                </Button>
-              </form>
-            </div>
-
-            {/* Right Column: Alert list & history */}
-            <div className="lg:col-span-8 space-y-6">
-              {/* Active Alerts */}
-              <div className="rounded-2xl bg-white/5 border border-white/10 p-5 glass-panel">
-                <h3 className="font-bold text-sm text-white flex items-center justify-between gap-2 mb-4">
-                  <span className="flex items-center gap-2">
-                    <Bell className="w-4 h-4 text-purple-400 animate-pulse" />
-                    目前警報清單
-                  </span>
-                  <Badge className="bg-purple-500/10 text-purple-400 border-none text-[10px] py-0.5 px-2 font-bold select-none">
-                    {(tab?.priceAlerts || []).length} 項
-                  </Badge>
-                </h3>
-
-                {(tab?.priceAlerts || []).length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-6 text-center rounded-xl border border-dashed border-white/5">
-                    <Bell className="w-8 h-8 text-white/10 mb-2" />
-                    <p className="text-xs font-bold text-white/40">此個股尚未設定任何價格警報</p>
-                    <p className="text-[10px] text-white/30 max-w-xs mt-1">您可以使用左側表單設定股票價格的達標提醒</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2.5 max-h-[300px] overflow-y-auto pr-1">
-                    {(tab?.priceAlerts || []).map((alert: any) => (
-                      <div 
-                        key={alert.id}
-                        className={`flex items-center justify-between rounded-xl p-3 border border-white/5 transition-all ${
-                          alert.isEnabled 
-                            ? 'bg-white/5' 
-                            : 'bg-white/[0.01] border-dashed border-white/5 opacity-60'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className={`p-2 rounded-lg ${alert.isEnabled ? 'bg-purple-500/10 text-purple-400' : 'bg-white/5 text-white/30'}`}>
-                            <Bell className="w-4 h-4" />
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-bold text-sm text-white">
-                                觸發：股價 {alert.condition === "above_or_equal" ? "≥" : "≤"} <span className="text-purple-400 font-mono text-base font-black">${alert.targetPrice}</span>
-                              </span>
-                              {!alert.isEnabled && (
-                                <Badge className="bg-white/5 text-white/40 border-none text-[9px] py-0 px-1 font-bold">
-                                  {alert.triggeredAt ? "已觸發" : "已停用"}
-                                </Badge>
-                              )}
-                            </div>
-                            <div className="text-[10px] text-white/45 flex items-center gap-3 mt-1 font-mono">
-                              <span>設於: {new Date(alert.createdAt).toLocaleString()}</span>
-                              <span className="flex items-center gap-1 text-white/35">
-                                [
-                                {alert.notifyBrowser && <span className="text-purple-400/80">Browser</span>}
-                                {alert.notifyBrowser && alert.notifyEmail && <span>|</span>}
-                                {alert.notifyEmail && <span className="text-blue-400/80">Email</span>}
-                                ]
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => handleToggleAlert(alert.id, alert.isEnabled)}
-                            className={`px-2.5 py-1 text-[11px] font-bold rounded-lg border transition-all cursor-pointer ${
-                              alert.isEnabled
-                                ? 'bg-purple-500/10 text-purple-400 border-purple-500/20 hover:bg-purple-500/20'
-                                : 'bg-white/5 text-white/40 border-white/5 hover:bg-white/10'
-                            }`}
-                          >
-                            {alert.isEnabled ? '已啟用' : '已停用'}
-                          </button>
-                          <button
-                            onClick={() => handleDeleteAlert(alert.id)}
-                            className="bg-red-500/10 hover:bg-red-500/20 text-red-400 p-1.5 rounded-lg border border-red-500/20 transition-all cursor-pointer"
-                            title="刪除警報"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Symbol Trigger History */}
-              <div className="rounded-2xl bg-white/5 border border-white/10 p-5 glass-panel">
-                <h3 className="font-bold text-sm text-white flex items-center gap-2 mb-4">
-                  <AlertCircle className="w-4 h-4 text-emerald-400" />
-                  此個股警報觸發記錄
-                </h3>
-
-                {alertHistory.filter((h: any) => h.symbol === tab?.symbol).length === 0 ? (
-                  <div className="py-5 text-center text-xs text-white/30 rounded-xl border border-dashed border-white/5">
-                    尚無觸發紀錄。當股價跨越設定門檻時，觸發紀錄將呈現於此。
-                  </div>
-                ) : (
-                  <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
-                    {alertHistory
-                      .filter((h: any) => h.symbol === tab?.symbol)
-                      .map((log: any) => (
-                        <div key={log.id} className="bg-emerald-500/[0.02] border border-emerald-500/10 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                          <div className="space-y-1">
-                            <p className="text-xs font-bold text-white flex items-center gap-1.5 flex-wrap">
-                              <span className="text-emerald-400">● 已觸發</span>
-                              價格門檻: 股價 {log.condition === "above_or_equal" ? "≥" : "≤"} ${log.targetPrice.toFixed(2)}
-                            </p>
-                            <p className="text-[10px] text-white/50">
-                              觸發當時現價: <span className="font-bold text-white">${log.triggeredPrice.toFixed(2)}</span>
-                            </p>
-                            <p className="text-[10px] text-white/40 font-mono">
-                              時間: {new Date(log.triggeredAt).toLocaleString()}
-                            </p>
-                          </div>
-                          
-                          <div className="flex items-center gap-1 flex-wrap sm:flex-nowrap">
-                            {log.channels?.browser && (
-                              <Badge className="bg-purple-500/10 text-purple-400 border-none text-[9px] font-semibold py-0.5 px-1.5 select-none rounded">
-                                Browser 通知
-                              </Badge>
-                            )}
-                            {log.channels?.email && (
-                              <Badge className="bg-blue-500/10 text-blue-400 border-none text-[9px] font-semibold py-0.5 px-1.5 select-none rounded" title={`已發信至 ${log.channels?.emailAddr}`}>
-                                Email 警報
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
         </TabsContent>
 
       </Tabs>

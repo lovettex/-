@@ -30,17 +30,6 @@ export interface StockTab {
   isFavoriteHighlight?: boolean;
   isDeviationConfirmed?: boolean;
   chartAnnotations?: ChartAnnotation[];
-  priceAlerts?: {
-    id: string;
-    targetPrice: number;
-    condition: 'above_or_equal' | 'below_or_equal';
-    notifyBrowser: boolean;
-    notifyEmail: boolean;
-    emailAddress?: string;
-    isEnabled: boolean;
-    triggeredAt?: string;
-    createdAt: string;
-  }[];
 }
 
 export interface ChartAnnotation {
