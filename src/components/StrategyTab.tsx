@@ -23,6 +23,7 @@ import {
   FileScan,
   Share,
   Sparkles,
+  Download,
 } from "lucide-react";
 import { StrategyConfig, StrategyEntry } from "../types";
 import { motion, AnimatePresence } from "motion/react";
@@ -57,6 +58,90 @@ export default function StrategyTab({
 
   const [isScanning, setIsScanning] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const jsonFileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleExportJson = () => {
+    try {
+      const dataToExport = {
+        entries: form.entries || [],
+        tpTargets: form.tpTargets || [],
+        slTargets: form.slTargets || [],
+        slConditions: form.slConditions || "",
+        strategyNotes: form.strategyNotes || "",
+        operationNote: form.operationNote || "",
+        resistanceZones: form.resistanceZones || [],
+        supportZones: form.supportZones || [],
+      };
+      
+      const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(
+        JSON.stringify(dataToExport, null, 2)
+      )}`;
+      const downloadAnchor = document.createElement("a");
+      downloadAnchor.setAttribute("href", jsonString);
+      const symbol = currentTab?.symbol || "strategy";
+      downloadAnchor.setAttribute("download", `${symbol}_strategy_${new Date().toISOString().slice(0, 10)}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+      toast.success("交易計畫與策略已成功匯出為 JSON 檔案");
+    } catch (error) {
+      console.error(error);
+      toast.error("匯出 JSON 失敗，請重試");
+    }
+  };
+
+  const handleImportJson = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const content = event.target?.result as string;
+        const parsed = JSON.parse(content);
+
+        // Simple validation to check if standard fields exist
+        const hasStrategyFields = 
+          parsed && 
+          (Array.isArray(parsed.entries) || 
+           Array.isArray(parsed.tpTargets) || 
+           Array.isArray(parsed.slTargets) || 
+           Array.isArray(parsed.resistanceZones) || 
+           Array.isArray(parsed.supportZones));
+
+        if (!hasStrategyFields) {
+          toast.error("不正確的 JSON 格式或沒有包含任何交易計畫欄位");
+          return;
+        }
+
+        const updatedForm = {
+          ...form,
+          entries: parsed.entries || form.entries || [],
+          tpTargets: parsed.tpTargets || form.tpTargets || [],
+          slTargets: parsed.slTargets || form.slTargets || [],
+          slConditions: typeof parsed.slConditions === "string" ? parsed.slConditions : form.slConditions || "",
+          strategyNotes: typeof parsed.strategyNotes === "string" ? parsed.strategyNotes : form.strategyNotes || "",
+          operationNote: typeof parsed.operationNote === "string" ? parsed.operationNote : form.operationNote || "",
+          resistanceZones: parsed.resistanceZones || form.resistanceZones || [],
+          supportZones: parsed.supportZones || form.supportZones || [],
+        };
+
+        setForm(updatedForm);
+        
+        // Auto-save the imported content so the user does not lose it on refresh
+        saveStrategy(updatedForm);
+        toast.success("交易計畫與策略 JSON 匯入並儲存成功！");
+      } catch (error) {
+        console.error(error);
+        toast.error("解析 JSON 檔案失敗，請確保檔案格式正確");
+      } finally {
+        if (jsonFileInputRef.current) {
+          jsonFileInputRef.current.value = "";
+        }
+      }
+    };
+    reader.readAsText(file);
+  };
 
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     entries: true,
@@ -826,6 +911,13 @@ export default function StrategyTab({
                   ref={fileInputRef}
                   onChange={handleFileScan}
                 />
+                <input
+                  type="file"
+                  accept="application/json"
+                  className="hidden"
+                  ref={jsonFileInputRef}
+                  onChange={handleImportJson}
+                />
                 <button
                   type="button"
                   disabled={isScanning}
@@ -846,6 +938,22 @@ export default function StrategyTab({
                 >
                   <Share className="w-3 h-3" />
                   匯出定單
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExportJson}
+                  className="flex items-center gap-2 px-2 py-1 rounded-full bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 border border-violet-500/20 transition-all text-[10px] font-bold"
+                >
+                  <Download className="w-3 h-3" />
+                  匯出Json
+                </button>
+                <button
+                  type="button"
+                  onClick={() => jsonFileInputRef.current?.click()}
+                  className="flex items-center gap-2 px-2 py-1 rounded-full bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 border border-amber-500/20 transition-all text-[10px] font-bold"
+                >
+                  <Upload className="w-3 h-3" />
+                  匯入Json
                 </button>
               </div>
             )}

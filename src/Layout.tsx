@@ -1,10 +1,13 @@
 import React from 'react';
 import { useAuth } from './lib/AuthContext';
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { LogOut, ActivitySquare } from 'lucide-react';
 
 export default function Layout() {
   const { user, login, logout, loading: authLoading } = useAuth();
+  const location = useLocation();
+  const match = location.pathname.match(/\/stock\/(.+)/);
+  const stockId = match ? match[1] : null;
 
   if (authLoading) return <div className="h-screen w-full flex items-center justify-center">載入中...</div>;
 
@@ -71,24 +74,18 @@ export default function Layout() {
         <div className="hidden sm:block text-right">
           <p className="text-xs font-bold text-white/50 uppercase tracking-widest">{user.displayName}</p>
         </div>
-        <button 
-          className="h-10 w-10 flex items-center justify-center rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-white/60 hover:text-white transition-all shadow-lg backdrop-blur-md" 
-          onClick={logout} 
-          title="登出"
-        >
-          <LogOut className="h-4 w-4" />
-        </button>
       </div>
 
       {/* Floating Dashboard Dot */}
       <NavLink
-        to="/"
+        to={stockId ? "/" : "/"}
+        state={stockId ? { autoFlipTabId: stockId } : undefined}
         title="交易總覽"
         className={({ isActive }) =>
           `fixed right-6 top-1/2 -translate-y-1/2 z-[100] flex items-center justify-center w-12 h-12 rounded-full backdrop-blur-xl transition-all duration-300 shadow-2xl group ${
             isActive 
               ? 'opacity-0 pointer-events-none' 
-              : 'bg-white/5 hover:bg-white/10 border border-white/10 hover:border-emerald-500/30'
+              : 'bg-white/5 hover:bg-white/10 border border-white/10 hover:border-emerald-500/30 opacity-30 hover:opacity-100'
           }`
         }
       >
@@ -100,7 +97,7 @@ export default function Layout() {
 
       {/* Main Content */}
       <main className="flex-1 relative z-0 overflow-y-auto focus:outline-none">
-        <div className="w-full mx-auto px-2 sm:px-4 md:px-6 pt-2 pb-10 md:pt-4 md:pb-16 max-w-[1920px]">
+        <div className="w-full mx-auto px-2 sm:px-4 md:px-6 pt-16 sm:pt-16 md:pt-4 pb-10 md:pb-16 max-w-[1920px]">
           <Outlet />
         </div>
       </main>

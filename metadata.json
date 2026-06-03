@@ -2,5 +2,5 @@
   "name": "美股交易策略紀錄",
   "description": "個人美股交易日誌、策略追蹤與損益管理工具",
   "requestFramePermissions": [],
-  "majorCapabilities": []
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

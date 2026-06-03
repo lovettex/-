@@ -99,6 +99,20 @@ service cloud.firestore {
         && ( !('pdfUrl2' in data) || (data.pdfUrl2 is string && data.pdfUrl2.size() <= 2000) );
     }
 
+    // Validation for ChipAnalysis
+    function isValidChipAnalysis(data) {
+      return data.keys().hasAll(['stage', 'patternExplanation', 'actionSuggestions', 'warnings', 'candlestickSupport', 'signalType', 'signalExplanation'])
+        && data.stage is map
+        && data.patternExplanation is string
+        && data.actionSuggestions is string
+        && data.warnings is map
+        && data.candlestickSupport is map
+        && data.signalType is string
+        && data.signalExplanation is string
+        && ( !('previewImage' in data) || data.previewImage is string )
+        && ( !('scannedAt' in data) || data.scannedAt is string );
+    }
+
     // Validation for SocratesData
     function isValidSocratesData(data) {
       return ( !('strong' in data) || (data.strong is list && data.strong.size() <= 500) )
@@ -185,6 +199,17 @@ service cloud.firestore {
           && ( !('updatedAt' in incoming()) || incoming().updatedAt is timestamp || incoming().updatedAt == request.time );
           
         allow delete: if isSignedIn() && isValidId(tabId) && isValidId(reportId) 
+          && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid;
+      }
+
+      match /chipAnalysis/{analysisId} {
+        allow get: if isSignedIn() && isValidId(tabId) && isValidId(analysisId) && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid;
+        allow list: if isSignedIn() && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid;
+        
+        allow create, update: if isSignedIn() && isValidId(tabId) && isValidId(analysisId) && isValidChipAnalysis(incoming())
+          && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid;
+          
+        allow delete: if isSignedIn() && isValidId(tabId) && isValidId(analysisId) 
           && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid;
       }
     }

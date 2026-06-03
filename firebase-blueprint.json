@@ -85,6 +85,23 @@
         "strong": { "type": "array" },
         "weak": { "type": "array" }
       }
+    },
+    "ChipAnalysis": {
+      "title": "Chip Analysis",
+      "description": "Market maker and chips analysis from technical chart screenshots.",
+      "type": "object",
+      "properties": {
+        "stage": { "type": "object" },
+        "patternExplanation": { "type": "string" },
+        "actionSuggestions": { "type": "string" },
+        "warnings": { "type": "object" },
+        "candlestickSupport": { "type": "object" },
+        "signalType": { "type": "string" },
+        "signalExplanation": { "type": "string" },
+        "previewImage": { "type": "string" },
+        "scannedAt": { "type": "string" }
+      },
+      "required": ["stage", "patternExplanation", "actionSuggestions", "warnings", "candlestickSupport", "signalType", "signalExplanation"]
     }
   },
   "firestore": {
@@ -107,6 +124,10 @@
     "/stockTabs/{tabId}/strategy/{strategyId}": {
       "schema": "StrategyConfig",
       "description": "Strategy and targets. Usually just one document per tab (e.g. ID 'main')."
+    },
+    "/stockTabs/{tabId}/chipAnalysis/{analysisId}": {
+      "schema": "ChipAnalysis",
+      "description": "Institutional chips and main player analysis on stock chart."
     }
   }
 }

@@ -100,10 +100,10 @@ InteractiveButton.displayName = "InteractiveButton";
 /**
  * Card that fades and slides in when scrolled into view
  */
-export const ScrollIn: React.FC<{ children: React.ReactNode; delay?: number }> = ({ children, delay = 0 }) => {
+export const ScrollIn: React.FC<{ children: React.ReactNode; delay?: number; className?: string; translateY?: number }> = ({ children, delay = 0, className = "", translateY = 30 }) => {
   return (
     <motion.div
-      initial={{ opacity: 0, y: 30 }}
+      initial={{ opacity: 0, y: translateY }}
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true, margin: "-50px" }}
       transition={{ 
@@ -112,6 +112,7 @@ export const ScrollIn: React.FC<{ children: React.ReactNode; delay?: number }> =
         stiffness: 100,
         delay 
       }}
+      className={className}
     >
       {children}
     </motion.div>

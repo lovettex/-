@@ -114,6 +114,12 @@ export interface StrategyConfig {
   slConditions?: string;
   strategyNotes?: string;
   operationNote?: string;
+  operationFocus?: string;
+  tpChecked?: boolean;
+  slChecked?: boolean;
+  addChecked?: boolean;
+  closeChecked?: boolean;
+  notesHighlighted?: boolean;
   tags?: string[];
   resistanceZones?: KeyPriceThreshold[];
   supportZones?: KeyPriceThreshold[];

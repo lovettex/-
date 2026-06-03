@@ -141,4 +141,93 @@
   .color-glow-red {
     text-shadow: 0 0 20px rgba(239,68,68,0.4);
   }
+  
+  .skeleton-box {
+    @apply relative overflow-hidden bg-white/[0.05] rounded;
+  }
+  .skeleton-box::after {
+    content: "";
+    @apply absolute inset-0;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+    transform: translateX(-100%);
+    animation: shimmerTransform 1.5s infinite linear;
+  }
+}
+
+@keyframes shimmerTransform {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes card-pulse-add {
+  0%, 100% {
+    border-color: rgba(66, 107, 74, 0.35);
+    box-shadow: 0 0 12px rgba(66, 107, 74, 0.25);
+    background-color: rgba(66, 107, 74, 0.04);
+  }
+  50% {
+    border-color: rgba(66, 107, 74, 0.95);
+    box-shadow: 0 0 26px rgba(66, 107, 74, 0.7);
+    background-color: rgba(66, 107, 74, 0.12);
+  }
+}
+
+@keyframes card-pulse-sl {
+  0%, 100% {
+    border-color: rgba(224, 65, 65, 0.35);
+    box-shadow: 0 0 12px rgba(224, 65, 65, 0.25);
+    background-color: rgba(224, 65, 65, 0.04);
+  }
+  50% {
+    border-color: rgba(224, 65, 65, 0.95);
+    box-shadow: 0 0 26px rgba(224, 65, 65, 0.7);
+    background-color: rgba(224, 65, 65, 0.12);
+  }
+}
+
+@keyframes card-pulse-close {
+  0%, 100% {
+    border-color: rgba(235, 245, 39, 0.3);
+    box-shadow: 0 0 12px rgba(235, 245, 39, 0.2);
+    background-color: rgba(235, 245, 39, 0.03);
+  }
+  50% {
+    border-color: rgba(235, 245, 39, 0.95);
+    box-shadow: 0 0 26px rgba(235, 245, 39, 0.65);
+    background-color: rgba(235, 245, 39, 0.10);
+  }
+}
+
+@keyframes card-pulse-tp {
+  0%, 100% {
+    border-color: rgba(53, 66, 140, 0.35);
+    box-shadow: 0 0 12px rgba(53, 66, 140, 0.25);
+    background-color: rgba(53, 66, 140, 0.04);
+  }
+  50% {
+    border-color: rgba(53, 66, 140, 0.95);
+    box-shadow: 0 0 26px rgba(53, 66, 140, 0.75);
+    background-color: rgba(53, 66, 140, 0.12);
+  }
+}
+
+.card-breathe-add {
+  animation: card-pulse-add 2.4s infinite ease-in-out;
+  border: 2px solid #426B4A !important;
+}
+
+.card-breathe-sl {
+  animation: card-pulse-sl 2.4s infinite ease-in-out;
+  border: 2px solid #E04141 !important;
+}
+
+.card-breathe-close {
+  animation: card-pulse-close 2.4s infinite ease-in-out;
+  border: 2px solid #EBF527 !important;
+}
+
+.card-breathe-tp {
+  animation: card-pulse-tp 2.4s infinite ease-in-out;
+  border: 2px solid #35428C !important;
 }

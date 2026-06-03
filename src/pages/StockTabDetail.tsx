@@ -13,14 +13,16 @@ import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
 import { format } from 'date-fns';
-import { Timestamp } from 'firebase/firestore';
-import { Trash2, BarChart3, ChevronDown, ChevronUp, Gamepad2, ShieldCheck, Upload } from 'lucide-react';
+import { Timestamp, collection, writeBatch, doc, serverTimestamp } from 'firebase/firestore';
+import { Trash2, BarChart3, ChevronDown, ChevronUp, Gamepad2, ShieldCheck, Upload, Download } from 'lucide-react';
 import { toast } from "sonner";
 import { motion, AnimatePresence } from 'motion/react';
+import { db } from '../lib/firebase';
+import { useAuth } from '../lib/AuthContext';
 import { ScrollIn, InteractiveButton, Magnetic } from '../components/MotionWrappers';
 import StrategyTab from '../components/StrategyTab';
 import PlannedOrdersTab from '../components/PlannedOrdersTab';
-import ReportsTab from '../components/ReportsTab';
+import ChipAnalysisTab from '../components/ChipAnalysisTab';
 
 export default function StockTabDetail() {
   const { id } = useParams<{ id: string }>();
@@ -48,6 +50,8 @@ export default function StockTabDetail() {
   const [activeTab, setActiveTab] = useState('trades');
   const [currentPriceInput, setCurrentPriceInput] = useState('');
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const tradesJsonFileInputRef = React.useRef<HTMLInputElement>(null);
+  const { user } = useAuth();
 
   // Update currentPriceInput when tab data loads or changes
   React.useEffect(() => {
@@ -179,6 +183,139 @@ export default function StockTabDetail() {
     reader.readAsText(file);
   };
 
+  const handleExportRatingJson = () => {
+    try {
+      const ratingData = {
+        "代碼": tab.symbol,
+        "rating": Number(tab.rating ?? 5),
+        "qualityScore": Number(tab.qualityScore ?? 5),
+        "valueScore": Number(tab.valueScore ?? 5),
+        "crashSimilarity": Number(tab.crashSimilarity ?? 5),
+        "buyRate": Number(tab.buyRate ?? 5),
+        "sellRate": Number(tab.sellRate ?? 5)
+      };
+
+      const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(
+        JSON.stringify(ratingData, null, 2)
+      )}`;
+      const downloadAnchor = document.createElement("a");
+      downloadAnchor.setAttribute("href", jsonString);
+      downloadAnchor.setAttribute("download", `${tab.symbol}_rating_${new Date().toISOString().slice(0, 10)}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+      toast.success("評分數據已成功匯出為 JSON 檔案");
+    } catch (error) {
+      console.error(error);
+      toast.error("匯出 JSON 失敗，請重試");
+    }
+  };
+
+  const handleExportTradesJson = () => {
+    try {
+      const tradesToExport = trades.map(t => ({
+        type: t.type,
+        purpose: t.purpose,
+        operator: t.operator || '人',
+        price: t.price,
+        quantity: t.quantity,
+        tradeDate: t.tradeDate instanceof Timestamp 
+          ? t.tradeDate.toDate().toISOString() 
+          : (t.tradeDate && (t.tradeDate as any).seconds 
+             ? new Date((t.tradeDate as any).seconds * 1000).toISOString() 
+             : new Date().toISOString()),
+        fees: t.fees || 0,
+        notes: t.notes || ''
+      }));
+
+      const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(
+        JSON.stringify(tradesToExport, null, 2)
+      )}`;
+      const downloadAnchor = document.createElement("a");
+      downloadAnchor.setAttribute("href", jsonString);
+      const symbol = tab?.symbol || "trades";
+      downloadAnchor.setAttribute("download", `${symbol}_trades_${new Date().toISOString().slice(0, 10)}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+      toast.success("交易紀錄已成功匯出為 JSON 檔案");
+    } catch (error) {
+      console.error(error);
+      toast.error("匯出 JSON 失敗，請重試");
+    }
+  };
+
+  const handleImportTradesJson = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!id || !user) {
+      toast.error("請確認已登入且頁面正常載入");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const content = event.target?.result as string;
+        const parsed = JSON.parse(content);
+
+        if (!Array.isArray(parsed)) {
+          toast.error("不正確的 JSON 格式，交易紀錄資料必須為 JSON 陣列");
+          return;
+        }
+
+        const validTrades = parsed.filter((t: any) => {
+          return t && typeof t.type === 'string' && (t.type === 'BUY' || t.type === 'SELL');
+        });
+
+        if (validTrades.length === 0) {
+          toast.error("沒有找到有效的交易紀錄資料（必須包含交易方向 type 與其他數值）");
+          return;
+        }
+
+        const batch = writeBatch(db);
+        const tradesColRef = collection(db, `stockTabs/${id}/trades`);
+
+        validTrades.forEach((item: any) => {
+          const newDocRef = doc(tradesColRef);
+          
+          let dateVal: Date;
+          if (item.tradeDate) {
+            dateVal = new Date(item.tradeDate);
+            if (isNaN(dateVal.getTime())) {
+              dateVal = new Date();
+            }
+          } else {
+            dateVal = new Date();
+          }
+
+          batch.set(newDocRef, {
+            type: item.type as 'BUY' | 'SELL',
+            purpose: (item.purpose || '加碼') as '加碼' | '平倉',
+            operator: (item.operator || '人') as '機器' | '人',
+            price: Number(item.price) || 0,
+            quantity: Number(item.quantity) || 0,
+            tradeDate: Timestamp.fromDate(dateVal),
+            fees: Number(item.fees) || 0,
+            notes: item.notes || '',
+            createdAt: serverTimestamp()
+          });
+        });
+
+        await batch.commit();
+        toast.success(`成功匯入 ${validTrades.length} 筆交易紀錄！`);
+      } catch (error) {
+        console.error(error);
+        toast.error("解析或儲存 JSON 檔案失敗，請確保檔案格式正確");
+      } finally {
+        if (tradesJsonFileInputRef.current) {
+          tradesJsonFileInputRef.current.value = "";
+        }
+      }
+    };
+    reader.readAsText(file);
+  };
+
   const handlePriceUpdate = (e: React.FormEvent) => {
     e.preventDefault();
     if (currentPriceInput && !isNaN(Number(currentPriceInput))) {
@@ -222,47 +359,63 @@ export default function StockTabDetail() {
   return (
     <div className="space-y-6">
       <ScrollIn>
-        <div className="glass-panel border border-white/10 bg-white/5 py-3 px-4 rounded-2xl shadow-sm flex flex-col xl:flex-row xl:items-center justify-between gap-3 md:gap-4">
-          <div className="flex flex-wrap items-center gap-4 md:gap-6">
-            <div>
-              <div className="flex items-center gap-2">
-                <motion.h1 
-                  layoutId="tab-title"
-                  className={`text-2xl font-bold tracking-tight ${isStaleData ? 'text-red-500 animate-pulse' : 'text-white'}`}
-                >
-                  {tab.symbol}
-                </motion.h1>
-                {tab.status === 'COMPLETED' && (
-                  <Badge variant="outline" className="bg-blue-500/10 text-blue-400 border-blue-500/20 font-bold text-[10px] px-2 py-0 rounded-full">COMPLETED</Badge>
-                )}
+        <div className="glass-panel border border-white/10 bg-white/5 p-4 sm:py-3 sm:px-4 rounded-2xl shadow-sm flex flex-col xl:flex-row xl:items-center justify-between gap-4 md:gap-4 overflow-visible relative">
+          <div className="flex flex-col md:flex-row md:items-center gap-4 md:gap-6 w-full xl:w-auto relative z-10">
+            <div className="w-full md:w-auto flex justify-between items-start">
+              <div>
+                <div className="flex items-center gap-2">
+                  <motion.h1 
+                    layoutId="tab-title"
+                    className={`text-2xl sm:text-2xl font-bold tracking-tight ${isStaleData ? 'text-red-500 animate-pulse' : 'text-white'}`}
+                  >
+                    {tab.symbol}
+                  </motion.h1>
+                  {tab.status === 'COMPLETED' && (
+                    <Badge variant="outline" className="bg-blue-500/10 text-blue-400 border-blue-500/20 font-bold text-[10px] px-2 py-0 rounded-full">COMPLETED</Badge>
+                  )}
+                </div>
+                <div className="flex flex-col mt-0.5 sm:mt-0">
+                  <p className="text-white/40 text-[10px] tracking-wider truncate max-w-[200px] sm:max-w-[120px]">{tab.companyName}</p>
+                  {tab.updatedAt && (
+                    <p className={`text-[9px] sm:text-[8px] mt-1 sm:mt-0.5 tracking-widest ${isStaleData ? 'text-red-500 font-bold animate-pulse' : 'text-white/20'}`}>
+                      UPD: {typeof tab.updatedAt.toDate === 'function' ? format(tab.updatedAt.toDate(), 'yyyy/MM/dd HH:mm') : ''}
+                    </p>
+                  )}
+                </div>
               </div>
-              <div className="flex flex-col">
-                <p className="text-white/40 text-[10px] tracking-wider truncate max-w-[120px]">{tab.companyName}</p>
-                {tab.updatedAt && (
-                  <p className={`text-[8px] mt-0.5 tracking-widest ${isStaleData ? 'text-red-500 font-bold animate-pulse' : 'text-white/20'}`}>
-                    UPD: {typeof tab.updatedAt.toDate === 'function' ? format(tab.updatedAt.toDate(), 'yyyy/MM/dd HH:mm') : ''}
-                  </p>
-                )}
+
+              {/* Mobile Only: Avg Cost & Total Shares */}
+              <div className="flex sm:hidden flex-row gap-4 shrink-0 text-right mt-0.5">
+                <div className="flex flex-col">
+                  <span className="text-[9px] font-semibold text-white/30 uppercase tracking-widest leading-tight">Avg Cost</span>
+                  <span className="text-base font-bold text-white tracking-tight leading-none mt-0.5">${stats.averagePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-[9px] font-semibold text-white/30 uppercase tracking-widest leading-tight">Total Shares</span>
+                  <span className="text-base font-bold text-white tracking-tight leading-none mt-0.5">{stats.totalQuantity} <span className="text-[10px] text-white/40 font-normal ml-0.5">股</span></span>
+                </div>
               </div>
             </div>
 
             <div className="h-8 w-px bg-white/10 hidden md:block" />
 
-            <div className="flex items-center gap-4 lg:gap-5">
-              <div className="flex flex-col">
-                <span className="text-[10px] font-semibold text-white/30 uppercase tracking-widest leading-tight">Avg Cost</span>
-                <span className="text-lg font-bold text-white tracking-tight leading-none mt-0.5">${stats.averagePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            <div className="flex flex-col md:flex-row md:items-center gap-5 sm:gap-4 lg:gap-5 w-full md:w-auto mt-2 md:mt-0">
+              <div className="hidden sm:flex flex-row gap-6 sm:gap-4 shrink-0">
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-semibold text-white/30 uppercase tracking-widest leading-tight">Avg Cost</span>
+                  <span className="text-lg font-bold text-white tracking-tight leading-none mt-0.5">${stats.averagePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-semibold text-white/30 uppercase tracking-widest leading-tight">Total Shares</span>
+                  <span className="text-lg font-bold text-white tracking-tight leading-none mt-0.5">{stats.totalQuantity} <span className="text-[10px] text-white/40 font-normal ml-0.5">股</span></span>
+                </div>
               </div>
-              <div className="flex flex-col">
-                <span className="text-[10px] font-semibold text-white/30 uppercase tracking-widest leading-tight">Total Shares</span>
-                <span className="text-lg font-bold text-white tracking-tight leading-none mt-0.5">{stats.totalQuantity} <span className="text-[10px] text-white/40 font-normal">股</span></span>
-              </div>
-              <div className="h-6 w-px bg-white/10 hidden md:block" />
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+              <div className="h-6 w-px bg-white/10 hidden md:block shrink-0" />
+              <div className="grid grid-cols-4 sm:flex sm:flex-wrap sm:items-center gap-x-2 gap-y-2.5 sm:gap-x-2 sm:gap-y-1.5 w-full sm:w-auto">
               <div className="flex flex-col gap-0.5">
-                <span className="text-[9px] font-semibold text-white/30 uppercase tracking-widest pl-0.5">評分</span>
+                <span className="text-[9px] font-semibold text-white/30 uppercase tracking-widest pl-0.5 text-center sm:text-left">評分</span>
                 <Select value={String(tab.rating || 5)} onValueChange={(val) => updateTab(tab.id, { rating: Number(val) })}>
-                  <SelectTrigger className="h-6 w-11 bg-white/5 border-white/10 text-white font-bold text-[11px] ring-0 focus:ring-emerald-500/50 rounded p-1">
+                  <SelectTrigger className="h-8 sm:h-6 w-full sm:w-11 bg-white/5 border-white/10 text-white font-bold text-[12px] sm:text-[11px] ring-0 focus:ring-emerald-500/50 rounded p-1 mx-auto sm:mx-0">
                     <SelectValue placeholder="-" />
                   </SelectTrigger>
                   <SelectContent className="glass-panel border-white/10 text-white min-w-[50px]">
@@ -274,9 +427,9 @@ export default function StockTabDetail() {
               </div>
 
               <div className="flex flex-col gap-0.5">
-                <span className="text-[9px] font-semibold text-white/30 uppercase tracking-widest pl-0.5">Quality</span>
+                <span className="text-[9px] font-semibold text-white/30 uppercase tracking-widest pl-0.5 text-center sm:text-left">Quality</span>
                 <Select value={String(tab.qualityScore || 5)} onValueChange={(val) => updateTab(tab.id, { qualityScore: Number(val) })}>
-                  <SelectTrigger className="h-6 w-11 bg-white/5 border-white/10 text-white font-bold text-[11px] ring-0 focus:ring-purple-500/50 rounded p-1">
+                  <SelectTrigger className="h-8 sm:h-6 w-full sm:w-11 bg-white/5 border-white/10 text-white font-bold text-[12px] sm:text-[11px] ring-0 focus:ring-purple-500/50 rounded p-1 mx-auto sm:mx-0">
                     <SelectValue placeholder="-" />
                   </SelectTrigger>
                   <SelectContent className="glass-panel border-white/10 text-white min-w-[50px]">
@@ -288,9 +441,9 @@ export default function StockTabDetail() {
               </div>
 
               <div className="flex flex-col gap-0.5">
-                <span className="text-[9px] font-semibold text-white/30 uppercase tracking-widest pl-0.5">Value</span>
+                <span className="text-[9px] font-semibold text-white/30 uppercase tracking-widest pl-0.5 text-center sm:text-left">Value</span>
                 <Select value={String(tab.valueScore || 5)} onValueChange={(val) => updateTab(tab.id, { valueScore: Number(val) })}>
-                  <SelectTrigger className="h-6 w-11 bg-white/5 border-white/10 text-white font-bold text-[11px] ring-0 focus:ring-amber-500/50 rounded p-1">
+                  <SelectTrigger className="h-8 sm:h-6 w-full sm:w-11 bg-white/5 border-white/10 text-white font-bold text-[12px] sm:text-[11px] ring-0 focus:ring-amber-500/50 rounded p-1 mx-auto sm:mx-0">
                     <SelectValue placeholder="-" />
                   </SelectTrigger>
                   <SelectContent className="glass-panel border-white/10 text-white min-w-[50px]">
@@ -302,9 +455,9 @@ export default function StockTabDetail() {
               </div>
 
               <div className="flex flex-col gap-0.5">
-                <span className="text-[9px] font-semibold text-white/30 uppercase tracking-widest pl-0.5 whitespace-nowrap">Crash Sim</span>
+                <span className="text-[9px] font-semibold text-white/30 uppercase tracking-widest pl-0.5 whitespace-nowrap text-center sm:text-left">Crash Sim</span>
                 <Select value={String(tab.crashSimilarity || 5)} onValueChange={(val) => updateTab(tab.id, { crashSimilarity: Number(val) })}>
-                  <SelectTrigger className="h-6 w-11 bg-white/5 border-white/10 text-white font-bold text-[11px] ring-0 focus:ring-rose-500/50 rounded p-1 mx-auto">
+                  <SelectTrigger className="h-8 sm:h-6 w-full sm:w-11 bg-white/5 border-white/10 text-white font-bold text-[12px] sm:text-[11px] ring-0 focus:ring-rose-500/50 rounded p-1 mx-auto sm:mx-0">
                     <SelectValue placeholder="-" />
                   </SelectTrigger>
                   <SelectContent className="glass-panel border-white/10 text-white min-w-[50px]">
@@ -316,9 +469,9 @@ export default function StockTabDetail() {
               </div>
 
               <div className="flex flex-col gap-0.5">
-                <span className="text-[9px] font-semibold text-white/30 uppercase tracking-widest pl-0.5">Buy Rate</span>
+                <span className="text-[9px] font-semibold text-white/30 uppercase tracking-widest pl-0.5 text-center sm:text-left">Buy Rate</span>
                 <Select value={String(tab.buyRate || 5)} onValueChange={(val) => updateTab(tab.id, { buyRate: Number(val) })}>
-                  <SelectTrigger className="h-6 w-11 bg-white/5 border-white/10 text-white font-bold text-[11px] ring-0 focus:ring-emerald-500/50 rounded p-1">
+                  <SelectTrigger className="h-8 sm:h-6 w-full sm:w-11 bg-white/5 border-white/10 text-white font-bold text-[12px] sm:text-[11px] ring-0 focus:ring-emerald-500/50 rounded p-1 mx-auto sm:mx-0">
                     <SelectValue placeholder="-" />
                   </SelectTrigger>
                   <SelectContent className="glass-panel border-white/10 text-white min-w-[50px]">
@@ -330,9 +483,9 @@ export default function StockTabDetail() {
               </div>
 
               <div className="flex flex-col gap-0.5">
-                <span className="text-[9px] font-semibold text-white/30 uppercase tracking-widest pl-0.5">Sell Rate</span>
+                <span className="text-[9px] font-semibold text-white/30 uppercase tracking-widest pl-0.5 text-center sm:text-left">Sell Rate</span>
                 <Select value={String(tab.sellRate || 5)} onValueChange={(val) => updateTab(tab.id, { sellRate: Number(val) })}>
-                  <SelectTrigger className="h-6 w-11 bg-white/5 border-white/10 text-white font-bold text-[11px] ring-0 focus:ring-red-500/50 rounded p-1">
+                  <SelectTrigger className="h-8 sm:h-6 w-full sm:w-11 bg-white/5 border-white/10 text-white font-bold text-[12px] sm:text-[11px] ring-0 focus:ring-red-500/50 rounded p-1 mx-auto sm:mx-0">
                     <SelectValue placeholder="-" />
                   </SelectTrigger>
                   <SelectContent className="glass-panel border-white/10 text-white min-w-[50px]">
@@ -344,9 +497,9 @@ export default function StockTabDetail() {
               </div>
 
               <div className="flex flex-col gap-0.5">
-                <span className="text-[9px] font-semibold text-white/30 uppercase tracking-widest pl-0.5">交易方向</span>
+                <span className="text-[9px] font-semibold text-white/30 uppercase tracking-widest pl-0.5 text-center sm:text-left">交易方向</span>
                 <Select value={tab.tradeDirection || ''} onValueChange={(val: any) => updateTab(tab.id, { tradeDirection: val === 'none' ? undefined : val })}>
-                  <SelectTrigger className={`h-6 w-[60px] bg-white/5 border-white/10 font-bold text-[10px] ring-0 focus:ring-emerald-500/50 rounded p-1 ${tab.tradeDirection === '看跌' ? 'text-red-400' : tab.tradeDirection === '看漲' ? 'text-emerald-400' : 'text-white'}`}>
+                  <SelectTrigger className={`h-8 sm:h-6 w-full sm:w-[60px] bg-white/5 border-white/10 font-bold text-[12px] sm:text-[10px] ring-0 focus:ring-emerald-500/50 rounded p-1 mx-auto sm:mx-0 ${tab.tradeDirection === '看跌' ? 'text-red-400' : tab.tradeDirection === '看漲' ? 'text-emerald-400' : 'text-white'}`}>
                     <SelectValue placeholder="-" />
                   </SelectTrigger>
                   <SelectContent className="glass-panel border-white/10 text-white">
@@ -358,9 +511,9 @@ export default function StockTabDetail() {
               </div>
 
               <div className="flex flex-col gap-0.5">
-                <span className="text-[9px] font-semibold text-white/30 uppercase tracking-widest pl-0.5">波動性</span>
+                <span className="text-[9px] font-semibold text-white/30 uppercase tracking-widest pl-0.5 text-center sm:text-left">波動性</span>
                 <Select value={tab.volatility || '中等'} onValueChange={(val: any) => updateTab(tab.id, { volatility: val })}>
-                  <SelectTrigger className="h-6 w-12 bg-white/5 border-white/10 text-white font-bold text-[10px] ring-0 focus:ring-emerald-500/50 rounded p-1">
+                  <SelectTrigger className="h-8 sm:h-6 w-full sm:w-12 bg-white/5 border-white/10 text-white font-bold text-[12px] sm:text-[10px] ring-0 focus:ring-emerald-500/50 rounded p-1 mx-auto sm:mx-0">
                     <SelectValue placeholder="-" />
                   </SelectTrigger>
                   <SelectContent className="glass-panel border-white/10 text-white">
@@ -371,21 +524,21 @@ export default function StockTabDetail() {
                 </Select>
               </div>
 
-              <div className="flex flex-col gap-0.5 ml-1">
+              <div className="flex flex-col gap-0.5 ml-0 sm:ml-1">
                 <span className="text-[9px] font-semibold text-emerald-400/50 uppercase tracking-widest text-center">Pos Value</span>
-                <div className="h-6 w-11 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-bold text-[11px] rounded flex items-center justify-center mx-auto">
+                <div className="h-8 sm:h-6 w-full sm:w-11 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-bold text-[12px] sm:text-[11px] rounded flex items-center justify-center mx-auto sm:mx-0">
                   {Math.max(0, Number(tab.rating||5) - 5) + Math.max(0, Number(tab.qualityScore||5) - 5) + Math.max(0, Number(tab.valueScore||5) - 5) + Number(tab.buyRate||5)}
                 </div>
               </div>
 
               <div className="flex flex-col gap-0.5">
                 <span className="text-[9px] font-semibold text-red-400/50 uppercase tracking-widest text-center">Neg Value</span>
-                <div className="h-6 w-11 bg-red-500/10 border border-red-500/20 text-red-400 font-bold text-[11px] rounded flex items-center justify-center mx-auto">
+                <div className="h-8 sm:h-6 w-full sm:w-11 bg-red-500/10 border border-red-500/20 text-red-400 font-bold text-[12px] sm:text-[11px] rounded flex items-center justify-center mx-auto sm:mx-0">
                   {Math.max(0, 5 - Number(tab.rating||5)) + Math.max(0, 5 - Number(tab.qualityScore||5)) + Math.max(0, 5 - Number(tab.valueScore||5)) + Number(tab.sellRate||5)}
                 </div>
               </div>
 
-              <div className="flex items-end mb-0.5 ml-1">
+              <div className="hidden sm:flex sm:col-span-1 flex-row items-center justify-start items-end mb-0.5 ml-1 gap-2 mt-0 border-t-0 pt-0">
                 <input
                   type="file"
                   accept=".json"
@@ -394,8 +547,15 @@ export default function StockTabDetail() {
                   onChange={handleJsonUpload}
                 />
                 <button 
+                  onClick={handleExportRatingJson}
+                  className="h-7 sm:h-6 px-3 sm:px-2.5 rounded flex items-center gap-1.5 border border-white/10 hover:border-white/30 bg-white/5 hover:bg-white/10 text-white/70 hover:text-white transition-all text-[11px] sm:text-[10px] tracking-wider font-bold whitespace-nowrap group"
+                >
+                  <Download className="w-3 h-3 group-hover:-translate-y-0.5 transition-transform" />
+                  匯出 JSON
+                </button>
+                <button 
                   onClick={() => fileInputRef.current?.click()}
-                  className="h-6 px-2.5 rounded flex items-center gap-1.5 border border-white/10 hover:border-white/30 bg-white/5 hover:bg-white/10 text-white/70 hover:text-white transition-all text-[10px] tracking-wider font-bold whitespace-nowrap group"
+                  className="h-7 sm:h-6 px-3 sm:px-2.5 rounded flex items-center gap-1.5 border border-white/10 hover:border-white/30 bg-white/5 hover:bg-white/10 text-white/70 hover:text-white transition-all text-[11px] sm:text-[10px] tracking-wider font-bold whitespace-nowrap group"
                 >
                   <Upload className="w-3 h-3 group-hover:-translate-y-0.5 transition-transform" />
                   匯入 JSON
@@ -405,32 +565,53 @@ export default function StockTabDetail() {
           </div>
         </div>
 
-        <div className="flex items-center gap-3 self-end xl:self-center">
-            <Select value={tab.tradeType} onValueChange={(val: any) => updateTradeType(tab.id, val)}>
-              <SelectTrigger className="h-8 px-3 bg-white/5 border border-white/10 text-white text-[11px] font-medium focus:ring-emerald-500/50 rounded-lg">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="glass-panel border-white/10 text-white">
-                <SelectItem value="simulated" className="text-xs font-medium focus:bg-white/10">
-                  <div className="flex items-center gap-1.5">
-                    <Gamepad2 className="h-3 w-3 text-amber-400" />
-                    模擬交易
-                  </div>
-                </SelectItem>
-                <SelectItem value="real" className="text-xs font-medium focus:bg-white/10">
-                  <div className="flex items-center gap-1.5">
-                    <ShieldCheck className="h-3 w-3 text-emerald-400" />
-                    真實交易
-                  </div>
-                </SelectItem>
-              </SelectContent>
-            </Select>
+        <div className="flex flex-row items-center justify-start sm:justify-start gap-1.5 sm:gap-3 w-full xl:w-auto relative z-20 pt-3 sm:pt-0 border-t border-white/5 xl:border-t-0 mt-3 sm:mt-1 xl:mt-0 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] py-1 sm:py-0">
+            <div className="flex sm:hidden flex-row items-center gap-1.5 shrink-0">
+                <button 
+                  onClick={handleExportRatingJson}
+                  className="h-8 px-3 rounded-full flex items-center gap-1.5 border border-white/10 hover:border-white/30 bg-white/5 hover:bg-white/10 text-white/70 hover:text-white transition-all text-[11px] tracking-wider font-bold whitespace-nowrap group shrink-0"
+                >
+                  <Download className="w-3 h-3" />
+                  匯出
+                </button>
+                <button 
+                  onClick={() => fileInputRef.current?.click()}
+                  className="h-8 px-3 rounded-full flex items-center gap-1.5 border border-white/10 hover:border-white/30 bg-white/5 hover:bg-white/10 text-white/70 hover:text-white transition-all text-[11px] tracking-wider font-bold whitespace-nowrap group shrink-0"
+                >
+                  <Upload className="w-3 h-3" />
+                  匯入
+                </button>
+            </div>
+
+            <div className="shrink-0">
+              <Select value={tab.tradeType} onValueChange={(val: any) => updateTradeType(tab.id, val)}>
+                <SelectTrigger className="h-8 px-2.5 sm:px-3 bg-white/5 border border-white/10 text-white text-[11px] font-medium focus:ring-emerald-500/50 rounded-full sm:rounded-lg">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="glass-panel border-white/10 text-white min-w-[100px]">
+                  <SelectItem value="simulated" className="text-xs font-medium focus:bg-white/10">
+                    <div className="flex items-center gap-1.5">
+                      <Gamepad2 className="h-3 w-3 text-amber-400" />
+                      <span className="hidden sm:inline">模擬交易</span>
+                      <span className="inline sm:hidden">模擬</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="real" className="text-xs font-medium focus:bg-white/10">
+                    <div className="flex items-center gap-1.5">
+                      <ShieldCheck className="h-3 w-3 text-emerald-400" />
+                      <span className="hidden sm:inline">真實交易</span>
+                      <span className="inline sm:hidden">真實</span>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
             {tab.status === 'ACTIVE' ? (
               <Dialog open={isCompleteOpen} onOpenChange={setIsCompleteOpen}>
                 <DialogTrigger 
                   render={
-                    <button className="h-8 bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30 px-4 text-xs font-bold rounded-lg whitespace-nowrap transition-all">
+                    <button className="h-8 bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30 px-3 sm:px-4 text-[11px] sm:text-xs font-bold rounded-full sm:rounded-lg whitespace-nowrap transition-all flex items-center justify-center shrink-0">
                       完成交易
                     </button>
                   } 
@@ -453,20 +634,20 @@ export default function StockTabDetail() {
                       />
                     </div>
                     <DialogFooter>
-                      <Button type="submit" className="glass-button bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 border-emerald-500/30 py-2 px-6">確認完成</Button>
+                      <Button type="submit" className="glass-button bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 border-emerald-500/30 py-2 px-6 rounded-full">確認完成</Button>
                     </DialogFooter>
                   </form>
                 </DialogContent>
               </Dialog>
             ) : (
-              <button onClick={handleReactivate} className="h-8 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30 px-4 text-xs font-bold rounded-lg whitespace-nowrap transition-all">
+              <button onClick={handleReactivate} className="h-8 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30 px-3 sm:px-4 text-[11px] sm:text-xs font-bold rounded-full sm:rounded-lg whitespace-nowrap transition-all flex items-center justify-center shrink-0">
                 重新啟用
               </button>
             )}
 
             <button 
               onClick={handleDelete}
-              className="h-8 w-8 flex items-center justify-center rounded-lg text-white/30 hover:text-red-400 hover:bg-red-500/10 border border-white/5 hover:border-red-500/20 transition-all"
+              className="h-8 w-8 flex items-center justify-center rounded-full sm:rounded-lg text-white/30 hover:text-red-400 hover:bg-red-500/10 border border-white/5 hover:border-red-500/20 transition-all shrink-0 ml-auto sm:ml-0"
               title="刪除"
             >
               <Trash2 className="h-4 w-4" />
@@ -579,15 +760,39 @@ export default function StockTabDetail() {
             <TabsTrigger value="trades" className="flex-1 py-1.5 text-xs font-bold rounded-lg data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/30 transition-all">交易紀錄</TabsTrigger>
             <TabsTrigger value="strategy" className="flex-1 py-1.5 text-xs font-bold rounded-lg data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/30 transition-all">策略計畫</TabsTrigger>
             <TabsTrigger value="orders" className="flex-1 py-1.5 text-xs font-bold rounded-lg data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/30 transition-all">預定訂單</TabsTrigger>
-            <TabsTrigger value="reports" className="flex-1 py-1.5 text-xs font-bold rounded-lg data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/30 transition-all">技術與關鍵報告</TabsTrigger>
+            <TabsTrigger value="chips" className="flex-1 py-1.5 text-xs font-bold rounded-lg data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/30 transition-all">主力與籌碼分析</TabsTrigger>
           </TabsList>
 
         <TabsContent value="trades" className="pt-4 space-y-4 pb-20 outline-none">
            {/* Trades Content */}
            <div className="flex justify-between items-center border-b border-white/10 pb-2 mb-4">
-             <div className="flex items-center gap-2">
+             <div className="flex flex-wrap items-center gap-2">
                <h2 className="text-xl font-bold tracking-tight text-white drop-shadow-sm">交易紀錄</h2>
-               <Badge className="bg-emerald-500/10 text-emerald-400 border-none text-[10px] py-0 px-2 font-bold">{trades.length} 筆</Badge>
+               <Badge className="bg-emerald-500/10 text-emerald-400 border-none text-[10px] py-0 px-2 font-bold whitespace-nowrap">{trades.length} 筆</Badge>
+               
+               <input
+                 type="file"
+                 accept="application/json"
+                 className="hidden"
+                 ref={tradesJsonFileInputRef}
+                 onChange={handleImportTradesJson}
+               />
+               <button
+                 type="button"
+                 onClick={handleExportTradesJson}
+                 className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 border border-violet-500/20 transition-all text-[10px] font-bold ml-1"
+               >
+                 <Download className="w-3 h-3" />
+                 匯出Json
+               </button>
+               <button
+                 type="button"
+                 onClick={() => tradesJsonFileInputRef.current?.click()}
+                 className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 border border-amber-500/20 transition-all text-[10px] font-bold"
+               >
+                 <Upload className="w-3 h-3" />
+                 匯入Json
+               </button>
              </div>
              <Dialog open={isTradeOpen} onOpenChange={setIsTradeOpen}>
                <DialogTrigger 
@@ -782,10 +987,12 @@ export default function StockTabDetail() {
         <TabsContent value="orders" className="pt-4">
            {id && <PlannedOrdersTab tabId={id} readOnly={false} />}
         </TabsContent>
-        
-        <TabsContent value="reports" className="pt-4">
-           {id && <ReportsTab tabId={id} />}
+
+        <TabsContent value="chips" className="pt-4">
+           {id && <ChipAnalysisTab tabId={id} symbol={tab?.symbol || ''} />}
         </TabsContent>
+        
+
 
       </Tabs>
     </div>

@@ -18,6 +18,27 @@ interface Props {
   sellRate?: number;
   volatility?: string;
   crashSimilarity?: number;
+  onRatingBarDoubleClick?: (e: React.MouseEvent | React.TouchEvent) => void;
+  strategy?: {
+    notesHighlighted?: boolean;
+    tpChecked?: boolean;
+    slChecked?: boolean;
+    addChecked?: boolean;
+    closeChecked?: boolean;
+    breakoutResistanceChecked?: boolean;
+    closeToResistanceChecked?: boolean;
+    closeToSupportChecked?: boolean;
+    breakdownSupportChecked?: boolean;
+    closeToSLChecked?: boolean;
+    breakdownSLChecked?: boolean;
+  };
+  tradeDirection?: string;
+  onUpdateStrategyField?: (field: string, checked: boolean) => void;
+  onUpdateTPChecked?: (checked: boolean) => void;
+  onUpdateSLChecked?: (checked: boolean) => void;
+  onUpdateAddChecked?: (checked: boolean) => void;
+  onUpdateCloseChecked?: (checked: boolean) => void;
+  onUpdateNotesHighlighted?: (checked: boolean) => void;
 }
 
 function resolveCollisions<T extends { rawY: number; isFixed?: boolean }>(
@@ -87,6 +108,64 @@ function resolveCollisions<T extends { rawY: number; isFixed?: boolean }>(
   return sorted;
 }
 
+export const priceCache = new Map<string, { price: number; timestamp: number }>();
+
+export const prefetchStockPrice = (symbol: string) => {
+  if (!symbol) return;
+  const cached = priceCache.get(symbol);
+  if (cached && Date.now() - cached.timestamp < 30000) return;
+  
+  fetch(`/api/stock/${symbol}`).then(res => res.json()).then(data => {
+    const fetchedPrice = data?.chart?.result?.[0]?.meta?.regularMarketPrice;
+    if (fetchedPrice && typeof fetchedPrice === 'number') {
+       priceCache.set(symbol, { price: fetchedPrice, timestamp: Date.now() });
+    }
+  }).catch(() => {});
+};
+
+export const useStockPrice = (symbol?: string, initialPrice: number = 0) => {
+  const [price, setPrice] = React.useState<number>(initialPrice);
+  const [isLoading, setIsLoading] = React.useState<boolean>(!initialPrice || initialPrice <= 0);
+
+  React.useEffect(() => {
+    if (!symbol) return;
+    
+    const cached = priceCache.get(symbol);
+    if (cached && Date.now() - cached.timestamp < 30000) {
+       setPrice(cached.price);
+       setIsLoading(false);
+       // We still want to refresh in background but not show loading state
+    } else if (initialPrice > 0) {
+       setPrice(initialPrice);
+       setIsLoading(false);
+    } else {
+       setIsLoading(true);
+    }
+
+    let isMounted = true;
+    const fetchPrice = async () => {
+      try {
+        const res = await fetch(`/api/stock/${symbol}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const fetchedPrice = data?.chart?.result?.[0]?.meta?.regularMarketPrice;
+        if (fetchedPrice && isMounted && typeof fetchedPrice === 'number') {
+           setPrice(fetchedPrice);
+           priceCache.set(symbol, { price: fetchedPrice, timestamp: Date.now() });
+           setIsLoading(false);
+        }
+      } catch (e) {
+         if (isMounted) setIsLoading(false);
+      }
+    };
+    
+    fetchPrice();
+    return () => { isMounted = false; };
+  }, [symbol, initialPrice]);
+
+  return { price, isLoading };
+};
+
 export const StockCardVisualizer: React.FC<Props> = ({
   plannedOrders,
   currentPrice = 0,
@@ -103,7 +182,18 @@ export const StockCardVisualizer: React.FC<Props> = ({
   sellRate,
   volatility,
   crashSimilarity,
+  onRatingBarDoubleClick,
+  strategy,
+  tradeDirection,
+  onUpdateStrategyField,
+  onUpdateTPChecked,
+  onUpdateSLChecked,
+  onUpdateAddChecked,
+  onUpdateCloseChecked,
+  onUpdateNotesHighlighted,
 }) => {
+  const { price: dynamicPrice, isLoading: isCardLoading } = useStockPrice(stockName, currentPrice);
+
   const ratingVal = rating !== undefined ? rating : 5;
   const qualityVal = qualityScore !== undefined ? qualityScore : 5;
   const valueVal = valueScore !== undefined ? valueScore : 5;
@@ -120,6 +210,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
   // Annotations State
   const [mode, setMode] = useState<'cursor' | 'line' | 'box' | 'text' | 'eraser' | 'arrow' | 'move'>('cursor');
   const [activeColor, setActiveColor] = useState<string>('#ffffff');
+  const [isMobileColorOpen, setIsMobileColorOpen] = useState<boolean>(false);
   const [activeThickness, setActiveThickness] = useState<number>(2);
   const [activeFontSize, setActiveFontSize] = useState<number>(12);
   const [isDrawing, setIsDrawing] = useState<boolean>(false);
@@ -500,7 +591,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
       .sort((a, b) => a.price - b.price);
 
     const allPrices = [
-      currentPrice,
+      dynamicPrice,
       ...(averageCost && averageCost > 0 ? [averageCost] : []),
       ...validOrders.map((o) => o.price)
     ].filter(
@@ -527,7 +618,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
     };
 
     const isAlert = (p: number) => {
-      const cp = Number(currentPrice);
+      const cp = Number(dynamicPrice);
       const targetP = Number(p);
       if (isNaN(cp) || isNaN(targetP) || cp <= 0 || targetP <= 0) return false;
       return Math.abs(cp - targetP) / targetP <= 0.021;
@@ -562,12 +653,12 @@ export const StockCardVisualizer: React.FC<Props> = ({
     }));
 
     const rightItems = [
-      ...(currentPrice > 0
+      ...(dynamicPrice > 0 || isCardLoading
         ? [
             {
               id: "cp",
-              text: `現價 $${currentPrice}`,
-              rawY: getYPct(currentPrice),
+              text: isCardLoading ? "Loading..." : `現價 $${dynamicPrice}`,
+              rawY: getYPct(dynamicPrice > 0 ? dynamicPrice : minP + (maxP - minP) / 2),
               color: "#60a5fa",
               isBold: true,
               isAlert: false,
@@ -613,11 +704,11 @@ export const StockCardVisualizer: React.FC<Props> = ({
       data: tp,
     }));
 
-    const leftLabels = resolveCollisions(leftItems, 3.5);
-    const slLabels = resolveCollisions(slItems, 3.5);
-    const entryLabels = resolveCollisions(entryItems, 3.5);
-    const tpLabels = resolveCollisions(tpItems, 3.5);
-    const rightLabels = resolveCollisions(rightItems, 3.5);
+    const leftLabels = resolveCollisions(leftItems, 4.8);
+    const slLabels = resolveCollisions(slItems, 4.8);
+    const entryLabels = resolveCollisions(entryItems, 4.8);
+    const tpLabels = resolveCollisions(tpItems, 4.8);
+    const rightLabels = resolveCollisions(rightItems, 4.8);
 
     return {
       supports,
@@ -632,7 +723,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
       slLabels,
       tpLabels,
     };
-  }, [plannedOrders, currentPrice, averageCost]);
+  }, [plannedOrders, dynamicPrice, averageCost]);
 
   if (!data)
     return (
@@ -665,6 +756,21 @@ export const StockCardVisualizer: React.FC<Props> = ({
       : l.isAlert
         ? "#7e22ce"
         : (l.color === "#ef4444" || l.color === "#60a5fa" || l.color === "#f97316" ? "#ffffff" : "#000000");
+
+    if (isCardLoading && l.id === "cp") {
+      return (
+         <div
+           key={l.id}
+           className={`absolute px-2.5 py-1 ${extraClass} z-10`}
+           style={style}
+         >
+           <div 
+             className="skeleton-box h-4 rounded-full" 
+             style={{ width: `${Math.max(60, (l.text?.length || 10) * 6)}px`, backgroundColor: `${l.color}20` }}
+           />
+         </div>
+      );
+    }
 
     return (
       <div
@@ -722,59 +828,72 @@ export const StockCardVisualizer: React.FC<Props> = ({
     );
   };
 
+  const hasActiveStrategy = !!(strategy?.addChecked || strategy?.slChecked || strategy?.closeChecked || strategy?.tpChecked);
+
   return (
     <div
       className="w-full h-full p-2 relative flex flex-col rounded-xl pointer-events-auto"
       style={{ isolation: "isolate" }}
       onClick={(e) => e.stopPropagation()}
     >
-      <div className="flex flex-wrap items-center justify-center gap-1.5 mb-2 shrink-0 select-none">
-        <div className="flex items-center border border-white/10 rounded overflow-hidden h-5 bg-white/5">
-          <div className="px-1.5 h-full flex items-center border-r border-white/10">
-            <span className="text-[10px] font-black text-yellow-500">
+      <div 
+        className={`flex flex-nowrap sm:flex-wrap items-center justify-start sm:justify-center gap-1 sm:gap-1.5 mb-2 shrink-0 select-none cursor-pointer overflow-x-auto sm:overflow-x-visible [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] pr-8 sm:pr-0 ${hasActiveStrategy ? "pl-[54px]" : ""}`}
+        onDoubleClick={onRatingBarDoubleClick}
+        onTouchEnd={(e) => {
+          const now = Date.now();
+          const lastTap = (e.currentTarget as any).dataset.lastTap || 0;
+          if (now - lastTap < 300) {
+            onRatingBarDoubleClick?.(e);
+          }
+          (e.currentTarget as any).dataset.lastTap = now;
+        }}
+      >
+        <div className="flex items-center border border-white/10 rounded overflow-hidden h-4 sm:h-5 bg-white/5 shrink-0">
+          <div className="px-1 sm:px-1.5 h-full flex items-center border-r border-white/10">
+            <span className="text-[9px] sm:text-[10px] font-black text-yellow-500">
               ★ {ratingVal}
             </span>
           </div>
-          <div className="px-1.5 h-full flex items-center border-r border-white/10">
-            <span className="text-[10px] font-black text-purple-400">
+          <div className="px-1 sm:px-1.5 h-full flex items-center border-r border-white/10">
+            <span className="text-[9px] sm:text-[10px] font-black text-purple-400">
               Q {qualityVal}
             </span>
           </div>
-          <div className="px-1.5 h-full flex items-center border-r border-white/10">
-            <span className="text-[10px] font-black text-amber-500">
+          <div className="px-1 sm:px-1.5 h-full flex items-center border-r border-white/10">
+            <span className="text-[9px] sm:text-[10px] font-black text-amber-500">
               V {valueVal}
             </span>
           </div>
-          <div className="px-1.5 h-full flex items-center border-r border-white/10 bg-emerald-500/10 text-emerald-400">
-            <span className="text-[10px] font-black">
+          <div className="px-1 sm:px-1.5 h-full flex items-center border-r border-white/10 bg-emerald-500/10 text-emerald-400">
+            <span className="text-[9px] sm:text-[10px] font-black">
               B {buyVal}
             </span>
           </div>
-          <div className="px-1.5 h-full flex items-center border-r border-white/10 bg-rose-500/10 text-rose-400">
-            <span className="text-[10px] font-black">
+          <div className="px-1 sm:px-1.5 h-full flex items-center border-r border-white/10 bg-rose-500/10 text-rose-400">
+            <span className="text-[9px] sm:text-[10px] font-black">
               S {sellVal}
             </span>
           </div>
-          <div className="px-1.5 h-full flex items-center bg-cyan-500/10 text-cyan-400 border-none">
-            <span className="text-[10px] font-black">
+          <div className="px-1 sm:px-1.5 h-full flex items-center bg-cyan-500/10 text-cyan-400 border-none">
+            <span className="text-[9px] sm:text-[10px] font-black">
               C {crashVal}
             </span>
           </div>
         </div>
 
-        <div className="flex items-center border border-white/10 rounded overflow-hidden h-5 bg-white/5">
-          <div className="px-1.5 h-full flex items-center border-r border-white/10 text-indigo-400">
-            <span className="text-[10px] font-black">
+        <div className="flex items-center border border-white/10 rounded overflow-hidden h-4 sm:h-5 bg-white/5 shrink-0">
+          <div className="px-1 sm:px-1.5 h-full flex items-center border-r border-white/10 text-indigo-400">
+            <span className="text-[9px] sm:text-[10px] font-black">
               🌊 {volatility || "中等"}
             </span>
           </div>
-          <div className="px-1.5 h-full flex items-center border-r border-white/10 bg-emerald-500/10 text-emerald-400" title="Positive Value">
-            <span className="text-[10px] font-black">
+          <div className="px-1 sm:px-1.5 h-full flex items-center border-r border-white/10 bg-emerald-500/10 text-emerald-400" title="Positive Value">
+            <span className="text-[9px] sm:text-[10px] font-black">
               P+ {posValue}
             </span>
           </div>
-          <div className="px-1.5 h-full flex items-center bg-rose-500/10 text-rose-400" title="Negative Value">
-            <span className="text-[10px] font-black">
+          <div className="px-1 sm:px-1.5 h-full flex items-center bg-rose-500/10 text-rose-400" title="Negative Value">
+            <span className="text-[9px] sm:text-[10px] font-black">
               N- {negValue}
             </span>
           </div>
@@ -786,11 +905,83 @@ export const StockCardVisualizer: React.FC<Props> = ({
         ref={canvasRef}
         className="relative flex-1 opacity-90 backdrop-blur-md bg-white/5 rounded-lg border border-white/10 overflow-hidden shadow-inner flex flex-col"
       >
-        {stockName && (
-          <div className="absolute top-2 left-2.5 z-20 font-black text-2xl tracking-tighter leading-none text-white pointer-events-none select-none drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)]">
-            {stockName}
-          </div>
-        )}
+        <div className="absolute top-2 left-2.5 right-2 flex items-center justify-between z-20 pointer-events-none select-none">
+          {stockName && (
+            <div className="font-black text-2xl tracking-tighter leading-none text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)] shrink-0">
+              {stockName}
+            </div>
+          )}
+          
+          {/* Strategy Checkboxes */}
+          {strategy && (
+            <div className="flex items-center gap-1 sm:gap-2.5 pointer-events-auto bg-black/50 hover:bg-black/75 backdrop-blur-md px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full border border-white/10 transition-all duration-300">
+              <label className="flex items-center gap-1 cursor-pointer group">
+                <input
+                  type="checkbox"
+                  checked={!!strategy.notesHighlighted}
+                  onChange={(e) => onUpdateNotesHighlighted?.(e.target.checked)}
+                  onClick={(e) => e.stopPropagation()}
+                  className="h-3 w-3 rounded border border-white/30 bg-white/5 checked:bg-amber-500 checked:border-amber-500 text-amber-500 focus:ring-0 cursor-pointer accent-amber-500 transition-all scale-90 sm:scale-100"
+                />
+                <span className={`text-[9px] font-black sm:text-[10px] select-none transition-colors ${strategy.notesHighlighted ? "text-amber-400" : "text-white/40 group-hover:text-white/80"}`}>
+                  選取
+                </span>
+              </label>
+              
+              <label className="flex items-center gap-1 cursor-pointer group">
+                <input
+                  type="checkbox"
+                  checked={!!strategy.tpChecked}
+                  onChange={(e) => onUpdateTPChecked?.(e.target.checked)}
+                  onClick={(e) => e.stopPropagation()}
+                  className="h-3 w-3 rounded border border-white/30 bg-white/5 checked:bg-emerald-500 checked:border-emerald-500 text-emerald-500 focus:ring-0 cursor-pointer accent-emerald-500 transition-all scale-90 sm:scale-100"
+                />
+                <span className={`text-[9px] font-black sm:text-[10px] select-none transition-colors ${strategy.tpChecked ? "text-emerald-400" : "text-white/40 group-hover:text-white/80"}`}>
+                  止盈
+                </span>
+              </label>
+              
+              <label className="flex items-center gap-1 cursor-pointer group">
+                <input
+                  type="checkbox"
+                  checked={!!strategy.slChecked}
+                  onChange={(e) => onUpdateSLChecked?.(e.target.checked)}
+                  onClick={(e) => e.stopPropagation()}
+                  className="h-3 w-3 rounded border border-white/30 bg-white/5 checked:bg-rose-500 checked:border-rose-500 text-rose-500 focus:ring-0 cursor-pointer accent-rose-500 transition-all scale-90 sm:scale-100"
+                />
+                <span className={`text-[9px] font-black sm:text-[10px] select-none transition-colors ${strategy.slChecked ? "text-rose-400" : "text-white/40 group-hover:text-white/80"}`}>
+                  止損
+                </span>
+              </label>
+              
+              <label className="flex items-center gap-1 cursor-pointer group">
+                <input
+                  type="checkbox"
+                  checked={!!strategy.addChecked}
+                  onChange={(e) => onUpdateAddChecked?.(e.target.checked)}
+                  onClick={(e) => e.stopPropagation()}
+                  className="h-3 w-3 rounded border border-white/30 bg-white/5 checked:bg-sky-500 checked:border-sky-500 text-sky-500 focus:ring-0 cursor-pointer accent-sky-500 transition-all scale-90 sm:scale-100"
+                />
+                <span className={`text-[9px] font-black sm:text-[10px] select-none transition-colors ${strategy.addChecked ? "text-sky-400" : "text-white/40 group-hover:text-white/80"}`}>
+                  加碼
+                </span>
+              </label>
+              
+              <label className="flex items-center gap-1 cursor-pointer group">
+                <input
+                  type="checkbox"
+                  checked={!!strategy.closeChecked}
+                  onChange={(e) => onUpdateCloseChecked?.(e.target.checked)}
+                  onClick={(e) => e.stopPropagation()}
+                  className="h-3 w-3 rounded border border-white/30 bg-white/5 checked:bg-violet-500 checked:border-violet-500 text-violet-500 focus:ring-0 cursor-pointer accent-violet-500 transition-all scale-90 sm:scale-100"
+                />
+                <span className={`text-[9px] font-black sm:text-[10px] select-none transition-colors ${strategy.closeChecked ? "text-violet-400" : "text-white/40 group-hover:text-white/80"}`}>
+                  平倉
+                </span>
+              </label>
+            </div>
+          )}
+        </div>
 
         {/* SVG layer for lines and curves - viewport scales 0-100 to full w/h */}
         <svg
@@ -878,12 +1069,12 @@ export const StockCardVisualizer: React.FC<Props> = ({
             </g>
           ))}
 
-          {currentPrice > 0 && (
+          {dynamicPrice > 0 && (
             <line
               x1="0"
-              y1={getYPct(currentPrice)}
+              y1={getYPct(dynamicPrice)}
               x2="100"
-              y2={getYPct(currentPrice)}
+              y2={getYPct(dynamicPrice)}
               vectorEffect="non-scaling-stroke"
               stroke="#60a5fa"
               strokeWidth="1.5"
@@ -909,7 +1100,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
             <g>
               {tps.length > 0 && (
                 <path
-                  d={`M 48 ${getYPct(currentPrice > 0 ? currentPrice : entries[entries.length - 1]?.price || 0)} C 60 ${getYPct(currentPrice > 0 ? currentPrice : entries[entries.length - 1]?.price || 0)} 60 ${getYPct(tps[0]?.price || 0)} 72 ${getYPct(tps[0]?.price || 0)} ${tps.length > 1 ? `L 72 ${getYPct(tps[tps.length - 1].price)}` : ""}`}
+                  d={`M 48 ${getYPct(dynamicPrice > 0 ? dynamicPrice : entries[entries.length - 1]?.price || 0)} C 60 ${getYPct(dynamicPrice > 0 ? dynamicPrice : entries[entries.length - 1]?.price || 0)} 60 ${getYPct(tps[0]?.price || 0)} 72 ${getYPct(tps[0]?.price || 0)} ${tps.length > 1 ? `L 72 ${getYPct(tps[tps.length - 1].price)}` : ""}`}
                   stroke="#10b981"
                   fill="none"
                   strokeDasharray="5 5"
@@ -921,7 +1112,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
               )}
               {sls.length > 0 && (
                 <path
-                  d={`M 48 ${getYPct(currentPrice > 0 ? currentPrice : entries[0]?.price || 0)} C 36 ${getYPct(currentPrice > 0 ? currentPrice : entries[0]?.price || 0)} 36 ${getYPct(sls[0]?.price || 0)} 24 ${getYPct(sls[0]?.price || 0)} ${sls.length > 1 ? `L 24 ${getYPct(sls[sls.length - 1].price)}` : ""}`}
+                  d={`M 48 ${getYPct(dynamicPrice > 0 ? dynamicPrice : entries[0]?.price || 0)} C 36 ${getYPct(dynamicPrice > 0 ? dynamicPrice : entries[0]?.price || 0)} 36 ${getYPct(sls[0]?.price || 0)} 24 ${getYPct(sls[0]?.price || 0)} ${sls.length > 1 ? `L 24 ${getYPct(sls[sls.length - 1].price)}` : ""}`}
                   stroke="#ef4444"
                   fill="none"
                   strokeDasharray="5 5"
@@ -1411,165 +1602,302 @@ export const StockCardVisualizer: React.FC<Props> = ({
         )}
       </div>
 
-      {/* COMPACT TOOLBAR AT THE BOTTOM OF CARD (Sits nicely underneath the chart within outer card flex flow) */}
+      {/* COMPACT BAR AT THE BOTTOM OF CARD (Signal checkboxes in first row, Drawing toolbar in second row) */}
       <div 
         onClick={(e) => e.stopPropagation()}
-        className="flex justify-center mt-1 shrink-0 z-50 pointer-events-auto select-none"
+        className="flex flex-col gap-1.5 mt-1 shrink-0 z-50 pointer-events-auto select-none w-full px-1 animate-fadeIn"
       >
-        <div className="flex items-center gap-0.5 p-[2px] px-1 bg-black/95 border border-white/10 backdrop-blur-md rounded-md shadow-2xl max-w-full overflow-x-auto">
-          {/* Cursor Interactive Mode Button */}
-          <button
-            type="button"
-            title="互動標籤"
-            onClick={() => { setMode('cursor'); setInputCoords(null); }}
-            className={`p-0.5 rounded transition-colors shrink-0 ${mode === 'cursor' ? 'bg-blue-500/20 text-blue-400' : 'text-white/60 hover:text-white hover:bg-white/5'}`}
-          >
-            <MousePointer className="w-3 h-3" />
-          </button>
+        {/* Row 1: Dual Observation Signals Tickboxes (Visually partitioned capsules - Green vs Red/Pink in a tight single row) */}
+        <div className="flex justify-center w-full">
+          <div className="flex flex-row items-center justify-center gap-1 sm:gap-1.5 w-full max-w-full flex-wrap transition-all duration-300 px-0.5">
+            {/* Buy Section (Green Rounded Border Capsule) */}
+            <div className="flex items-center gap-1 px-1.5 py-0.5 bg-black/95 border border-emerald-500/25 hover:border-emerald-500/40 bg-emerald-500/[0.03] hover:bg-emerald-500/[0.06] hover:shadow-[0_0_8px_rgba(16,185,129,0.1)] rounded-md transition-all duration-300 shrink-0">
+              <span className="text-[8px] font-black sm:text-[8.5px] text-emerald-400 select-none bg-emerald-500/10 px-0.75 py-0.25 rounded leading-none shrink-0 mr-0.5">
+                買進
+              </span>
+              
+              <label className="flex items-center gap-[2px] cursor-pointer group">
+                <input
+                  type="checkbox"
+                  checked={!!strategy?.breakoutResistanceChecked}
+                  onChange={(e) => onUpdateStrategyField?.('breakoutResistanceChecked', e.target.checked)}
+                  onClick={(e) => e.stopPropagation()}
+                  className="h-2 w-2 rounded border border-emerald-500/30 bg-white/5 checked:bg-emerald-500 checked:border-emerald-500 text-emerald-500 focus:ring-0 cursor-pointer accent-emerald-500 transition-all scale-90"
+                />
+                <span className={`text-[8px] font-black sm:text-[8.5px] select-none transition-colors whitespace-nowrap ${strategy?.breakoutResistanceChecked ? "text-emerald-400 font-bold" : "text-white/40 group-hover:text-white/80"}`}>
+                  等突破壓力
+                </span>
+              </label>
 
-          {/* Move Annotation Mode Button */}
-          <button
-            type="button"
-            title="拖曳移動標記"
-            onClick={() => { setMode('move'); setInputCoords(null); }}
-            className={`p-0.5 rounded transition-colors shrink-0 ${mode === 'move' ? 'bg-blue-500/20 text-blue-400' : 'text-white/60 hover:text-white hover:bg-white/5'}`}
-          >
-            <Move className="w-3 h-3" />
-          </button>
-          
-          <div className="w-[1px] h-2.5 bg-white/10 mx-0.5 shrink-0" />
-          
-          {/* Rectangle Mode Button */}
-          <button
-            type="button"
-            title="畫方框"
-            onClick={() => { setMode('box'); setInputCoords(null); }}
-            className={`p-0.5 rounded transition-colors shrink-0 ${mode === 'box' ? 'bg-blue-500/20 text-blue-400' : 'text-white/60 hover:text-white hover:bg-white/5'}`}
-          >
-            <Square className="w-3 h-3" />
-          </button>
-          
-          {/* Line Mode Button */}
-          <button
-            type="button"
-            title="畫線"
-            onClick={() => { setMode('line'); setInputCoords(null); }}
-            className={`p-0.5 rounded transition-colors shrink-0 ${mode === 'line' ? 'bg-blue-500/20 text-blue-400' : 'text-white/60 hover:text-white hover:bg-white/5'}`}
-          >
-            <Minus className="w-3 h-3" />
-          </button>
+              <label className="flex items-center gap-[2px] cursor-pointer group">
+                <input
+                  type="checkbox"
+                  checked={!!strategy?.closeToSupportChecked}
+                  onChange={(e) => onUpdateStrategyField?.('closeToSupportChecked', e.target.checked)}
+                  onClick={(e) => e.stopPropagation()}
+                  className="h-2 w-2 rounded border border-emerald-500/30 bg-white/5 checked:bg-emerald-500 checked:border-emerald-500 text-emerald-500 focus:ring-0 cursor-pointer accent-emerald-500 transition-all scale-90"
+                />
+                <span className={`text-[8px] font-black sm:text-[8.5px] select-none transition-colors whitespace-nowrap ${strategy?.closeToSupportChecked ? "text-emerald-400 font-bold" : "text-white/40 group-hover:text-white/80"}`}>
+                  靠近支撐
+                </span>
+              </label>
+            </div>
 
-          {/* Arrow Mode Button */}
-          <button
-            type="button"
-            title="箭頭指向"
-            onClick={() => { setMode('arrow'); setInputCoords(null); }}
-            className={`p-0.5 rounded transition-colors shrink-0 ${mode === 'arrow' ? 'bg-blue-500/20 text-blue-400' : 'text-white/60 hover:text-white hover:bg-white/5'}`}
-          >
-            <ArrowUpRight className="w-3 h-3" />
-          </button>
-          
-          {/* Text Annotation Mode Button */}
-          <button
-            type="button"
-            title="打文字"
-            onClick={() => { setMode('text'); }}
-            className={`p-0.5 rounded transition-colors shrink-0 ${mode === 'text' ? 'bg-blue-500/20 text-blue-400' : 'text-white/60 hover:text-white hover:bg-white/5'}`}
-          >
-            <Type className="w-3 h-3" />
-          </button>
+            {/* Sell / Close Section (Red/Pink Rounded Border Capsule) */}
+            <div className="flex items-center gap-1 px-1.5 py-0.5 bg-black/95 border border-rose-500/25 hover:border-rose-500/40 bg-rose-500/[0.03] hover:bg-rose-500/[0.06] hover:shadow-[0_0_8px_rgba(244,63,94,0.1)] rounded-md transition-all duration-300 shrink-0 select-none">
+              <span className="text-[8px] font-black sm:text-[8.5px] text-pink-400 select-none bg-pink-500/10 px-0.75 py-0.25 rounded leading-none shrink-0 mr-0.5">
+                融券/平倉
+              </span>
+              
+              <label className="flex items-center gap-[2px] cursor-pointer group">
+                <input
+                  type="checkbox"
+                  checked={!!strategy?.breakdownSupportChecked}
+                  onChange={(e) => onUpdateStrategyField?.('breakdownSupportChecked', e.target.checked)}
+                  onClick={(e) => e.stopPropagation()}
+                  className="h-2 w-2 rounded border border-rose-500/30 bg-white/5 checked:bg-rose-500 checked:border-rose-500 text-rose-500 focus:ring-0 cursor-pointer accent-rose-500 transition-all scale-90"
+                />
+                <span className={`text-[8px] font-black sm:text-[8.5px] select-none transition-colors whitespace-nowrap ${strategy?.breakdownSupportChecked ? "text-rose-400 font-bold" : "text-white/40 group-hover:text-white/80"}`}>
+                  跌破支撐
+                </span>
+              </label>
 
-          {/* Eraser Mode Button */}
-          <button
-            type="button"
-            title="橡皮擦工具"
-            onClick={() => { setMode('eraser'); setInputCoords(null); }}
-            className={`p-0.5 rounded transition-colors shrink-0 ${mode === 'eraser' ? 'bg-red-500/20 text-red-400' : 'text-white/60 hover:text-white hover:bg-white/5'}`}
-          >
-            <Eraser className="w-3 h-3" />
-          </button>
-          
-          <div className="w-[1px] h-2.5 bg-white/10 mx-0.5 shrink-0" />
+              <label className="flex items-center gap-[2px] cursor-pointer group">
+                <input
+                  type="checkbox"
+                  checked={!!strategy?.closeToSLChecked}
+                  onChange={(e) => onUpdateStrategyField?.('closeToSLChecked', e.target.checked)}
+                  onClick={(e) => e.stopPropagation()}
+                  className="h-2 w-2 rounded border border-rose-500/30 bg-white/5 checked:bg-rose-500 checked:border-rose-500 text-rose-500 focus:ring-0 cursor-pointer accent-rose-500 transition-all scale-90"
+                />
+                <span className={`text-[8px] font-black sm:text-[8.5px] select-none transition-colors whitespace-nowrap ${strategy?.closeToSLChecked ? "text-rose-400 font-bold" : "text-white/40 group-hover:text-white/80"}`}>
+                  靠近止損
+                </span>
+              </label>
 
-          {/* Undo Button */}
-          <button
-            type="button"
-            title="上一步"
-            onClick={handleUndo}
-            disabled={history.length === 0}
-            className={`p-0.5 rounded transition-colors shrink-0 ${history.length > 0 ? 'text-amber-400 hover:text-amber-300 hover:bg-white/5' : 'text-white/20 cursor-not-allowed'}`}
-          >
-            <Undo2 className="w-3 h-3" />
-          </button>
-          
-          <div className="w-[1px] h-2.5 bg-white/10 mx-0.5 shrink-0" />
+              <label className="flex items-center gap-[2px] cursor-pointer group">
+                <input
+                  type="checkbox"
+                  checked={!!strategy?.breakdownSLChecked}
+                  onChange={(e) => onUpdateStrategyField?.('breakdownSLChecked', e.target.checked)}
+                  onClick={(e) => e.stopPropagation()}
+                  className="h-2 w-2 rounded border border-rose-500/30 bg-white/5 checked:bg-rose-500 checked:border-rose-500 text-rose-500 focus:ring-0 cursor-pointer accent-rose-500 transition-all scale-90"
+                />
+                <span className={`text-[8px] font-black sm:text-[8.5px] select-none transition-colors whitespace-nowrap ${strategy?.breakdownSLChecked ? "text-rose-400 font-bold" : "text-white/40 group-hover:text-white/80"}`}>
+                  跌破止損
+                </span>
+              </label>
 
-          {/* Stroke Width Cycle Control */}
-          <button
-            type="button"
-            title={`粗細: ${activeThickness}px`}
-            onClick={cycleThickness}
-            className="p-0.5 px-1 rounded hover:bg-white/5 transition-colors flex items-center gap-0.5 shrink-0"
-          >
-            <span className="text-[8px] font-medium text-white/50 tracking-tighter">粗</span>
-            <span className="bg-white/10 rounded px-1 py-0.25 text-white font-bold text-[8px]">{activeThickness}px</span>
-          </button>
-          
-          <div className="w-[1px] h-2.5 bg-white/10 mx-0.5 shrink-0" />
-
-          {/* Font Size Cycle Control */}
-          <button
-            type="button"
-            title={`字級: ${activeFontSize}px`}
-            onClick={() => {
-              setActiveFontSize((prev) => {
-                const sizes = [10, 12, 14, 16, 20, 24, 28];
-                const idx = sizes.indexOf(prev);
-                return sizes[(idx + 1) % sizes.length];
-              });
-            }}
-            className="p-0.5 px-1 rounded hover:bg-white/5 transition-colors flex items-center gap-0.5 shrink-0"
-          >
-            <span className="text-[8px] font-medium text-white/50 tracking-tighter">字</span>
-            <span className="bg-white/10 rounded px-1 py-0.25 text-white font-bold text-[8px]">{activeFontSize}px</span>
-          </button>
-          
-          <div className="w-[1px] h-2.5 bg-white/10 mx-0.5 shrink-0" />
-
-          {/* Rich Color Selection */}
-          <div className="flex items-center gap-[3px] px-0.5 shrink-0">
-            {[
-              { hex: '#ef4444', name: '止損紅' },
-              { hex: '#10b981', name: '止盈綠' },
-              { hex: '#facc15', name: '關鍵黃' },
-              { hex: '#3b82f6', name: '系統藍' },
-              { hex: '#ffffff', name: '亮色白' }
-            ].map((col) => (
-              <button
-                key={col.hex}
-                type="button"
-                title={col.name}
-                onClick={() => setActiveColor(col.hex)}
-                style={{ backgroundColor: col.hex }}
-                className={`w-2 h-2 rounded-full border border-black/30 transition-transform ${activeColor === col.hex ? 'scale-110 ring-1 ring-white/50' : 'opacity-60 hover:opacity-100 hover:scale-105'}`}
-              />
-            ))}
+              <label className="flex items-center gap-[2px] cursor-pointer group">
+                <input
+                  type="checkbox"
+                  checked={!!strategy?.closeToResistanceChecked}
+                  onChange={(e) => onUpdateStrategyField?.('closeToResistanceChecked', e.target.checked)}
+                  onClick={(e) => e.stopPropagation()}
+                  className="h-2 w-2 rounded border border-rose-500/30 bg-white/5 checked:bg-rose-500 checked:border-rose-500 text-rose-500 focus:ring-0 cursor-pointer accent-rose-500 transition-all scale-90"
+                />
+                <span className={`text-[8px] font-black sm:text-[8.5px] select-none transition-colors whitespace-nowrap ${strategy?.closeToResistanceChecked ? "text-rose-400 font-bold" : "text-white/40 group-hover:text-white/80"}`}>
+                  接近壓力
+                </span>
+              </label>
+            </div>
           </div>
+        </div>
 
-          {annotations.length > 0 && (
-            <>
-              <div className="w-[1px] h-2.5 bg-white/10 mx-0.5 shrink-0" />
-              {/* Clear All Button */}
-              <button
-                type="button"
-                title="清除此圖表所有備註"
-                onClick={handleClearAll}
-                className="p-0.5 rounded text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors shrink-0"
-              >
-                <Trash2 className="w-3 h-3" />
-              </button>
-            </>
-          )}
+        {/* Row 2: Drawing Toolbar */}
+        <div className="flex justify-center w-full mt-0.5">
+          <div className="flex items-center gap-0 sm:gap-0.5 p-[2px] px-0.5 sm:px-1 bg-black/95 border border-white/10 backdrop-blur-md rounded-md shadow-2xl shrink-0">
+            {/* Cursor Interactive Mode Button */}
+            <button
+              type="button"
+              title="互動標籤"
+              onClick={() => { setMode('cursor'); setInputCoords(null); }}
+              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'cursor' ? 'bg-blue-500/20 text-blue-400' : 'text-white/60 hover:text-white hover:bg-white/5'}`}
+            >
+              <MousePointer className="w-3 h-3 sm:w-3 sm:h-3" />
+            </button>
+
+            {/* Move Annotation Mode Button */}
+            <button
+              type="button"
+              title="拖曳移動標記"
+              onClick={() => { setMode('move'); setInputCoords(null); }}
+              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'move' ? 'bg-blue-500/20 text-blue-400' : 'text-white/60 hover:text-white hover:bg-white/5'}`}
+            >
+              <Move className="w-3 h-3 sm:w-3 sm:h-3" />
+            </button>
+            
+            <div className="w-[1px] h-2.5 bg-white/10 mx-0 sm:mx-0.5 shrink-0" />
+            
+            {/* Rectangle Mode Button */}
+            <button
+              type="button"
+              title="畫方框"
+              onClick={() => { setMode('box'); setInputCoords(null); }}
+              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'box' ? 'bg-blue-500/20 text-blue-400' : 'text-white/60 hover:text-white hover:bg-white/5'}`}
+            >
+              <Square className="w-3 h-3 sm:w-3 sm:h-3" />
+            </button>
+            
+            {/* Line Mode Button */}
+            <button
+              type="button"
+              title="畫線"
+              onClick={() => { setMode('line'); setInputCoords(null); }}
+              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'line' ? 'bg-blue-500/20 text-blue-400' : 'text-white/60 hover:text-white hover:bg-white/5'}`}
+            >
+              <Minus className="w-3 h-3 sm:w-3 sm:h-3" />
+            </button>
+
+            {/* Arrow Mode Button */}
+            <button
+              type="button"
+              title="箭頭指向"
+              onClick={() => { setMode('arrow'); setInputCoords(null); }}
+              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'arrow' ? 'bg-blue-500/20 text-blue-400' : 'text-white/60 hover:text-white hover:bg-white/5'}`}
+            >
+              <ArrowUpRight className="w-3 h-3 sm:w-3 sm:h-3" />
+            </button>
+            
+            {/* Text Annotation Mode Button */}
+            <button
+              type="button"
+              title="打文字"
+              onClick={() => { setMode('text'); }}
+              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'text' ? 'bg-blue-500/20 text-blue-400' : 'text-white/60 hover:text-white hover:bg-white/5'}`}
+            >
+              <Type className="w-3 h-3 sm:w-3 sm:h-3" />
+            </button>
+
+            {/* Eraser Mode Button */}
+            <button
+              type="button"
+              title="橡皮擦工具"
+              onClick={() => { setMode('eraser'); setInputCoords(null); }}
+              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'eraser' ? 'bg-red-500/20 text-red-400' : 'text-white/60 hover:text-white hover:bg-white/5'}`}
+            >
+              <Eraser className="w-3 h-3 sm:w-3 sm:h-3" />
+            </button>
+            
+            <div className="w-[1px] h-2.5 bg-white/10 mx-0 sm:mx-0.5 shrink-0" />
+
+            {/* Undo Button */}
+            <button
+              type="button"
+              title="上一步"
+              onClick={handleUndo}
+              disabled={history.length === 0}
+              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${history.length > 0 ? 'text-amber-400 hover:text-amber-300 hover:bg-white/5' : 'text-white/20 cursor-not-allowed'}`}
+            >
+              <Undo2 className="w-3 h-3 sm:w-3 sm:h-3" />
+            </button>
+            
+            <div className="w-[1px] h-2.5 bg-white/10 mx-0 sm:mx-0.5 shrink-0" />
+
+            {/* Stroke Width Cycle Control */}
+            <button
+              type="button"
+              title={`粗細: ${activeThickness}px`}
+              onClick={cycleThickness}
+              className="p-0.5 px-0.5 sm:px-1 rounded hover:bg-white/5 transition-colors flex items-center gap-0.5 shrink-0"
+            >
+              <span className="text-[8px] font-medium text-white/50 tracking-tighter">粗</span>
+              <span className="bg-white/10 rounded px-1 py-0.25 text-white font-bold text-[8px]">{activeThickness}px</span>
+            </button>
+            
+            <div className="w-[1px] h-2.5 bg-white/10 mx-0 sm:mx-0.5 shrink-0" />
+
+            {/* Font Size Cycle Control */}
+            <button
+              type="button"
+              title={`字級: ${activeFontSize}px`}
+              onClick={() => {
+                setActiveFontSize((prev) => {
+                  const sizes = [10, 12, 14, 16, 20, 24, 28];
+                  const idx = sizes.indexOf(prev);
+                  return sizes[(idx + 1) % sizes.length];
+                });
+              }}
+              className="p-0.5 px-0.5 sm:px-1 rounded hover:bg-white/5 transition-colors flex items-center gap-0.5 shrink-0"
+            >
+              <span className="text-[8px] font-medium text-white/50 tracking-tighter">字</span>
+              <span className="bg-white/10 rounded px-1 py-0.25 text-white font-bold text-[8px]">{activeFontSize}px</span>
+            </button>
+            
+            <div className="w-[1px] h-2.5 bg-white/10 mx-0 sm:mx-0.5 shrink-0" />
+
+            {/* Rich Color Selection */}
+            <div className="flex items-center gap-[3px] px-0.5 shrink-0 relative">
+              {/* PC version (always visible) */}
+              <div className="hidden sm:flex items-center gap-[3px]">
+                {[
+                  { hex: '#ef4444', name: '止損紅' },
+                  { hex: '#10b981', name: '止盈綠' },
+                  { hex: '#facc15', name: '關鍵黃' },
+                  { hex: '#3b82f6', name: '系統藍' },
+                  { hex: '#ffffff', name: '亮色白' }
+                ].map((col) => (
+                  <button
+                    key={col.hex}
+                    type="button"
+                    title={col.name}
+                    onClick={() => setActiveColor(col.hex)}
+                    style={{ backgroundColor: col.hex }}
+                    className={`w-2 h-2 rounded-full border border-black/30 transition-transform ${activeColor === col.hex ? 'scale-110 ring-1 ring-white/50' : 'opacity-60 hover:opacity-100 hover:scale-105'}`}
+                  />
+                ))}
+              </div>
+
+              {/* Mobile version (compact, click to expand) */}
+              <div className="flex sm:hidden items-center relative">
+                <button
+                  type="button"
+                  className="w-2.5 h-2.5 rounded-full border border-white/50 shadow-sm"
+                  style={{ backgroundColor: activeColor }}
+                  onClick={() => setIsMobileColorOpen(!isMobileColorOpen)}
+                />
+                
+                {isMobileColorOpen && (
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-black/98 border border-white/10 rounded-lg p-1.5 shadow-2xl flex flex-col gap-2 z-[100]">
+                    {[
+                      { hex: '#ef4444', name: '止損紅' },
+                      { hex: '#10b981', name: '止盈綠' },
+                      { hex: '#facc15', name: '關鍵黃' },
+                      { hex: '#3b82f6', name: '系統藍' },
+                      { hex: '#ffffff', name: '亮色白' }
+                    ].map((col) => (
+                      <button
+                        key={col.hex}
+                        type="button"
+                        title={col.name}
+                        onClick={() => {
+                          setActiveColor(col.hex);
+                          setIsMobileColorOpen(false);
+                        }}
+                        style={{ backgroundColor: col.hex }}
+                        className={`w-4 h-4 rounded-full border border-black/30 transition-transform ${activeColor === col.hex ? 'scale-110 ring-2 ring-white/50' : 'opacity-80 hover:opacity-100'}`}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {annotations.length > 0 && (
+              <>
+                <div className="w-[1px] h-2.5 bg-white/10 mx-0.5 shrink-0" />
+                {/* Clear All Button */}
+                <button
+                  type="button"
+                  title="清除此圖表所有備註"
+                  onClick={handleClearAll}
+                  className="p-0.5 rounded text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors shrink-0"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>
