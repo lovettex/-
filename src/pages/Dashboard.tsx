@@ -550,6 +550,28 @@ export default function Dashboard() {
     }
   };
 
+  const handleUpdateObserveChecked = async (tabId: string, checked: boolean) => {
+    try {
+      const currentStrategy = activeTabStrategies[tabId] || {};
+      const updatedStrategy = { 
+        ...currentStrategy, 
+        observeChecked: checked, 
+        updatedAt: serverTimestamp() 
+      };
+      
+      setActiveTabStrategies((prev) => ({
+        ...prev,
+        [tabId]: updatedStrategy
+      }));
+      
+      const docRef = doc(db, `stockTabs/${tabId}/strategy`, 'main');
+      await setDoc(docRef, { observeChecked: checked, updatedAt: serverTimestamp() }, { merge: true });
+    } catch (error) {
+      console.error(error);
+      toast.error("更新觀察狀態失敗");
+    }
+  };
+
   const handleUpdateNotesHighlighted = async (tabId: string, checked: boolean) => {
     try {
       const currentStrategy = activeTabStrategies[tabId] || {};
@@ -572,7 +594,7 @@ export default function Dashboard() {
     }
   };
 
-  const handleUpdateStrategyField = async (tabId: string, field: string, checked: boolean) => {
+  const handleUpdateStrategyField = async (tabId: string, field: string, checked: any) => {
     try {
       const currentStrategy = activeTabStrategies[tabId] || {};
       const updatedStrategy = { 
@@ -1641,6 +1663,7 @@ export default function Dashboard() {
           slChecked: strat.slChecked || false,
           addChecked: strat.addChecked || false,
           closeChecked: strat.closeChecked || false,
+          observeChecked: strat.observeChecked || false,
           operationFocus: strat.operationFocus || "",
           operationNote: strat.operationNote || "",
           entries: strat.entries || [],
@@ -1746,6 +1769,7 @@ export default function Dashboard() {
             slChecked: item.slChecked !== undefined ? !!item.slChecked : false,
             addChecked: item.addChecked !== undefined ? !!item.addChecked : false,
             closeChecked: item.closeChecked !== undefined ? !!item.closeChecked : false,
+            observeChecked: item.observeChecked !== undefined ? !!item.observeChecked : false,
             operationFocus: typeof item.operationFocus === "string" ? item.operationFocus : "",
             operationNote: typeof item.operationNote === "string" ? item.operationNote : "",
             entries: Array.isArray(item.entries) ? item.entries : [],
@@ -2651,7 +2675,7 @@ export default function Dashboard() {
   };
 
   return (
-    <div className={`space-y-4 sm:space-y-6 mx-auto pb-12 px-3 sm:px-4 mt-0 transition-all duration-300 ${activeViewTab === "notes" ? "max-w-6xl lg:max-w-[1450px]" : "max-w-6xl"}`}>
+    <div className={`space-y-4 sm:space-y-6 mx-auto pb-12 px-3 sm:px-4 mt-0 transition-all duration-300 ${activeViewTab === "notes" ? "max-w-6xl lg:max-w-[96%] xl:max-w-[1760px]" : "max-w-6xl"}`}>
       <ScrollIn>
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-end glass-panel pt-5 pb-5 px-5 sm:px-4 sm:py-4 mb-4 relative overflow-hidden group">
           <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/10 via-transparent to-blue-500/10 opacity-50 group-hover:opacity-100 transition-opacity duration-700"></div>
@@ -3768,6 +3792,17 @@ export default function Dashboard() {
                               <div className="flex flex-nowrap gap-4 sm:gap-6 px-6 sm:px-[max(15%,calc((100vw-1152px)/2+16px))] pt-2 pb-4 w-max">
                                 {renderGroups.map((group, groupIdx) => {
                                   const renderCard = (tab: any, idx: number) => {
+                                    const getCardStatusInfo = (tabItem: any) => {
+                                      const statusName = getDisplayHoldingStatus(tabItem.list || tabItem.status);
+                                      let color = "#38bdf8";
+                                      if (statusName === "候選名單") color = "#fbbf24";
+                                      else if (statusName === "買進操作") color = "#34d399";
+                                      else if (statusName === "賣出操作") color = "#fb7185";
+                                      else if (statusName === "平倉操作") color = "#e879f9";
+                                      else if (statusName === "乖離名單") color = "#818cf8";
+                                      return { text: statusName, color };
+                                    };
+
                                     const plannedOrders =
                                     activeTabOrders[tab.id] || [];
                                   const trades = activeTabTrades[tab.id] || [];
@@ -3871,9 +3906,6 @@ export default function Dashboard() {
                                           animate={{
                                             opacity: 1,
                                             y: 0,
-                                            rotateY: flippedCards[tab.id]
-                                              ? 180
-                                              : 0,
                                           }}
                                           transition={{
                                             duration: 0.6,
@@ -3883,31 +3915,171 @@ export default function Dashboard() {
                                             delay: idx * 0.05,
                                           }}
                                           key={tab.id}
-                                          style={{
-                                            transformStyle: "preserve-3d",
-                                          }}
-                                          className="relative w-full h-full flex-1 flex flex-col min-h-[460px] cursor-pointer"
+                                          className={`relative w-full h-full flex-1 flex flex-col min-h-[460px] cursor-pointer slide-drawer-container ${
+                                            flippedCards[tab.id] ? "show-back" : ""
+                                          } ${activeTabStrategies[tab.id]?.observeChecked ? "card-breathe-observe" : activeTabStrategies[tab.id]?.closeChecked ? "card-breathe-close" : activeTabStrategies[tab.id]?.slChecked ? "card-breathe-sl" : activeTabStrategies[tab.id]?.addChecked ? "card-breathe-add" : activeTabStrategies[tab.id]?.tpChecked ? "card-breathe-tp" : ""}`}
                                         >
-                                          {/* Front Face */}
+                                          {/* Corner label badges - stacked vertically (render on container level to avoid clip truncation) */}
+                                          <div className="absolute -top-2.5 -left-2.5 z-40 flex flex-col gap-1 items-start">
+                                            {(() => {
+                                              const strat = activeTabStrategies[tab.id] || {};
+                                              const badges: React.ReactNode[] = [];
+
+                                              if (strat.observeChecked) {
+                                                badges.push(
+                                                  <div key="observe" className="flex items-center text-[12px] font-black px-3 py-0.5 rounded-full uppercase tracking-wider bg-[#C9C9C9] text-black border border-[#C9C9C9]/50 shadow-[0_0_12px_rgba(201,201,201,0.6)] select-none font-bold">
+                                                    觀察中
+                                                  </div>
+                                                );
+                                              }
+                                              if (strat.addChecked) {
+                                                badges.push(
+                                                  <div key="add" className="flex items-center text-[12px] font-black px-3 py-0.5 rounded-full uppercase tracking-wider bg-[#426B4A] text-white border border-[#426B4A]/50 shadow-[0_0_12px_rgba(66,107,74,0.6)] select-none font-bold">
+                                                    加碼中
+                                                  </div>
+                                                );
+                                              }
+                                              if (strat.slChecked) {
+                                                badges.push(
+                                                  <div key="sl" className="flex items-center text-[12px] font-black px-3 py-0.5 rounded-full uppercase tracking-wider bg-[#E04141] text-white border border-[#E04141]/50 shadow-[0_0_12px_rgba(224,65,65,0.6)] select-none font-bold">
+                                                    止損中
+                                                  </div>
+                                                );
+                                              }
+                                              if (strat.closeChecked) {
+                                                badges.push(
+                                                  <div key="close" className="flex items-center text-[12px] font-black px-3 py-0.5 rounded-full uppercase tracking-wider bg-[#EBF527] text-black border border-[#EBF527]/50 shadow-[0_0_12px_rgba(235,245,39,0.6)] select-none font-bold">
+                                                    平倉中
+                                                  </div>
+                                                );
+                                              }
+                                              if (strat.tpChecked) {
+                                                badges.push(
+                                                  <div key="tp" className="flex items-center text-[12px] font-black px-3 py-0.5 rounded-full uppercase tracking-wider bg-[#35428C] text-white border border-[#35428C]/50 shadow-[0_0_12px_rgba(53,66,140,0.6)] select-none font-bold">
+                                                    止盈中
+                                                  </div>
+                                                );
+                                              }
+
+                                              return badges;
+                                            })()}
+                                          </div>
+
+                                          {/* Inner sliding wrapper that handles overflow: hidden for transition faces */}
+                                          <div className="slide-drawer-inner">
+                                            {/* Front Face */}
                                           <div
                                             style={{
-                                              backfaceVisibility: "hidden",
                                               pointerEvents: flippedCards[
                                                 tab.id
                                               ]
                                                 ? "none"
                                                 : "auto",
-                                              opacity: flippedCards[tab.id]
-                                                ? 0
-                                                : 1,
-                                              transition:
-                                                "opacity 0.2s ease-in-out",
                                             }}
-                                            className="glass-card flex flex-col p-3 group/item relative overflow-hidden w-full h-full"
+                                            className="card-front absolute inset-0 glass-card flex flex-col group/item w-full h-full transition-all duration-500 overflow-hidden"
                                           >
-                                            {/* No spotlight or glow overlays */}
+                                            {/* 左側色條 */}
+                                            {(() => {
+                                              const strat = activeTabStrategies[tab.id] || {};
+                                              let color = "";
+                                              if (strat.observeChecked) color = "#C9C9C9";
+                                              else if (strat.closeChecked) color = "#EBF527";
+                                              else if (strat.slChecked) color = "#E04141";
+                                              else if (strat.addChecked) color = "#426B4A";
+                                              else if (strat.tpChecked) color = "#35428C";
+
+                                              if (!color) return null;
+                                              return (
+                                                <div 
+                                                  style={{ backgroundColor: color }}
+                                                  className="absolute left-0 top-4 bottom-4 w-[3px] z-30 rounded-full"
+                                                />
+                                              );
+                                            })()}
+
+                                            {/* Independent Top Banner Row */}
+                                            {(() => {
+                                              const isBannerActive = tab.isDeviationConfirmed || tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle;
+                                              const bannerBgColor = tab.isDeviationConfirmed
+                                                ? "#F0D1B9"
+                                                : tab.isOperationConfirmed
+                                                  ? "#A3A3A3"
+                                                  : tab.isFavoriteHighlight
+                                                    ? "#B1C28D"
+                                                    : shouldHighlightTitle
+                                                      ? "#F5DAD5"
+                                                      : "transparent";
+
+                                              const bannerTextColor = tab.isDeviationConfirmed
+                                                ? "#7a4a1e"
+                                                : tab.isOperationConfirmed
+                                                  ? "#7a4a1e"
+                                                  : tab.isFavoriteHighlight
+                                                    ? "#7a4a1e"
+                                                    : shouldHighlightTitle
+                                                      ? "#7a4a1e"
+                                                      : "rgba(255, 255, 255, 0.7)";
+
+                                              const statusInfo = getCardStatusInfo(tab);
+                                              const dotColor = isBannerActive ? bannerTextColor : statusInfo.color;
+
+                                              return (
+                                                <div
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setSelectedActionTab(tab);
+                                                    setIsActionDialogOpen(true);
+                                                  }}
+                                                  style={{ backgroundColor: bannerBgColor }}
+                                                  className={`w-full h-[18px] flex items-center justify-between px-3 transition-colors duration-500 shrink-0 border-b ${isBannerActive ? "border-transparent" : "border-white/5"} select-none cursor-pointer`}
+                                                >
+                                                  {/* Status with dot */}
+                                                  <div className="flex items-center gap-1.5 font-sans">
+                                                    <span 
+                                                      className="w-1.5 h-1.5 rounded-full inline-block transition-colors duration-500" 
+                                                      style={{ backgroundColor: dotColor }}
+                                                    />
+                                                  </div>
+
+                                                  {/* Timestamp shifted to right side of title bar */}
+                                                  {tab.updatedAt && (
+                                                    <span 
+                                                      style={{ color: bannerTextColor }}
+                                                      className="text-[9.5px] font-black tracking-wider opacity-80 transition-colors duration-500 font-bold"
+                                                    >
+                                                      {typeof tab.updatedAt.toDate === 'function' 
+                                                        ? format(tab.updatedAt.toDate(), 'yyyy/MM/dd HH:mm') 
+                                                        : ''}
+                                                    </span>
+                                                  )}
+                                                </div>
+                                              );
+                                            })()}
+
+                                            {/* Main Card Content Body with padding */}
+                                            <div className="flex-1 flex flex-col p-3 pt-2 pb-16 w-full overflow-y-auto scrollbar-hide relative">
+                                            {/* 左側色條 */}
+                                            {(() => {
+                                              const strat = activeTabStrategies[tab.id] || {};
+                                              let color = "";
+                                              if (strat.observeChecked) color = "#C9C9C9";
+                                              else if (strat.closeChecked) color = "#EBF527";
+                                              else if (strat.slChecked) color = "#E04141";
+                                              else if (strat.addChecked) color = "#426B4A";
+                                              else if (strat.tpChecked) color = "#35428C";
+
+                                              if (!color) return null;
+                                              return (
+                                                <div 
+                                                  style={{ backgroundColor: color }}
+                                                  className="hidden"
+                                                />
+                                              );
+                                            })()}
+
+                                            {/* Symbol, Price, Scores Row */}
                                             <div
-                                              className="flex items-start justify-between relative z-10 w-full overflow-hidden transition-colors duration-500 rounded-lg p-2 -mx-2 -mt-2"
+                                              className="flex items-center justify-between relative z-10 w-full overflow-hidden rounded-lg p-1.5 hover:bg-white/5 transition-colors duration-200 shrink-0"
                                               onClick={(e) => {
                                                 e.stopPropagation();
                                                 setSelectedActionTab(tab);
@@ -3919,36 +4091,19 @@ export default function Dashboard() {
                                                   ? `[執行操作備註]\n${activeTabStrategies[tab.id].operationNote}`
                                                   : undefined
                                               }
-                                              style={{
-                                                backgroundColor:
-                                                  tab.isDeviationConfirmed
-                                                    ? "#F0D1B9"
-                                                    : tab.isOperationConfirmed
-                                                      ? "#A3A3A3"
-                                                      : tab.isFavoriteHighlight
-                                                        ? "#B1C28D"
-                                                        : shouldHighlightTitle
-                                                          ? "#F5DAD5"
-                                                          : "transparent",
-                                              }}
                                             >
                                               <div className="flex items-start gap-4 w-full">
                                                 <div className="flex flex-col w-full min-w-0">
-                                                  {/* Row 1: Symbol & Name & Badge */}
-                                                  <div className="flex items-baseline gap-2 mb-1">
+                                                  {/* Row 1: Symbol & Name & SIM/LIVE Badge */}
+                                                  <div className="flex items-baseline gap-2 mb-1.5">
                                                     <span
-                                                      className={`font-black text-2xl tracking-tighter leading-none ${typeof tab.updatedAt?.toDate === 'function' && (new Date().getTime() - tab.updatedAt.toDate().getTime() > 17 * 60 * 60 * 1000) ? "text-red-500 animate-pulse font-bold" : tab.isDeviationConfirmed || tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "text-[#0F0F0F]" : "text-white"}`}
+                                                      className={`font-black text-2xl tracking-tighter leading-none ${typeof tab.updatedAt?.toDate === 'function' && (new Date().getTime() - tab.updatedAt.toDate().getTime() > 17 * 60 * 60 * 1000) ? "text-red-500 animate-pulse font-bold" : "text-white"}`}
                                                     >
                                                       {tab.symbol}
                                                     </span>
-                                                    {tab.updatedAt && (
-                                                      <span className={`text-[9px] tracking-widest ml-1 ${typeof tab.updatedAt.toDate === 'function' && (new Date().getTime() - tab.updatedAt.toDate().getTime() > 17 * 60 * 60 * 1000) ? "text-red-500 animate-pulse font-bold" : tab.isDeviationConfirmed || tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "text-[#0F0F0F]/40" : "text-white/30"}`}>
-                                                        {typeof tab.updatedAt.toDate === 'function' ? format(tab.updatedAt.toDate(), 'yyyy/MM/dd HH:mm') : ''}
-                                                      </span>
-                                                    )}
                                                     {tab.currentPrice !== undefined && (
                                                       <div className="flex items-baseline gap-2">
-                                                        <span className={`text-lg font-black tabular-nums ${tab.isDeviationConfirmed || tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "text-[#0F0F0F]" : "text-white"}`}>
+                                                        <span className="text-lg font-black tabular-nums text-white">
                                                           ${tab.currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                         </span>
                                                         {unrealizedPnL !== 0 && (
@@ -3958,139 +4113,67 @@ export default function Dashboard() {
                                                         )}
                                                       </div>
                                                     )}
-                                                    {(() => {
-                                                      const strat = activeTabStrategies[tab.id] || {};
-                                                      if (strat.addChecked) {
-                                                        return (
-                                                          <div className="flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest ml-auto bg-[#426B4A] text-white border border-[#426B4A]/40 shadow-[0_0_8px_rgba(66,107,74,0.3)] select-none">
-                                                            加碼
-                                                          </div>
-                                                        );
-                                                      } else if (strat.slChecked) {
-                                                        return (
-                                                          <div className="flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest ml-auto bg-[#E04141] text-white border border-[#E04141]/40 shadow-[0_0_8px_rgba(224,65,65,0.3)] select-none">
-                                                            止損
-                                                          </div>
-                                                        );
-                                                      } else if (strat.closeChecked) {
-                                                        return (
-                                                          <div className="flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest ml-auto bg-[#EBF527] text-black border border-[#EBF527]/40 shadow-[0_0_8px_rgba(235,245,39,0.3)] select-none">
-                                                            平倉
-                                                          </div>
-                                                        );
-                                                      } else if (strat.tpChecked) {
-                                                        return (
-                                                          <div className="flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest ml-auto bg-[#35428C] text-white border border-[#35428C]/40 shadow-[0_0_8px_rgba(53,66,140,0.3)] select-none">
-                                                            止盈
-                                                          </div>
-                                                        );
-                                                      } else {
-                                                        return (
-                                                          <div
-                                                            className={`flex items-center gap-1 text-[9px] font-black px-1.5 py-0.5 rounded-full border uppercase tracking-widest ml-auto ${
-                                                              tab.tradeType ===
-                                                              "simulated"
-                                                                ? "bg-amber-500/10 text-amber-500 border-amber-500/30"
-                                                                : "bg-emerald-500/10 text-emerald-500 border-emerald-500/30"
-                                                            }`}
-                                                          >
-                                                            {tab.tradeType === "simulated" ? (
-                                                              <Gamepad2 className="h-2.5 w-2.5" />
-                                                            ) : (
-                                                              <ShieldCheck className="h-2.5 w-2.5" />
-                                                            )}
-                                                            {tab.tradeType === "simulated" ? "SIM" : "LIVE"}
-                                                          </div>
-                                                        );
-                                                      }
-                                                    })()}
+                                                    <div
+                                                      className={`flex items-center gap-1 text-[9px] font-black px-1.5 py-0.5 rounded-full border uppercase tracking-widest ml-auto ${
+                                                        tab.tradeType ===
+                                                        "simulated"
+                                                          ? "bg-amber-500/10 text-amber-500 border-amber-500/30"
+                                                          : "bg-emerald-500/10 text-emerald-500 border-emerald-500/30"
+                                                      }`}
+                                                    >
+                                                      {tab.tradeType === "simulated" ? (
+                                                        <Gamepad2 className="h-2.5 w-2.5" />
+                                                      ) : (
+                                                        <ShieldCheck className="h-2.5 w-2.5" />
+                                                      )}
+                                                      {tab.tradeType === "simulated" ? "SIM" : "LIVE"}
+                                                    </div>
                                                   </div>
 
                                                   {/* Row 2: Score & Sentiment Groups */}
-                                                  <div className="flex flex-wrap items-center gap-2 mb-2">
-                                                    <div
-                                                      className={`flex items-center border rounded-md overflow-hidden h-5 ${tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "border-black/10" : "border-white/10"}`}
-                                                    >
-                                                      <div
-                                                        className={`px-1.5 h-full flex items-center border-r ${tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "bg-black/5 border-black/10" : "bg-white/5 border-white/10"}`}
-                                                      >
-                                                        <span
-                                                          className={`text-[10px] font-black ${tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "text-amber-700" : "text-yellow-500"}`}
-                                                        >
+                                                  <div className="flex flex-wrap items-center gap-2 mb-1">
+                                                    <div className="flex items-center border border-white/10 rounded-md overflow-hidden h-5 bg-white/5">
+                                                      <div className="px-1.5 h-full flex items-center border-r border-white/10 bg-white/5">
+                                                        <span className="text-[10px] font-black text-yellow-500">
                                                           ★ {tab.rating || 8}
                                                         </span>
                                                       </div>
-                                                      <div
-                                                        className={`px-1.5 h-full flex items-center border-r ${tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "bg-black/5 border-black/10" : "bg-white/5 border-white/10"}`}
-                                                      >
-                                                        <span
-                                                          className={`text-[10px] font-black ${tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "text-purple-700" : "text-purple-400"}`}
-                                                        >
-                                                          Q{" "}
-                                                          {tab.qualityScore ||
-                                                            5}
+                                                      <div className="px-1.5 h-full flex items-center border-r border-white/10 bg-white/5">
+                                                        <span className="text-[10px] font-black text-purple-400">
+                                                          Q {tab.qualityScore || 5}
                                                         </span>
                                                       </div>
-                                                      <div
-                                                        className={`px-1.5 h-full flex items-center border-r ${tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "bg-black/5 border-black/10" : "bg-white/5 border-white/10"}`}
-                                                      >
-                                                        <span
-                                                          className={`text-[10px] font-black ${tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "text-amber-700" : "text-amber-500"}`}
-                                                        >
-                                                          V{" "}
-                                                          {tab.valueScore || 5}
+                                                      <div className="px-1.5 h-full flex items-center border-r border-white/10 bg-white/5">
+                                                        <span className="text-[10px] font-black text-amber-500">
+                                                          V {tab.valueScore || 5}
                                                         </span>
                                                       </div>
-                                                      <div
-                                                        className={`px-1.5 h-full flex items-center bg-emerald-500/10 text-emerald-600`}
-                                                      >
+                                                      <div className="px-1.5 h-full flex items-center bg-emerald-500/10 text-emerald-400">
                                                         <span className="text-[10px] font-black">
                                                           B {tab.buyRate || 5}
                                                         </span>
                                                       </div>
-                                                      <div
-                                                        className={`px-1.5 h-full flex items-center bg-rose-500/10 text-rose-600`}
-                                                      >
+                                                      <div className="px-1.5 h-full flex items-center bg-rose-500/10 text-rose-400">
                                                         <span className="text-[10px] font-black">
                                                           S {tab.sellRate || 5}
                                                         </span>
                                                       </div>
                                                     </div>
 
-                                                    <div
-                                                      className={`flex items-center border rounded-md overflow-hidden h-5 ${tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "border-black/10" : "border-white/10"}`}
-                                                    >
-                                                      <div
-                                                        className={`px-1.5 h-full flex items-center border-r ${tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "bg-black/5 border-black/10" : "bg-white/5 border-white/10"}`}
-                                                      >
-                                                        <span
-                                                          className={`text-[10px] font-black ${tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "text-indigo-700" : "text-indigo-400"}`}
-                                                        >
-                                                          🌊{" "}
-                                                          {tab.volatility ||
-                                                            "中"}
+                                                    <div className="flex items-center border border-white/10 rounded-md overflow-hidden h-5 bg-white/5">
+                                                      <div className="px-1.5 h-full flex items-center border-r border-white/10 bg-white/5">
+                                                        <span className="text-[10px] font-black text-indigo-400">
+                                                          🌊 {tab.volatility || "中"}
                                                         </span>
                                                       </div>
-                                                      <div
-                                                        className={`px-1.5 h-full flex items-center border-r ${tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "bg-black/5 border-black/10" : "bg-white/5 border-white/10"}`}
-                                                        title="Positive Value"
-                                                      >
-                                                        <span
-                                                          className={`text-[10px] font-black ${tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "text-emerald-700" : "text-emerald-400"}`}
-                                                        >
-                                                          P+{" "}
-                                                          {calculatePositiveValue(Number(tab.rating||5), Number(tab.qualityScore||5), Number(tab.valueScore||5), Number(tab.buyRate||5))}
+                                                      <div className="px-1.5 h-full flex items-center border-r border-white/10 bg-white/5" title="Positive Value">
+                                                        <span className="text-[10px] font-black text-emerald-400">
+                                                          P+ {calculatePositiveValue(Number(tab.rating||5), Number(tab.qualityScore||5), Number(tab.valueScore||5), Number(tab.buyRate||5))}
                                                         </span>
                                                       </div>
-                                                      <div
-                                                        className={`px-1.5 h-full flex items-center ${tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "bg-black/5" : "bg-white/5"}`}
-                                                        title="Negative Value"
-                                                      >
-                                                        <span
-                                                          className={`text-[10px] font-black ${tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "text-red-700" : "text-red-400"}`}
-                                                        >
-                                                          N-{" "}
-                                                          {calculateNegativeValue(Number(tab.rating||5), Number(tab.qualityScore||5), Number(tab.valueScore||5), Number(tab.sellRate||5))}
+                                                      <div className="px-1.5 h-full flex items-center bg-white/5" title="Negative Value">
+                                                        <span className="text-[10px] font-black text-red-500">
+                                                          N- {calculateNegativeValue(Number(tab.rating||5), Number(tab.qualityScore||5), Number(tab.valueScore||5), Number(tab.sellRate||5))}
                                                         </span>
                                                       </div>
                                                     </div>
@@ -4102,7 +4185,7 @@ export default function Dashboard() {
                                               <div className="flex flex-col items-end justify-center self-stretch ml-2">
                                                 <div className={`${tab.groupId ? 'opacity-100 translate-x-0' : 'opacity-100 sm:opacity-0 sm:group-hover/item:opacity-100 translate-x-0 sm:translate-x-4 sm:group-hover/item:translate-x-0'} transition-all duration-500 transform`}>
                                                   <button
-                                                    className={`whitespace-nowrap text-sm font-black rounded-full px-5 py-2.5 sm:hover:scale-105 active:scale-95 transition-all ${tab.isDeviationConfirmed || tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "bg-[#0F0F12] text-white" : "bg-white text-black shadow-[0_0_20px_rgba(255,255,255,0.3)]"} ${tab.tradeDirection === '看跌' ? '!bg-red-500 !text-white' : tab.tradeDirection === '看漲' ? '!bg-emerald-500 !text-white' : ''}`}
+                                                    className={`whitespace-nowrap text-sm font-black rounded-full px-5 py-2.5 sm:hover:scale-105 active:scale-95 transition-all ${tab.tradeDirection === '看跌' ? '!bg-red-500 !text-white' : tab.tradeDirection === '看漲' ? '!bg-emerald-500 !text-white' : 'bg-white text-black shadow-[0_0_20px_rgba(255,255,255,0.3)]'}`}
                                                   >
                                                     {tab.tradeDirection ? `${tab.tradeDirection}操作` : "檢視細節"}
                                                   </button>
@@ -4553,23 +4636,20 @@ export default function Dashboard() {
                                                 數據圖視化
                                               </div>
                                             </div>
+                                            </div>
                                           </div>
 
                                           {/* Back Face */}
                                           <div
                                             style={{
-                                              backfaceVisibility: "hidden",
-                                              transform: "rotateY(180deg)",
                                               pointerEvents: flippedCards[tab.id]
                                                 ? "auto"
                                                 : "none",
-                                              opacity: flippedCards[tab.id]
-                                                ? 1
-                                                : 0,
-                                              transition: "opacity 0.2s ease-in-out",
                                             }}
-                                            className={`absolute inset-0 glass-card bg-transparent rounded-2xl flex flex-col p-3 w-full h-full sm:hover:bg-white/[0.04] transition-all duration-500 ${
-                                              activeTabStrategies[tab.id]?.closeChecked
+                                            className={`card-back absolute inset-0 glass-card bg-transparent rounded-2xl flex flex-col w-full h-full sm:hover:bg-white/[0.04] transition-all duration-500 overflow-hidden ${
+                                              activeTabStrategies[tab.id]?.observeChecked
+                                                ? "card-breathe-observe"
+                                                : activeTabStrategies[tab.id]?.closeChecked
                                                 ? "card-breathe-close"
                                                 : activeTabStrategies[tab.id]?.slChecked
                                                 ? "card-breathe-sl"
@@ -4580,99 +4660,154 @@ export default function Dashboard() {
                                                 : ""
                                             }`}
                                           >
-                                            {/* 左側色條 & 頂部色條 */}
-                                            {activeTabStrategies[tab.id]?.addChecked && (
-                                              <div className="absolute left-0 top-0 bottom-0 w-[2px] bg-[#426B4A] z-30 rounded-l-2xl" />
-                                            )}
-                                            {activeTabStrategies[tab.id]?.slChecked && (
-                                              <div className="absolute left-0 top-0 bottom-0 w-[2px] bg-[#E04141] z-30 rounded-l-2xl" />
-                                            )}
-                                            {activeTabStrategies[tab.id]?.closeChecked && (
-                                              <div className="absolute left-0 top-0 bottom-0 w-[2px] bg-[#EBF527] z-30 rounded-l-2xl" />
-                                            )}
-                                            {activeTabStrategies[tab.id]?.tpChecked && (
-                                              <div className="absolute left-0 top-0 bottom-0 w-[2px] bg-[#35428C] z-30 rounded-l-2xl" />
-                                            )}
-
-                                            <StockCardVisualizer
-                                              plannedOrders={plannedOrders}
-                                              currentPrice={tab.currentPrice}
-                                              onToggleHighlight={(orderId, currentStatus) => handleToggleOrderHighlight(tab.id, orderId, currentStatus)}
-                                              tabId={tab.id}
-                                              annotations={tab.chartAnnotations || []}
-                                              onUpdateAnnotations={(newAnn) => updateTab(tab.id, { chartAnnotations: newAnn })}
-                                              averageCost={stats.totalQuantity !== 0 ? stats.averagePrice : undefined}
-                                              stockName={tab.symbol}
-                                              rating={tab.rating}
-                                              qualityScore={tab.qualityScore}
-                                              valueScore={tab.valueScore}
-                                              buyRate={tab.buyRate}
-                                              sellRate={tab.sellRate}
-                                              volatility={tab.volatility}
-                                              crashSimilarity={tab.crashSimilarity}
-                                              onRatingBarDoubleClick={(e) => {
-                                                if (e.stopPropagation) e.stopPropagation();
-                                                setVisualizerFocusTabId(tab.id);
-                                                setVisualizerFocusText(activeTabStrategies[tab.id]?.operationFocus || "");
-                                              }}
-                                              strategy={activeTabStrategies[tab.id]}
-                                              tradeDirection={tab.tradeDirection}
-                                              onUpdateStrategyField={(field, checked) => handleUpdateStrategyField(tab.id, field, checked)}
-                                              onUpdateTPChecked={(checked) => handleUpdateTPChecked(tab.id, checked)}
-                                              onUpdateSLChecked={(checked) => handleUpdateSLChecked(tab.id, checked)}
-                                              onUpdateAddChecked={(checked) => handleUpdateAddChecked(tab.id, checked)}
-                                              onUpdateCloseChecked={(checked) => handleUpdateCloseChecked(tab.id, checked)}
-                                              onUpdateNotesHighlighted={(checked) => handleUpdateNotesHighlighted(tab.id, checked)}
-                                            />
-
-                                            {/* Corner label badge */}
+                                            {/* 左側色條 */}
                                             {(() => {
                                               const strat = activeTabStrategies[tab.id] || {};
-                                              if (strat.addChecked) {
-                                                return (
-                                                  <div className="absolute -top-2.5 -left-2.5 z-40 flex items-center text-[12px] font-black px-3 py-0.5 rounded-full uppercase tracking-wider bg-[#426B4A] text-white border border-[#426B4A]/50 shadow-[0_0_12px_rgba(66,107,74,0.6)] select-none">
-                                                    加碼中
-                                                  </div>
-                                                );
-                                              } else if (strat.slChecked) {
-                                                return (
-                                                  <div className="absolute -top-2.5 -left-2.5 z-40 flex items-center text-[12px] font-black px-3 py-0.5 rounded-full uppercase tracking-wider bg-[#E04141] text-white border border-[#E04141]/50 shadow-[0_0_12px_rgba(224,65,65,0.6)] select-none">
-                                                    止損中
-                                                  </div>
-                                                );
-                                              } else if (strat.closeChecked) {
-                                                return (
-                                                  <div className="absolute -top-2.5 -left-2.5 z-40 flex items-center text-[12px] font-black px-3 py-0.5 rounded-full uppercase tracking-wider bg-[#EBF527] text-black border border-[#EBF527]/50 shadow-[0_0_12px_rgba(235,245,39,0.6)] select-none">
-                                                    平倉中
-                                                  </div>
-                                                );
-                                              } else if (strat.tpChecked) {
-                                                return (
-                                                  <div className="absolute -top-2.5 -left-2.5 z-40 flex items-center text-[12px] font-black px-3 py-0.5 rounded-full uppercase tracking-wider bg-[#35428C] text-white border border-[#35428C]/50 shadow-[0_0_12px_rgba(53,66,140,0.6)] select-none">
-                                                    止盈中
-                                                  </div>
-                                                );
-                                              }
-                                              return null;
+                                              let color = "";
+                                              if (strat.observeChecked) color = "#C9C9C9";
+                                              else if (strat.closeChecked) color = "#EBF527";
+                                              else if (strat.slChecked) color = "#E04141";
+                                              else if (strat.addChecked) color = "#426B4A";
+                                              else if (strat.tpChecked) color = "#35428C";
+
+                                              if (!color) return null;
+                                              return (
+                                                <div 
+                                                  style={{ backgroundColor: color }}
+                                                  className="absolute left-0 top-4 bottom-4 w-[3px] z-30 rounded-full"
+                                                />
+                                              );
                                             })()}
 
-                                            {/* Close back button */}
-                                            <div className="absolute top-2 right-2">
-                                              <button
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  setFlippedCards((prev) => ({
-                                                    ...prev,
-                                                    [tab.id]: false,
-                                                  }));
+                                            {/* Independent Top Banner Row for visualizer (back face) */}
+                                            {(() => {
+                                              const isBannerActive = tab.isDeviationConfirmed || tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle;
+                                              const bannerBgColor = tab.isDeviationConfirmed
+                                                ? "#F0D1B9"
+                                                : tab.isOperationConfirmed
+                                                  ? "#A3A3A3"
+                                                  : tab.isFavoriteHighlight
+                                                    ? "#B1C28D"
+                                                    : shouldHighlightTitle
+                                                      ? "#F5DAD5"
+                                                      : "transparent";
+
+                                              const bannerTextColor = tab.isDeviationConfirmed
+                                                ? "#7a4a1e"
+                                                : tab.isOperationConfirmed
+                                                  ? "#7a4a1e"
+                                                  : tab.isFavoriteHighlight
+                                                    ? "#7a4a1e"
+                                                    : shouldHighlightTitle
+                                                      ? "#7a4a1e"
+                                                      : "rgba(255, 255, 255, 0.7)";
+
+                                              const statusInfo = getCardStatusInfo(tab);
+                                              const dotColor = isBannerActive ? bannerTextColor : statusInfo.color;
+
+                                              return (
+                                                <div
+                                                  style={{ backgroundColor: bannerBgColor }}
+                                                  className={`w-full h-[18px] flex items-center justify-between px-3 transition-colors duration-500 shrink-0 border-b ${isBannerActive ? "border-transparent" : "border-white/5"} select-none`}
+                                                >
+                                                  {/* Status with dot */}
+                                                  <div className="flex items-center gap-1.5 font-sans">
+                                                    <span 
+                                                      className="w-1.5 h-1.5 rounded-full inline-block transition-colors duration-500" 
+                                                      style={{ backgroundColor: dotColor }}
+                                                    />
+                                                  </div>
+
+                                                  {/* Timestamp & Close Button */}
+                                                  <div className="flex items-center gap-2">
+                                                    {tab.updatedAt && (
+                                                      <span 
+                                                        style={{ color: bannerTextColor }}
+                                                        className="text-[9.5px] font-black tracking-wider opacity-80 transition-colors duration-500 font-bold"
+                                                      >
+                                                        {typeof tab.updatedAt.toDate === 'function' 
+                                                          ? format(tab.updatedAt.toDate(), 'yyyy/MM/dd HH:mm') 
+                                                          : ''}
+                                                      </span>
+                                                    )}
+                                                    <button
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setFlippedCards((prev) => ({
+                                                          ...prev,
+                                                          [tab.id]: false,
+                                                        }));
+                                                      }}
+                                                      style={{ 
+                                                        color: bannerTextColor, 
+                                                        borderColor: isBannerActive ? 'rgba(122,74,30,0.2)' : 'rgba(255,255,255,0.1)' 
+                                                      }}
+                                                      className="w-3.5 h-3.5 flex items-center justify-center rounded-full border bg-black/10 sm:hover:bg-black/20 text-[7px] font-black transition-all leading-none"
+                                                      title="返回正面"
+                                                    >
+                                                      ✕
+                                                    </button>
+                                                  </div>
+                                                </div>
+                                              );
+                                            })()}
+
+                                            {/* Padded wrapper for the visualizer content */}
+                                            <div className="flex-1 flex flex-col p-2.5 pt-1.5 w-full min-h-0 relative overflow-hidden">
+                                              {/* 左側色條 */}
+                                              {(() => {
+                                                const strat = activeTabStrategies[tab.id] || {};
+                                                let color = "";
+                                                if (strat.observeChecked) color = "#C9C9C9";
+                                                else if (strat.closeChecked) color = "#EBF527";
+                                                else if (strat.slChecked) color = "#E04141";
+                                                else if (strat.addChecked) color = "#426B4A";
+                                                else if (strat.tpChecked) color = "#35428C";
+
+                                                if (!color) return null;
+                                                return (
+                                                  <div 
+                                                    style={{ backgroundColor: color }}
+                                                    className="hidden"
+                                                  />
+                                                );
+                                              })()}
+
+                                              <StockCardVisualizer
+                                                plannedOrders={plannedOrders}
+                                                currentPrice={tab.currentPrice}
+                                                onToggleHighlight={(orderId, currentStatus) => handleToggleOrderHighlight(tab.id, orderId, currentStatus)}
+                                                tabId={tab.id}
+                                                annotations={tab.chartAnnotations || []}
+                                                onUpdateAnnotations={(newAnn) => updateTab(tab.id, { chartAnnotations: newAnn })}
+                                                averageCost={stats.totalQuantity !== 0 ? stats.averagePrice : undefined}
+                                                stockName={tab.symbol}
+                                                rating={tab.rating}
+                                                qualityScore={tab.qualityScore}
+                                                valueScore={tab.valueScore}
+                                                buyRate={tab.buyRate}
+                                                sellRate={tab.sellRate}
+                                                volatility={tab.volatility}
+                                                crashSimilarity={tab.crashSimilarity}
+                                                onRatingBarDoubleClick={(e) => {
+                                                  if (e.stopPropagation) e.stopPropagation();
+                                                  setVisualizerFocusTabId(tab.id);
+                                                  setVisualizerFocusText(activeTabStrategies[tab.id]?.operationFocus || "");
                                                 }}
-                                                className="w-8 h-8 flex items-center justify-center rounded-full bg-white/10 sm:hover:bg-white/20 text-white/50 sm:hover:text-white transition-colors"
-                                              >
-                                                ✕
-                                              </button>
+                                                strategy={activeTabStrategies[tab.id]}
+                                                tradeDirection={tab.tradeDirection}
+                                                onUpdateStrategyField={(field, checked) => handleUpdateStrategyField(tab.id, field, checked)}
+                                                onUpdateTPChecked={(checked) => handleUpdateTPChecked(tab.id, checked)}
+                                                onUpdateSLChecked={(checked) => handleUpdateSLChecked(tab.id, checked)}
+                                                onUpdateAddChecked={(checked) => handleUpdateAddChecked(tab.id, checked)}
+                                                onUpdateCloseChecked={(checked) => handleUpdateCloseChecked(tab.id, checked)}
+                                                onUpdateObserveChecked={(checked) => handleUpdateObserveChecked(tab.id, checked)}
+                                                onUpdateNotesHighlighted={(checked) => handleUpdateNotesHighlighted(tab.id, checked)}
+                                              />
                                             </div>
                                           </div>
-                                        </motion.div>
+                                        </div>
+                                      </motion.div>
                                       </div>
                                     </div>
                                   );
@@ -4997,6 +5132,7 @@ export default function Dashboard() {
                                   if (strat.slChecked) actions.push({ label: "止損", color: "bg-rose-500/15 text-rose-400 border-rose-500/30" });
                                   if (strat.addChecked) actions.push({ label: "加碼", color: "bg-sky-500/15 text-sky-400 border-sky-500/30" });
                                   if (strat.closeChecked) actions.push({ label: "平倉", color: "bg-violet-500/15 text-violet-400 border-violet-500/30" });
+                                  if (strat.observeChecked) actions.push({ label: "觀察", color: "bg-[#C9C9C9]/15 text-[#C9C9C9] border-[#C9C9C9]/30" });
                                   
                                   return (
                                     <div 
@@ -5115,7 +5251,7 @@ export default function Dashboard() {
                                       </div>
                                     </div>
 
-                                    <div className="grid grid-cols-4 gap-2 mb-4">
+                                    <div className="grid grid-cols-5 gap-2 mb-4">
                                       <div className="flex flex-col items-center justify-center bg-white/[0.02] border border-white/5 rounded-xl py-2.5">
                                         <span className="text-[10px] font-bold text-white/50 mb-2">止盈</span>
                                         <input type="checkbox" checked={!!activeTabStrategies[tab.id]?.tpChecked} onChange={(e) => handleUpdateTPChecked(tab.id, e.target.checked)} className="h-4 w-4 rounded border border-white/20 bg-white/5 checked:bg-emerald-500 checked:border-emerald-500 text-emerald-500 focus:ring-0 cursor-pointer accent-emerald-500 transition-all" />
@@ -5132,6 +5268,10 @@ export default function Dashboard() {
                                         <span className="text-[10px] font-bold text-white/50 mb-2">平倉</span>
                                         <input type="checkbox" checked={!!activeTabStrategies[tab.id]?.closeChecked} onChange={(e) => handleUpdateCloseChecked(tab.id, e.target.checked)} className="h-4 w-4 rounded border border-white/20 bg-white/5 checked:bg-violet-500 checked:border-violet-500 text-violet-500 focus:ring-0 cursor-pointer accent-violet-500 transition-all" />
                                       </div>
+                                      <div className="flex flex-col items-center justify-center bg-white/[0.02] border border-white/5 rounded-xl py-2.5">
+                                        <span className="text-[10px] font-bold text-white/50 mb-2">觀察</span>
+                                        <input id="observe-input-tab" type="checkbox" checked={!!activeTabStrategies[tab.id]?.observeChecked} onChange={(e) => handleUpdateObserveChecked(tab.id, e.target.checked)} className="h-4 w-4 rounded border border-white/20 bg-white/5 checked:bg-[#C9C9C9] checked:border-[#C9C9C9] text-[#C9C9C9] focus:ring-0 cursor-pointer accent-[#C9C9C9] transition-all" />
+                                      </div>
                                     </div>
 
                                     <div>
@@ -5140,9 +5280,8 @@ export default function Dashboard() {
                                         value={activeTabStrategies[tab.id]?.operationFocus || ""}
                                         onChange={(e) => handleUpdateOperationFocus(tab.id, e.target.value)}
                                         placeholder="點擊輸入操作重點..."
-                                        rows={2}
-                                        className="w-full bg-black/40 border border-white/5 hover:border-white/10 focus:border-amber-500/50 text-white text-xs rounded-xl p-3 focus:ring-1 focus:ring-amber-500/50 outline-none resize-y transition-colors min-h-[56px] font-medium [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] overflow-auto"
-                                        style={{ scrollbarWidth: "none" }}
+                                        rows={4}
+                                        className="w-full bg-black/40 border border-white/5 hover:border-white/10 focus:border-amber-500/50 text-white text-xs rounded-xl p-3 focus:ring-1 focus:ring-amber-500/50 outline-none resize-y transition-colors min-h-[100px] font-medium overflow-auto"
                                       />
                                     </div>
                                   </div>
@@ -5155,37 +5294,40 @@ export default function Dashboard() {
                               <table className="w-full text-left border-collapse table-fixed">
                               <thead>
                                 <tr className="border-b border-white/5 bg-white/[0.01]">
-                                  <th className="w-[140px] py-3 px-6 text-[10px] font-black text-white/40 uppercase tracking-wider">
+                                  <th className="w-[115px] py-2.5 px-4 text-[10px] font-black text-white/40 uppercase tracking-wider">
                                     選取 / 股票代號
                                   </th>
-                                  <th className="w-[150px] py-3 px-4 text-[10px] font-black text-white/40 uppercase tracking-wider">
+                                  <th className="w-[125px] py-2.5 px-3 text-[10px] font-black text-white/40 uppercase tracking-wider">
                                     股票名稱
                                   </th>
-                                  <th className="w-[100px] py-3 px-4 text-[10px] font-black text-white/40 uppercase tracking-wider text-right">
+                                  <th className="w-[85px] py-2.5 px-3 text-[10px] font-black text-white/40 uppercase tracking-wider text-right">
                                     現價
                                   </th>
-                                  <th className="w-[100px] py-3 px-4 text-[10px] font-black text-white/40 uppercase tracking-wider text-right">
+                                  <th className="w-[85px] py-2.5 px-3 text-[10px] font-black text-white/40 uppercase tracking-wider text-right">
                                     平均成本
                                   </th>
-                                  <th className="w-[110px] py-3 px-4 text-[10px] font-black text-white/40 uppercase tracking-wider text-right">
+                                  <th className="w-[100px] py-2.5 px-3 text-[10px] font-black text-white/40 uppercase tracking-wider text-right">
                                     未實現損益
                                   </th>
-                                  <th className="w-[100px] py-3 px-4 text-[10px] font-black text-white/40 uppercase tracking-wider text-right">
+                                  <th className="w-[85px] py-2.5 px-3 text-[10px] font-black text-white/40 uppercase tracking-wider text-right">
                                     持有股數
                                   </th>
-                                  <th className="w-[75px] py-3 px-4 text-[10px] font-black text-white/40 uppercase tracking-wider text-center">
+                                  <th className="w-[54px] py-2.5 px-2 text-[10px] font-black text-white/40 uppercase tracking-wider text-center">
                                     止盈
                                   </th>
-                                  <th className="w-[75px] py-3 px-4 text-[10px] font-black text-white/40 uppercase tracking-wider text-center">
+                                  <th className="w-[54px] py-2.5 px-2 text-[10px] font-black text-white/40 uppercase tracking-wider text-center">
                                     止損
                                   </th>
-                                  <th className="w-[75px] py-3 px-4 text-[10px] font-black text-white/40 uppercase tracking-wider text-center">
+                                  <th className="w-[54px] py-2.5 px-2 text-[10px] font-black text-white/40 uppercase tracking-wider text-center">
                                     加碼
                                   </th>
-                                  <th className="w-[75px] py-3 px-4 text-[10px] font-black text-white/40 uppercase tracking-wider text-center">
+                                  <th className="w-[54px] py-2.5 px-2 text-[10px] font-black text-white/40 uppercase tracking-wider text-center">
                                     平倉
                                   </th>
-                                  <th className="py-3 px-4 text-[10px] font-black text-white/40 uppercase tracking-wider">
+                                  <th className="w-[54px] py-2.5 px-2 text-[10px] font-black text-white/40 uppercase tracking-wider text-center">
+                                    觀察
+                                  </th>
+                                  <th className="py-2.5 px-4 text-[10px] font-black text-white/40 uppercase tracking-wider">
                                     操作重點
                                   </th>
                                 </tr>
@@ -5207,8 +5349,8 @@ export default function Dashboard() {
                                           : "hover:bg-white/[0.02]"
                                       }`}
                                     >
-                                      <td className="py-3.5 px-6 whitespace-nowrap">
-                                        <div className="flex items-center gap-3">
+                                      <td className="py-2.5 px-4 whitespace-nowrap">
+                                        <div className="flex items-center gap-2">
                                           <input
                                             type="checkbox"
                                             checked={isHighlighted}
@@ -5220,7 +5362,7 @@ export default function Dashboard() {
                                           </span>
                                         </div>
                                       </td>
-                                      <td className="py-3.5 px-4">
+                                      <td className="py-2.5 px-3">
                                         <span 
                                           onClick={() => {
                                             handleSearchSelect(tab.id);
@@ -5235,13 +5377,13 @@ export default function Dashboard() {
                                           {tab.companyName || tab.symbol}
                                         </span>
                                       </td>
-                                      <td className="py-3.5 px-4 text-right font-mono text-xs text-white/90">
+                                      <td className="py-2.5 px-3 text-right font-mono text-xs text-white/90">
                                         {tab.currentPrice !== undefined && tab.currentPrice > 0 ? tab.currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "-"}
                                       </td>
-                                      <td className="py-3.5 px-4 text-right font-mono text-xs text-white/90">
+                                      <td className="py-2.5 px-3 text-right font-mono text-xs text-white/90">
                                         {Math.abs(stats.totalQuantity) > 0 && stats.averagePrice > 0 ? stats.averagePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "-"}
                                       </td>
-                                      <td className="py-3.5 px-4 text-right font-mono text-xs">
+                                      <td className="py-2.5 px-3 text-right font-mono text-xs">
                                         {Math.abs(stats.totalQuantity) > 0 && unrealizedPnL !== 0 ? (
                                           <span className={`${unrealizedPnL > 0 ? "text-emerald-400" : "text-rose-400"} font-semibold`}>
                                             {unrealizedPnL > 0 ? "+" : ""}{unrealizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -5250,49 +5392,57 @@ export default function Dashboard() {
                                           <span className="text-white/30">-</span>
                                         )}
                                       </td>
-                                      <td className="py-3.5 px-4 text-right font-mono text-xs text-white/90">
+                                      <td className="py-2.5 px-3 text-right font-mono text-xs text-white/90">
                                         {Math.abs(stats.totalQuantity) > 0 ? stats.totalQuantity.toLocaleString(undefined, { maximumFractionDigits: 4 }) : "-"}
                                       </td>
-                                      <td className="py-3.5 px-4 text-center">
+                                      <td className="py-2.5 px-2 text-center">
                                         <input
                                           type="checkbox"
                                           checked={!!activeTabStrategies[tab.id]?.tpChecked}
                                           onChange={(e) => handleUpdateTPChecked(tab.id, e.target.checked)}
-                                          className="h-5 w-5 rounded border border-white/20 bg-white/5 checked:bg-emerald-500 checked:border-emerald-500 text-emerald-500 focus:ring-0 cursor-pointer accent-emerald-500 transition-all mx-auto"
+                                          className="h-4 w-4 rounded border border-white/20 bg-white/5 checked:bg-emerald-500 checked:border-emerald-500 text-emerald-500 focus:ring-0 cursor-pointer accent-emerald-500 transition-all mx-auto"
                                         />
                                       </td>
-                                      <td className="py-3.5 px-4 text-center">
+                                      <td className="py-2.5 px-2 text-center">
                                         <input
                                           type="checkbox"
                                           checked={!!activeTabStrategies[tab.id]?.slChecked}
                                           onChange={(e) => handleUpdateSLChecked(tab.id, e.target.checked)}
-                                          className="h-5 w-5 rounded border border-white/20 bg-white/5 checked:bg-rose-500 checked:border-rose-500 text-rose-500 focus:ring-0 cursor-pointer accent-rose-500 transition-all mx-auto"
+                                          className="h-4 w-4 rounded border border-white/20 bg-white/5 checked:bg-rose-500 checked:border-rose-500 text-rose-500 focus:ring-0 cursor-pointer accent-rose-500 transition-all mx-auto"
                                         />
                                       </td>
-                                      <td className="py-3.5 px-4 text-center">
+                                      <td className="py-2.5 px-2 text-center">
                                         <input
                                           type="checkbox"
                                           checked={!!activeTabStrategies[tab.id]?.addChecked}
                                           onChange={(e) => handleUpdateAddChecked(tab.id, e.target.checked)}
-                                          className="h-5 w-5 rounded border border-white/20 bg-white/5 checked:bg-sky-500 checked:border-sky-500 text-sky-500 focus:ring-0 cursor-pointer accent-sky-500 transition-all mx-auto"
+                                          className="h-4 w-4 rounded border border-white/20 bg-white/5 checked:bg-sky-500 checked:border-sky-500 text-sky-500 focus:ring-0 cursor-pointer accent-sky-500 transition-all mx-auto"
                                         />
                                       </td>
-                                      <td className="py-3.5 px-4 text-center">
+                                      <td className="py-2.5 px-2 text-center">
                                         <input
                                           type="checkbox"
                                           checked={!!activeTabStrategies[tab.id]?.closeChecked}
                                           onChange={(e) => handleUpdateCloseChecked(tab.id, e.target.checked)}
-                                          className="h-5 w-5 rounded border border-white/20 bg-white/5 checked:bg-violet-500 checked:border-violet-500 text-violet-500 focus:ring-0 cursor-pointer accent-violet-500 transition-all mx-auto"
+                                          className="h-4 w-4 rounded border border-white/20 bg-white/5 checked:bg-violet-500 checked:border-violet-500 text-violet-500 focus:ring-0 cursor-pointer accent-violet-500 transition-all mx-auto"
                                         />
                                       </td>
-                                      <td className="py-2.5 px-4">
+                                      <td className="py-2.5 px-2 text-center">
+                                        <input
+                                          id="observe-input-row"
+                                          type="checkbox"
+                                          checked={!!activeTabStrategies[tab.id]?.observeChecked}
+                                          onChange={(e) => handleUpdateObserveChecked(tab.id, e.target.checked)}
+                                          className="h-4 w-4 rounded border border-white/20 bg-white/5 checked:bg-[#C9C9C9] checked:border-[#C9C9C9] text-[#C9C9C9] focus:ring-0 cursor-pointer accent-[#C9C9C9] transition-all mx-auto"
+                                        />
+                                      </td>
+                                      <td className="py-2 px-4">
                                         <textarea
                                           value={activeTabStrategies[tab.id]?.operationFocus || ""}
                                           onChange={(e) => handleUpdateOperationFocus(tab.id, e.target.value)}
                                           placeholder="點擊輸入操作重點..."
-                                          rows={2}
-                                          className="w-full bg-white/5 border border-white/10 hover:border-white/20 focus:border-amber-400 text-white text-xs rounded-lg p-2 focus:ring-1 focus:ring-amber-400 outline-none resize-y transition-colors min-h-[42px] font-medium [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] overflow-auto"
-                                          style={{ scrollbarWidth: "none" }}
+                                          rows={4}
+                                          className="w-full bg-white/5 border border-white/10 hover:border-white/20 focus:border-amber-400 text-white text-xs rounded-lg p-2 focus:ring-1 focus:ring-amber-400 outline-none resize-y transition-colors min-h-[90px] font-medium overflow-auto"
                                         />
                                       </td>
                                     </tr>
@@ -5344,7 +5494,7 @@ export default function Dashboard() {
               />
             </div>
             {visualizerFocusTabId && (
-              <div className="grid grid-cols-5 gap-2">
+              <div className="grid grid-cols-6 gap-2">
                 <div className="flex flex-col items-center justify-center bg-white/[0.02] border border-white/5 rounded-xl py-2.5 hover:bg-white/[0.04] transition-colors cursor-pointer" onClick={() => handleUpdateNotesHighlighted(visualizerFocusTabId, !activeTabStrategies[visualizerFocusTabId]?.notesHighlighted)}>
                   <span className="text-[10px] font-bold text-white/50 mb-2 pointer-events-none">選取</span>
                   <input type="checkbox" checked={!!activeTabStrategies[visualizerFocusTabId]?.notesHighlighted} onChange={(e) => handleUpdateNotesHighlighted(visualizerFocusTabId, e.target.checked)} onClick={(e) => e.stopPropagation()} className="h-4 w-4 rounded border border-white/20 bg-white/5 checked:bg-amber-500 checked:border-amber-500 text-amber-500 focus:ring-0 cursor-pointer accent-amber-500 transition-all" />
@@ -5364,6 +5514,10 @@ export default function Dashboard() {
                 <div className="flex flex-col items-center justify-center bg-white/[0.02] border border-white/5 rounded-xl py-2.5 hover:bg-white/[0.04] transition-colors cursor-pointer" onClick={() => handleUpdateCloseChecked(visualizerFocusTabId, !activeTabStrategies[visualizerFocusTabId]?.closeChecked)}>
                   <span className="text-[10px] font-bold text-white/50 mb-2 pointer-events-none">平倉</span>
                   <input type="checkbox" checked={!!activeTabStrategies[visualizerFocusTabId]?.closeChecked} onChange={(e) => handleUpdateCloseChecked(visualizerFocusTabId, e.target.checked)} onClick={(e) => e.stopPropagation()} className="h-4 w-4 rounded border border-white/20 bg-white/5 checked:bg-violet-500 checked:border-violet-500 text-violet-500 focus:ring-0 cursor-pointer accent-violet-500 transition-all" />
+                </div>
+                <div className="flex flex-col items-center justify-center bg-white/[0.02] border border-white/5 rounded-xl py-2.5 hover:bg-white/[0.04] transition-colors cursor-pointer" onClick={() => handleUpdateObserveChecked(visualizerFocusTabId, !activeTabStrategies[visualizerFocusTabId]?.observeChecked)}>
+                  <span className="text-[10px] font-bold text-white/50 mb-2 pointer-events-none">觀察</span>
+                  <input id="observe-input-focus" type="checkbox" checked={!!activeTabStrategies[visualizerFocusTabId]?.observeChecked} onChange={(e) => handleUpdateObserveChecked(visualizerFocusTabId, e.target.checked)} onClick={(e) => e.stopPropagation()} className="h-4 w-4 rounded border border-white/20 bg-white/5 checked:bg-[#C9C9C9] checked:border-[#C9C9C9] text-[#C9C9C9] focus:ring-0 cursor-pointer accent-[#C9C9C9] transition-all" />
                 </div>
               </div>
             )}

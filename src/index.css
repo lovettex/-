@@ -231,3 +231,64 @@
   animation: card-pulse-tp 2.4s infinite ease-in-out;
   border: 2px solid #35428C !important;
 }
+
+@keyframes card-pulse-observe {
+  0%, 100% {
+    border-color: rgba(201, 201, 201, 0.35);
+    box-shadow: 0 0 12px rgba(201, 201, 201, 0.25);
+    background-color: rgba(201, 201, 201, 0.04);
+  }
+  50% {
+    border-color: rgba(201, 201, 201, 0.95);
+    box-shadow: 0 0 26px rgba(201, 201, 201, 0.75);
+    background-color: rgba(201, 201, 201, 0.12);
+  }
+}
+
+.card-breathe-observe {
+  animation: card-pulse-observe 2.4s infinite ease-in-out;
+  border: 2px solid #C9C9C9 !important;
+}
+
+/* Slide Up Drawer-style Card Transition */
+.slide-drawer-container {
+    position: relative !important;
+    height: 460px !important;
+    min-height: 460px !important;
+    border-radius: 1rem !important; /* Ensure boundary alignment */
+    border: 2px solid transparent !important; /* Prevent layout shifting when breathe borders apply */
+    transition: border-color 0.3s ease, box-shadow 0.3s ease, background-color 0.3s ease;
+}
+
+.slide-drawer-inner {
+    position: absolute !important;
+    inset: 0 !important;
+    overflow: hidden !important;
+    border-radius: 0.9rem !important; /* Ensure neat rounded internal overflow container */
+}
+
+.card-front,
+.card-back {
+    position: absolute !important;
+    inset: 0 !important;
+    transition: transform 400ms cubic-bezier(0.4, 0, 0.2, 1) !important;
+    will-change: transform;
+}
+
+.card-front {
+    transform: translateY(0) !important;
+}
+
+.card-back {
+    transform: translateY(100%) !important;
+}
+
+.show-back .card-front {
+    transform: translateY(-100%) !important;
+}
+
+.show-back .card-back {
+    transform: translateY(0) !important;
+}
+
+

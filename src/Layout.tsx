@@ -76,25 +76,6 @@ export default function Layout() {
         </div>
       </div>
 
-      {/* Floating Dashboard Dot */}
-      <NavLink
-        to={stockId ? "/" : "/"}
-        state={stockId ? { autoFlipTabId: stockId } : undefined}
-        title="交易總覽"
-        className={({ isActive }) =>
-          `fixed right-6 top-1/2 -translate-y-1/2 z-[100] flex items-center justify-center w-12 h-12 rounded-full backdrop-blur-xl transition-all duration-300 shadow-2xl group ${
-            isActive 
-              ? 'opacity-0 pointer-events-none' 
-              : 'bg-white/5 hover:bg-white/10 border border-white/10 hover:border-emerald-500/30 opacity-30 hover:opacity-100'
-          }`
-        }
-      >
-        <div className="relative flex items-center justify-center w-full h-full">
-          <div className="w-3 h-3 rounded-full bg-emerald-400 group-hover:scale-150 group-hover:shadow-[0_0_15px_rgba(52,211,153,0.8)] transition-all duration-300"></div>
-          <span className="absolute right-14 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity bg-white/10 px-3 py-1.5 rounded-lg text-xs font-bold text-white border border-white/10">交易總覽</span>
-        </div>
-      </NavLink>
-
       {/* Main Content */}
       <main className="flex-1 relative z-0 overflow-y-auto focus:outline-none">
         <div className="w-full mx-auto px-2 sm:px-4 md:px-6 pt-16 sm:pt-16 md:pt-4 pb-10 md:pb-16 max-w-[1920px]">

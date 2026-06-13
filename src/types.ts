@@ -119,6 +119,7 @@ export interface StrategyConfig {
   slChecked?: boolean;
   addChecked?: boolean;
   closeChecked?: boolean;
+  observeChecked?: boolean;
   notesHighlighted?: boolean;
   tags?: string[];
   resistanceZones?: KeyPriceThreshold[];

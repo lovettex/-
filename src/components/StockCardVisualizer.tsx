@@ -25,19 +25,31 @@ interface Props {
     slChecked?: boolean;
     addChecked?: boolean;
     closeChecked?: boolean;
+    observeChecked?: boolean;
     breakoutResistanceChecked?: boolean;
     closeToResistanceChecked?: boolean;
     closeToSupportChecked?: boolean;
     breakdownSupportChecked?: boolean;
     closeToSLChecked?: boolean;
     breakdownSLChecked?: boolean;
+    pathAccumulationChecked?: boolean;
+    pathAccumulationStage?: string;
+    pathWashChecked?: boolean;
+    pathWashStage?: string;
+    pathTestChecked?: boolean;
+    pathTestStage?: string;
+    pathRallyChecked?: boolean;
+    pathRallyStage?: string;
+    pathDistributionChecked?: boolean;
+    pathDistributionStage?: string;
   };
   tradeDirection?: string;
-  onUpdateStrategyField?: (field: string, checked: boolean) => void;
+  onUpdateStrategyField?: (field: string, checked: any) => void;
   onUpdateTPChecked?: (checked: boolean) => void;
   onUpdateSLChecked?: (checked: boolean) => void;
   onUpdateAddChecked?: (checked: boolean) => void;
   onUpdateCloseChecked?: (checked: boolean) => void;
+  onUpdateObserveChecked?: (checked: boolean) => void;
   onUpdateNotesHighlighted?: (checked: boolean) => void;
 }
 
@@ -190,6 +202,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
   onUpdateSLChecked,
   onUpdateAddChecked,
   onUpdateCloseChecked,
+  onUpdateObserveChecked,
   onUpdateNotesHighlighted,
 }) => {
   const { price: dynamicPrice, isLoading: isCardLoading } = useStockPrice(stockName, currentPrice);
@@ -211,6 +224,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
   const [mode, setMode] = useState<'cursor' | 'line' | 'box' | 'text' | 'eraser' | 'arrow' | 'move'>('cursor');
   const [activeColor, setActiveColor] = useState<string>('#ffffff');
   const [isMobileColorOpen, setIsMobileColorOpen] = useState<boolean>(false);
+  const [openSubField, setOpenSubField] = useState<string | null>(null);
   const [activeThickness, setActiveThickness] = useState<number>(2);
   const [activeFontSize, setActiveFontSize] = useState<number>(12);
   const [isDrawing, setIsDrawing] = useState<boolean>(false);
@@ -828,7 +842,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
     );
   };
 
-  const hasActiveStrategy = !!(strategy?.addChecked || strategy?.slChecked || strategy?.closeChecked || strategy?.tpChecked);
+  const hasActiveStrategy = !!(strategy?.addChecked || strategy?.slChecked || strategy?.closeChecked || strategy?.tpChecked || strategy?.observeChecked);
 
   return (
     <div
@@ -837,7 +851,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
       onClick={(e) => e.stopPropagation()}
     >
       <div 
-        className={`flex flex-nowrap sm:flex-wrap items-center justify-start sm:justify-center gap-1 sm:gap-1.5 mb-2 shrink-0 select-none cursor-pointer overflow-x-auto sm:overflow-x-visible [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] pr-8 sm:pr-0 ${hasActiveStrategy ? "pl-[54px]" : ""}`}
+        className={`flex flex-wrap sm:flex-wrap items-center justify-center sm:justify-center gap-1 sm:gap-1.5 mb-2 shrink-0 select-none cursor-pointer w-full ${hasActiveStrategy ? "pl-[36px] sm:pl-[54px]" : ""}`}
         onDoubleClick={onRatingBarDoubleClick}
         onTouchEnd={(e) => {
           const now = Date.now();
@@ -907,76 +921,90 @@ export const StockCardVisualizer: React.FC<Props> = ({
       >
         <div className="absolute top-2 left-2.5 right-2 flex items-center justify-between z-20 pointer-events-none select-none">
           {stockName && (
-            <div className="font-black text-2xl tracking-tighter leading-none text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)] shrink-0">
+            <div className="font-black text-base sm:text-2xl tracking-tighter leading-none text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)] shrink-0">
               {stockName}
             </div>
           )}
           
           {/* Strategy Checkboxes */}
           {strategy && (
-            <div className="flex items-center gap-1 sm:gap-2.5 pointer-events-auto bg-black/50 hover:bg-black/75 backdrop-blur-md px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full border border-white/10 transition-all duration-300">
-              <label className="flex items-center gap-1 cursor-pointer group">
+            <div className="flex items-center gap-0.5 sm:gap-2.5 pointer-events-auto bg-black/50 hover:bg-black/75 backdrop-blur-md px-1.5 py-0.5 sm:px-2.5 sm:py-1 rounded-full border border-white/10 transition-all duration-300 scale-[0.82] sm:scale-100 origin-top-right">
+              <label className="flex items-center gap-0.5 sm:gap-1 cursor-pointer group whitespace-nowrap flex-nowrap shrink-0">
                 <input
                   type="checkbox"
                   checked={!!strategy.notesHighlighted}
                   onChange={(e) => onUpdateNotesHighlighted?.(e.target.checked)}
                   onClick={(e) => e.stopPropagation()}
-                  className="h-3 w-3 rounded border border-white/30 bg-white/5 checked:bg-amber-500 checked:border-amber-500 text-amber-500 focus:ring-0 cursor-pointer accent-amber-500 transition-all scale-90 sm:scale-100"
+                  className="h-2.5 w-2.5 sm:h-3 sm:w-3 rounded border border-white/30 bg-white/5 checked:bg-amber-500 checked:border-amber-500 text-amber-500 focus:ring-0 cursor-pointer accent-amber-500 transition-all shrink-0"
                 />
-                <span className={`text-[9px] font-black sm:text-[10px] select-none transition-colors ${strategy.notesHighlighted ? "text-amber-400" : "text-white/40 group-hover:text-white/80"}`}>
+                <span className={`text-[8.5px] font-bold sm:font-black sm:text-[10px] select-none transition-colors ${strategy.notesHighlighted ? "text-amber-400" : "text-white/40 group-hover:text-white/80"}`}>
                   選取
                 </span>
               </label>
               
-              <label className="flex items-center gap-1 cursor-pointer group">
+              <label className="flex items-center gap-0.5 sm:gap-1 cursor-pointer group whitespace-nowrap flex-nowrap shrink-0">
                 <input
                   type="checkbox"
                   checked={!!strategy.tpChecked}
                   onChange={(e) => onUpdateTPChecked?.(e.target.checked)}
                   onClick={(e) => e.stopPropagation()}
-                  className="h-3 w-3 rounded border border-white/30 bg-white/5 checked:bg-emerald-500 checked:border-emerald-500 text-emerald-500 focus:ring-0 cursor-pointer accent-emerald-500 transition-all scale-90 sm:scale-100"
+                  className="h-2.5 w-2.5 sm:h-3 sm:w-3 rounded border border-white/30 bg-white/5 checked:bg-emerald-500 checked:border-emerald-500 text-emerald-500 focus:ring-0 cursor-pointer accent-emerald-500 transition-all shrink-0"
                 />
-                <span className={`text-[9px] font-black sm:text-[10px] select-none transition-colors ${strategy.tpChecked ? "text-emerald-400" : "text-white/40 group-hover:text-white/80"}`}>
+                <span className={`text-[8.5px] font-bold sm:font-black sm:text-[10px] select-none transition-colors ${strategy.tpChecked ? "text-emerald-400" : "text-white/40 group-hover:text-white/80"}`}>
                   止盈
                 </span>
               </label>
               
-              <label className="flex items-center gap-1 cursor-pointer group">
+              <label className="flex items-center gap-0.5 sm:gap-1 cursor-pointer group whitespace-nowrap flex-nowrap shrink-0">
                 <input
                   type="checkbox"
                   checked={!!strategy.slChecked}
                   onChange={(e) => onUpdateSLChecked?.(e.target.checked)}
                   onClick={(e) => e.stopPropagation()}
-                  className="h-3 w-3 rounded border border-white/30 bg-white/5 checked:bg-rose-500 checked:border-rose-500 text-rose-500 focus:ring-0 cursor-pointer accent-rose-500 transition-all scale-90 sm:scale-100"
+                  className="h-2.5 w-2.5 sm:h-3 sm:w-3 rounded border border-white/30 bg-white/5 checked:bg-rose-500 checked:border-rose-500 text-rose-500 focus:ring-0 cursor-pointer accent-rose-500 transition-all shrink-0"
                 />
-                <span className={`text-[9px] font-black sm:text-[10px] select-none transition-colors ${strategy.slChecked ? "text-rose-400" : "text-white/40 group-hover:text-white/80"}`}>
+                <span className={`text-[8.5px] font-bold sm:font-black sm:text-[10px] select-none transition-colors ${strategy.slChecked ? "text-rose-400" : "text-white/40 group-hover:text-white/80"}`}>
                   止損
                 </span>
               </label>
               
-              <label className="flex items-center gap-1 cursor-pointer group">
+              <label className="flex items-center gap-0.5 sm:gap-1 cursor-pointer group whitespace-nowrap flex-nowrap shrink-0">
                 <input
                   type="checkbox"
                   checked={!!strategy.addChecked}
                   onChange={(e) => onUpdateAddChecked?.(e.target.checked)}
                   onClick={(e) => e.stopPropagation()}
-                  className="h-3 w-3 rounded border border-white/30 bg-white/5 checked:bg-sky-500 checked:border-sky-500 text-sky-500 focus:ring-0 cursor-pointer accent-sky-500 transition-all scale-90 sm:scale-100"
+                  className="h-2.5 w-2.5 sm:h-3 sm:w-3 rounded border border-white/30 bg-white/5 checked:bg-sky-500 checked:border-sky-500 text-sky-500 focus:ring-0 cursor-pointer accent-sky-500 transition-all shrink-0"
                 />
-                <span className={`text-[9px] font-black sm:text-[10px] select-none transition-colors ${strategy.addChecked ? "text-sky-400" : "text-white/40 group-hover:text-white/80"}`}>
+                <span className={`text-[8.5px] font-bold sm:font-black sm:text-[10px] select-none transition-colors ${strategy.addChecked ? "text-sky-400" : "text-white/40 group-hover:text-white/80"}`}>
                   加碼
                 </span>
               </label>
               
-              <label className="flex items-center gap-1 cursor-pointer group">
+              <label className="flex items-center gap-0.5 sm:gap-1 cursor-pointer group whitespace-nowrap flex-nowrap shrink-0">
                 <input
                   type="checkbox"
                   checked={!!strategy.closeChecked}
                   onChange={(e) => onUpdateCloseChecked?.(e.target.checked)}
                   onClick={(e) => e.stopPropagation()}
-                  className="h-3 w-3 rounded border border-white/30 bg-white/5 checked:bg-violet-500 checked:border-violet-500 text-violet-500 focus:ring-0 cursor-pointer accent-violet-500 transition-all scale-90 sm:scale-100"
+                  className="h-2.5 w-2.5 sm:h-3 sm:w-3 rounded border border-white/30 bg-white/5 checked:bg-violet-500 checked:border-violet-500 text-violet-500 focus:ring-0 cursor-pointer accent-violet-500 transition-all shrink-0"
                 />
-                <span className={`text-[9px] font-black sm:text-[10px] select-none transition-colors ${strategy.closeChecked ? "text-violet-400" : "text-white/40 group-hover:text-white/80"}`}>
+                <span className={`text-[8.5px] font-bold sm:font-black sm:text-[10px] select-none transition-colors ${strategy.closeChecked ? "text-violet-400" : "text-white/40 group-hover:text-white/80"}`}>
                   平倉
+                </span>
+              </label>
+              
+              <label className="flex items-center gap-0.5 sm:gap-1 cursor-pointer group whitespace-nowrap flex-nowrap shrink-0" id="tickbox-observe-label">
+                <input
+                  id="tickbox-observe-input"
+                  type="checkbox"
+                  checked={!!strategy.observeChecked}
+                  onChange={(e) => onUpdateObserveChecked?.(e.target.checked)}
+                  onClick={(e) => e.stopPropagation()}
+                  className="h-2.5 w-2.5 sm:h-3 sm:w-3 rounded border border-white/30 bg-white/5 checked:bg-[#C9C9C9] checked:border-[#C9C9C9] text-[#C9C9C9] focus:ring-0 cursor-pointer accent-[#C9C9C9] transition-all shrink-0"
+                />
+                <span className={`text-[8.5px] font-bold sm:font-black sm:text-[10px] select-none transition-colors ${strategy.observeChecked ? "text-[#C9C9C9]" : "text-white/40 group-hover:text-white/80"}`}>
+                  觀察
                 </span>
               </label>
             </div>
@@ -1607,100 +1635,184 @@ export const StockCardVisualizer: React.FC<Props> = ({
         onClick={(e) => e.stopPropagation()}
         className="flex flex-col gap-1.5 mt-1 shrink-0 z-50 pointer-events-auto select-none w-full px-1 animate-fadeIn"
       >
-        {/* Row 1: Dual Observation Signals Tickboxes (Visually partitioned capsules - Green vs Red/Pink in a tight single row) */}
-        <div className="flex justify-center w-full">
-          <div className="flex flex-row items-center justify-center gap-1 sm:gap-1.5 w-full max-w-full flex-wrap transition-all duration-300 px-0.5">
-            {/* Buy Section (Green Rounded Border Capsule) */}
-            <div className="flex items-center gap-1 px-1.5 py-0.5 bg-black/95 border border-emerald-500/25 hover:border-emerald-500/40 bg-emerald-500/[0.03] hover:bg-emerald-500/[0.06] hover:shadow-[0_0_8px_rgba(16,185,129,0.1)] rounded-md transition-all duration-300 shrink-0">
-              <span className="text-[8px] font-black sm:text-[8.5px] text-emerald-400 select-none bg-emerald-500/10 px-0.75 py-0.25 rounded leading-none shrink-0 mr-0.5">
-                買進
+        {/* Row 1: Main Path (主力路徑) Phase Tickboxes with Dynamic Stage Selection (前期, 中期, 後期) */}
+        <div className="flex justify-center w-full my-1">
+          <div className="flex flex-row flex-wrap sm:flex-nowrap items-center justify-center gap-1 sm:gap-1.5 p-1 px-1.5 sm:px-2.5 bg-black/95 border border-[#3c1b63] rounded-2xl sm:rounded-full shadow-[0_0_12px_rgba(217,70,239,0.06)] shrink-0 overflow-visible max-w-full select-none">
+            {/* Permanent Label "主力路徑" */}
+            <div className="flex items-center justify-center bg-fuchsia-500/10 px-1.5 sm:px-2 py-0.5 rounded-full shrink-0">
+              <span className="text-[8px] sm:text-[9px] font-black text-fuchsia-400 select-none tracking-wider whitespace-nowrap">
+                主力路徑
               </span>
-              
-              <label className="flex items-center gap-[2px] cursor-pointer group">
-                <input
-                  type="checkbox"
-                  checked={!!strategy?.breakoutResistanceChecked}
-                  onChange={(e) => onUpdateStrategyField?.('breakoutResistanceChecked', e.target.checked)}
-                  onClick={(e) => e.stopPropagation()}
-                  className="h-2 w-2 rounded border border-emerald-500/30 bg-white/5 checked:bg-emerald-500 checked:border-emerald-500 text-emerald-500 focus:ring-0 cursor-pointer accent-emerald-500 transition-all scale-90"
-                />
-                <span className={`text-[8px] font-black sm:text-[8.5px] select-none transition-colors whitespace-nowrap ${strategy?.breakoutResistanceChecked ? "text-emerald-400 font-bold" : "text-white/40 group-hover:text-white/80"}`}>
-                  等突破壓力
-                </span>
-              </label>
-
-              <label className="flex items-center gap-[2px] cursor-pointer group">
-                <input
-                  type="checkbox"
-                  checked={!!strategy?.closeToSupportChecked}
-                  onChange={(e) => onUpdateStrategyField?.('closeToSupportChecked', e.target.checked)}
-                  onClick={(e) => e.stopPropagation()}
-                  className="h-2 w-2 rounded border border-emerald-500/30 bg-white/5 checked:bg-emerald-500 checked:border-emerald-500 text-emerald-500 focus:ring-0 cursor-pointer accent-emerald-500 transition-all scale-90"
-                />
-                <span className={`text-[8px] font-black sm:text-[8.5px] select-none transition-colors whitespace-nowrap ${strategy?.closeToSupportChecked ? "text-emerald-400 font-bold" : "text-white/40 group-hover:text-white/80"}`}>
-                  靠近支撐
-                </span>
-              </label>
             </div>
 
-            {/* Sell / Close Section (Red/Pink Rounded Border Capsule) */}
-            <div className="flex items-center gap-1 px-1.5 py-0.5 bg-black/95 border border-rose-500/25 hover:border-rose-500/40 bg-rose-500/[0.03] hover:bg-rose-500/[0.06] hover:shadow-[0_0_8px_rgba(244,63,94,0.1)] rounded-md transition-all duration-300 shrink-0 select-none">
-              <span className="text-[8px] font-black sm:text-[8.5px] text-pink-400 select-none bg-pink-500/10 px-0.75 py-0.25 rounded leading-none shrink-0 mr-0.5">
-                融券/平倉
-              </span>
+            {[
+              {
+                key: "accumulation",
+                label: "吸籌",
+                checkedKey: "pathAccumulationChecked",
+                stageKey: "pathAccumulationStage",
+                theme: {
+                  activeBg: "rgba(245, 158, 11, 0.12)",
+                  activeBorder: "#F59E0B",
+                  activeText: "#FBBF24",
+                }
+              },
+              {
+                key: "wash",
+                label: "洗盤",
+                checkedKey: "pathWashChecked",
+                stageKey: "pathWashStage",
+                theme: {
+                  activeBg: "rgba(245, 158, 11, 0.12)",
+                  activeBorder: "#F59E0B",
+                  activeText: "#FBBF24",
+                }
+              },
+              {
+                key: "test",
+                label: "試升",
+                checkedKey: "pathTestChecked",
+                stageKey: "pathTestStage",
+                theme: {
+                  activeBg: "rgba(245, 158, 11, 0.12)",
+                  activeBorder: "#F59E0B",
+                  activeText: "#FBBF24",
+                }
+              },
+              {
+                key: "rally",
+                label: "拉升",
+                checkedKey: "pathRallyChecked",
+                stageKey: "pathRallyStage",
+                theme: {
+                  activeBg: "rgba(34, 197, 94, 0.12)",
+                  activeBorder: "#22C55E",
+                  activeText: "#4ADE80",
+                }
+              },
+              {
+                key: "distribution",
+                label: "出貨",
+                checkedKey: "pathDistributionChecked",
+                stageKey: "pathDistributionStage",
+                theme: {
+                  activeBg: "rgba(239, 68, 68, 0.12)",
+                  activeBorder: "#EF4444",
+                  activeText: "#F87171",
+                }
+              }
+            ].map((phase) => {
+              const isChecked = !!strategy?.[phase.checkedKey as keyof typeof strategy];
+              const currentStage = (strategy?.[phase.stageKey as keyof typeof strategy] as string) || "前期";
               
-              <label className="flex items-center gap-[2px] cursor-pointer group">
-                <input
-                  type="checkbox"
-                  checked={!!strategy?.breakdownSupportChecked}
-                  onChange={(e) => onUpdateStrategyField?.('breakdownSupportChecked', e.target.checked)}
-                  onClick={(e) => e.stopPropagation()}
-                  className="h-2 w-2 rounded border border-rose-500/30 bg-white/5 checked:bg-rose-500 checked:border-rose-500 text-rose-500 focus:ring-0 cursor-pointer accent-rose-500 transition-all scale-90"
-                />
-                <span className={`text-[8px] font-black sm:text-[8.5px] select-none transition-colors whitespace-nowrap ${strategy?.breakdownSupportChecked ? "text-rose-400 font-bold" : "text-white/40 group-hover:text-white/80"}`}>
-                  跌破支撐
-                </span>
-              </label>
+              const activeBg = isChecked ? phase.theme.activeBg : "transparent";
+              const activeBorder = isChecked ? phase.theme.activeBorder : "#3F3F5A";
+              const activeText = isChecked ? phase.theme.activeText : "#888888";
 
-              <label className="flex items-center gap-[2px] cursor-pointer group">
-                <input
-                  type="checkbox"
-                  checked={!!strategy?.closeToSLChecked}
-                  onChange={(e) => onUpdateStrategyField?.('closeToSLChecked', e.target.checked)}
-                  onClick={(e) => e.stopPropagation()}
-                  className="h-2 w-2 rounded border border-rose-500/30 bg-white/5 checked:bg-rose-500 checked:border-rose-500 text-rose-500 focus:ring-0 cursor-pointer accent-rose-500 transition-all scale-90"
-                />
-                <span className={`text-[8px] font-black sm:text-[8.5px] select-none transition-colors whitespace-nowrap ${strategy?.closeToSLChecked ? "text-rose-400 font-bold" : "text-white/40 group-hover:text-white/80"}`}>
-                  靠近止損
-                </span>
-              </label>
+              const handleDotClick = (e: React.MouseEvent) => {
+                e.stopPropagation();
+                const nextChecked = !isChecked;
+                onUpdateStrategyField?.(phase.checkedKey, nextChecked);
+                if (nextChecked) {
+                  if (!strategy?.[phase.stageKey as keyof typeof strategy]) {
+                    onUpdateStrategyField?.(phase.stageKey, "前期");
+                  }
+                  setOpenSubField(phase.key);
+                } else {
+                  if (openSubField === phase.key) {
+                    setOpenSubField(null);
+                  }
+                }
+              };
 
-              <label className="flex items-center gap-[2px] cursor-pointer group">
-                <input
-                  type="checkbox"
-                  checked={!!strategy?.breakdownSLChecked}
-                  onChange={(e) => onUpdateStrategyField?.('breakdownSLChecked', e.target.checked)}
-                  onClick={(e) => e.stopPropagation()}
-                  className="h-2 w-2 rounded border border-rose-500/30 bg-white/5 checked:bg-rose-500 checked:border-rose-500 text-rose-500 focus:ring-0 cursor-pointer accent-rose-500 transition-all scale-90"
-                />
-                <span className={`text-[8px] font-black sm:text-[8.5px] select-none transition-colors whitespace-nowrap ${strategy?.breakdownSLChecked ? "text-rose-400 font-bold" : "text-white/40 group-hover:text-white/80"}`}>
-                  跌破止損
-                </span>
-              </label>
+              const handleLabelClick = (e: React.MouseEvent) => {
+                e.stopPropagation();
+                if (isChecked) {
+                  setOpenSubField(openSubField === phase.key ? null : phase.key);
+                } else {
+                  onUpdateStrategyField?.(phase.checkedKey, true);
+                  if (!strategy?.[phase.stageKey as keyof typeof strategy]) {
+                    onUpdateStrategyField?.(phase.stageKey, "前期");
+                  }
+                  setOpenSubField(phase.key);
+                }
+              };
 
-              <label className="flex items-center gap-[2px] cursor-pointer group">
-                <input
-                  type="checkbox"
-                  checked={!!strategy?.closeToResistanceChecked}
-                  onChange={(e) => onUpdateStrategyField?.('closeToResistanceChecked', e.target.checked)}
-                  onClick={(e) => e.stopPropagation()}
-                  className="h-2 w-2 rounded border border-rose-500/30 bg-white/5 checked:bg-rose-500 checked:border-rose-500 text-rose-500 focus:ring-0 cursor-pointer accent-rose-500 transition-all scale-90"
-                />
-                <span className={`text-[8px] font-black sm:text-[8.5px] select-none transition-colors whitespace-nowrap ${strategy?.closeToResistanceChecked ? "text-rose-400 font-bold" : "text-white/40 group-hover:text-white/80"}`}>
-                  接近壓力
-                </span>
-              </label>
-            </div>
+              return (
+                <div key={phase.key} className="relative flex items-center shrink-0">
+                  <div
+                    onClick={handleLabelClick}
+                    style={{
+                      backgroundColor: activeBg,
+                      borderColor: activeBorder,
+                    }}
+                    className="flex items-center px-1 sm:px-2 py-0.5 border rounded-full transition-all duration-300 select-none shrink-0 cursor-pointer hover:brightness-110"
+                  >
+                    {/* Circle Dot Zone */}
+                    {isChecked ? (
+                      <span
+                        onClick={handleDotClick}
+                        className="w-1 h-1 sm:w-1.5 sm:h-1.5 rounded-full mr-1 sm:mr-1.5 flex-shrink-0 cursor-pointer transition-transform hover:scale-125"
+                        style={{ backgroundColor: phase.theme.activeBorder }}
+                      />
+                    ) : (
+                      <span
+                        onClick={handleDotClick}
+                        className="w-1 h-1 sm:w-1.5 sm:h-1.5 rounded-full border border-[#3F3F5A] mr-1 sm:mr-1.5 flex-shrink-0 cursor-pointer hover:border-white/50 transition-colors"
+                      />
+                    )}
+
+                    {/* Text / Dropdown Zone */}
+                    <div
+                      style={{ color: activeText }}
+                      className="flex items-center gap-0.5 text-[7.5px] sm:text-[8.5px] font-black whitespace-nowrap select-none"
+                    >
+                      <span>{phase.label}</span>
+                      {isChecked && (
+                        <span className="text-[6.8px] sm:text-[7.5px] font-black opacity-90">
+                          ({currentStage})
+                        </span>
+                      )}
+                      {isChecked && (
+                        <span className="text-[6.8px] sm:text-[7.5px] ml-0.5 opacity-90 select-none">▾</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Dropdown Popover */}
+                  {openSubField === phase.key && (
+                    <div
+                      onClick={(e) => e.stopPropagation()}
+                      className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 p-0.5 bg-[#0F0F1E] border border-[#3F3F5A]/40 rounded-full shadow-[0_4px_24px_rgba(0,0,0,0.9)] flex flex-row items-center gap-0.5 z-[100] animate-fadeIn whitespace-nowrap"
+                    >
+                      {/* Triangle Pointer */}
+                      <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-[1px] border-4 border-transparent border-t-[#0F0F1E]" />
+                      {["前期", "中期", "後期"].map((stg) => {
+                        const isActive = currentStage === stg;
+                        return (
+                          <button
+                            key={stg}
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onUpdateStrategyField?.(phase.stageKey, stg);
+                              setOpenSubField(null);
+                            }}
+                            className={`px-3 py-1 text-[8px] sm:text-[8.5px] font-black rounded-full transition-all cursor-pointer whitespace-nowrap ${
+                              isActive
+                                ? "bg-[#7C3AED] text-[#EDE9FE] shadow-md font-black"
+                                : "text-[#555555] hover:text-[#EDE9FE]/80 bg-transparent"
+                            }`}
+                          >
+                            {stg}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
 

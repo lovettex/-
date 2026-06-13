@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
 import { format } from 'date-fns';
 import { Timestamp, collection, writeBatch, doc, serverTimestamp } from 'firebase/firestore';
-import { Trash2, BarChart3, ChevronDown, ChevronUp, Gamepad2, ShieldCheck, Upload, Download } from 'lucide-react';
+import { Trash2, BarChart3, ChevronDown, ChevronUp, Gamepad2, ShieldCheck, Upload, Download, ChevronLeft } from 'lucide-react';
 import { toast } from "sonner";
 import { motion, AnimatePresence } from 'motion/react';
 import { db } from '../lib/firebase';
@@ -358,6 +358,19 @@ export default function StockTabDetail() {
 
   return (
     <div className="space-y-6">
+      {/* Breadcrumb Navigation */}
+      <div className="h-[36px] flex items-center gap-2 bg-transparent select-none">
+        <button
+          onClick={() => navigate('/', { state: { autoFlipTabId: id } })}
+          className="flex items-center gap-1 text-[12px] font-bold transition-all hover:opacity-80 cursor-pointer"
+          style={{ color: 'rgba(255,255,255,0.45)' }}
+        >
+          <ChevronLeft className="w-3.5 h-3.5" />
+          <span>交易總覽</span>
+        </button>
+        <span className="text-[12px]" style={{ color: 'rgba(255,255,255,0.25)' }}>/</span>
+        <span className="text-[12px] font-bold" style={{ color: 'rgba(255,255,255,0.75)' }}>{tab.symbol}</span>
+      </div>
       <ScrollIn>
         <div className="glass-panel border border-white/10 bg-white/5 p-4 sm:py-3 sm:px-4 rounded-2xl shadow-sm flex flex-col xl:flex-row xl:items-center justify-between gap-4 md:gap-4 overflow-visible relative">
           <div className="flex flex-col md:flex-row md:items-center gap-4 md:gap-6 w-full xl:w-auto relative z-10">
