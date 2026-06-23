@@ -1,6 +1,8 @@
 import React, { useMemo, useState, useRef } from "react";
 import { PlannedOrder, ChartAnnotation } from "../types";
-import { MousePointer, Minus, Square, Type, Trash2, Eraser, Undo2, ArrowUpRight, Move } from "lucide-react";
+import { MousePointer, Minus, Square, Type, Trash2, Eraser, Undo2, ArrowUpRight, Move, Download, Share2, Camera, Loader2 } from "lucide-react";
+import html2canvas from "html2canvas";
+import { toast } from "sonner";
 
 interface Props {
   plannedOrders: PlannedOrder[];
@@ -10,6 +12,7 @@ interface Props {
   annotations?: ChartAnnotation[];
   onUpdateAnnotations?: (annotations: ChartAnnotation[]) => void;
   averageCost?: number;
+  averageCostQuantity?: number;
   stockName?: string;
   rating?: number;
   qualityScore?: number;
@@ -54,31 +57,23 @@ interface Props {
 }
 
 function resolveCollisions<T extends { rawY: number; isFixed?: boolean }>(
-
   items: T[],
   minDisp: number,
 ): (T & { y: number })[] {
   if (items.length === 0) return [];
+  
   let sorted = [...items]
     .sort((a, b) => a.rawY - b.rawY)
     .map((item) => ({ ...item, y: item.rawY }));
 
-  for (let iter = 0; iter < 50; iter++) {
+  const minY = 14;
+  const maxY = 97;
+
+  // 100 rounds of relaxation
+  for (let iter = 0; iter < 100; iter++) {
     let changed = false;
 
-    for (let i = 0; i < sorted.length; i++) {
-      if (!sorted[i].isFixed) {
-        if (sorted[i].y < 3) {
-          sorted[i].y = 3;
-          changed = true;
-        }
-        if (sorted[i].y > 97) {
-          sorted[i].y = 97;
-          changed = true;
-        }
-      }
-    }
-
+    // Standard push-apart
     for (let i = 0; i < sorted.length - 1; i++) {
       const diff = sorted[i + 1].y - sorted[i].y;
       if (diff < minDisp) {
@@ -96,27 +91,62 @@ function resolveCollisions<T extends { rawY: number; isFixed?: boolean }>(
         }
       }
     }
+
+    // Dynamic, cooperative bounds clamping (pushes the entire stack if standard clamping squeezes it)
+    if (sorted[0].y < minY && !sorted[0].isFixed) {
+      const push = minY - sorted[0].y;
+      for (let j = 0; j < sorted.length; j++) {
+        if (!sorted[j].isFixed) sorted[j].y += push;
+      }
+      changed = true;
+    }
+
+    const lastIdx = sorted.length - 1;
+    if (sorted[lastIdx].y > maxY && !sorted[lastIdx].isFixed) {
+      const push = sorted[lastIdx].y - maxY;
+      for (let j = 0; j <= lastIdx; j++) {
+        if (!sorted[j].isFixed) sorted[j].y -= push;
+      }
+      changed = true;
+    }
+
     if (!changed) break;
   }
 
+  // Final strict clamps and guarantee passes
+  for (let i = 0; i < sorted.length; i++) {
+    if (!sorted[i].isFixed) {
+      sorted[i].y = Math.max(minY, Math.min(maxY, sorted[i].y));
+    }
+  }
+
+  // Forward sweep guarantee
   for (let i = 0; i < sorted.length - 1; i++) {
     const diff = sorted[i + 1].y - sorted[i].y;
-    if (diff < minDisp * 0.9) {
-      if (!sorted[i + 1].isFixed && !sorted[i].isFixed) {
-        sorted[i + 1].y = sorted[i].y + minDisp * 0.9;
-      } else if (!sorted[i + 1].isFixed && sorted[i].isFixed) {
-        sorted[i + 1].y = sorted[i].y + minDisp * 0.9;
-      } else if (sorted[i + 1].isFixed && !sorted[i].isFixed) {
-        sorted[i].y = sorted[i + 1].y - minDisp * 0.9;
+    if (diff < minDisp * 0.95) {
+      if (!sorted[i + 1].isFixed) {
+        sorted[i + 1].y = Math.min(maxY, sorted[i].y + minDisp * 0.95);
       }
     }
   }
 
+  // Backward sweep guarantee to balance space distribution
+  for (let i = sorted.length - 1; i > 0; i--) {
+    const diff = sorted[i].y - sorted[i - 1].y;
+    if (diff < minDisp * 0.95) {
+      if (!sorted[i - 1].isFixed) {
+        sorted[i - 1].y = Math.max(minY, sorted[i].y - minDisp * 0.95);
+      }
+    }
+  }
+
+  // Final hard clamping to keep within safe physical boundaries
   sorted.forEach((item) => {
     if (!item.isFixed) {
-      item.y = Math.max(3, Math.min(97, item.y));
+      item.y = Math.max(minY, Math.min(maxY, item.y));
     }
   });
+
   return sorted;
 }
 
@@ -178,6 +208,103 @@ export const useStockPrice = (symbol?: string, initialPrice: number = 0) => {
   return { price, isLoading };
 };
 
+interface StockBar {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+const computeMA = (bars: StockBar[], period: number): (number | null)[] => {
+  const ma: (number | null)[] = [];
+  for (let i = 0; i < bars.length; i++) {
+    if (i < period - 1) {
+      ma.push(null);
+    } else {
+      let sum = 0;
+      for (let j = 0; j < period; j++) {
+        sum += bars[i - j].close;
+      }
+      ma.push(sum / period);
+    }
+  }
+  return ma;
+};
+
+const computeRSI = (bars: StockBar[], period: number = 14): (number | null)[] => {
+  const rsi: (number | null)[] = [];
+  if (bars.length < period + 1) {
+    return Array(bars.length).fill(null);
+  }
+  
+  const gains: number[] = [];
+  const losses: number[] = [];
+  for (let i = 1; i < bars.length; i++) {
+    const diff = bars[i].close - bars[i - 1].close;
+    gains.push(diff > 0 ? diff : 0);
+    losses.push(diff < 0 ? -diff : 0);
+  }
+  
+  let avgGain = 0;
+  let avgLoss = 0;
+  for (let i = 0; i < period; i++) {
+    avgGain += gains[i];
+    avgLoss += losses[i];
+  }
+  avgGain /= period;
+  avgLoss /= period;
+  
+  for (let i = 0; i <= period; i++) {
+    rsi.push(null);
+  }
+  
+  rsi[period] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+  
+  for (let i = period; i < gains.length; i++) {
+    avgGain = (avgGain * (period - 1) + gains[i]) / period;
+    avgLoss = (avgLoss * (period - 1) + losses[i]) / period;
+    
+    const rs = avgLoss === 0 ? 999999 : avgGain / avgLoss;
+    const rsiVal = 100 - 100 / (1 + rs);
+    rsi.push(rsiVal);
+  }
+  
+  return rsi;
+};
+
+const computeEMA = (values: number[], period: number): number[] => {
+  const ema: number[] = [];
+  if (values.length === 0) return ema;
+  
+  const k = 2 / (period + 1);
+  ema[0] = values[0];
+  for (let i = 1; i < values.length; i++) {
+    ema[i] = values[i] * k + ema[i - 1] * (1 - k);
+  }
+  return ema;
+};
+
+const computeMACD = (bars: StockBar[]) => {
+  const closes = bars.map(b => b.close);
+  const ema12 = computeEMA(closes, 12);
+  const ema26 = computeEMA(closes, 26);
+  
+  const dif: number[] = [];
+  for (let i = 0; i < bars.length; i++) {
+    dif.push(ema12[i] - ema26[i]);
+  }
+  
+  const dea = computeEMA(dif, 9);
+  const histogram: number[] = [];
+  for (let i = 0; i < bars.length; i++) {
+    histogram.push(dif[i] - dea[i]);
+  }
+  
+  return { dif, dea, histogram };
+};
+
 export const StockCardVisualizer: React.FC<Props> = ({
   plannedOrders,
   currentPrice = 0,
@@ -186,6 +313,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
   annotations = [],
   onUpdateAnnotations,
   averageCost,
+  averageCostQuantity,
   stockName,
   rating,
   qualityScore,
@@ -233,6 +361,10 @@ export const StockCardVisualizer: React.FC<Props> = ({
   const [inputCoords, setInputCoords] = useState<{ x: number, y: number } | null>(null);
   const [inputText, setInputText] = useState<string>('');
 
+  // Export states
+  const [showExportModal, setShowExportModal] = useState<boolean>(false);
+  const [exportLoading, setExportLoading] = useState<boolean>(false);
+
   // Local undo history for visual annotations
   const [history, setHistory] = useState<ChartAnnotation[][]>([]);
 
@@ -246,6 +378,728 @@ export const StockCardVisualizer: React.FC<Props> = ({
     const prevState = history[history.length - 1];
     setHistory((prev) => prev.slice(0, -1));
     onUpdateAnnotations?.(prevState);
+  };
+
+  // 1. Export Screenshot of the current Visualizer
+  // 1. Export Screenshot of the current Visualizer - updated to capture Card Front
+  const handleExportVisualizer = async () => {
+    if (!canvasRef.current) return;
+
+    // Helper to replace CSS Color 4 functions in strings (handles nested parens safely)
+    const sanitizeColorString = (val: string): string => {
+      if (!val) return val;
+      const targets = ["oklch(", "oklab(", "color-mix(", "light-dark("];
+      let res = val;
+      
+      while (true) {
+        let earliestIdx = -1;
+        let foundTarget = "";
+        for (const target of targets) {
+          const idx = res.toLowerCase().indexOf(target);
+          if (idx !== -1) {
+            if (earliestIdx === -1 || idx < earliestIdx) {
+              earliestIdx = idx;
+              foundTarget = target;
+            }
+          }
+        }
+        
+        if (earliestIdx === -1) {
+          break; // No more targets found
+        }
+        
+        // Find the matching close parenthesis for foundTarget
+        let openCount = 1;
+        let endIdx = -1;
+        for (let i = earliestIdx + foundTarget.length; i < res.length; i++) {
+          if (res[i] === "(") {
+            openCount++;
+          } else if (res[i] === ")") {
+            openCount--;
+            if (openCount === 0) {
+              endIdx = i;
+              break;
+            }
+          }
+        }
+        
+        if (endIdx !== -1) {
+          res = res.substring(0, earliestIdx) + "rgba(100, 100, 100, 0.8)" + res.substring(endIdx + 1);
+        } else {
+          res = res.substring(0, earliestIdx) + "rgba(100, 100, 100, 0.8)" + res.substring(earliestIdx + foundTarget.length);
+        }
+      }
+      return res;
+    };
+
+    // Override window.getComputedStyle to intercept oklch/oklab/color-mix computed colors during screenshot
+    const originalGetComputedStyle = window.getComputedStyle;
+    window.getComputedStyle = function (elt, pseudoElt) {
+      const style = originalGetComputedStyle(elt, pseudoElt);
+      return new Proxy(style, {
+        get(target, prop, receiver) {
+          if (prop === "getPropertyValue") {
+            return function (propertyName: string) {
+              const val = target.getPropertyValue(propertyName);
+              if (typeof val === "string") {
+                if (
+                  val.includes("oklch") ||
+                  val.includes("oklab") ||
+                  val.includes("color-mix") ||
+                  val.includes("light-dark")
+                ) {
+                  return sanitizeColorString(val);
+                }
+              }
+              return val;
+            };
+          }
+          
+          // Safeguard native prototype getters to avoid Illegal invocation error on host object proxies
+          try {
+            let currentProto = Object.getPrototypeOf(target);
+            while (currentProto) {
+              const desc = Object.getOwnPropertyDescriptor(currentProto, prop);
+              if (desc) {
+                if (desc.get) {
+                  // Bind getter 'this' to actual native element instead of the proxy
+                  return desc.get.call(target);
+                }
+                if (desc.value !== undefined) {
+                  const val = desc.value;
+                  if (typeof val === "function") {
+                    return val.bind(target);
+                  }
+                  return val;
+                }
+              }
+              currentProto = Object.getPrototypeOf(currentProto);
+            }
+          } catch (protoErr) {
+            // Ignore prototype lookup issues and fallback
+          }
+
+          const val = Reflect.get(target, prop);
+          if (typeof val === "function") {
+            return val.bind(target);
+          }
+          if (typeof val === "string") {
+            if (
+              val.includes("oklch") ||
+              val.includes("oklab") ||
+              val.includes("color-mix") ||
+              val.includes("light-dark")
+            ) {
+              return sanitizeColorString(val);
+            }
+          }
+          return val;
+        }
+      });
+    };
+
+    // Find the front of the card (.card-front) relative to this visualizer's canvasRef
+    const parentContainer = canvasRef.current.closest(".slide-drawer-inner");
+    const cardFront = parentContainer?.querySelector(".card-front") as HTMLElement | null;
+    const targetElement = cardFront || canvasRef.current;
+
+    let originalTransform = "";
+    let originalTransition = "";
+
+    if (cardFront) {
+      originalTransform = cardFront.style.transform;
+      originalTransition = cardFront.style.transition;
+      
+      // Temporarily override the transform with high !important priority to place it in active view for screenshotting
+      cardFront.style.setProperty("transform", "translateY(0)", "important");
+      cardFront.style.setProperty("transition", "none", "important");
+    }
+
+    // Temporarily sanitize style rules with oklch, oklab, and color-mix to prevent html2canvas crashing
+    const restoredRules: { sheet: CSSStyleSheet; ruleText: string; index: number }[] = [];
+    const cssStyleSheets = Array.from(document.styleSheets) as CSSStyleSheet[];
+    
+    for (const sheet of cssStyleSheets) {
+      try {
+        if (!sheet.cssRules) continue;
+        // Go backwards to safely delete rules by index without affecting outer rules
+        for (let j = sheet.cssRules.length - 1; j >= 0; j--) {
+          const rule = sheet.cssRules[j];
+          if (rule && rule.cssText) {
+            const cssText = rule.cssText;
+            if (
+              cssText.includes("oklch") || 
+              cssText.includes("oklab") || 
+              cssText.includes("color-mix") ||
+              cssText.includes("light-dark")
+            ) {
+              // Store original rule to restore after screenshot
+              restoredRules.push({
+                sheet,
+                ruleText: cssText,
+                index: j
+              });
+              
+              // Remove the problematic rule
+              sheet.deleteRule(j);
+              
+              // Rewrite rule to replace unsupported CSS Color 4 functions with safe RGB/RGBA fallback
+              const sanitizedText = sanitizeColorString(cssText);
+              
+              try {
+                sheet.insertRule(sanitizedText, j);
+              } catch (insErr) {
+                // If the rewritten version can't be inserted, leave it removed
+              }
+            }
+          }
+        }
+      } catch (e) {
+        // Ignore CORS-restricted stylesheets
+      }
+    }
+
+    try {
+      const canvas = await html2canvas(targetElement, {
+        backgroundColor: "#16161a",
+        scale: 2.5, // Ultra sharp high-res export
+        logging: false,
+        useCORS: true,
+        allowTaint: true,
+      });
+      const link = document.createElement("a");
+      link.download = `${stockName || "stock"}_card_front_${Date.now()}.png`;
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+    } catch (error: any) {
+      console.error("Export card front failed:", error);
+      toast.error("截圖個股卡片正面失敗，請再試一次。");
+    } finally {
+      // Restore getComputedStyle
+      window.getComputedStyle = originalGetComputedStyle;
+
+      // Restore card front's original transforms
+      if (cardFront) {
+        if (originalTransform) {
+          cardFront.style.setProperty("transform", originalTransform, "important");
+        } else {
+          cardFront.style.removeProperty("transform");
+        }
+        if (originalTransition) {
+          cardFront.style.setProperty("transition", originalTransition, "important");
+        } else {
+          cardFront.style.removeProperty("transition");
+        }
+      }
+
+      // Restore original rules in ascending index order so they align perfectly
+      restoredRules.sort((a, b) => a.index - b.index);
+      for (const item of restoredRules) {
+        try {
+          item.sheet.deleteRule(item.index);
+          item.sheet.insertRule(item.ruleText, item.index);
+        } catch (restoreErr) {
+          console.warn("Failed to restore original CSS rule:", restoreErr);
+        }
+      }
+    }
+  };
+
+  // 2. Export K-Line Chart (incorporating Volume, MA5, MA10, MA20, MACD, RSI indicators)
+  const handleGenerateKLineChart = async () => {
+    if (!stockName) return;
+    try {
+      // Fetch 6 months history from Yahoo Finance via proxy
+      const res = await fetch(`/api/stock/${stockName}?range=6mo`);
+      if (!res.ok) throw new Error("無法取得走勢數據，請檢查個股名稱或網路。");
+      const data = await res.json();
+      
+      const result = data?.chart?.result?.[0];
+      if (!result) throw new Error("走勢數據結構解析異常。");
+      
+      const timestamps = result.timestamp || [];
+      const quote = result.indicators?.quote?.[0] || {};
+      const opens = quote.open || [];
+      const highs = quote.high || [];
+      const lows = quote.low || [];
+      const closes = quote.close || [];
+      const volumes = quote.volume || [];
+      
+      const bars: StockBar[] = [];
+      for (let i = 0; i < timestamps.length; i++) {
+        if (
+          opens[i] !== null && opens[i] !== undefined &&
+          highs[i] !== null && highs[i] !== undefined &&
+          lows[i] !== null && lows[i] !== undefined &&
+          closes[i] !== null && closes[i] !== undefined &&
+          volumes[i] !== null && volumes[i] !== undefined
+        ) {
+          bars.push({
+            time: timestamps[i],
+            open: opens[i],
+            high: highs[i],
+            low: lows[i],
+            close: closes[i],
+            volume: volumes[i]
+          });
+        }
+      }
+      
+      if (bars.length < 30) {
+        throw new Error(`走勢 K 線數據不足以計算技術指標 (僅有 ${bars.length} 筆天數，至少需要 30 天)。`);
+      }
+      
+      // Calculate indicators
+      const ma5 = computeMA(bars, 5);
+      const ma10 = computeMA(bars, 10);
+      const ma20 = computeMA(bars, 20);
+      const rsi14 = computeRSI(bars, 14);
+      const macdResult = computeMACD(bars);
+      
+      // Canvas sizing parameters
+      const width = 1200;
+      const height = 950;
+      
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("建置 Canvas Context2D 失敗。");
+      
+      // 1. Dark background (TradingView style `#131722`)
+      ctx.fillStyle = "#131722";
+      ctx.fillRect(0, 0, width, height);
+      
+      const displayCount = Math.min(65, bars.length);
+      const startIndex = bars.length - displayCount;
+      const endIndex = bars.length;
+      
+      const visibleBars = bars.slice(startIndex, endIndex);
+      const visibleMa5 = ma5.slice(startIndex, endIndex);
+      const visibleMa10 = ma10.slice(startIndex, endIndex);
+      const visibleMa20 = ma20.slice(startIndex, endIndex);
+      const visibleRsi = rsi14.slice(startIndex, endIndex);
+      const visibleMacdDif = macdResult.dif.slice(startIndex, endIndex);
+      const visibleMacdDea = macdResult.dea.slice(startIndex, endIndex);
+      const visibleMacdHist = macdResult.histogram.slice(startIndex, endIndex);
+      
+      // Grid dimensions and partitions
+      const headerHeight = 70;
+      const mainChartTop = headerHeight;
+      const mainChartHeight = 440;
+      const mainChartBottom = mainChartTop + mainChartHeight; // 510
+      
+      const volChartTop = 525;
+      const volChartHeight = 100;
+      const volChartBottom = volChartTop + volChartHeight; // 625
+      
+      const macdChartTop = 640;
+      const macdChartHeight = 110;
+      const macdChartBottom = macdChartTop + macdChartHeight; // 750
+      
+      const rsiChartTop = 765;
+      const rsiChartHeight = 110;
+      const rsiChartBottom = rsiChartTop + rsiChartHeight; // 875
+      
+      const paddingLeft = 45;
+      const paddingRight = 95;
+      const activeWidth = width - paddingLeft - paddingRight; // 1060
+      
+      const getX = (idx: number) => {
+        const step = activeWidth / (displayCount - 1);
+        return paddingLeft + idx * step;
+      };
+      
+      const drawGridLines = (top: number, bottom: number, count: number = 4) => {
+        ctx.strokeStyle = "rgba(42, 46, 57, 0.4)";
+        ctx.lineWidth = 1;
+        const subHeight = bottom - top;
+        for (let j = 0; j <= count; j++) {
+          const y = top + (j * subHeight) / count;
+          ctx.beginPath();
+          ctx.moveTo(paddingLeft, y);
+          ctx.lineTo(width - paddingRight, y);
+          ctx.stroke();
+        }
+      };
+      
+      const drawVerticalGridLines = () => {
+        ctx.strokeStyle = "rgba(42, 46, 57, 0.25)";
+        ctx.lineWidth = 1;
+        const interval = Math.max(1, Math.floor(displayCount / 8));
+        for (let j = 0; j < displayCount; j += interval) {
+          const x = getX(j);
+          ctx.beginPath();
+          ctx.moveTo(x, mainChartTop);
+          ctx.lineTo(x, rsiChartBottom);
+          ctx.stroke();
+        }
+      };
+      
+      drawVerticalGridLines();
+      
+      // ==========================================
+      // DRAW CANVAS HEADER Text
+      // ==========================================
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 22px 'Inter', sans-serif";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText(`${stockName} / Daily`, paddingLeft, 35);
+      
+      const lastBar = visibleBars[visibleBars.length - 1];
+      const prevBar = visibleBars[visibleBars.length - 2] || lastBar;
+      const priceDiff = lastBar.close - prevBar.close;
+      const pctDiff = (priceDiff / prevBar.close) * 100;
+      const changeText = `${priceDiff >= 0 ? "+" : ""}${priceDiff.toFixed(2)} (${priceDiff >= 0 ? "+" : ""}${pctDiff.toFixed(2)}%)`;
+      const changeColor = priceDiff >= 0 ? "#26a69a" : "#ef5350";
+      
+      ctx.font = "bold 18px 'Inter', sans-serif";
+      ctx.fillStyle = changeColor;
+      ctx.fillText(`$${lastBar.close.toFixed(2)}`, paddingLeft + 150, 35);
+      
+      ctx.font = "13px 'Inter', sans-serif";
+      ctx.fillText(changeText, paddingLeft + 300, 35);
+      
+      ctx.font = "12px 'Inter', sans-serif";
+      ctx.fillStyle = "#ffb119";
+      ctx.fillText("MA(5)", paddingLeft + 520, 35);
+      ctx.fillStyle = "#965cf4";
+      ctx.fillText("MA(10)", paddingLeft + 575, 35);
+      ctx.fillStyle = "#13c2c2";
+      ctx.fillText("MA(20)", paddingLeft + 635, 35);
+      ctx.fillStyle = "#9e9eb4";
+      ctx.fillText("Volume", paddingLeft + 695, 35);
+      ctx.fillStyle = "#2962ff";
+      ctx.fillText("MACD(12,26,9)", paddingLeft + 760, 35);
+      ctx.fillStyle = "#c299ff";
+      ctx.fillText("RSI(14)", paddingLeft + 870, 35);
+      
+      const formatBarDate = (timestamp: number) => {
+        const d = new Date(timestamp * 1000);
+        return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`;
+      };
+      
+      ctx.fillStyle = "rgba(158, 158, 180, 0.6)";
+      ctx.font = "12px 'Inter', sans-serif";
+      ctx.textAlign = "right";
+      ctx.fillText(
+        `${formatBarDate(visibleBars[0].time)} - ${formatBarDate(lastBar.time)}`,
+        width - paddingRight,
+        35
+      );
+      
+      // ==========================================
+      // DRAW MAIN PRICE CHART (Candlesticks & MA)
+      // ==========================================
+      drawGridLines(mainChartTop, mainChartBottom, 5);
+      
+      let maxP = -Infinity;
+      let minP = Infinity;
+      for (let j = 0; j < displayCount; j++) {
+        const b = visibleBars[j];
+        if (b.high > maxP) maxP = b.high;
+        if (b.low < minP) minP = b.low;
+        
+        const m5 = visibleMa5[j];
+        if (m5 !== null && m5 !== undefined) {
+          if (m5 > maxP) maxP = m5;
+          if (m5 < minP) minP = m5;
+        }
+        
+        const m10 = visibleMa10[j];
+        if (m10 !== null && m10 !== undefined) {
+          if (m10 > maxP) maxP = m10;
+          if (m10 < minP) minP = m10;
+        }
+        
+        const m20 = visibleMa20[j];
+        if (m20 !== null && m20 !== undefined) {
+          if (m20 > maxP) maxP = m20;
+          if (m20 < minP) minP = m20;
+        }
+      }
+      
+      const priceRange = maxP - minP;
+      const priceBuffer = priceRange * 0.05 || 1.0;
+      const scaleMaxPrice = maxP + priceBuffer;
+      const scaleMinPrice = Math.max(0, minP - priceBuffer);
+      
+      const getPriceY = (price: number) => {
+        return mainChartBottom - ((price - scaleMinPrice) / (scaleMaxPrice - scaleMinPrice)) * mainChartHeight;
+      };
+      
+      const barWidthRatio = 0.65;
+      const maxBarWidth = activeWidth / (displayCount - 1);
+      const candleWidth = maxBarWidth * barWidthRatio;
+      
+      for (let j = 0; j < displayCount; j++) {
+        const b = visibleBars[j];
+        const x = getX(j);
+        
+        const isUp = b.close >= b.open;
+        const color = isUp ? "#26a69a" : "#ef5350";
+        
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        
+        ctx.beginPath();
+        ctx.moveTo(x, getPriceY(b.high));
+        ctx.lineTo(x, getPriceY(b.low));
+        ctx.stroke();
+        
+        ctx.fillStyle = color;
+        const bodyY = getPriceY(Math.max(b.open, b.close));
+        const bodyH = Math.max(1, Math.abs(getPriceY(b.open) - getPriceY(b.close)));
+        ctx.fillRect(x - candleWidth / 2, bodyY, candleWidth, bodyH);
+      }
+      
+      const drawMALine = (maArray: (number | null)[], color: string) => {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        let started = false;
+        for (let j = 0; j < displayCount; j++) {
+          const val = maArray[j];
+          if (val !== null && val !== undefined) {
+            const x = getX(j);
+            const y = getPriceY(val);
+            if (!started) {
+              ctx.moveTo(x, y);
+              started = true;
+            } else {
+              ctx.lineTo(x, y);
+            }
+          }
+        }
+        ctx.stroke();
+      };
+      
+      drawMALine(visibleMa5, "#ffb119");
+      drawMALine(visibleMa10, "#965cf4");
+      drawMALine(visibleMa20, "#13c2c2");
+      
+      ctx.fillStyle = "rgba(158, 158, 180, 0.7)";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.font = "11px 'Inter', sans-serif";
+      
+      for (let j = 0; j <= 5; j++) {
+        const priceVal = scaleMinPrice + (j / 5) * (scaleMaxPrice - scaleMinPrice);
+        const y = getPriceY(priceVal);
+        ctx.fillText(`$${priceVal.toFixed(2)}`, width - paddingRight + 10, y);
+      }
+      
+      // ==========================================
+      // DRAW VOLUME CHART
+      // ==========================================
+      drawGridLines(volChartTop, volChartBottom, 2);
+      
+      let maxVol = 0;
+      for (let j = 0; j < displayCount; j++) {
+        if (visibleBars[j].volume > maxVol) maxVol = visibleBars[j].volume;
+      }
+      maxVol = maxVol || 100000;
+      
+      const getVolY = (vol: number) => {
+        return volChartBottom - (vol / maxVol) * volChartHeight;
+      };
+      
+      for (let j = 0; j < displayCount; j++) {
+        const b = visibleBars[j];
+        const x = getX(j);
+        const isUp = b.close >= b.open;
+        ctx.fillStyle = isUp ? "rgba(38, 166, 154, 0.45)" : "rgba(239, 83, 80, 0.45)";
+        
+        const y = getVolY(b.volume);
+        const h = Math.max(1, volChartBottom - y);
+        ctx.fillRect(x - candleWidth / 2, y, candleWidth, h);
+      }
+      
+      ctx.fillStyle = "rgba(158, 158, 180, 0.7)";
+      ctx.font = "10px 'Inter', sans-serif";
+      ctx.fillText(`${(maxVol / 1000).toFixed(0)}K`, width - paddingRight + 10, volChartTop);
+      ctx.fillText("0", width - paddingRight + 10, volChartBottom);
+      
+      // ==========================================
+      // DRAW MACD CHART
+      // ==========================================
+      drawGridLines(macdChartTop, macdChartBottom, 2);
+      
+      let maxM = -Infinity;
+      let minM = Infinity;
+      for (let j = 0; j < displayCount; j++) {
+        const d = visibleMacdDif[j];
+        const de = visibleMacdDea[j];
+        const hi = visibleMacdHist[j];
+        
+        [d, de, hi].forEach(val => {
+          if (val !== null && val !== undefined) {
+            if (val > maxM) maxM = val;
+            if (val < minM) minM = val;
+          }
+        });
+      }
+      
+      const macdBound = Math.max(Math.abs(maxM), Math.abs(minM)) || 1.0;
+      const getMacdY = (val: number) => {
+        const center = macdChartTop + macdChartHeight / 2;
+        return center - (val / macdBound) * (macdChartHeight / 2);
+      };
+      
+      ctx.strokeStyle = "rgba(158, 158, 180, 0.15)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(paddingLeft, getMacdY(0));
+      ctx.lineTo(width - paddingRight, getMacdY(0));
+      ctx.stroke();
+      
+      for (let j = 0; j < displayCount; j++) {
+        const hist = visibleMacdHist[j];
+        if (hist !== null && hist !== undefined) {
+          const x = getX(j);
+          const y = getMacdY(hist);
+          const y0 = getMacdY(0);
+          
+          const isPositive = hist > 0;
+          const color = isPositive ? "rgba(38, 166, 154, 0.7)" : "rgba(239, 83, 80, 0.7)";
+          
+          ctx.fillStyle = color;
+          ctx.fillRect(x - candleWidth / 3, Math.min(y, y0), candleWidth * 0.67, Math.max(1, Math.abs(y0 - y)));
+        }
+      }
+      
+      ctx.strokeStyle = "#2962ff";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      let macdStarted = false;
+      for (let j = 0; j < displayCount; j++) {
+        const val = visibleMacdDif[j];
+        if (val !== null && val !== undefined) {
+          const x = getX(j);
+          const y = getMacdY(val);
+          if (!macdStarted) {
+            ctx.moveTo(x, y);
+            macdStarted = true;
+          } else {
+            ctx.lineTo(x, y);
+          }
+        }
+      }
+      ctx.stroke();
+      
+      ctx.strokeStyle = "#ef6d00";
+      ctx.lineWidth = 1.3;
+      ctx.beginPath();
+      macdStarted = false;
+      for (let j = 0; j < displayCount; j++) {
+        const val = visibleMacdDea[j];
+        if (val !== null && val !== undefined) {
+          const x = getX(j);
+          const y = getMacdY(val);
+          if (!macdStarted) {
+            ctx.moveTo(x, y);
+            macdStarted = true;
+          } else {
+            ctx.lineTo(x, y);
+          }
+        }
+      }
+      ctx.stroke();
+      
+      ctx.fillStyle = "rgba(158, 158, 180, 0.7)";
+      ctx.font = "10px 'Inter', sans-serif";
+      ctx.fillText(`+${macdBound.toFixed(2)}`, width - paddingRight + 10, macdChartTop);
+      ctx.fillText("0.00", width - paddingRight + 10, getMacdY(0));
+      ctx.fillText(`-${macdBound.toFixed(2)}`, width - paddingRight + 10, macdChartBottom);
+      
+      // ==========================================
+      // DRAW RSI CHART
+      // ==========================================
+      const getRsiY = (rsiVal: number) => {
+        return rsiChartBottom - (rsiVal / 100) * rsiChartHeight;
+      };
+      
+      const rsi30y = getRsiY(30);
+      const rsi70y = getRsiY(70);
+      ctx.fillStyle = "rgba(124, 58, 237, 0.05)";
+      ctx.fillRect(paddingLeft, rsi70y, activeWidth, rsi30y - rsi70y);
+      
+      ctx.strokeStyle = "rgba(124, 58, 237, 0.25)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      
+      [30, 50, 70].forEach(level => {
+        ctx.beginPath();
+        ctx.moveTo(paddingLeft, getRsiY(level));
+        ctx.lineTo(width - paddingRight, getRsiY(level));
+        ctx.stroke();
+      });
+      ctx.setLineDash([]);
+      
+      ctx.strokeStyle = "#c299ff";
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      let rsiStarted = false;
+      for (let j = 0; j < displayCount; j++) {
+        const val = visibleRsi[j];
+        if (val !== null && val !== undefined) {
+          const x = getX(j);
+          const y = getRsiY(val);
+          if (!rsiStarted) {
+            ctx.moveTo(x, y);
+            rsiStarted = true;
+          } else {
+            ctx.lineTo(x, y);
+          }
+        }
+      }
+      ctx.stroke();
+      
+      ctx.fillStyle = "rgba(158, 158, 180, 0.7)";
+      ctx.font = "10px 'Inter', sans-serif";
+      ctx.fillText("70", width - paddingRight + 10, rsi70y);
+      ctx.fillText("50", width - paddingRight + 10, getRsiY(50));
+      ctx.fillText("30", width - paddingRight + 10, rsi30y);
+      
+      // ==========================================
+      // DRAW DATES X-AXIS LABELS
+      // ==========================================
+      ctx.strokeStyle = "rgba(42, 46, 57, 0.3)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(paddingLeft, rsiChartBottom);
+      ctx.lineTo(width - paddingRight, rsiChartBottom);
+      ctx.stroke();
+      
+      ctx.fillStyle = "rgba(158, 158, 180, 0.6)";
+      ctx.font = "11px 'Inter', sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      
+      const dateInterval = Math.max(1, Math.floor(displayCount / 6));
+      for (let j = 0; j < displayCount; j += dateInterval) {
+        const x = getX(j);
+        const b = visibleBars[j];
+        const d = new Date(b.time * 1000);
+        const labelStr = `${d.getMonth() + 1}/${d.getDate()}`;
+        ctx.fillText(labelStr, x, rsiChartBottom + 10);
+      }
+      
+      ctx.textAlign = "right";
+      ctx.fillStyle = "rgba(158, 158, 180, 0.25)";
+      ctx.font = "italic bold 11px 'Inter', sans-serif";
+      ctx.fillText("TradingView Premium Auto-Generated Chart", width - 20, height - 20);
+      
+      const link = document.createElement("a");
+      link.download = `${stockName}_kline_indicators_${Date.now()}.png`;
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+      
+    } catch (error: any) {
+      console.error("Generate historical chart failed:", error);
+      toast.error(`繪製 K 線指標圖敗：${error.message || error}`);
+    }
   };
 
   // Drag move state/refs
@@ -627,15 +1481,12 @@ export const StockCardVisualizer: React.FC<Props> = ({
     }
 
     const getYPct = (p: number) => {
-      const pct = ((p - minP) / (maxP - minP)) * 100;
-      return 100 - pct;
+      const pct = ((p - minP) / (maxP - minP)) * 78;
+      return 96 - pct;
     };
 
     const isAlert = (p: number) => {
-      const cp = Number(dynamicPrice);
-      const targetP = Number(p);
-      if (isNaN(cp) || isNaN(targetP) || cp <= 0 || targetP <= 0) return false;
-      return Math.abs(cp - targetP) / targetP <= 0.021;
+      return false;
     };
 
     const leftItems = [
@@ -646,14 +1497,6 @@ export const StockCardVisualizer: React.FC<Props> = ({
         color: "#facc15",
         isAlert: isAlert(s.price),
         data: s,
-      })),
-      ...resistances.map((r, i) => ({
-        id: `r-${i}`,
-        text: `壓力 $${r.price}`,
-        rawY: getYPct(r.price),
-        color: "#f87171",
-        isAlert: isAlert(r.price),
-        data: r,
       })),
     ];
 
@@ -688,7 +1531,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
               text: `均本 $${averageCost.toLocaleString(undefined, {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2,
-              })}`,
+              })}${averageCostQuantity && averageCostQuantity !== 0 ? ` (${Math.abs(averageCostQuantity).toLocaleString(undefined, { maximumFractionDigits: 4 })}股)` : ""}`,
               rawY: getYPct(averageCost),
               color: "#f97316",
               isBold: true,
@@ -709,14 +1552,24 @@ export const StockCardVisualizer: React.FC<Props> = ({
       data: en,
     }));
 
-    const tpItems = tps.map((tp, i) => ({
-      id: `tp-${i}`,
-      text: `止盈 $${tp.price}`,
-      rawY: getYPct(tp.price),
-      color: "#10b981",
-      isAlert: isAlert(tp.price),
-      data: tp,
-    }));
+    const tpItems = [
+      ...tps.map((tp, i) => ({
+        id: `tp-${i}`,
+        text: `止盈 $${tp.price}`,
+        rawY: getYPct(tp.price),
+        color: "#10b981",
+        isAlert: isAlert(tp.price),
+        data: tp,
+      })),
+      ...resistances.map((r, i) => ({
+        id: `r-${i}`,
+        text: `壓力 $${r.price}`,
+        rawY: getYPct(r.price),
+        color: "#f87171",
+        isAlert: isAlert(r.price),
+        data: r,
+      })),
+    ];
 
     const leftLabels = resolveCollisions(leftItems, 4.8);
     const slLabels = resolveCollisions(slItems, 4.8);
@@ -741,7 +1594,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
 
   if (!data)
     return (
-      <div className="text-white/40 text-[10px] flex items-center justify-center h-full">
+      <div className="text-zinc-500 font-medium text-[10.5px] flex items-center justify-center h-full">
         無目標價設定資料
       </div>
     );
@@ -789,7 +1642,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
     return (
       <div
         key={l.id}
-        className={`absolute whitespace-nowrap transition-all duration-300 font-bold px-1.5 py-0.5 rounded text-[11px] tracking-wide cursor-help select-none ${extraClass} ${blinkClass} ${alertClass}`}
+        className={`absolute whitespace-nowrap transition-all duration-300 font-extrabold px-1 py-0.5 rounded-sm text-[9.5px] sm:text-[10px] md:text-[10.5px] tracking-tight cursor-help select-none hover:scale-105 hover:z-40 active:scale-95 shadow-sm border border-black/10 leading-none ${extraClass} ${blinkClass} ${alertClass}`}
         style={{
           ...style,
           backgroundColor: finalBgColor,
@@ -917,98 +1770,113 @@ export const StockCardVisualizer: React.FC<Props> = ({
       {/* Chart container */}
       <div
         ref={canvasRef}
-        className="relative flex-1 opacity-90 backdrop-blur-md bg-white/5 rounded-lg border border-white/10 overflow-hidden shadow-inner flex flex-col"
+        className="relative flex-1 bg-transparent rounded-lg overflow-hidden flex flex-col"
       >
         <div className="absolute top-2 left-2.5 right-2 flex items-center justify-between z-20 pointer-events-none select-none">
           {stockName && (
-            <div className="font-black text-base sm:text-2xl tracking-tighter leading-none text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)] shrink-0">
+            <div className="font-extrabold text-base sm:text-2xl tracking-tighter leading-none text-zinc-900 shrink-0">
               {stockName}
             </div>
           )}
           
-          {/* Strategy Checkboxes */}
-          {strategy && (
-            <div className="flex items-center gap-0.5 sm:gap-2.5 pointer-events-auto bg-black/50 hover:bg-black/75 backdrop-blur-md px-1.5 py-0.5 sm:px-2.5 sm:py-1 rounded-full border border-white/10 transition-all duration-300 scale-[0.82] sm:scale-100 origin-top-right">
-              <label className="flex items-center gap-0.5 sm:gap-1 cursor-pointer group whitespace-nowrap flex-nowrap shrink-0">
-                <input
-                  type="checkbox"
-                  checked={!!strategy.notesHighlighted}
-                  onChange={(e) => onUpdateNotesHighlighted?.(e.target.checked)}
-                  onClick={(e) => e.stopPropagation()}
-                  className="h-2.5 w-2.5 sm:h-3 sm:w-3 rounded border border-white/30 bg-white/5 checked:bg-amber-500 checked:border-amber-500 text-amber-500 focus:ring-0 cursor-pointer accent-amber-500 transition-all shrink-0"
-                />
-                <span className={`text-[8.5px] font-bold sm:font-black sm:text-[10px] select-none transition-colors ${strategy.notesHighlighted ? "text-amber-400" : "text-white/40 group-hover:text-white/80"}`}>
-                  選取
-                </span>
-              </label>
-              
-              <label className="flex items-center gap-0.5 sm:gap-1 cursor-pointer group whitespace-nowrap flex-nowrap shrink-0">
-                <input
-                  type="checkbox"
-                  checked={!!strategy.tpChecked}
-                  onChange={(e) => onUpdateTPChecked?.(e.target.checked)}
-                  onClick={(e) => e.stopPropagation()}
-                  className="h-2.5 w-2.5 sm:h-3 sm:w-3 rounded border border-white/30 bg-white/5 checked:bg-emerald-500 checked:border-emerald-500 text-emerald-500 focus:ring-0 cursor-pointer accent-emerald-500 transition-all shrink-0"
-                />
-                <span className={`text-[8.5px] font-bold sm:font-black sm:text-[10px] select-none transition-colors ${strategy.tpChecked ? "text-emerald-400" : "text-white/40 group-hover:text-white/80"}`}>
-                  止盈
-                </span>
-              </label>
-              
-              <label className="flex items-center gap-0.5 sm:gap-1 cursor-pointer group whitespace-nowrap flex-nowrap shrink-0">
-                <input
-                  type="checkbox"
-                  checked={!!strategy.slChecked}
-                  onChange={(e) => onUpdateSLChecked?.(e.target.checked)}
-                  onClick={(e) => e.stopPropagation()}
-                  className="h-2.5 w-2.5 sm:h-3 sm:w-3 rounded border border-white/30 bg-white/5 checked:bg-rose-500 checked:border-rose-500 text-rose-500 focus:ring-0 cursor-pointer accent-rose-500 transition-all shrink-0"
-                />
-                <span className={`text-[8.5px] font-bold sm:font-black sm:text-[10px] select-none transition-colors ${strategy.slChecked ? "text-rose-400" : "text-white/40 group-hover:text-white/80"}`}>
-                  止損
-                </span>
-              </label>
-              
-              <label className="flex items-center gap-0.5 sm:gap-1 cursor-pointer group whitespace-nowrap flex-nowrap shrink-0">
-                <input
-                  type="checkbox"
-                  checked={!!strategy.addChecked}
-                  onChange={(e) => onUpdateAddChecked?.(e.target.checked)}
-                  onClick={(e) => e.stopPropagation()}
-                  className="h-2.5 w-2.5 sm:h-3 sm:w-3 rounded border border-white/30 bg-white/5 checked:bg-sky-500 checked:border-sky-500 text-sky-500 focus:ring-0 cursor-pointer accent-sky-500 transition-all shrink-0"
-                />
-                <span className={`text-[8.5px] font-bold sm:font-black sm:text-[10px] select-none transition-colors ${strategy.addChecked ? "text-sky-400" : "text-white/40 group-hover:text-white/80"}`}>
-                  加碼
-                </span>
-              </label>
-              
-              <label className="flex items-center gap-0.5 sm:gap-1 cursor-pointer group whitespace-nowrap flex-nowrap shrink-0">
-                <input
-                  type="checkbox"
-                  checked={!!strategy.closeChecked}
-                  onChange={(e) => onUpdateCloseChecked?.(e.target.checked)}
-                  onClick={(e) => e.stopPropagation()}
-                  className="h-2.5 w-2.5 sm:h-3 sm:w-3 rounded border border-white/30 bg-white/5 checked:bg-violet-500 checked:border-violet-500 text-violet-500 focus:ring-0 cursor-pointer accent-violet-500 transition-all shrink-0"
-                />
-                <span className={`text-[8.5px] font-bold sm:font-black sm:text-[10px] select-none transition-colors ${strategy.closeChecked ? "text-violet-400" : "text-white/40 group-hover:text-white/80"}`}>
-                  平倉
-                </span>
-              </label>
-              
-              <label className="flex items-center gap-0.5 sm:gap-1 cursor-pointer group whitespace-nowrap flex-nowrap shrink-0" id="tickbox-observe-label">
-                <input
-                  id="tickbox-observe-input"
-                  type="checkbox"
-                  checked={!!strategy.observeChecked}
-                  onChange={(e) => onUpdateObserveChecked?.(e.target.checked)}
-                  onClick={(e) => e.stopPropagation()}
-                  className="h-2.5 w-2.5 sm:h-3 sm:w-3 rounded border border-white/30 bg-white/5 checked:bg-[#C9C9C9] checked:border-[#C9C9C9] text-[#C9C9C9] focus:ring-0 cursor-pointer accent-[#C9C9C9] transition-all shrink-0"
-                />
-                <span className={`text-[8.5px] font-bold sm:font-black sm:text-[10px] select-none transition-colors ${strategy.observeChecked ? "text-[#C9C9C9]" : "text-white/40 group-hover:text-white/80"}`}>
-                  觀察
-                </span>
-              </label>
-            </div>
-          )}
+          <div className="flex items-center gap-1.5 sm:gap-2 pointer-events-auto shrink-0">
+            {/* Strategy Checkboxes */}
+            {strategy && (
+              <div className="flex items-center gap-0.5 sm:gap-2.5 bg-zinc-100 hover:bg-zinc-200/90 backdrop-blur-md px-1.5 py-0.5 sm:px-2.5 sm:py-1 rounded-full border border-zinc-200 transition-all duration-300 scale-[0.82] sm:scale-100 origin-top-right">
+                <label className="flex items-center gap-0.5 sm:gap-1 cursor-pointer group whitespace-nowrap flex-nowrap shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={!!strategy.notesHighlighted}
+                    onChange={(e) => onUpdateNotesHighlighted?.(e.target.checked)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="h-2.5 w-2.5 sm:h-3 sm:w-3 rounded border border-zinc-300 bg-white checked:bg-amber-500 checked:border-amber-500 text-amber-600 focus:ring-0 cursor-pointer accent-amber-500 transition-all shrink-0"
+                  />
+                  <span className={`text-[8.5px] font-bold sm:font-black sm:text-[10px] select-none transition-colors ${strategy.notesHighlighted ? "text-amber-600" : "text-zinc-500 hover:text-zinc-800"}`}>
+                    選取
+                  </span>
+                </label>
+                
+                <label className="flex items-center gap-0.5 sm:gap-1 cursor-pointer group whitespace-nowrap flex-nowrap shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={!!strategy.tpChecked}
+                    onChange={(e) => onUpdateTPChecked?.(e.target.checked)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="h-2.5 w-2.5 sm:h-3 sm:w-3 rounded border border-zinc-300 bg-white checked:bg-emerald-500 checked:border-emerald-500 text-emerald-600 focus:ring-0 cursor-pointer accent-emerald-500 transition-all shrink-0"
+                  />
+                  <span className={`text-[8.5px] font-bold sm:font-black sm:text-[10px] select-none transition-colors ${strategy.tpChecked ? "text-emerald-600" : "text-zinc-500 hover:text-zinc-800"}`}>
+                    止盈
+                  </span>
+                </label>
+                
+                <label className="flex items-center gap-0.5 sm:gap-1 cursor-pointer group whitespace-nowrap flex-nowrap shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={!!strategy.slChecked}
+                    onChange={(e) => onUpdateSLChecked?.(e.target.checked)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="h-2.5 w-2.5 sm:h-3 sm:w-3 rounded border border-zinc-300 bg-white checked:bg-rose-500 checked:border-rose-500 text-rose-600 focus:ring-0 cursor-pointer accent-rose-500 transition-all shrink-0"
+                  />
+                  <span className={`text-[8.5px] font-bold sm:font-black sm:text-[10px] select-none transition-colors ${strategy.slChecked ? "text-rose-600" : "text-zinc-500 hover:text-zinc-800"}`}>
+                    止損
+                  </span>
+                </label>
+                
+                <label className="flex items-center gap-0.5 sm:gap-1 cursor-pointer group whitespace-nowrap flex-nowrap shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={!!strategy.addChecked}
+                    onChange={(e) => onUpdateAddChecked?.(e.target.checked)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="h-2.5 w-2.5 sm:h-3 sm:w-3 rounded border border-zinc-300 bg-white checked:bg-sky-500 checked:border-sky-500 text-sky-600 focus:ring-0 cursor-pointer accent-sky-500 transition-all shrink-0"
+                  />
+                  <span className={`text-[8.5px] font-bold sm:font-black sm:text-[10px] select-none transition-colors ${strategy.addChecked ? "text-sky-600" : "text-zinc-500 hover:text-zinc-800"}`}>
+                    加碼
+                  </span>
+                </label>
+                
+                <label className="flex items-center gap-0.5 sm:gap-1 cursor-pointer group whitespace-nowrap flex-nowrap shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={!!strategy.closeChecked}
+                    onChange={(e) => onUpdateCloseChecked?.(e.target.checked)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="h-2.5 w-2.5 sm:h-3 sm:w-3 rounded border border-zinc-300 bg-white checked:bg-violet-500 checked:border-violet-500 text-violet-600 focus:ring-0 cursor-pointer accent-violet-500 transition-all shrink-0"
+                  />
+                  <span className={`text-[8.5px] font-bold sm:font-black sm:text-[10px] select-none transition-colors ${strategy.closeChecked ? "text-violet-600" : "text-zinc-500 hover:text-zinc-800"}`}>
+                    平倉
+                  </span>
+                </label>
+                
+                <label className="flex items-center gap-0.5 sm:gap-1 cursor-pointer group whitespace-nowrap flex-nowrap shrink-0" id="tickbox-observe-label">
+                  <input
+                    id="tickbox-observe-input"
+                    type="checkbox"
+                    checked={!!strategy.observeChecked}
+                    onChange={(e) => onUpdateObserveChecked?.(e.target.checked)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="h-2.5 w-2.5 sm:h-3 sm:w-3 rounded border border-zinc-300 bg-white checked:bg-[#929292] checked:border-[#929292] text-[#929292] focus:ring-0 cursor-pointer accent-[#929292] transition-all shrink-0"
+                  />
+                  <span className={`text-[8.5px] font-bold sm:font-black sm:text-[10px] select-none transition-colors ${strategy.observeChecked ? "text-zinc-650" : "text-zinc-500 hover:text-zinc-800"}`}>
+                    觀察
+                  </span>
+                </label>
+              </div>
+            )}
+
+            {/* Elegant Export Button */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowExportModal(true);
+              }}
+              className="flex items-center justify-center rounded-full bg-zinc-100 hover:bg-zinc-200 hover:scale-105 active:scale-95 border border-zinc-200 text-zinc-650 hover:text-zinc-900 transition-all cursor-pointer shadow-sm h-5 w-5 sm:h-7 sm:w-7 shrink-0"
+              title="匯出圖表模式..."
+            >
+              <Share2 className="w-2.5 h-2.5 sm:w-3.5 sm:h-3.5" />
+            </button>
+          </div>
         </div>
 
         {/* SVG layer for lines and curves - viewport scales 0-100 to full w/h */}
@@ -1057,18 +1925,10 @@ export const StockCardVisualizer: React.FC<Props> = ({
                 x2="100"
                 y2={getYPct(s.price)}
                 vectorEffect="non-scaling-stroke"
-                stroke="#facc15"
-                strokeWidth="2.5"
+                stroke="#d4d4d8"
+                strokeWidth="1.5"
                 strokeDasharray="6 4"
-                opacity="0.4"
-              />
-              <rect
-                x="0"
-                y={getYPct(s.price)}
-                width="100"
-                height={100 - getYPct(s.price)}
-                fill="#facc15"
-                opacity="0.08"
+                opacity="0.8"
               />
             </g>
           ))}
@@ -1081,18 +1941,10 @@ export const StockCardVisualizer: React.FC<Props> = ({
                 x2="100"
                 y2={getYPct(r.price)}
                 vectorEffect="non-scaling-stroke"
-                stroke="#f87171"
-                strokeWidth="2.5"
+                stroke="#d4d4d8"
+                strokeWidth="1.5"
                 strokeDasharray="6 4"
-                opacity="0.4"
-              />
-              <rect
-                x="0"
-                y="0"
-                width="100"
-                height={getYPct(r.price)}
-                fill="#f87171"
-                opacity="0.08"
+                opacity="0.8"
               />
             </g>
           ))}
@@ -1128,7 +1980,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
             <g>
               {tps.length > 0 && (
                 <path
-                  d={`M 48 ${getYPct(dynamicPrice > 0 ? dynamicPrice : entries[entries.length - 1]?.price || 0)} C 60 ${getYPct(dynamicPrice > 0 ? dynamicPrice : entries[entries.length - 1]?.price || 0)} 60 ${getYPct(tps[0]?.price || 0)} 72 ${getYPct(tps[0]?.price || 0)} ${tps.length > 1 ? `L 72 ${getYPct(tps[tps.length - 1].price)}` : ""}`}
+                  d={`M 42 ${getYPct(dynamicPrice > 0 ? dynamicPrice : entries[entries.length - 1]?.price || 0)} C 52.5 ${getYPct(dynamicPrice > 0 ? dynamicPrice : entries[entries.length - 1]?.price || 0)} 52.5 ${getYPct(tps[0]?.price || 0)} 63 ${getYPct(tps[0]?.price || 0)} ${tps.length > 1 ? `L 63 ${getYPct(tps[tps.length - 1].price)}` : ""}`}
                   stroke="#10b981"
                   fill="none"
                   strokeDasharray="5 5"
@@ -1140,7 +1992,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
               )}
               {sls.length > 0 && (
                 <path
-                  d={`M 48 ${getYPct(dynamicPrice > 0 ? dynamicPrice : entries[0]?.price || 0)} C 36 ${getYPct(dynamicPrice > 0 ? dynamicPrice : entries[0]?.price || 0)} 36 ${getYPct(sls[0]?.price || 0)} 24 ${getYPct(sls[0]?.price || 0)} ${sls.length > 1 ? `L 24 ${getYPct(sls[sls.length - 1].price)}` : ""}`}
+                  d={`M 42 ${getYPct(dynamicPrice > 0 ? dynamicPrice : entries[0]?.price || 0)} C 31.5 ${getYPct(dynamicPrice > 0 ? dynamicPrice : entries[0]?.price || 0)} 31.5 ${getYPct(sls[0]?.price || 0)} 21 ${getYPct(sls[0]?.price || 0)} ${sls.length > 1 ? `L 21 ${getYPct(sls[sls.length - 1].price)}` : ""}`}
                   stroke="#ef4444"
                   fill="none"
                   strokeDasharray="5 5"
@@ -1158,9 +2010,9 @@ export const StockCardVisualizer: React.FC<Props> = ({
             Math.abs(l.y - l.rawY) > 0.5 ? (
               <line
                 key={`sl-conn-${i}`}
-                x1="24"
+                x1="21"
                 y1={l.rawY}
-                x2="26"
+                x2="23"
                 y2={l.y}
                 stroke={l.color}
                 strokeWidth="1"
@@ -1174,9 +2026,9 @@ export const StockCardVisualizer: React.FC<Props> = ({
             Math.abs(l.y - l.rawY) > 0.5 ? (
               <line
                 key={`en-conn-${i}`}
-                x1="48"
+                x1="42"
                 y1={l.rawY}
-                x2="50"
+                x2="44"
                 y2={l.y}
                 stroke={l.color}
                 strokeWidth="1"
@@ -1190,9 +2042,9 @@ export const StockCardVisualizer: React.FC<Props> = ({
             Math.abs(l.y - l.rawY) > 0.5 ? (
               <line
                 key={`tp-conn-${i}`}
-                x1="72"
+                x1="63"
                 y1={l.rawY}
-                x2="74"
+                x2="65"
                 y2={l.y}
                 stroke={l.color}
                 strokeWidth="1"
@@ -1431,7 +2283,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
               key={`sl-dot-${i}`}
               className="absolute w-2 h-2 rounded-full bg-[#ef4444]"
               style={{
-                left: "24%",
+                left: "21%",
                 top: `${getYPct(sl.price)}%`,
                 transform: "translate(-50%, -50%)",
                 opacity: 0.8,
@@ -1444,7 +2296,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
               key={`en-dot-${i}`}
               className="absolute w-2 h-2 rounded-full bg-[#57C1D4]"
               style={{
-                left: "48%",
+                left: "42%",
                 top: `${getYPct(en.price)}%`,
                 transform: "translate(-50%, -50%)",
                 opacity: 0.8,
@@ -1457,11 +2309,24 @@ export const StockCardVisualizer: React.FC<Props> = ({
               key={`tp-dot-${i}`}
               className="absolute w-2 h-2 rounded-full bg-[#10b981]"
               style={{
-                left: "72%",
+                left: "63%",
                 top: `${getYPct(tp.price)}%`,
                 transform: "translate(-50%, -50%)",
                 opacity: 0.8,
                 boxShadow: "0 0 5px #10b981",
+              }}
+            />
+          ))}
+          {resistances.map((r, i) => (
+            <div
+              key={`res-dot-${i}`}
+              className="absolute w-2 h-2 rounded-full bg-[#f87171]"
+              style={{
+                left: "63%",
+                top: `${getYPct(r.price)}%`,
+                transform: "translate(-50%, -50%)",
+                opacity: 0.8,
+                boxShadow: "0 0 5px #f87171",
               }}
             />
           ))}
@@ -1489,7 +2354,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
           {/* SL Labels */}
           <div className="pointer-events-auto">
             {slLabels.map((l) =>
-              renderLabel(l, "left-[26%]", {
+              renderLabel(l, "left-[23%]", {
                 top: `${l.y}%`,
                 transform: "translateY(-50%)",
               }),
@@ -1499,7 +2364,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
           {/* Entry Labels */}
           <div className="pointer-events-auto">
             {entryLabels.map((l) =>
-              renderLabel(l, "left-[50%]", {
+              renderLabel(l, "left-[44%]", {
                 top: `${l.y}%`,
                 transform: "translateY(-50%)",
               }),
@@ -1509,7 +2374,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
           {/* TP Labels */}
           <div className="pointer-events-auto">
             {tpLabels.map((l) =>
-              renderLabel(l, "left-[74%]", {
+              renderLabel(l, "left-[65%]", {
                 top: `${l.y}%`,
                 transform: "translateY(-50%)",
               }),
@@ -1637,10 +2502,10 @@ export const StockCardVisualizer: React.FC<Props> = ({
       >
         {/* Row 1: Main Path (主力路徑) Phase Tickboxes with Dynamic Stage Selection (前期, 中期, 後期) */}
         <div className="flex justify-center w-full my-1">
-          <div className="flex flex-row flex-wrap sm:flex-nowrap items-center justify-center gap-1 sm:gap-1.5 p-1 px-1.5 sm:px-2.5 bg-black/95 border border-[#3c1b63] rounded-2xl sm:rounded-full shadow-[0_0_12px_rgba(217,70,239,0.06)] shrink-0 overflow-visible max-w-full select-none">
+          <div className="flex flex-row flex-wrap sm:flex-nowrap items-center justify-center gap-1 sm:gap-1.5 p-1 px-1.5 sm:px-2.5 bg-white/40 backdrop-blur-md border border-zinc-200/80 rounded-2xl sm:rounded-full shadow-none shrink-0 overflow-visible max-w-full select-none">
             {/* Permanent Label "主力路徑" */}
-            <div className="flex items-center justify-center bg-fuchsia-500/10 px-1.5 sm:px-2 py-0.5 rounded-full shrink-0">
-              <span className="text-[8px] sm:text-[9px] font-black text-fuchsia-400 select-none tracking-wider whitespace-nowrap">
+            <div className="flex items-center justify-center bg-zinc-900/10 px-1.5 sm:px-2 py-0.5 rounded-full shrink-0">
+              <span className="text-[8px] sm:text-[9px] font-black text-zinc-900 select-none tracking-wider whitespace-nowrap">
                 主力路徑
               </span>
             </div>
@@ -1652,9 +2517,9 @@ export const StockCardVisualizer: React.FC<Props> = ({
                 checkedKey: "pathAccumulationChecked",
                 stageKey: "pathAccumulationStage",
                 theme: {
-                  activeBg: "rgba(245, 158, 11, 0.12)",
-                  activeBorder: "#F59E0B",
-                  activeText: "#FBBF24",
+                  activeBg: "rgba(217, 119, 6, 0.15)",
+                  activeBorder: "#D97706",
+                  activeText: "#000000",
                 }
               },
               {
@@ -1663,9 +2528,9 @@ export const StockCardVisualizer: React.FC<Props> = ({
                 checkedKey: "pathWashChecked",
                 stageKey: "pathWashStage",
                 theme: {
-                  activeBg: "rgba(245, 158, 11, 0.12)",
-                  activeBorder: "#F59E0B",
-                  activeText: "#FBBF24",
+                  activeBg: "rgba(217, 119, 6, 0.15)",
+                  activeBorder: "#D97706",
+                  activeText: "#000000",
                 }
               },
               {
@@ -1674,9 +2539,9 @@ export const StockCardVisualizer: React.FC<Props> = ({
                 checkedKey: "pathTestChecked",
                 stageKey: "pathTestStage",
                 theme: {
-                  activeBg: "rgba(245, 158, 11, 0.12)",
-                  activeBorder: "#F59E0B",
-                  activeText: "#FBBF24",
+                  activeBg: "rgba(217, 119, 6, 0.15)",
+                  activeBorder: "#D97706",
+                  activeText: "#000000",
                 }
               },
               {
@@ -1685,9 +2550,9 @@ export const StockCardVisualizer: React.FC<Props> = ({
                 checkedKey: "pathRallyChecked",
                 stageKey: "pathRallyStage",
                 theme: {
-                  activeBg: "rgba(34, 197, 94, 0.12)",
-                  activeBorder: "#22C55E",
-                  activeText: "#4ADE80",
+                  activeBg: "rgba(22, 163, 74, 0.15)",
+                  activeBorder: "#16A34A",
+                  activeText: "#000000",
                 }
               },
               {
@@ -1696,9 +2561,9 @@ export const StockCardVisualizer: React.FC<Props> = ({
                 checkedKey: "pathDistributionChecked",
                 stageKey: "pathDistributionStage",
                 theme: {
-                  activeBg: "rgba(239, 68, 68, 0.12)",
-                  activeBorder: "#EF4444",
-                  activeText: "#F87171",
+                  activeBg: "rgba(220, 38, 38, 0.15)",
+                  activeBorder: "#DC2626",
+                  activeText: "#000000",
                 }
               }
             ].map((phase) => {
@@ -1706,8 +2571,8 @@ export const StockCardVisualizer: React.FC<Props> = ({
               const currentStage = (strategy?.[phase.stageKey as keyof typeof strategy] as string) || "前期";
               
               const activeBg = isChecked ? phase.theme.activeBg : "transparent";
-              const activeBorder = isChecked ? phase.theme.activeBorder : "#3F3F5A";
-              const activeText = isChecked ? phase.theme.activeText : "#888888";
+              const activeBorder = isChecked ? phase.theme.activeBorder : "rgba(9, 9, 11, 0.12)";
+              const activeText = isChecked ? "#000000" : "#4b5563";
 
               const handleDotClick = (e: React.MouseEvent) => {
                 e.stopPropagation();
@@ -1752,13 +2617,12 @@ export const StockCardVisualizer: React.FC<Props> = ({
                     {isChecked ? (
                       <span
                         onClick={handleDotClick}
-                        className="w-1 h-1 sm:w-1.5 sm:h-1.5 rounded-full mr-1 sm:mr-1.5 flex-shrink-0 cursor-pointer transition-transform hover:scale-125"
-                        style={{ backgroundColor: phase.theme.activeBorder }}
+                        className="w-1 h-1 sm:w-1.5 sm:h-1.5 rounded-full mr-1 sm:mr-1.5 flex-shrink-0 cursor-pointer transition-transform hover:scale-125 bg-black"
                       />
                     ) : (
                       <span
                         onClick={handleDotClick}
-                        className="w-1 h-1 sm:w-1.5 sm:h-1.5 rounded-full border border-[#3F3F5A] mr-1 sm:mr-1.5 flex-shrink-0 cursor-pointer hover:border-white/50 transition-colors"
+                        className="w-1 h-1 sm:w-1.5 sm:h-1.5 rounded-full border border-zinc-400 mr-1 sm:mr-1.5 flex-shrink-0 cursor-pointer hover:border-zinc-800 transition-colors"
                       />
                     )}
 
@@ -1783,10 +2647,10 @@ export const StockCardVisualizer: React.FC<Props> = ({
                   {openSubField === phase.key && (
                     <div
                       onClick={(e) => e.stopPropagation()}
-                      className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 p-0.5 bg-[#0F0F1E] border border-[#3F3F5A]/40 rounded-full shadow-[0_4px_24px_rgba(0,0,0,0.9)] flex flex-row items-center gap-0.5 z-[100] animate-fadeIn whitespace-nowrap"
+                      className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 p-0.5 bg-white border border-zinc-200 rounded-full shadow-lg flex flex-row items-center gap-0.5 z-[100] animate-fadeIn whitespace-nowrap"
                     >
                       {/* Triangle Pointer */}
-                      <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-[1px] border-4 border-transparent border-t-[#0F0F1E]" />
+                      <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-[1px] border-4 border-transparent border-t-white" />
                       {["前期", "中期", "後期"].map((stg) => {
                         const isActive = currentStage === stg;
                         return (
@@ -1800,8 +2664,8 @@ export const StockCardVisualizer: React.FC<Props> = ({
                             }}
                             className={`px-3 py-1 text-[8px] sm:text-[8.5px] font-black rounded-full transition-all cursor-pointer whitespace-nowrap ${
                               isActive
-                                ? "bg-[#7C3AED] text-[#EDE9FE] shadow-md font-black"
-                                : "text-[#555555] hover:text-[#EDE9FE]/80 bg-transparent"
+                                ? "bg-zinc-900 text-white shadow-md font-black"
+                                : "text-zinc-500 hover:text-zinc-900 bg-transparent"
                             }`}
                           >
                             {stg}
@@ -1818,13 +2682,13 @@ export const StockCardVisualizer: React.FC<Props> = ({
 
         {/* Row 2: Drawing Toolbar */}
         <div className="flex justify-center w-full mt-0.5">
-          <div className="flex items-center gap-0 sm:gap-0.5 p-[2px] px-0.5 sm:px-1 bg-black/95 border border-white/10 backdrop-blur-md rounded-md shadow-2xl shrink-0">
+          <div className="flex items-center gap-0 sm:gap-0.5 p-[2px] px-0.5 sm:px-1 bg-white/40 border border-zinc-200/80 backdrop-blur-md rounded-md shadow-none shrink-0">
             {/* Cursor Interactive Mode Button */}
             <button
               type="button"
               title="互動標籤"
               onClick={() => { setMode('cursor'); setInputCoords(null); }}
-              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'cursor' ? 'bg-blue-500/20 text-blue-400' : 'text-white/60 hover:text-white hover:bg-white/5'}`}
+              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'cursor' ? 'bg-zinc-900/15 text-zinc-950 font-bold ring-1 ring-zinc-200' : 'text-zinc-700 hover:text-zinc-950 hover:bg-zinc-900/5'}`}
             >
               <MousePointer className="w-3 h-3 sm:w-3 sm:h-3" />
             </button>
@@ -1834,19 +2698,19 @@ export const StockCardVisualizer: React.FC<Props> = ({
               type="button"
               title="拖曳移動標記"
               onClick={() => { setMode('move'); setInputCoords(null); }}
-              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'move' ? 'bg-blue-500/20 text-blue-400' : 'text-white/60 hover:text-white hover:bg-white/5'}`}
+              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'move' ? 'bg-zinc-900/15 text-zinc-950 font-bold ring-1 ring-zinc-200' : 'text-zinc-700 hover:text-zinc-950 hover:bg-zinc-900/5'}`}
             >
               <Move className="w-3 h-3 sm:w-3 sm:h-3" />
             </button>
             
-            <div className="w-[1px] h-2.5 bg-white/10 mx-0 sm:mx-0.5 shrink-0" />
+            <div className="w-[1px] h-2.5 bg-zinc-300/80 mx-0 sm:mx-0.5 shrink-0" />
             
             {/* Rectangle Mode Button */}
             <button
               type="button"
               title="畫方框"
               onClick={() => { setMode('box'); setInputCoords(null); }}
-              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'box' ? 'bg-blue-500/20 text-blue-400' : 'text-white/60 hover:text-white hover:bg-white/5'}`}
+              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'box' ? 'bg-zinc-900/15 text-zinc-950 font-bold ring-1 ring-zinc-200' : 'text-zinc-700 hover:text-zinc-950 hover:bg-zinc-900/5'}`}
             >
               <Square className="w-3 h-3 sm:w-3 sm:h-3" />
             </button>
@@ -1856,7 +2720,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
               type="button"
               title="畫線"
               onClick={() => { setMode('line'); setInputCoords(null); }}
-              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'line' ? 'bg-blue-500/20 text-blue-400' : 'text-white/60 hover:text-white hover:bg-white/5'}`}
+              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'line' ? 'bg-zinc-900/15 text-zinc-950 font-bold ring-1 ring-zinc-200' : 'text-zinc-700 hover:text-zinc-950 hover:bg-zinc-900/5'}`}
             >
               <Minus className="w-3 h-3 sm:w-3 sm:h-3" />
             </button>
@@ -1866,7 +2730,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
               type="button"
               title="箭頭指向"
               onClick={() => { setMode('arrow'); setInputCoords(null); }}
-              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'arrow' ? 'bg-blue-500/20 text-blue-400' : 'text-white/60 hover:text-white hover:bg-white/5'}`}
+              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'arrow' ? 'bg-zinc-900/15 text-zinc-950 font-bold ring-1 ring-zinc-200' : 'text-zinc-700 hover:text-zinc-950 hover:bg-zinc-900/5'}`}
             >
               <ArrowUpRight className="w-3 h-3 sm:w-3 sm:h-3" />
             </button>
@@ -1876,7 +2740,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
               type="button"
               title="打文字"
               onClick={() => { setMode('text'); }}
-              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'text' ? 'bg-blue-500/20 text-blue-400' : 'text-white/60 hover:text-white hover:bg-white/5'}`}
+              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'text' ? 'bg-zinc-900/15 text-zinc-950 font-bold ring-1 ring-zinc-200' : 'text-zinc-700 hover:text-zinc-950 hover:bg-zinc-900/5'}`}
             >
               <Type className="w-3 h-3 sm:w-3 sm:h-3" />
             </button>
@@ -1886,12 +2750,12 @@ export const StockCardVisualizer: React.FC<Props> = ({
               type="button"
               title="橡皮擦工具"
               onClick={() => { setMode('eraser'); setInputCoords(null); }}
-              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'eraser' ? 'bg-red-500/20 text-red-400' : 'text-white/60 hover:text-white hover:bg-white/5'}`}
+              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'eraser' ? 'bg-rose-500/15 text-rose-800 font-bold' : 'text-zinc-700 hover:text-zinc-950 hover:bg-zinc-900/5'}`}
             >
               <Eraser className="w-3 h-3 sm:w-3 sm:h-3" />
             </button>
             
-            <div className="w-[1px] h-2.5 bg-white/10 mx-0 sm:mx-0.5 shrink-0" />
+            <div className="w-[1px] h-2.5 bg-zinc-300/80 mx-0 sm:mx-0.5 shrink-0" />
 
             {/* Undo Button */}
             <button
@@ -1899,25 +2763,25 @@ export const StockCardVisualizer: React.FC<Props> = ({
               title="上一步"
               onClick={handleUndo}
               disabled={history.length === 0}
-              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${history.length > 0 ? 'text-amber-400 hover:text-amber-300 hover:bg-white/5' : 'text-white/20 cursor-not-allowed'}`}
+              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${history.length > 0 ? 'text-amber-800 hover:text-amber-950 hover:bg-zinc-900/5' : 'text-zinc-400/50 cursor-not-allowed'}`}
             >
               <Undo2 className="w-3 h-3 sm:w-3 sm:h-3" />
             </button>
             
-            <div className="w-[1px] h-2.5 bg-white/10 mx-0 sm:mx-0.5 shrink-0" />
+            <div className="w-[1px] h-2.5 bg-zinc-300/80 mx-0 sm:mx-0.5 shrink-0" />
 
             {/* Stroke Width Cycle Control */}
             <button
               type="button"
               title={`粗細: ${activeThickness}px`}
               onClick={cycleThickness}
-              className="p-0.5 px-0.5 sm:px-1 rounded hover:bg-white/5 transition-colors flex items-center gap-0.5 shrink-0"
+              className="p-0.5 px-0.5 sm:px-1 rounded hover:bg-zinc-900/5 transition-colors flex items-center gap-0.5 shrink-0"
             >
-              <span className="text-[8px] font-medium text-white/50 tracking-tighter">粗</span>
-              <span className="bg-white/10 rounded px-1 py-0.25 text-white font-bold text-[8px]">{activeThickness}px</span>
+              <span className="text-[8px] font-medium text-zinc-600 tracking-tighter">粗</span>
+              <span className="bg-zinc-900/10 rounded px-1 py-0.25 text-zinc-900 font-bold text-[8px]">{activeThickness}px</span>
             </button>
             
-            <div className="w-[1px] h-2.5 bg-white/10 mx-0 sm:mx-0.5 shrink-0" />
+            <div className="w-[1px] h-2.5 bg-zinc-300/80 mx-0 sm:mx-0.5 shrink-0" />
 
             {/* Font Size Cycle Control */}
             <button
@@ -1930,13 +2794,13 @@ export const StockCardVisualizer: React.FC<Props> = ({
                   return sizes[(idx + 1) % sizes.length];
                 });
               }}
-              className="p-0.5 px-0.5 sm:px-1 rounded hover:bg-white/5 transition-colors flex items-center gap-0.5 shrink-0"
+              className="p-0.5 px-0.5 sm:px-1 rounded hover:bg-zinc-900/5 transition-colors flex items-center gap-0.5 shrink-0"
             >
-              <span className="text-[8px] font-medium text-white/50 tracking-tighter">字</span>
-              <span className="bg-white/10 rounded px-1 py-0.25 text-white font-bold text-[8px]">{activeFontSize}px</span>
+              <span className="text-[8px] font-medium text-zinc-600 tracking-tighter">字</span>
+              <span className="bg-zinc-900/10 rounded px-1 py-0.25 text-zinc-900 font-bold text-[8px]">{activeFontSize}px</span>
             </button>
             
-            <div className="w-[1px] h-2.5 bg-white/10 mx-0 sm:mx-0.5 shrink-0" />
+            <div className="w-[1px] h-2.5 bg-zinc-300/80 mx-0 sm:mx-0.5 shrink-0" />
 
             {/* Rich Color Selection */}
             <div className="flex items-center gap-[3px] px-0.5 shrink-0 relative">
@@ -1947,7 +2811,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
                   { hex: '#10b981', name: '止盈綠' },
                   { hex: '#facc15', name: '關鍵黃' },
                   { hex: '#3b82f6', name: '系統藍' },
-                  { hex: '#ffffff', name: '亮色白' }
+                  { hex: '#000000', name: '亮色黑' }
                 ].map((col) => (
                   <button
                     key={col.hex}
@@ -1955,7 +2819,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
                     title={col.name}
                     onClick={() => setActiveColor(col.hex)}
                     style={{ backgroundColor: col.hex }}
-                    className={`w-2 h-2 rounded-full border border-black/30 transition-transform ${activeColor === col.hex ? 'scale-110 ring-1 ring-white/50' : 'opacity-60 hover:opacity-100 hover:scale-105'}`}
+                    className={`w-2 h-2 rounded-full border border-black/30 transition-transform ${activeColor === col.hex ? 'scale-110 ring-1 ring-zinc-400' : 'opacity-65 hover:opacity-100 hover:scale-105'}`}
                   />
                 ))}
               </div>
@@ -1964,19 +2828,19 @@ export const StockCardVisualizer: React.FC<Props> = ({
               <div className="flex sm:hidden items-center relative">
                 <button
                   type="button"
-                  className="w-2.5 h-2.5 rounded-full border border-white/50 shadow-sm"
+                  className="w-2.5 h-2.5 rounded-full border border-zinc-400 shadow-sm"
                   style={{ backgroundColor: activeColor }}
                   onClick={() => setIsMobileColorOpen(!isMobileColorOpen)}
                 />
                 
                 {isMobileColorOpen && (
-                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-black/98 border border-white/10 rounded-lg p-1.5 shadow-2xl flex flex-col gap-2 z-[100]">
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-white border border-zinc-200 rounded-lg p-1.5 shadow-2xl flex flex-col gap-2 z-[100]">
                     {[
                       { hex: '#ef4444', name: '止損紅' },
                       { hex: '#10b981', name: '止盈綠' },
                       { hex: '#facc15', name: '關鍵黃' },
                       { hex: '#3b82f6', name: '系統藍' },
-                      { hex: '#ffffff', name: '亮色白' }
+                      { hex: '#000000', name: '亮色黑' }
                     ].map((col) => (
                       <button
                         key={col.hex}
@@ -1987,7 +2851,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
                           setIsMobileColorOpen(false);
                         }}
                         style={{ backgroundColor: col.hex }}
-                        className={`w-4 h-4 rounded-full border border-black/30 transition-transform ${activeColor === col.hex ? 'scale-110 ring-2 ring-white/50' : 'opacity-80 hover:opacity-100'}`}
+                        className={`w-4 h-4 rounded-full border border-black/30 transition-transform ${activeColor === col.hex ? 'scale-110 ring-2 ring-zinc-400' : 'opacity-85 hover:opacity-100'}`}
                       />
                     ))}
                   </div>
@@ -1997,13 +2861,13 @@ export const StockCardVisualizer: React.FC<Props> = ({
 
             {annotations.length > 0 && (
               <>
-                <div className="w-[1px] h-2.5 bg-white/10 mx-0.5 shrink-0" />
+                <div className="w-[1px] h-2.5 bg-zinc-300/80 mx-0.5 shrink-0" />
                 {/* Clear All Button */}
                 <button
                   type="button"
                   title="清除此圖表所有備註"
                   onClick={handleClearAll}
-                  className="p-0.5 rounded text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors shrink-0"
+                  className="p-0.5 rounded text-red-600 hover:text-red-800 hover:bg-red-500/10 transition-colors shrink-0"
                 >
                   <Trash2 className="w-3 h-3" />
                 </button>
@@ -2012,6 +2876,71 @@ export const StockCardVisualizer: React.FC<Props> = ({
           </div>
         </div>
       </div>
+
+      {showExportModal && (
+        <div 
+          className="absolute inset-0 bg-white/60 backdrop-blur-md border border-zinc-200/80 z-[200] flex flex-col items-center justify-center p-4 rounded-xl animate-fadeIn pointer-events-auto select-none"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Close button in top right */}
+          <button 
+            onClick={() => setShowExportModal(false)}
+            className="absolute top-3 right-3 p-1.5 rounded-full bg-zinc-950/5 hover:bg-zinc-950/10 text-zinc-650 hover:text-zinc-900 transition-all cursor-pointer z-50 text-xs w-6 h-6 flex items-center justify-center font-bold border border-zinc-200/80"
+          >
+            ✕
+          </button>
+          
+          <div className="w-full max-w-sm flex flex-col text-center">
+            {/* Title */}
+            <div className="flex justify-center items-center gap-2 mb-1">
+              <Share2 className="w-5 h-5 text-indigo-600" />
+              <h3 className="text-sm sm:text-base font-black text-zinc-900 tracking-wide">
+                匯出個股分析圖表 - {stockName}
+              </h3>
+            </div>
+            <p className="text-[10px] sm:text-xs text-zinc-550 mb-5 leading-normal">
+              請選擇您想要產生的圖表類型
+            </p>
+            
+            {/* Options container */}
+            <div className="flex flex-col gap-3">
+              {/* Option 2: TradingView style historical chart */}
+              <button
+                disabled={exportLoading}
+                onClick={async () => {
+                  setExportLoading(true);
+                  await handleGenerateKLineChart();
+                  setExportLoading(false);
+                  setShowExportModal(false);
+                }}
+                className="group flex flex-col items-start p-3 bg-zinc-50 hover:bg-zinc-100 active:bg-zinc-50 border border-zinc-200 hover:border-indigo-500 rounded-xl transition-all text-left cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+              >
+                <div className="flex items-center gap-2 w-full">
+                  <div className="p-1.5 rounded-lg bg-indigo-500/10 text-indigo-600 group-hover:scale-105 transition-transform">
+                    <ArrowUpRight className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="text-[11px] sm:text-xs font-black text-zinc-900 group-hover:text-indigo-650 transition-colors">
+                      輸出 TradingView K線走勢圖 (PNG)
+                    </span>
+                    <span className="block text-[9px] sm:text-[10px] text-zinc-500 font-medium mt-0.5 leading-tight">
+                      包含 5/10/20日均線、MACD、RSI 及成交量技術指標
+                    </span>
+                  </div>
+                </div>
+              </button>
+            </div>
+            
+            {/* Loading Feedback */}
+            {exportLoading && (
+              <div className="mt-5 flex items-center justify-center gap-2 text-indigo-600 text-[10px] sm:text-xs font-black animate-pulse">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>圖表產生中，請稍候...</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

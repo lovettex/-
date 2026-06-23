@@ -157,7 +157,11 @@ async function startServer() {
   app.get("/api/stock/:symbol", async (req, res) => {
     try {
       const { symbol } = req.params;
-      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d`;
+      const { range, interval } = req.query;
+      
+      const targetInterval = interval || "1d";
+      const targetRange = range ? `&range=${range}` : "";
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=${targetInterval}${targetRange}`;
       
       const response = await fetch(url, {
         headers: {
@@ -178,6 +182,244 @@ async function startServer() {
     }
   });
 
+  // Proxy route for generating stock operation notes with Gemini & Search Grounding
+  app.post("/api/generate-operation-note", async (req, res) => {
+    try {
+      const {
+        symbol,
+        currentPrice,
+        rating,
+        qualityScore,
+        valueScore,
+        crashSimilarity,
+        buyRate,
+        sellRate,
+        volatility,
+        strategyData,
+      } = req.body;
+
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return res.status(500).json({ error: "伺服器未設定 GEMINI_API_KEY，請在設定中添加金鑰。" });
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey: apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
+
+      const currentPriceStr = currentPrice ? `$${currentPrice}` : "未知";
+
+      const prompt = `
+        你是一個量化與風控並重的選股模型設計顧問，協助建立可實際交易的選股框架。
+        請根據以下的股票資訊、個股評分指標及使用者的交易計畫，給出「執行操作備註」的建議。
+        請善用你內建的 Google Search 能力尋找該股票 (${symbol}) 最新的新聞、財報數據或技術分析，
+        並結合以下三個面相來擬定內容：
+        1. 當前情境分析：結合最新現價 (${currentPriceStr})、市況與「個股評分指標」來評估目前狀況。
+        2. 進場操作建議：融合當前計畫（分批進出場規劃、止盈/止損、關鍵價格門檻），給予具體的執行細節。
+        3. 綜合考量與注意事項：點出潛在風險（特別是崩盤相似度、波動性等），以及距離目標價的多寡。
+
+        請保持專業簡潔，條理分明。按照上述三大點進行段落劃分，輸出格式為純文字（Markdown 格式）。
+
+        [當前狀態]
+        股票代號: ${symbol}
+        目前現價: ${currentPriceStr}
+
+        [個股評分指標]
+        綜合評分: ${rating || "未評分"} / 10
+        企業體質 (Quality): ${qualityScore || "未評分"} / 10
+        估值 (Value): ${valueScore || "未評分"} / 10
+        崩盤相似度 (Crash Similarity): ${crashSimilarity || "未評分"} / 10
+        看多訊號 (Buy Rate): ${buyRate || "未評分"} / 10
+        看空訊號 (Sell Rate): ${sellRate || "未評分"} / 10
+        波動性: ${volatility || "未知"}
+        正向價值 (Pos Value): ${Math.max(0, Number(rating||5) - 5) + Math.max(0, Number(qualityScore||5) - 5) + Math.max(0, Number(valueScore||5) - 5) + Number(buyRate||5)}
+        負向價值 (Neg Value): ${Math.max(0, 5 - Number(rating||5)) + Math.max(0, 5 - Number(qualityScore||5)) + Math.max(0, 5 - Number(valueScore||5)) + Number(sellRate||5)}
+        
+        [交易計畫與策略紀錄]
+        分批進場規劃: ${JSON.stringify(strategyData?.entries || [])}
+        止盈設定: ${JSON.stringify(strategyData?.tpTargets || [])}
+        止損設定: ${JSON.stringify(strategyData?.slTargets || [])}
+        止損條件: ${strategyData?.slConditions || "無"}
+        上方壓力區: ${JSON.stringify(strategyData?.resistanceZones || [])}
+        下方支撐區: ${JSON.stringify(strategyData?.supportZones || [])}
+      `;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: prompt,
+        config: {
+          tools: [{ googleSearch: {} }]
+        }
+      });
+
+      res.json({ text: response.text || "" });
+    } catch (error: any) {
+      console.error("AI operation note error:", error);
+      res.status(500).json({ error: error.message || "取得 AI 操作備註失敗，請稍後再試。" });
+    }
+  });
+
+  // Proxy route for scanning and extracting strategy details from PDF
+  app.post("/api/scan-pdf", async (req, res) => {
+    try {
+      const { pdfBase64 } = req.body;
+      if (!pdfBase64) {
+        return res.status(400).json({ error: "請提供 PDF Base64 檔案內容。" });
+      }
+
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return res.status(500).json({ error: "伺服器未設定 GEMINI_API_KEY，請在設定中添加金鑰。" });
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey: apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: [
+          {
+            role: "user",
+            parts: [
+              {
+                inlineData: {
+                  data: pdfBase64,
+                  mimeType: "application/pdf",
+                },
+              },
+              {
+                text: "Extract the trading strategy details from this PDF. Please match the data into entries (分批進場 - direction should be 'BUY' or 'SELL'), tpTargets (止盈設定), slTargets (止損設定) including slConditions (condition notes, if any), resistanceZones (關鍵心理門檻 壓力區) and supportZones (支撐區). For prices in resistanceZones and supportZones, if it's a range (e.g., 100~200), compute and return the average (150). Also, remove any currency symbols like $.",
+              },
+            ],
+          },
+        ],
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              entries: {
+                type: Type.ARRAY,
+                description: "List of entry orders (分批進出場規劃)",
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    type: { type: Type.STRING, description: "BUY or SELL" },
+                    priceStr: {
+                      type: Type.STRING,
+                      description: "Price or range",
+                    },
+                    quantityStr: { type: Type.STRING, description: "Quantity" },
+                    notes: {
+                      type: Type.STRING,
+                      description: "Annotations or context",
+                    },
+                  },
+                },
+              },
+              tpTargets: {
+                type: Type.ARRAY,
+                description: "List of take profit targets (止盈設定)",
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    price: {
+                      type: Type.NUMBER,
+                      description: "Take profit price",
+                    },
+                    quantity: {
+                      type: Type.NUMBER,
+                      description: "Take profit quantity",
+                    },
+                  },
+                },
+              },
+              slTargets: {
+                type: Type.ARRAY,
+                description: "List of stop loss targets (止損設定)",
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    price: {
+                      type: Type.NUMBER,
+                      description: "Stop loss price",
+                    },
+                    percentage: {
+                      type: Type.NUMBER,
+                      description: "Stop loss percentage",
+                    },
+                    quantity: {
+                      type: Type.NUMBER,
+                      description: "Stop loss quantity",
+                    },
+                  },
+                },
+              },
+              slConditions: {
+                type: Type.STRING,
+                description: "Stop loss dynamic/conditional description (動態/條件止損說明)",
+              },
+              resistanceZones: {
+                type: Type.ARRAY,
+                description: "List of resistance zones (關鍵心理門檻 壓力區)",
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    price: {
+                      type: Type.NUMBER,
+                      description: "Resistance price point. If a range is given, compute the average. Remove $ symbols.",
+                    },
+                    notes: {
+                      type: Type.STRING,
+                      description: "Annotations or context",
+                    },
+                  },
+                },
+              },
+              supportZones: {
+                type: Type.ARRAY,
+                description: "List of support zones (關鍵心理門檻 支撐區)",
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    price: {
+                      type: Type.NUMBER,
+                      description: "Support price point. If a range is given, compute the average. Remove $ symbols.",
+                    },
+                    notes: {
+                      type: Type.STRING,
+                      description: "Annotations or context",
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+
+      const text = response.text;
+      if (!text) throw new Error("No text returned from Gemini");
+
+      const data = JSON.parse(text);
+      res.json(data);
+    } catch (error: any) {
+      console.error("PDF Scan error:", error);
+      res.status(500).json({ error: error.message || "掃描 PDF 失敗，請稍後再試。" });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
@@ -195,7 +437,7 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Server running on port ${PORT}`);
   });
 }
 

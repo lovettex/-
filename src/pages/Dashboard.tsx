@@ -89,6 +89,7 @@ import {
   LogOut,
 } from "lucide-react";
 import { calculateStats } from "../lib/calculations";
+import { safeLocalStorage } from "../lib/utils";
 import { format } from "date-fns";
 import { StockCardVisualizer, prefetchStockPrice } from "../components/StockCardVisualizer";
 
@@ -117,7 +118,7 @@ function handleFirestoreError(
   operationType: OperationType,
   path: string | null,
   user: any,
-) {
+): never {
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
@@ -129,7 +130,7 @@ function handleFirestoreError(
     path,
   };
   console.error("Firestore Error: ", JSON.stringify(errInfo));
-  return errInfo;
+  throw new Error(JSON.stringify(errInfo));
 }
 
 const getDisplayHoldingStatus = (
@@ -149,51 +150,51 @@ const getDisplayHoldingStatus = (
 const holdingTabConfig = {
   "觀察中": {
     icon: Eye,
-    colorClass: "text-sky-400",
-    bgClass: "bg-sky-500/10",
-    borderClass: "border-sky-500/30",
-    shadowClass: "shadow-[0_0_12px_rgba(56,189,248,0.15)]",
-    activeCountClass: "bg-sky-500/20 text-sky-300 border-sky-400/30",
+    colorClass: "text-sky-650 text-sky-600 font-bold",
+    bgClass: "bg-sky-50",
+    borderClass: "border-sky-200",
+    shadowClass: "shadow-[0_4px_12px_rgba(56,189,248,0.06)]",
+    activeCountClass: "bg-sky-100/80 text-sky-700 border-sky-200/50",
   },
   "候選名單": {
     icon: Star,
-    colorClass: "text-amber-400",
-    bgClass: "bg-amber-500/10",
-    borderClass: "border-amber-500/30",
-    shadowClass: "shadow-[0_0_12px_rgba(245,158,11,0.15)]",
-    activeCountClass: "bg-amber-500/20 text-amber-300 border-amber-400/30",
+    colorClass: "text-amber-700 font-bold",
+    bgClass: "bg-amber-50",
+    borderClass: "border-amber-200",
+    shadowClass: "shadow-[0_4px_12px_rgba(245,158,11,0.06)]",
+    activeCountClass: "bg-amber-100/80 text-amber-800 border-amber-200/50",
   },
   "買進操作": {
     icon: TrendingUp,
-    colorClass: "text-emerald-400",
-    bgClass: "bg-emerald-500/10",
-    borderClass: "border-emerald-500/30",
-    shadowClass: "shadow-[0_0_12px_rgba(52,211,153,0.15)]",
-    activeCountClass: "bg-emerald-500/20 text-emerald-300 border-emerald-400/30",
+    colorClass: "text-emerald-700 font-bold",
+    bgClass: "bg-emerald-50",
+    borderClass: "border-emerald-200",
+    shadowClass: "shadow-[0_4px_12px_rgba(16,185,129,0.06)]",
+    activeCountClass: "bg-emerald-100/80 text-emerald-800 border-emerald-200/50",
   },
   "賣出操作": {
     icon: TrendingDown,
-    colorClass: "text-rose-400",
-    bgClass: "bg-rose-500/10",
-    borderClass: "border-rose-500/30",
-    shadowClass: "shadow-[0_0_12px_rgba(251,113,133,0.15)]",
-    activeCountClass: "bg-rose-500/20 text-rose-300 border-rose-400/30",
+    colorClass: "text-rose-700 font-bold",
+    bgClass: "bg-rose-50",
+    borderClass: "border-rose-200",
+    shadowClass: "shadow-[0_4px_12px_rgba(225,29,72,0.06)]",
+    activeCountClass: "bg-rose-100/80 text-rose-850 text-rose-800 border-rose-200/50",
   },
   "平倉操作": {
     icon: CheckCircle2,
-    colorClass: "text-fuchsia-400",
-    bgClass: "bg-fuchsia-500/10",
-    borderClass: "border-fuchsia-500/30",
-    shadowClass: "shadow-[0_0_12px_rgba(232,121,249,0.15)]",
-    activeCountClass: "bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-400/30",
+    colorClass: "text-fuchsia-700 font-bold",
+    bgClass: "bg-fuchsia-50",
+    borderClass: "border-fuchsia-200",
+    shadowClass: "shadow-[0_4px_12px_rgba(217,70,239,0.06)]",
+    activeCountClass: "bg-fuchsia-100/80 text-fuchsia-800 border-fuchsia-200/50",
   },
   "乖離名單": {
     icon: Activity,
-    colorClass: "text-indigo-400",
-    bgClass: "bg-indigo-500/10",
-    borderClass: "border-indigo-500/30",
-    shadowClass: "shadow-[0_0_12px_rgba(129,140,248,0.15)]",
-    activeCountClass: "bg-indigo-500/20 text-indigo-300 border-indigo-400/30",
+    colorClass: "text-indigo-700 font-bold",
+    bgClass: "bg-indigo-50",
+    borderClass: "border-indigo-200",
+    shadowClass: "shadow-[0_4px_12px_rgba(99,102,241,0.06)]",
+    activeCountClass: "bg-indigo-100/80 text-indigo-800 border-indigo-200/50",
   },
 } as const;
 
@@ -240,6 +241,50 @@ export default function Dashboard() {
   const location = useLocation();
   const { user, logout } = useAuth();
 
+  const [totalCapital, setTotalCapital] = useState<number>(() => {
+    const saved = safeLocalStorage.getItem(`total-capital-${user?.uid || "guest"}`);
+    return saved ? parseFloat(saved) : 1000000;
+  });
+
+  useEffect(() => {
+    if (!user) return;
+    const fetchSettings = async () => {
+      try {
+        const docRef = doc(db, "userSettings", user.uid);
+        const snapshot = await getDoc(docRef);
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          if (typeof data.totalCapital === "number") {
+            setTotalCapital(data.totalCapital);
+            safeLocalStorage.setItem(`total-capital-${user.uid}`, data.totalCapital.toString());
+          }
+        }
+      } catch (error) {
+        console.error("Failed to fetch userSettings:", error);
+        handleFirestoreError(error, OperationType.GET, `userSettings/${user.uid}`, user);
+      }
+    };
+    fetchSettings();
+  }, [user]);
+
+  const handleUpdateTotalCapital = async (newVal: number) => {
+    setTotalCapital(newVal);
+    const userKey = user ? user.uid : "guest";
+    safeLocalStorage.setItem(`total-capital-${userKey}`, newVal.toString());
+    if (user) {
+      try {
+        await setDoc(
+          doc(db, "userSettings", user.uid),
+          { totalCapital: newVal, updatedAt: serverTimestamp() },
+          { merge: true }
+        );
+      } catch (error) {
+        console.error("Failed to save userSettings:", error);
+        handleFirestoreError(error, OperationType.WRITE, `userSettings/${user.uid}`, user);
+      }
+    }
+  };
+
   const [activeTabOrders, setActiveTabOrders] = useState<Record<string, any[]>>(
     {},
   );
@@ -264,15 +309,30 @@ export default function Dashboard() {
     {},
   );
   const [isGeneratingSuggestion, setIsGeneratingSuggestion] = useState(false);
+  const [isMobile, setIsMobile] = useState(typeof window !== "undefined" ? window.innerWidth < 640 : false);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 640);
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
   const [activeViewTab, setActiveViewTab] = useState<
-    "active" | "completed" | "socrates" | "alerts" | "notes"
+    "active" | "real" | "completed" | "socrates" | "alerts" | "notes"
   >("active");
   const [activeHoldingSubTab, setActiveHoldingSubTab] = useState<
     "觀察中" | "候選名單" | "買進操作" | "賣出操作" | "平倉操作" | "乖離名單"
   >((sessionStorage.getItem('preferredHoldingSubTab') as any) || "候選名單");
 
+  const [activeCardDefinitionFilter, setActiveCardDefinitionFilter] = useState<
+    "all" | "highlight" | "operation" | "deviation" | "group"
+  >("all");
+
   useEffect(() => {
     sessionStorage.setItem('preferredHoldingSubTab', activeHoldingSubTab);
+    setActiveCardDefinitionFilter("all");
   }, [activeHoldingSubTab]);
   const [activeManageTab, setActiveManageTab] = useState<
     "觀察中" | "候選名單" | "買進操作" | "賣出操作" | "平倉操作" | "乖離名單" | "持股監控"
@@ -282,6 +342,7 @@ export default function Dashboard() {
 
     Record<string, any>
   >({});
+  const [strategyHighlights, setStrategyHighlights] = useState<Record<string, boolean>>({});
   const [alerts, setAlerts] = useState<any[]>([]);
   const [socratesData, setSocratesData] = useState<
     Record<string, { strong?: any[]; weak?: any[] }>
@@ -314,12 +375,12 @@ export default function Dashboard() {
 
   const socratesLoadedUserRef = useRef<string | null>(null);
 
-  // Synchronize socrates highlighted rows and sort weights with localStorage keyed by user
+  // Synchronize socrates highlighted rows and sort weights with safeLocalStorage keyed by user
   useEffect(() => {
     const userKey = user ? user.uid : "guest";
     
     // Load highlighted rows
-    const savedHighlights = localStorage.getItem(`socrates-highlighted-rows-${userKey}`);
+    const savedHighlights = safeLocalStorage.getItem(`socrates-highlighted-rows-${userKey}`);
     if (savedHighlights) {
       try {
         setSocratesHighlightedRows(JSON.parse(savedHighlights));
@@ -332,7 +393,7 @@ export default function Dashboard() {
     }
 
     // Load sort weights
-    const savedWeights = localStorage.getItem(`socrates-sort-weights-${userKey}`);
+    const savedWeights = safeLocalStorage.getItem(`socrates-sort-weights-${userKey}`);
     if (savedWeights) {
       try {
         setSocratesSortWeights(JSON.parse(savedWeights));
@@ -348,7 +409,7 @@ export default function Dashboard() {
   useEffect(() => {
     const userKey = user ? user.uid : "guest";
     if (socratesLoadedUserRef.current === userKey) {
-      localStorage.setItem(`socrates-highlighted-rows-${userKey}`, JSON.stringify(socratesHighlightedRows));
+      safeLocalStorage.setItem(`socrates-highlighted-rows-${userKey}`, JSON.stringify(socratesHighlightedRows));
     }
   }, [socratesHighlightedRows, user]);
 
@@ -356,7 +417,7 @@ export default function Dashboard() {
   useEffect(() => {
     const userKey = user ? user.uid : "guest";
     if (socratesLoadedUserRef.current === userKey) {
-      localStorage.setItem(`socrates-sort-weights-${userKey}`, JSON.stringify(socratesSortWeights));
+      safeLocalStorage.setItem(`socrates-sort-weights-${userKey}`, JSON.stringify(socratesSortWeights));
     }
   }, [socratesSortWeights, user]);
 
@@ -414,7 +475,7 @@ export default function Dashboard() {
   const toggleNotesCategory = (cat: string) => {
     setNotesExpandedCategories((prev) => ({
       ...prev,
-      [cat]: !prev[cat],
+      [cat]: prev[cat] === false,
     }));
   };
 
@@ -647,7 +708,7 @@ export default function Dashboard() {
 
   const DRAG_THRESHOLD = 5;
 
-  const onDragStart = (e: React.MouseEvent) => {
+  const onDragStart = (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
     const ele = carouselRef.current;
     if (!ele) return;
 
@@ -656,11 +717,16 @@ export default function Dashboard() {
       animFrameId.current = null;
     }
 
+    const pageX =
+      "touches" in e && e.touches && e.touches.length > 0
+        ? e.touches[0].pageX
+        : (e as React.MouseEvent).pageX;
+
     dragRef.current.isDragging = true;
     dragRef.current.hasDraggedBeyondThreshold = false;
-    dragRef.current.startX = e.pageX - ele.offsetLeft;
+    dragRef.current.startX = pageX - ele.offsetLeft;
     dragRef.current.scrollLeft = ele.scrollLeft;
-    dragRef.current.lastX = e.pageX;
+    dragRef.current.lastX = pageX;
     dragRef.current.vx = 0;
 
     // Disable snap behavior during drag for smooth swiping
@@ -669,23 +735,24 @@ export default function Dashboard() {
     document.body.style.userSelect = "none"; // Prevent text selection
   };
 
-  const onDragMove = useCallback((e: MouseEvent) => {
+  const onDragMove = useCallback((e: MouseEvent | TouchEvent) => {
     if (!dragRef.current.isDragging) return;
 
     const ele = carouselRef.current;
     if (!ele) return;
 
-    const x = e.pageX - ele.offsetLeft;
+    const pageX =
+      "touches" in e && e.touches && e.touches.length > 0
+        ? e.touches[0].pageX
+        : (e as MouseEvent).pageX;
+    const x = pageX - ele.offsetLeft;
     const dx = x - dragRef.current.startX;
 
-    dragRef.current.vx = e.pageX - dragRef.current.lastX;
-    dragRef.current.lastX = e.pageX;
+    dragRef.current.vx = pageX - dragRef.current.lastX;
+    dragRef.current.lastX = pageX;
 
     if (Math.abs(dx) > DRAG_THRESHOLD) {
       dragRef.current.hasDraggedBeyondThreshold = true;
-      if (e.cancelable) {
-        e.preventDefault(); // Prevent scrolling the page while dragging horizontally
-      }
     }
 
     ele.scrollLeft = dragRef.current.scrollLeft - dx;
@@ -699,21 +766,67 @@ export default function Dashboard() {
     if (ele) {
       ele.style.cursor = "grab";
 
-      const loop = () => {
-        if (Math.abs(dragRef.current.vx) < 0.5) {
-          ele.style.scrollSnapType = "x mandatory"; // Re-enable snap to auto-align
-          animFrameId.current = null;
-          return;
+      // Programmatic horizontal paging/snapping based on mobile vs desktop
+      const containerInner = ele.children[0] as HTMLElement;
+      if (containerInner && containerInner.children.length > 0) {
+        const items = Array.from(containerInner.children) as HTMLElement[];
+        const offsets = items.map((item) => item.offsetLeft);
+        const currentScroll = ele.scrollLeft;
+        
+        // Find the index of the item closest to current scroll position
+        let closestIdx = 0;
+        let minDiff = Infinity;
+        for (let i = 0; i < offsets.length; i++) {
+          const diff = Math.abs(offsets[i] - currentScroll);
+          if (diff < minDiff) {
+            minDiff = diff;
+            closestIdx = i;
+          }
         }
-        dragRef.current.vx *= 0.95; // decay
-        ele.scrollLeft -= dragRef.current.vx;
-        animFrameId.current = requestAnimationFrame(loop);
-      };
 
-      if (Math.abs(dragRef.current.vx) > 1) {
-        animFrameId.current = requestAnimationFrame(loop);
-      } else {
-        ele.style.scrollSnapType = "x mandatory";
+        // Determine step size based on viewport width (Desktop: 2 units, Mobile: 1 unit)
+        const isMobile = window.innerWidth < 640;
+        const step = isMobile ? 1 : 2;
+
+        let targetIdx = closestIdx;
+        const vx = dragRef.current.vx;
+
+        // Decisive drag direction check (negative velocity scrolls right, positive scrolls left)
+        if (vx < -2.0) {
+          // Swiped left (user wants to scroll right)
+          targetIdx = Math.min(items.length - 1, closestIdx + step);
+        } else if (vx > 2.0) {
+          // Swiped right (user wants to scroll left)
+          targetIdx = Math.max(0, closestIdx - step);
+        }
+
+        const targetScrollLeft = Math.max(0, Math.min(ele.scrollWidth - ele.clientWidth, offsets[targetIdx]));
+
+        // Smooth animations with ease-out cubic feel
+        let startScroll = ele.scrollLeft;
+        const distance = targetScrollLeft - startScroll;
+        const duration = 280; // ms transition phase
+        let startTime: number | null = null;
+
+        const animateScroll = (time: number) => {
+          if (!startTime) startTime = time;
+          const progress = time - startTime;
+          const t = Math.min(progress / duration, 1);
+          const ease = t * (2 - t); // Quadratic ease out
+          
+          ele.scrollLeft = startScroll + distance * ease;
+
+          if (t < 1) {
+            animFrameId.current = requestAnimationFrame(animateScroll);
+          } else {
+            animFrameId.current = null;
+          }
+        };
+
+        if (animFrameId.current) {
+          cancelAnimationFrame(animFrameId.current);
+        }
+        animFrameId.current = requestAnimationFrame(animateScroll);
       }
 
       if (dragRef.current.hasDraggedBeyondThreshold) {
@@ -726,11 +839,15 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    window.addEventListener("mousemove", onDragMove);
+    window.addEventListener("mousemove", onDragMove, { passive: false });
     window.addEventListener("mouseup", onDragEnd);
+    window.addEventListener("touchmove", onDragMove, { passive: false });
+    window.addEventListener("touchend", onDragEnd);
     return () => {
       window.removeEventListener("mousemove", onDragMove);
       window.removeEventListener("mouseup", onDragEnd);
+      window.removeEventListener("touchmove", onDragMove);
+      window.removeEventListener("touchend", onDragEnd);
       if (animFrameId.current) cancelAnimationFrame(animFrameId.current);
     };
   }, [onDragMove, onDragEnd]);
@@ -773,7 +890,7 @@ export default function Dashboard() {
         });
 
         // Handle migration from localStorage if Firestore is empty but local has data
-        const saved = localStorage.getItem("socrates-data");
+        const saved = safeLocalStorage.getItem("socrates-data");
         if (Object.keys(data).length === 0 && saved) {
           try {
             const parsed = JSON.parse(saved);
@@ -789,7 +906,7 @@ export default function Dashboard() {
               }
             });
             setSocratesData(parsed);
-            localStorage.removeItem("socrates-data");
+            safeLocalStorage.removeItem("socrates-data");
             return;
           } catch (e) {
             console.error("Migration failed", e);
@@ -1229,26 +1346,43 @@ export default function Dashboard() {
     });
   };
 
+  const fetchedTabIdsRef = useRef<Set<string>>(new Set());
+  const prevTabIdsStrRef = useRef<string>("");
+
   useEffect(() => {
     // Quick count of pending orders and fetch recent trades across all active tabs
     const fetchTabData = async () => {
       if (!user) return;
-      let count = 0;
-      const ordersMap: Record<string, any[]> = {};
-      const tradesMap: Record<string, any[]> = {};
-      const strategiesMap: Record<string, any> = {};
 
       const activeTabs = tabs.filter((t) => t.status === "ACTIVE");
+      const currentTabIdsStr = activeTabs.map(t => t.id).sort().join(",");
 
-      for (const tab of activeTabs) {
+      // If the set of active tabs changed, clear our fetched cache to reload fresh
+      if (currentTabIdsStr !== prevTabIdsStrRef.current) {
+        fetchedTabIdsRef.current.clear();
+        prevTabIdsStrRef.current = currentTabIdsStr;
+      }
+
+      // 1. Separate priority and other tabs
+      const priorityTabs = activeTabs.filter((t) => {
+        return getDisplayHoldingStatus(t.holdingStatus) === activeHoldingSubTab;
+      });
+      const otherTabs = activeTabs.filter(
+        (t) => getDisplayHoldingStatus(t.holdingStatus) !== activeHoldingSubTab
+      );
+
+      // Determine which ones actually need to be fetched (not in cache)
+      const priorityToFetch = priorityTabs.filter(t => !fetchedTabIdsRef.current.has(t.id));
+      const otherToFetch = otherTabs.filter(t => !fetchedTabIdsRef.current.has(t.id));
+
+      const fetchSingleTab = async (tab: any) => {
         // Fetch pending orders
         const qOrders = query(
           collection(db, `stockTabs/${tab.id}/plannedOrders`),
           where("status", "==", "PENDING"),
         );
         const snapshotOrders = await getDocs(qOrders);
-        count += snapshotOrders.size;
-        ordersMap[tab.id] = snapshotOrders.docs.map((doc) => ({
+        const orders = snapshotOrders.docs.map((doc) => ({
           id: doc.id,
           ...doc.data(),
         }));
@@ -1256,7 +1390,7 @@ export default function Dashboard() {
         // Fetch trades
         const qTrades = query(collection(db, `stockTabs/${tab.id}/trades`));
         const snapshotTrades = await getDocs(qTrades);
-        tradesMap[tab.id] = snapshotTrades.docs.map((doc) => ({
+        const trades = snapshotTrades.docs.map((doc) => ({
           id: doc.id,
           ...doc.data(),
         }));
@@ -1265,18 +1399,71 @@ export default function Dashboard() {
         const qStrategy = query(collection(db, `stockTabs/${tab.id}/strategy`));
         const snapshotStrategy = await getDocs(qStrategy);
         const mainStrategy = snapshotStrategy.docs.find((d) => d.id === "main");
-        if (mainStrategy) {
-          strategiesMap[tab.id] = mainStrategy.data();
+        const strategy = mainStrategy ? mainStrategy.data() : null;
+
+        return { id: tab.id, orders, trades, strategy };
+      };
+
+      // Helper to update state with loaded results maps
+      const mergeResults = (results: any[]) => {
+        setActiveTabOrders(prev => {
+          const next = { ...prev };
+          results.forEach(res => {
+            next[res.id] = res.orders;
+          });
+          return next;
+        });
+
+        setActiveTabTrades(prev => {
+          const next = { ...prev };
+          results.forEach(res => {
+            next[res.id] = res.trades;
+          });
+          return next;
+        });
+
+        setActiveTabStrategies(prev => {
+          const next = { ...prev };
+          results.forEach(res => {
+            if (res.strategy) {
+              next[res.id] = res.strategy;
+            }
+          });
+          return next;
+        });
+
+        results.forEach(res => {
+          fetchedTabIdsRef.current.add(res.id);
+        });
+      };
+
+      // 2. Fetch priority tabs concurrently for speed!
+      if (priorityToFetch.length > 0) {
+        try {
+          const priorityResults = await Promise.all(priorityToFetch.map(fetchSingleTab));
+          mergeResults(priorityResults);
+        } catch (err) {
+          console.error("Error loading prioritised tab data:", err);
         }
       }
-      setActiveTabOrders(ordersMap);
-      setActiveTabTrades(tradesMap);
-      setActiveTabStrategies(strategiesMap);
+
+      // 3. Fetch remaining (other) tabs in the background after priority tabs have updated
+      if (otherToFetch.length > 0) {
+        setTimeout(async () => {
+          try {
+            const otherResults = await Promise.all(otherToFetch.map(fetchSingleTab));
+            mergeResults(otherResults);
+          } catch (err) {
+            console.error("Error loading background tab data:", err);
+          }
+        }, 150); // small delay to allow active tab cards to draw flawlessly
+      }
     };
+
     if (tabs.length > 0) {
       fetchTabData();
     }
-  }, [tabs, user]);
+  }, [tabs, user, activeHoldingSubTab]);
 
   // Alert detection logic
   useEffect(() => {
@@ -1373,6 +1560,7 @@ export default function Dashboard() {
   const [selectedActionTab, setSelectedActionTab] = useState<any>(null);
   const [visualizerFocusTabId, setVisualizerFocusTabId] = useState<string | null>(null);
   const [visualizerFocusText, setVisualizerFocusText] = useState("");
+  const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({});
 
   const handleSearchSelect = useCallback(
     (tabId: string) => {
@@ -1392,8 +1580,7 @@ export default function Dashboard() {
         if (element && carouselRef.current) {
           element.scrollIntoView({
             behavior: "smooth",
-            block: "nearest",
-            inline: "center",
+            block: "center",
           });
           // Flash effect or scale up feedback
           element.style.transform = "scale(1.05)";
@@ -1548,23 +1735,30 @@ export default function Dashboard() {
       }
 
       // Shift + F for Search (Only if not Ctrl/Meta)
-      if (e.shiftKey && !e.ctrlKey && !e.metaKey && e.key === "F") {
+      if (e.shiftKey && !e.ctrlKey && !e.metaKey && e.key.toUpperCase() === "F") {
         e.preventDefault();
         setIsSearchOpen(true);
         return;
       }
 
       // Shift + A for Add Stock
-      if (e.shiftKey && !e.ctrlKey && !e.metaKey && e.key === "A") {
+      if (e.shiftKey && !e.ctrlKey && !e.metaKey && e.key.toUpperCase() === "A") {
         e.preventDefault();
         setIsAddOpen(true);
         return;
       }
 
       // Shift + I for Import Latest Prices
-      if (e.shiftKey && !e.ctrlKey && !e.metaKey && e.key === "I") {
+      if (e.shiftKey && !e.ctrlKey && !e.metaKey && e.key.toUpperCase() === "I") {
         e.preventDefault();
         handleImportLatestPrices();
+        return;
+      }
+
+      // Shift + U for managing holding/active stocks
+      if (e.shiftKey && !e.ctrlKey && !e.metaKey && e.key.toUpperCase() === "U") {
+        e.preventDefault();
+        setIsManageHiddenOpen((prev) => !prev);
         return;
       }
 
@@ -1628,9 +1822,17 @@ export default function Dashboard() {
           setActiveViewTab("active");
           const el = document.getElementById("active-cards-section");
           if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+        } else if (e.code === "Digit2") {
+          e.preventDefault();
+          setActiveViewTab("real");
+          const el = document.getElementById("active-cards-section");
+          if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
         } else if (e.code === "Digit3") {
           e.preventDefault();
           setActiveViewTab("completed");
+        } else if (e.code === "Digit4") {
+          e.preventDefault();
+          setActiveViewTab("notes");
         }
       }
     };
@@ -2431,27 +2633,133 @@ export default function Dashboard() {
   };
 
   const activeTabs = tabs.filter((t) => t.status === "ACTIVE");
+
+  const totalRealHoldingCost = useMemo(() => {
+    return activeTabs
+      .filter((tab) => tab.tradeType === "real")
+      .reduce((sum, tab) => {
+        const trades = activeTabTrades[tab.id] || [];
+        const stats = calculateStats(trades, tab.currentPrice);
+        return sum + (stats.totalQuantity * stats.averagePrice);
+      }, 0);
+  }, [activeTabs, activeTabTrades]);
+
+  const remainingBalance = totalCapital - totalRealHoldingCost;
+
   const visibleActiveTabs = activeTabs.filter((t) => !t.isHidden);
   const hiddenActiveTabs = activeTabs.filter((t) => t.isHidden);
 
+  const filledCategories = useMemo(() => {
+    const allCats = ["觀察中", "候選名單", "買進操作", "賣出操作", "平倉操作", "乖離名單"] as const;
+    return allCats.filter(cat => 
+      visibleActiveTabs.some(t => getDisplayHoldingStatus(t.holdingStatus) === cat)
+    );
+  }, [visibleActiveTabs]);
+
+  const effectiveActiveTabs = useMemo(() => {
+    if (activeViewTab === "real") {
+      return activeTabs.filter((t) => t.tradeType === "real");
+    }
+    if (activeViewTab === "active") {
+      return activeTabs.filter((t) => t.tradeType === "simulated");
+    }
+    return activeTabs;
+  }, [activeTabs, activeViewTab]);
+
+  const effectiveVisibleActiveTabs = useMemo(() => {
+    if (activeViewTab === "real") {
+      return visibleActiveTabs.filter((t) => t.tradeType === "real");
+    }
+    if (activeViewTab === "active") {
+      return visibleActiveTabs.filter((t) => t.tradeType === "simulated");
+    }
+    return visibleActiveTabs;
+  }, [visibleActiveTabs, activeViewTab]);
+
+  const effectiveHiddenActiveTabs = useMemo(() => {
+    if (activeViewTab === "real") {
+      return hiddenActiveTabs.filter((t) => t.tradeType === "real");
+    }
+    if (activeViewTab === "active") {
+      return hiddenActiveTabs.filter((t) => t.tradeType === "simulated");
+    }
+    return hiddenActiveTabs;
+  }, [hiddenActiveTabs, activeViewTab]);
+
+  const visibleSubTabs = useMemo(() => {
+    const list = [
+      "觀察中",
+      "候選名單",
+      "買進操作",
+      "賣出操作",
+      "平倉操作",
+      "乖離名單",
+    ] as const;
+    return list.filter((tab) => {
+      const tabCount = effectiveVisibleActiveTabs.filter(
+        (t) => getDisplayHoldingStatus(t.holdingStatus) === tab,
+      ).length;
+      return tabCount > 0;
+    });
+  }, [effectiveVisibleActiveTabs]);
+
+  // Adjust active sub tab if the current one has no cards & other active sub tabs are available
+  useEffect(() => {
+    if (visibleSubTabs.length > 0 && !visibleSubTabs.includes(activeHoldingSubTab)) {
+      setActiveHoldingSubTab(visibleSubTabs[0]);
+    }
+  }, [visibleSubTabs, activeHoldingSubTab]);
+
   // further categorize visible tabs based on holdingStatus for rendering
-  const currentSubTabVisibleTabs = visibleActiveTabs.filter(
+  const currentSubTabVisibleTabs = effectiveVisibleActiveTabs.filter(
     (t) => getDisplayHoldingStatus(t.holdingStatus) === activeHoldingSubTab,
   );
-  visibleTabsRef.current = currentSubTabVisibleTabs;
+
+  // Automatically reset card definition filter if it has no items in the active sub tab
+  useEffect(() => {
+    if (activeCardDefinitionFilter !== "all" && currentSubTabVisibleTabs) {
+      const counts: Record<string, number> = {
+        highlight: currentSubTabVisibleTabs.filter(t => !!t.isFavoriteHighlight).length,
+        operation: currentSubTabVisibleTabs.filter(t => !!t.isOperationConfirmed).length,
+        deviation: currentSubTabVisibleTabs.filter(t => !!t.isDeviationConfirmed).length,
+        group: currentSubTabVisibleTabs.filter(t => !!t.groupId).length,
+      };
+      if (counts[activeCardDefinitionFilter] === 0) {
+        setActiveCardDefinitionFilter("all");
+      }
+    }
+  }, [currentSubTabVisibleTabs, activeCardDefinitionFilter]);
+
+  const filteredSubTabVisibleTabs = useMemo(() => {
+    switch (activeCardDefinitionFilter) {
+      case "highlight":
+        return currentSubTabVisibleTabs.filter(t => !!t.isFavoriteHighlight);
+      case "operation":
+        return currentSubTabVisibleTabs.filter(t => !!t.isOperationConfirmed);
+      case "deviation":
+        return currentSubTabVisibleTabs.filter(t => !!t.isDeviationConfirmed);
+      case "group":
+        return currentSubTabVisibleTabs.filter(t => !!t.groupId);
+      default:
+        return currentSubTabVisibleTabs;
+    }
+  }, [currentSubTabVisibleTabs, activeCardDefinitionFilter]);
+
+  visibleTabsRef.current = filteredSubTabVisibleTabs;
 
   const renderGroups = useMemo(() => {
     const groups: { isGroup: boolean; id: string; tabs: any[] }[] = [];
     const processedGroupIds = new Set<string>();
     
-    currentSubTabVisibleTabs.forEach((tab) => {
-      if (tab.groupId) {
-        if (!processedGroupIds.has(tab.groupId)) {
-          processedGroupIds.add(tab.groupId);
-          const allGroupTabs = visibleActiveTabs.filter(t => t.groupId === tab.groupId);
+    filteredSubTabVisibleTabs.forEach((tab) => {
+      const shouldGroup = tab.groupId && !isMobile;
+      if (shouldGroup) {
+        if (!processedGroupIds.has(tab.groupId!)) {
+          processedGroupIds.add(tab.groupId!);
+          const allGroupTabs = effectiveVisibleActiveTabs.filter(t => t.groupId === tab.groupId);
           groups.push({
             isGroup: true,
-            id: tab.groupId,
+            id: tab.groupId!,
             tabs: allGroupTabs
           });
         }
@@ -2464,7 +2772,7 @@ export default function Dashboard() {
       }
     });
     return groups;
-  }, [currentSubTabVisibleTabs, visibleActiveTabs]);
+  }, [filteredSubTabVisibleTabs, effectiveVisibleActiveTabs, isMobile]);
 
   const completedTabs = tabs.filter((t) => t.status === "COMPLETED");
 
@@ -2477,59 +2785,34 @@ export default function Dashboard() {
     });
 
     try {
-      const { GoogleGenAI } = await import("@google/genai");
-      // @ts-ignore
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
       // Fetch the strategy
       const strategyDocRef = doc(db, `stockTabs/${tab.id}/strategy`, 'main');
       const strategySnap = await getDoc(strategyDocRef);
       const strategyData = strategySnap.exists() ? strategySnap.data() : { entries: [], tpTargets: [], slTargets: [], slConditions: "", resistanceZones: [], supportZones: [] };
 
-      const currentPriceStr = tab.currentPrice
-        ? `$${tab.currentPrice}`
-        : "未知";
-
-      const prompt = `
-        你是一個量化與風控並重的選股模型設計顧問，協助建立可實際交易的選股框架。
-        請根據以下的股票資訊、個股評分指標及使用者的交易計畫，給出「執行操作備註」的建議。
-        請善用你內建的 Google Search 能力尋找該股票 (${tab.symbol}) 最新的新聞、財報數據或技術分析，
-        並結合以下三個面相來擬定內容：
-        1. 當前情境分析：結合最新現價 (${currentPriceStr})、市況與「個股評分指標」來評估目前狀況。
-        2. 進場操作建議：融合當前計畫（分批進出場規劃、止盈/止損、關鍵價格門檻），給予具體的執行細節。
-        3. 綜合考量與注意事項：點出潛在風險（特別是崩盤相似度、波動性等），以及距離目標價的多寡。
-
-        請保持專業簡潔，條理分明。按照上述三大點進行段落劃分，輸出格式為純文字。
-
-        [當前狀態]
-        股票代號: ${tab.symbol}
-        目前現價: ${currentPriceStr}
-
-        [個股評分指標]
-        綜合評分: ${tab.rating || "未評分"} / 10
-        企業體質 (Quality): ${tab.qualityScore || "未評分"} / 10
-        估值 (Value): ${tab.valueScore || "未評分"} / 10
-        崩盤相似度 (Crash Similarity): ${tab.crashSimilarity || "未評分"} / 10
-        看多訊號 (Buy Rate): ${tab.buyRate || "未評分"} / 10
-        看空訊號 (Sell Rate): ${tab.sellRate || "未評分"} / 10
-        波動性: ${tab.volatility || "未知"}
-        正向價值 (Pos Value): ${Math.max(0, Number(tab.rating||5) - 5) + Math.max(0, Number(tab.qualityScore||5) - 5) + Math.max(0, Number(tab.valueScore||5) - 5) + Number(tab.buyRate||5)}
-        負向價值 (Neg Value): ${Math.max(0, 5 - Number(tab.rating||5)) + Math.max(0, 5 - Number(tab.qualityScore||5)) + Math.max(0, 5 - Number(tab.valueScore||5)) + Number(tab.sellRate||5)}
-        
-        [交易計畫與策略紀錄]
-        分批進場規劃: ${JSON.stringify(strategyData.entries)}
-        止盈設定: ${JSON.stringify(strategyData.tpTargets)}
-        止損設定: ${JSON.stringify(strategyData.slTargets)}
-        止損條件: ${strategyData.slConditions || "無"}
-        上方壓力區: ${JSON.stringify(strategyData.resistanceZones)}
-        下方支撐區: ${JSON.stringify(strategyData.supportZones)}
-      `;
-
-      const result = await ai.models.generateContent({
-        model: "gemini-2.5-pro",
-        contents: prompt,
+      const response = await fetch("/api/generate-operation-note", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          symbol: tab.symbol,
+          currentPrice: tab.currentPrice,
+          rating: tab.rating,
+          qualityScore: tab.qualityScore,
+          valueScore: tab.valueScore,
+          crashSimilarity: tab.crashSimilarity,
+          buyRate: tab.buyRate,
+          sellRate: tab.sellRate,
+          volatility: tab.volatility,
+          strategyData,
+        }),
       });
 
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "伺服器請求失敗");
+      }
+
+      const result = await response.json();
       const resultText = result.text;
 
       // Update the strategy with the new operationNote
@@ -2558,9 +2841,9 @@ export default function Dashboard() {
 
       toast.success("AI 已產生並更新策略建議", { id: "ai-smart-suggestion" });
       setIsActionDialogOpen(false);
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      toast.error("AI 產生失敗，請稍後再試", { id: "ai-smart-suggestion" });
+      toast.error(error.message || "AI 產生失敗，請稍後再試", { id: "ai-smart-suggestion" });
     } finally {
       setIsGeneratingSuggestion(false);
     }
@@ -2678,33 +2961,68 @@ export default function Dashboard() {
     <div className={`space-y-4 sm:space-y-6 mx-auto pb-12 px-3 sm:px-4 mt-0 transition-all duration-300 ${activeViewTab === "notes" ? "max-w-6xl lg:max-w-[96%] xl:max-w-[1760px]" : "max-w-6xl"}`}>
       <ScrollIn>
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-end glass-panel pt-5 pb-5 px-5 sm:px-4 sm:py-4 mb-4 relative overflow-hidden group">
-          <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/10 via-transparent to-blue-500/10 opacity-50 group-hover:opacity-100 transition-opacity duration-700"></div>
+          <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/5 via-transparent to-blue-500/5 opacity-50 group-hover:opacity-100 transition-opacity duration-700"></div>
           
           <button
             onClick={logout}
-            className="absolute top-5 right-5 sm:top-4 sm:right-4 z-20 h-8 w-8 flex items-center justify-center bg-white/5 hover:bg-red-500/20 border border-white/10 hover:border-red-500/50 text-white/50 hover:text-red-400 transition-all rounded-lg"
+            className="absolute top-5 right-5 sm:top-4 sm:right-4 z-20 h-8 w-8 flex items-center justify-center bg-zinc-100 hover:bg-rose-55 hover:bg-rose-50 border border-zinc-200 hover:border-rose-300 text-zinc-500 hover:text-rose-650 transition-all rounded-lg"
             title="登出"
           >
             <LogOut className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
           </button>
 
-          <div className="relative z-10 w-full flex flex-col md:flex-row justify-between items-start md:items-end gap-5 sm:gap-4 border-b border-white/5 pb-3 sm:pb-2">
-            <div className="w-full text-left md:text-left pt-1 sm:pt-0">
+          <div className="relative z-10 w-full flex flex-col md:flex-row justify-between items-start md:items-end gap-5 sm:gap-4 border-b border-zinc-200 pb-3 sm:pb-2">
+            <div className="text-left pt-1 sm:pt-0 flex-1">
               <div className="flex items-center justify-start md:justify-start gap-2">
-                <p className="text-[10px] sm:text-[10px] font-bold sm:font-medium tracking-[0.2em] sm:tracking-[0.25em] text-emerald-400 uppercase mb-1">
+                <p className="text-[10px] sm:text-[10px] font-bold sm:font-medium tracking-[0.2em] sm:tracking-[0.25em] text-emerald-600 uppercase mb-1">
                   Portfolio Overview
                 </p>
                 <button
                   onClick={() => setIsHelpOpen(true)}
-                  className="mb-1 text-white/40 hover:text-white transition-colors p-1"
+                  className="mb-1 text-zinc-400 hover:text-zinc-700 transition-colors p-1"
                   title="快捷鍵一覽"
                 >
                   <HelpCircle className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
                 </button>
               </div>
-              <h1 className="text-4xl md:text-4xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-white to-white/60 drop-shadow-sm leading-tight pb-1">
-                交易總覽
-              </h1>
+              <div className="flex flex-col md:flex-row md:items-center gap-4 md:gap-6">
+                <h1 className="text-4xl md:text-4xl font-black tracking-tighter text-zinc-800 leading-tight pb-1 whitespace-nowrap">
+                  交易總覽
+                </h1>
+                
+                <div className="flex flex-col md:flex-row md:items-center gap-1.5 md:gap-3 bg-zinc-100/60 border border-zinc-200 p-3 md:px-3.5 md:py-1.5 rounded-2xl backdrop-blur-md w-full md:w-auto divide-y divide-zinc-200 md:divide-none">
+                  <div className="flex items-center justify-between md:justify-start gap-2 py-1.5 md:py-0">
+                    <span className="text-[11px] text-zinc-500 font-bold whitespace-nowrap">目前的總資金</span>
+                    <div className="relative">
+                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[10px] text-emerald-600 font-extrabold">$</span>
+                      <input
+                        type="number"
+                        placeholder="設定總資金"
+                        className="bg-white border border-zinc-200 text-emerald-700 font-bold text-xs h-7 w-24 sm:w-28 pl-5 pr-1.5 rounded-lg focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 transition-all font-mono"
+                        value={totalCapital || ""}
+                        onChange={(e) => {
+                          const val = e.target.value === "" ? 0 : parseFloat(e.target.value);
+                          handleUpdateTotalCapital(val);
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <div className="hidden md:block h-4 w-[1px] bg-zinc-200/80" />
+                  <div className="flex items-center justify-between md:justify-start gap-2 py-1.5 md:py-0 md:pt-0">
+                    <span className="text-[11px] text-zinc-500 font-bold whitespace-nowrap">剩餘額度</span>
+                    <span className={`text-xs sm:text-sm font-black font-mono tracking-tight ${remainingBalance >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                      ${remainingBalance.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                    </span>
+                  </div>
+                  <div className="hidden md:block h-4 w-[1px] bg-zinc-200/80" />
+                  <div className="flex items-center justify-between md:justify-start gap-2 py-1.5 md:py-0 md:pt-0">
+                    <span className="text-[11px] text-zinc-500 font-bold whitespace-nowrap">真實交易總持有成本</span>
+                    <span className="text-xs sm:text-sm font-black font-mono tracking-tight text-teal-600">
+                      ${totalRealHoldingCost.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                    </span>
+                  </div>
+                </div>
+              </div>
             </div>
             <div className="flex flex-col sm:flex-row w-full md:w-auto items-stretch sm:items-center gap-2.5 sm:gap-2">
               <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
@@ -2713,15 +3031,15 @@ export default function Dashboard() {
                     <InteractiveButton
                       noGlow
                       as="button"
-                      className="h-[44px] sm:h-8 w-full sm:w-auto sm:min-w-[100px] px-3 flex items-center justify-center text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 text-[13px] sm:text-[11px] font-bold sm:font-semibold transition-all hover:bg-emerald-500/20 hover:text-emerald-300 rounded-xl sm:rounded"
+                      className="h-[44px] sm:h-8 w-full sm:w-auto sm:min-w-[100px] px-3 flex items-center justify-center text-emerald-700 bg-emerald-500/10 border border-emerald-500/20 text-[13px] sm:text-[11px] font-bold transition-all hover:bg-emerald-500/20 rounded-xl sm:rounded shadow-sm"
                     >
                       <span>新增股票</span>
                     </InteractiveButton>
                   }
                 />
-                <DialogContent className="glass-panel border-white/10 shadow-2xl bg-slate-900/90 backdrop-blur-3xl text-white outline-none w-[95vw] max-w-[400px] h-auto max-h-[90vh] overflow-y-auto !rounded-3xl p-5 sm:p-6 p-safe">
+                <DialogContent className="glass-panel border-zinc-200/80 shadow-2xl bg-white/95 backdrop-blur-3xl text-zinc-800 outline-none w-[95vw] max-w-[400px] h-auto max-h-[90vh] overflow-y-auto !rounded-3xl p-5 sm:p-6 p-safe">
                   <DialogHeader>
-                    <DialogTitle className="font-bold text-2xl tracking-tight text-white mb-2">
+                    <DialogTitle className="font-bold text-2xl tracking-tight text-zinc-900 mb-2">
                       新增股票分頁
                     </DialogTitle>
                   </DialogHeader>
@@ -2732,7 +3050,7 @@ export default function Dashboard() {
                     <div className="space-y-2">
                       <Label
                         htmlFor="symbol_dashboard"
-                        className="font-medium text-white/70 text-base sm:text-sm"
+                        className="font-medium text-zinc-700 text-base sm:text-sm"
                       >
                         股票代號 (Ticker)
                       </Label>
@@ -2744,13 +3062,13 @@ export default function Dashboard() {
                         }
                         placeholder="例如：AAPL"
                         required
-                        className="bg-white/5 border-white/10 text-white placeholder-white/30 focus-visible:ring-emerald-500/50 focus-visible:border-emerald-500 h-[48px] text-base"
+                        className="bg-zinc-50 border-zinc-200 text-zinc-800 placeholder-zinc-400 focus-visible:ring-emerald-500/20 focus-visible:border-emerald-500 h-[48px] text-base"
                       />
                     </div>
                     <div className="space-y-2">
                       <Label
                         htmlFor="company_dashboard"
-                        className="font-medium text-white/70 text-base sm:text-sm"
+                        className="font-medium text-zinc-700 text-base sm:text-sm"
                       >
                         公司名稱 (選填)
                       </Label>
@@ -2759,36 +3077,36 @@ export default function Dashboard() {
                         value={newCompany}
                         onChange={(e) => setNewCompany(e.target.value)}
                         placeholder="例如：Apple Inc."
-                        className="bg-white/5 border-white/10 text-white placeholder-white/30 focus-visible:ring-emerald-500/50 focus-visible:border-emerald-500 h-[48px] text-base"
+                        className="bg-zinc-50 border-zinc-200 text-zinc-800 placeholder-zinc-400 focus-visible:ring-emerald-500/20 focus-visible:border-emerald-500 h-[48px] text-base"
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label className="font-medium text-white/70 text-base sm:text-sm">
+                      <Label className="font-medium text-zinc-700 text-base sm:text-sm">
                         交易模式
                       </Label>
                       <Select
                         value={newTradeType}
                         onValueChange={(val: any) => setNewTradeType(val)}
                       >
-                        <SelectTrigger className="w-full bg-white/5 border-white/10 text-white focus-visible:ring-emerald-500/50 focus-visible:border-emerald-500 h-[48px] text-base">
+                        <SelectTrigger className="w-full bg-zinc-50 border-zinc-200 text-zinc-800 focus-visible:ring-emerald-500/20 focus-visible:border-emerald-500 h-[48px] text-base">
                           <SelectValue placeholder="選擇交易模式" />
                         </SelectTrigger>
-                        <SelectContent className="glass-panel border-white/10 text-white outline-none">
+                        <SelectContent className="bg-white border-zinc-200 text-zinc-800 outline-none rounded-xl shadow-lg">
                           <SelectItem
                             value="simulated"
-                            className="font-medium focus:bg-white/10 focus:text-white cursor-pointer px-4 text-base sm:text-sm py-3 sm:py-1"
+                            className="font-medium focus:bg-zinc-100 focus:text-zinc-900 cursor-pointer text-zinc-700 px-4 text-base sm:text-sm py-3 sm:py-1"
                           >
                             <div className="flex items-center gap-3">
-                              <Gamepad2 className="h-5 w-5 sm:h-4 sm:w-4 text-amber-400" />
+                              <Gamepad2 className="h-5 w-5 sm:h-4 sm:w-4 text-amber-600" />
                               模擬交易 (Simulated)
                             </div>
                           </SelectItem>
                           <SelectItem
                             value="real"
-                            className="font-medium focus:bg-white/10 focus:text-white cursor-pointer px-4 text-base sm:text-sm py-3 sm:py-1"
+                            className="font-medium focus:bg-zinc-100 focus:text-zinc-900 cursor-pointer text-zinc-700 px-4 text-base sm:text-sm py-3 sm:py-1"
                           >
                             <div className="flex items-center gap-3">
-                              <ShieldCheck className="h-5 w-5 sm:h-4 sm:w-4 text-emerald-400" />
+                              <ShieldCheck className="h-5 w-5 sm:h-4 sm:w-4 text-emerald-600" />
                               真實交易 (Real)
                             </div>
                           </SelectItem>
@@ -2798,7 +3116,7 @@ export default function Dashboard() {
                     <DialogFooter className="pt-4 pb-2">
                       <button
                         type="submit"
-                        className="glass-button w-full h-[52px] sm:h-auto justify-center bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20 py-0 sm:py-6 text-[17px] font-bold transition-all shadow-[0_0_20px_rgba(16,185,129,0.1)] rounded-xl"
+                        className="glass-button w-full h-[52px] sm:h-auto justify-center bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 hover:bg-emerald-500/20 py-0 sm:py-6 text-[17px] font-bold transition-all rounded-xl"
                       >
                         建立交易日誌檔案
                       </button>
@@ -2812,7 +3130,7 @@ export default function Dashboard() {
                 disabled={isImportingPrices || !user}
                 noGlow
                 as="button"
-                className={`h-[44px] sm:h-8 w-full sm:w-auto sm:min-w-[100px] px-2 sm:px-3 flex items-center justify-center text-white/90 text-[13px] sm:text-[11px] font-bold sm:font-semibold transition-all hover:text-white hover:bg-white/5 border border-white/10 sm:border-white/10 rounded-xl sm:rounded bg-white/[0.03] sm:bg-transparent ${!user || isImportingPrices ? "opacity-50 cursor-not-allowed" : ""}`}
+                className={`h-[44px] sm:h-8 w-full sm:w-auto sm:min-w-[100px] px-2 sm:px-3 flex items-center justify-center text-zinc-700 text-[13px] sm:text-[11px] font-bold sm:font-semibold transition-all hover:text-zinc-900 hover:bg-zinc-100 border border-zinc-200 rounded-xl sm:rounded bg-white shadow-sm ${!user || isImportingPrices ? "opacity-50 cursor-not-allowed" : ""}`}
               >
                 <span>匯入最新現價</span>
               </InteractiveButton>
@@ -2899,11 +3217,11 @@ export default function Dashboard() {
               )}
               <div className="py-4 px-3 sm:p-4 flex justify-between items-center cursor-default">
                 <div className="flex flex-col min-w-0 w-full">
-                  <span className="text-[10px] sm:text-[11px] font-bold tracking-wider text-white/60 uppercase truncate leading-none">
+                  <span className="text-[10px] sm:text-[11px] font-bold tracking-wider text-zinc-500 uppercase truncate leading-none">
                     {metric.title}
                   </span>
                   <div
-                    className={`text-xl sm:text-xl lg:text-lg xl:text-xl 2xl:text-2xl font-black tracking-tight mt-1.5 sm:mt-[6px] leading-none ${metric.pnl !== undefined ? (metric.pnl >= 0 ? "text-emerald-400 color-glow-emerald" : "text-red-400 color-glow-red") : "text-white"} truncate`}
+                    className={`text-xl sm:text-xl lg:text-lg xl:text-xl 2xl:text-2xl font-black tracking-tight mt-1.5 sm:mt-[6px] leading-none ${metric.pnl !== undefined ? (metric.pnl >= 0 ? "text-emerald-650" : "text-rose-650") : "text-zinc-800"} truncate`}
                     title={`${metric.showPlus && metric.rawValue > 0 ? "+" : ""}${metric.prefix}${metric.rawValue.toLocaleString(undefined, { minimumFractionDigits: metric.decimals, maximumFractionDigits: metric.decimals })}${metric.suffix}`}
                   >
                     <AnimatedNumber
@@ -2918,23 +3236,23 @@ export default function Dashboard() {
               </div>
               <div className="grid grid-rows-[0fr] group-hover:grid-rows-[1fr] transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]">
                 <div className="overflow-hidden px-3 sm:px-4">
-                  <div className="pb-4 md:pb-4 border-t border-white/10 pt-3 md:pt-3">
+                  <div className="pb-4 md:pb-4 border-t border-zinc-200 pt-3 md:pt-3">
                     {metric.progress !== undefined ? (
                       <>
-                        <div className="w-full bg-white/5 rounded-full h-1 sm:h-1.5 border border-white/5 overflow-hidden">
+                        <div className="w-full bg-zinc-100 rounded-full h-1 sm:h-1.5 border border-zinc-200 overflow-hidden">
                           <motion.div
                             initial={{ width: 0 }}
                             whileInView={{ width: `${metric.progress}%` }}
                             transition={{ duration: 1, ease: "easeOut" }}
-                            className="bg-gradient-to-r from-red-500 to-amber-500 h-full rounded-full"
+                            className="bg-gradient-to-r from-rose-500 to-amber-500 h-full rounded-full"
                           ></motion.div>
                         </div>
-                        <p className="text-[9px] sm:text-[10px] font-medium text-white/40 mt-1.5 md:mt-2 tracking-wide truncate">
+                        <p className="text-[9px] sm:text-[10px] font-medium text-zinc-500 mt-1.5 md:mt-2 tracking-wide truncate">
                           {metric.sub}
                         </p>
                       </>
                     ) : (
-                      <p className="text-[9px] sm:text-[10px] font-medium text-white/40 tracking-wide truncate">
+                      <p className="text-[9px] sm:text-[10px] font-medium text-zinc-500 tracking-wide truncate">
                         {metric.sub}
                       </p>
                     )}
@@ -2947,42 +3265,61 @@ export default function Dashboard() {
       </div>
 
       {/* Main Panels - Tabs */}
-      <div className="flex flex-row snap-x flex-nowrap w-full gap-2 sm:gap-3 border-b border-white/10 mb-4 sm:mb-6 mt-4 sm:mt-5 overflow-x-auto pt-2 pb-px scrollbar-hide">
+      <div className="flex flex-row snap-x flex-nowrap w-full gap-2 sm:gap-3 border-b border-zinc-200 mb-4 sm:mb-6 mt-4 sm:mt-5 overflow-x-auto pt-2 pb-px scrollbar-hide">
         <button
           onClick={() => setActiveViewTab("active")}
           className={`h-[48px] snap-start flex-shrink-0 flex items-center justify-center gap-2 px-5 sm:px-6 py-3 font-bold text-base tracking-wide rounded-t-xl transition-all duration-300 relative overflow-hidden ${
             activeViewTab === "active"
-              ? "bg-emerald-500/10 text-emerald-400 border border-t-emerald-500/30 border-x-emerald-500/30 border-b-transparent shadow-[0_-10px_20px_rgba(16,185,129,0.05)]"
-              : "bg-transparent text-white/50 hover:bg-white/5 hover:text-white/80 border border-transparent"
+              ? "bg-emerald-500/[0.08] text-emerald-700 border border-t-emerald-500/25 border-x-emerald-500/25 border-b-transparent shadow-[0_-10px_20px_rgba(16,185,129,0.02)]"
+              : "bg-transparent text-zinc-500 hover:bg-zinc-200/50 hover:text-zinc-800 border border-transparent"
           }`}
         >
           {activeViewTab === "active" && (
             <motion.div
               layoutId="tab-indicator-active"
-              className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-400"
+              className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-600"
             />
           )}
           <Activity
-            className={`w-5 h-5 ${activeViewTab === "active" ? "text-emerald-400" : "opacity-70"}`}
+            className={`w-5 h-5 ${activeViewTab === "active" ? "text-emerald-600" : "opacity-60"}`}
           />
-          持有中 (<AnimatedNumber value={visibleActiveTabs.length} />)
+          持有中 (<AnimatedNumber value={visibleActiveTabs.filter((t) => t.tradeType === "simulated").length} />)
+        </button>
+        <button
+          onClick={() => setActiveViewTab("real")}
+          className={`h-[48px] snap-start flex-shrink-0 flex items-center justify-center gap-2 px-5 sm:px-6 py-3 font-bold text-base tracking-wide rounded-t-xl transition-all duration-300 relative overflow-hidden ${
+            activeViewTab === "real"
+              ? "bg-teal-500/[0.08] text-teal-700 border border-t-teal-500/25 border-x-teal-500/25 border-b-transparent shadow-[0_-10px_20px_rgba(20,184,166,0.02)]"
+              : "bg-transparent text-zinc-500 hover:bg-zinc-200/50 hover:text-zinc-800 border border-transparent"
+          }`}
+        >
+          {activeViewTab === "real" && (
+            <motion.div
+              layoutId="tab-indicator-real"
+              className="absolute bottom-0 left-0 right-0 h-0.5 bg-teal-600"
+            />
+          )}
+          <ShieldCheck
+            className={`w-5 h-5 ${activeViewTab === "real" ? "text-teal-600" : "opacity-60"}`}
+          />
+          真實交易 (<AnimatedNumber value={visibleActiveTabs.filter((t) => t.tradeType === "real").length} />)
         </button>
         <button
           onClick={() => setActiveViewTab("completed")}
           className={`h-[48px] snap-start flex-shrink-0 flex items-center justify-center gap-2 px-5 sm:px-6 py-3 font-bold text-base tracking-wide rounded-t-xl transition-all duration-300 relative overflow-hidden ${
             activeViewTab === "completed"
-              ? "bg-blue-500/10 text-blue-400 border border-t-blue-500/30 border-x-blue-500/30 border-b-transparent shadow-[0_-10px_20px_rgba(59,130,246,0.05)]"
-              : "bg-transparent text-white/50 hover:bg-white/5 hover:text-white/80 border border-transparent"
+              ? "bg-blue-500/[0.08] text-blue-700 border border-t-blue-500/25 border-x-blue-500/25 border-b-transparent shadow-[0_-10px_20px_rgba(59,130,246,0.02)]"
+              : "bg-transparent text-zinc-500 hover:bg-zinc-200/50 hover:text-zinc-800 border border-transparent"
           }`}
         >
           {activeViewTab === "completed" && (
             <motion.div
               layoutId="tab-indicator-completed"
-              className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-400"
+              className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"
             />
           )}
           <TrendingUp
-            className={`w-5 h-5 ${activeViewTab === "completed" ? "text-blue-400" : "opacity-70"}`}
+            className={`w-5 h-5 ${activeViewTab === "completed" ? "text-blue-600" : "opacity-60"}`}
           />
           已完成 (<AnimatedNumber value={completedTabs.length} />)
         </button>
@@ -2990,18 +3327,18 @@ export default function Dashboard() {
           onClick={() => setActiveViewTab("notes")}
           className={`h-[48px] snap-start flex-shrink-0 flex items-center justify-center gap-2 px-5 sm:px-6 py-3 font-bold text-base tracking-wide rounded-t-xl transition-all duration-300 relative overflow-hidden ${
             activeViewTab === "notes"
-              ? "bg-amber-500/10 text-amber-400 border border-t-amber-500/30 border-x-amber-500/30 border-b-transparent shadow-[0_-10px_20px_rgba(245,158,11,0.05)]"
-              : "bg-transparent text-white/50 hover:bg-white/5 hover:text-white/80 border border-transparent"
+              ? "bg-amber-500/[0.08] text-amber-700 border border-t-amber-500/25 border-x-amber-500/25 border-b-transparent shadow-[0_-10px_20px_rgba(245,158,11,0.02)]"
+              : "bg-transparent text-zinc-500 hover:bg-zinc-200/50 hover:text-zinc-800 border border-transparent"
           }`}
         >
           {activeViewTab === "notes" && (
             <motion.div
               layoutId="tab-indicator-notes"
-              className="absolute bottom-0 left-0 right-0 h-0.5 bg-amber-400"
+              className="absolute bottom-0 left-0 right-0 h-0.5 bg-amber-600"
             />
           )}
           <FileText
-            className={`w-5 h-5 ${activeViewTab === "notes" ? "text-amber-400" : "opacity-70"}`}
+            className={`w-5 h-5 ${activeViewTab === "notes" ? "text-amber-600" : "opacity-60"}`}
           />
           操作備註
         </button>
@@ -3010,10 +3347,10 @@ export default function Dashboard() {
       <div className="space-y-6">
         {/* Search Dialog */}
         <Dialog open={isSearchOpen} onOpenChange={setIsSearchOpen}>
-          <DialogContent className="glass-panel border-white/10 shadow-2xl bg-slate-900/90 backdrop-blur-3xl text-white max-w-sm">
+          <DialogContent className="border border-zinc-200/50 shadow-2xl bg-white/90 backdrop-blur-xl text-zinc-900 max-w-[400px] w-[92%] p-6 rounded-2xl">
             <DialogHeader>
-              <DialogTitle className="font-bold text-xl text-white flex items-center gap-2">
-                <Search className="h-5 w-5 text-emerald-400" />
+              <DialogTitle className="font-extrabold text-xl text-zinc-900 flex items-center gap-2">
+                <Search className="h-5 w-5 text-emerald-600" />
                 快速搜尋個股
               </DialogTitle>
             </DialogHeader>
@@ -3021,7 +3358,7 @@ export default function Dashboard() {
               <Input
                 autoFocus
                 placeholder="輸入代號或名稱..."
-                className="bg-white/5 border-white/10 text-white"
+                className="bg-zinc-50 border-zinc-200 text-zinc-900 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 placeholder:text-zinc-400 font-medium"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => {
@@ -3042,46 +3379,46 @@ export default function Dashboard() {
                   }
                 }}
               />
-              <div className="max-h-[300px] overflow-y-auto space-y-1 pr-1 scrollbar-hide">
+              <div className="max-h-[300px] overflow-y-auto space-y-1.5 pr-1 scrollbar-hide">
                 {tabs
                   .filter(
-                    (t) =>
-                      t.status === "ACTIVE" &&
-                      (t.symbol
-                        .toLowerCase()
-                        .includes(searchQuery.toLowerCase()) ||
-                        t.companyName
-                          ?.toLowerCase()
-                          .includes(searchQuery.toLowerCase())),
+                     (t) =>
+                       t.status === "ACTIVE" &&
+                       (t.symbol
+                         .toLowerCase()
+                         .includes(searchQuery.toLowerCase()) ||
+                         t.companyName
+                           ?.toLowerCase()
+                           .includes(searchQuery.toLowerCase())),
                   )
                   .map((t) => (
                     <button
                       key={t.id}
                       onClick={() => handleSearchSelect(t.id)}
-                      className="w-full flex items-center justify-between p-3 rounded-lg bg-white/5 hover:bg-white/10 border border-transparent hover:border-white/10 transition-all text-left group"
+                      className="w-full flex items-center justify-between p-3 rounded-xl bg-zinc-50 hover:bg-zinc-100/80 border border-zinc-100 hover:border-zinc-200/80 transition-all text-left group active:scale-[0.98] cursor-pointer"
                     >
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 flex items-center justify-center font-bold text-xs rounded bg-white/10 text-white">
-                          {t.symbol.slice(0, 2)}
+                        <div className="w-8 h-8 flex items-center justify-center font-extrabold text-[10px] rounded bg-zinc-200/70 text-zinc-650 group-hover:bg-emerald-50 group-hover:text-emerald-700 transition-colors">
+                          {t.symbol.slice(0, 2).toUpperCase()}
                         </div>
                         <div>
-                          <p className="font-bold text-sm text-white group-hover:text-emerald-400 transition-colors">
+                          <p className="font-extrabold text-sm text-zinc-900 group-hover:text-emerald-600 transition-colors">
                             {t.symbol}
                           </p>
-                          <p className="text-[10px] text-white/40 truncate max-w-[150px]">
+                          <p className="text-[10px] font-bold text-zinc-400 truncate max-w-[150px]">
                             {t.companyName}
                           </p>
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className="text-xs font-bold text-white/60">
+                        <p className="text-xs font-black text-zinc-750 group-hover:text-emerald-600 transition-colors">
                           ${t.currentPrice?.toLocaleString()}
                         </p>
                       </div>
                     </button>
                   ))}
                 {tabs.filter((t) => t.status === "ACTIVE").length === 0 && (
-                  <p className="text-center py-8 text-white/30 text-sm italic">
+                  <p className="text-center py-8 text-zinc-400 text-sm font-semibold italic">
                     尚無持有中的個股
                   </p>
                 )}
@@ -3092,10 +3429,10 @@ export default function Dashboard() {
 
         {/* Card Action Choice Dialog */}
         <Dialog open={isActionDialogOpen} onOpenChange={setIsActionDialogOpen}>
-          <DialogContent className="glass-panel border-white/10 shadow-2xl bg-[#0F0F12]/95 backdrop-blur-3xl text-white max-w-[320px] p-6 rounded-2xl border border-white/10">
+          <DialogContent className="border border-zinc-200 shadow-2xl bg-white text-zinc-800 max-w-[320px] p-6 rounded-2xl">
             <DialogHeader className="mb-4">
-              <DialogTitle className="font-black text-xl text-white flex items-center justify-center gap-2">
-                {selectedActionTab?.symbol} 操作
+              <DialogTitle className="font-black text-xl text-zinc-900 flex items-center justify-center gap-2">
+                <span className="bg-zinc-105 text-zinc-800 px-2 py-0.5 rounded text-sm font-black border border-zinc-200">{selectedActionTab?.symbol}</span> 操作
               </DialogTitle>
             </DialogHeader>
             <div className="grid grid-cols-1 gap-3">
@@ -3107,20 +3444,20 @@ export default function Dashboard() {
                   }
                 }}
                 onMouseEnter={() => selectedActionTab && prefetchStockPrice(selectedActionTab.symbol)}
-                className="w-full py-4 px-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl flex items-center justify-between transition-all group"
+                className="w-full py-4 px-4 bg-zinc-50 hover:bg-zinc-100/70 border border-zinc-200 rounded-xl flex items-center justify-between transition-all group shadow-sm cursor-pointer"
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center group-hover:scale-110 transition-transform">
-                    <ExternalLink className="w-5 h-5 text-blue-400" />
+                  <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center group-hover:scale-110 transition-transform">
+                    <ExternalLink className="w-5 h-5 text-blue-600" />
                   </div>
                   <div className="text-left">
-                    <p className="font-black text-sm text-white">檢視細節</p>
-                    <p className="text-[10px] font-bold text-white/40">
+                    <p className="font-black text-sm text-zinc-800">檢視細節</p>
+                    <p className="text-[10px] font-bold text-zinc-500">
                       進入個股詳情頁面
                     </p>
                   </div>
                 </div>
-                <ChevronRight className="w-4 h-4 text-white/20 group-hover:text-blue-400 group-hover:translate-x-1 transition-all" />
+                <ChevronRight className="w-4 h-4 text-zinc-400 group-hover:text-blue-600 group-hover:translate-x-1 transition-all" />
               </button>
 
               <button
@@ -3132,31 +3469,31 @@ export default function Dashboard() {
                     );
                   }
                 }}
-                className={`w-full py-4 px-4 border rounded-xl flex items-center justify-between transition-all group ${
+                className={`w-full py-4 px-4 border rounded-xl flex items-center justify-between transition-all group cursor-pointer ${
                   selectedActionTab?.isFavoriteHighlight
-                    ? "bg-[#B1C28D]/10 border-[#B1C28D]/30 hover:bg-[#B1C28D]/20"
-                    : "bg-white/5 border-white/10 hover:bg-white/10"
+                    ? "bg-[#B1C28D]/20 border-[#B1C28D]/50 hover:bg-[#B1C28D]/30"
+                    : "bg-zinc-50 border-zinc-200 hover:bg-zinc-100/70 shadow-sm"
                 }`}
               >
                 <div className="flex items-center gap-3">
                   <div
                     className={`w-10 h-10 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform ${
                       selectedActionTab?.isFavoriteHighlight
-                        ? "bg-[#B1C28D]/20"
-                        : "bg-amber-500/20"
+                        ? "bg-[#B1C28D]/30"
+                        : "bg-amber-100"
                     }`}
                   >
                     <Star
-                      className={`w-5 h-5 ${selectedActionTab?.isFavoriteHighlight ? "text-[#B1C28D] fill-[#B1C28D]/50" : "text-amber-400"}`}
+                      className={`w-5 h-5 ${selectedActionTab?.isFavoriteHighlight ? "text-[#58633F] fill-[#58633F]/50" : "text-amber-600"}`}
                     />
                   </div>
                   <div className="text-left">
-                    <p className="font-black text-sm text-white">
+                    <p className="font-black text-sm text-zinc-800">
                       {selectedActionTab?.isFavoriteHighlight
                         ? "取消重點"
                         : "重點關注"}
                     </p>
-                    <p className="text-[10px] font-bold text-white/40">
+                    <p className="text-[10px] font-bold text-zinc-505">
                       切換首頁卡片高亮狀態
                     </p>
                   </div>
@@ -3164,8 +3501,8 @@ export default function Dashboard() {
                 <ChevronRight
                   className={`w-4 h-4 transition-all group-hover:translate-x-1 ${
                     selectedActionTab?.isFavoriteHighlight
-                      ? "text-[#B1C28D]"
-                      : "text-white/20 group-hover:text-amber-400"
+                      ? "text-[#58633F]"
+                      : "text-zinc-400 group-hover:text-amber-500"
                   }`}
                 />
               </button>
@@ -3180,27 +3517,27 @@ export default function Dashboard() {
                     setIsActionDialogOpen(false);
                   }
                 }}
-                className={`w-full py-4 px-4 border rounded-xl flex items-center justify-between transition-all group ${
+                className={`w-full py-4 px-4 border rounded-xl flex items-center justify-between transition-all group cursor-pointer ${
                   selectedActionTab?.isOperationConfirmed
-                    ? "bg-[#A3A3A3]/20 border-[#A3A3A3]/50 hover:bg-[#A3A3A3]/30"
-                    : "bg-white/5 border-white/10 hover:bg-white/10"
+                    ? "bg-emerald-50 border-emerald-250 hover:bg-emerald-100/50"
+                    : "bg-zinc-50 border-zinc-200 hover:bg-zinc-100/70 shadow-sm"
                 }`}
               >
                 <div className="flex items-center gap-3">
                   <div
                     className={`w-10 h-10 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform ${
                       selectedActionTab?.isOperationConfirmed
-                        ? "bg-[#A3A3A3]/30"
-                        : "bg-emerald-500/20"
+                        ? "bg-[#5cb884]/20"
+                        : "bg-emerald-500/10"
                     }`}
                   >
                     <CheckCircle2
-                      className={`w-5 h-5 ${selectedActionTab?.isOperationConfirmed ? "text-white" : "text-emerald-400"}`}
+                      className={`w-5 h-5 ${selectedActionTab?.isOperationConfirmed ? "text-emerald-700 font-bold" : "text-emerald-600"}`}
                     />
                   </div>
                   <div className="text-left">
-                    <p className="font-black text-sm text-white">操作確認</p>
-                    <p className="text-[10px] font-bold text-white/40">
+                    <p className="font-black text-sm text-zinc-800">操作確認</p>
+                    <p className="text-[10px] font-bold text-zinc-500">
                       切換首頁卡片顏色
                     </p>
                   </div>
@@ -3208,8 +3545,8 @@ export default function Dashboard() {
                 <ChevronRight
                   className={`w-4 h-4 transition-all group-hover:translate-x-1 ${
                     selectedActionTab?.isOperationConfirmed
-                      ? "text-white"
-                      : "text-white/20 group-hover:text-emerald-400"
+                      ? "text-emerald-700"
+                      : "text-zinc-400 group-hover:text-emerald-600"
                   }`}
                 />
               </button>
@@ -3224,27 +3561,27 @@ export default function Dashboard() {
                     setIsActionDialogOpen(false);
                   }
                 }}
-                className={`w-full py-4 px-4 border rounded-xl flex items-center justify-between transition-all group ${
+                className={`w-full py-4 px-4 border rounded-xl flex items-center justify-between transition-all group cursor-pointer ${
                   selectedActionTab?.isDeviationConfirmed
-                    ? "bg-[#F0D1B9]/20 border-[#F0D1B9]/50 hover:bg-[#F0D1B9]/30"
-                    : "bg-white/5 border-white/10 hover:bg-white/10"
+                    ? "bg-[#F5E6DB]/90 border-[#A55F2A]/35 hover:bg-[#F5E6DB]"
+                    : "bg-zinc-50 border-zinc-200 hover:bg-zinc-100/70 shadow-sm"
                 }`}
               >
                 <div className="flex items-center gap-3">
                   <div
                     className={`w-10 h-10 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform ${
                       selectedActionTab?.isDeviationConfirmed
-                        ? "bg-[#F0D1B9]/30"
-                        : "bg-[#F0D1B9]/10"
+                        ? "bg-[#F0D1B9]/60"
+                        : "bg-[#F0D1B9]/30"
                     }`}
                   >
                     <Star
-                      className={`w-5 h-5 ${selectedActionTab?.isDeviationConfirmed ? "text-[#F0D1B9]" : "text-[#F0D1B9]/70"}`}
+                      className={`w-5 h-5 ${selectedActionTab?.isDeviationConfirmed ? "text-[#854D20]" : "text-[#b06a34]"}`}
                     />
                   </div>
                   <div className="text-left">
-                    <p className="font-black text-sm text-white">乖離確認</p>
-                    <p className="text-[10px] font-bold text-white/40">
+                    <p className="font-black text-sm text-zinc-800">乖離確認</p>
+                    <p className="text-[10px] font-bold text-zinc-505">
                       更改卡片標題背景顏色
                     </p>
                   </div>
@@ -3252,8 +3589,8 @@ export default function Dashboard() {
                 <ChevronRight
                   className={`w-4 h-4 transition-all group-hover:translate-x-1 ${
                     selectedActionTab?.isDeviationConfirmed
-                      ? "text-[#F0D1B9]"
-                      : "text-white/20 group-hover:text-[#F0D1B9]/70"
+                      ? "text-[#854D20]"
+                      : "text-zinc-400 group-hover:text-[#b06a34]"
                   }`}
                 />
               </button>
@@ -3261,52 +3598,32 @@ export default function Dashboard() {
               <button
                 onClick={() => {
                   if (selectedActionTab) {
-                    setFlippedCards((prev) => ({
-                      ...prev,
-                      [selectedActionTab.id]: !prev[selectedActionTab.id],
-                    }));
+                    updateTab(selectedActionTab.id, {
+                      isNew: !selectedActionTab.isNew,
+                    });
                     setIsActionDialogOpen(false);
                   }
                 }}
-                className="w-full py-4 px-4 border rounded-xl flex items-center justify-between transition-all group bg-white/5 border-white/10 hover:bg-white/10"
+                className={`w-full py-4 px-4 border rounded-xl flex items-center justify-between transition-all group cursor-pointer ${
+                  selectedActionTab?.isNew
+                    ? "bg-emerald-50 border-emerald-250 hover:bg-[#D8F3E5]"
+                    : "bg-zinc-50 border-zinc-200 hover:bg-zinc-100/70 shadow-sm"
+                }`}
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform bg-purple-500/20">
-                    <Activity className="w-5 h-5 text-purple-400" />
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform ${selectedActionTab?.isNew ? 'bg-emerald-500/20' : 'bg-zinc-200/80'}`}>
+                    <Sparkles className={`w-5 h-5 ${selectedActionTab?.isNew ? 'text-emerald-600' : 'text-zinc-550'}`} />
                   </div>
                   <div className="text-left">
-                    <p className="font-black text-sm text-white">數據圖視化</p>
-                    <p className="text-[10px] font-bold text-white/40">
-                      翻轉卡片檢視分批圖表
+                    <p className={`font-black text-sm ${selectedActionTab?.isNew ? 'text-emerald-700' : 'text-zinc-800'}`}>
+                      更新版本
+                    </p>
+                    <p className={`text-[10px] font-bold ${selectedActionTab?.isNew ? 'text-emerald-700/80' : 'text-zinc-500'}`}>
+                      新增或移除卡片頂部的 NEW 標籤與彩色漸層細線
                     </p>
                   </div>
                 </div>
-                <ChevronRight className="w-4 h-4 text-white/20 transition-all group-hover:translate-x-1 group-hover:text-purple-400" />
-              </button>
-
-              <button
-                onClick={() => {
-                  if (selectedActionTab && !isGeneratingSuggestion) {
-                    handleSmartSuggestion(selectedActionTab);
-                  }
-                }}
-                disabled={isGeneratingSuggestion}
-                className="w-full py-4 px-4 border rounded-xl flex items-center justify-between transition-all group bg-emerald-500/10 border-emerald-500/30 hover:bg-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform bg-emerald-500/20">
-                    <Sparkles className="w-5 h-5 text-emerald-400" />
-                  </div>
-                  <div className="text-left">
-                    <p className="font-black text-sm text-emerald-400">
-                      {isGeneratingSuggestion ? "分析中..." : "AI 智能建議"}
-                    </p>
-                    <p className="text-[10px] font-bold text-emerald-400/60">
-                      動態取得操作備註分析並更新策略
-                    </p>
-                  </div>
-                </div>
-                <ChevronRight className="w-4 h-4 text-emerald-400/50 transition-all group-hover:translate-x-1 group-hover:text-emerald-400" />
+                <ChevronRight className={`w-4 h-4 transition-all group-hover:translate-x-1 ${selectedActionTab?.isNew ? 'text-emerald-600' : 'text-zinc-400 group-hover:text-emerald-500'}`} />
               </button>
             </div>
           </DialogContent>
@@ -3327,18 +3644,21 @@ export default function Dashboard() {
             <div className="space-y-4 py-4">
               <div className="grid grid-cols-2 gap-3">
                 {[
+                  { key: "Alt + 1", desc: "持有中 - 觀察中" },
+                  { key: "Alt + 2", desc: "持有中 - 候選名單" },
+                  { key: "Alt + 3", desc: "持有中 - 買進操作" },
+                  { key: "Alt + 4", desc: "持有中 - 賣出操作" },
+                  { key: "Alt + 5", desc: "持有中 - 平倉操作" },
+                  { key: "Alt + 6", desc: "持有中 - 乖離名單" },
+                  { key: "Shift + 1", desc: "切換至 持有中 標籤" },
+                  { key: "Shift + 2", desc: "切換至 真實交易 標籤" },
+                  { key: "Shift + 3", desc: "切換至 已完成 標籤" },
+                  { key: "Shift + 4", desc: "切換至 操作備註 標籤" },
                   { key: "Shift + F", desc: "快速搜尋股票" },
                   { key: "Shift + H", desc: "切換全螢幕模式" },
-                  { key: "Shift + 1", desc: "切換至 持有中 標籤" },
-                  { key: "Shift + 3", desc: "切換至 已完成 標籤" },
-                  { key: "Alt + 1", desc: "切換至 觀察中" },
-                  { key: "Alt + 2", desc: "切換至 候選名單" },
-                  { key: "Alt + 3", desc: "切換至 買進操作" },
-                  { key: "Alt + 4", desc: "切換至 賣出操作" },
-                  { key: "Alt + 5", desc: "切換至 平倉操作" },
-                  { key: "Alt + 6", desc: "切換至 乖離名單" },
-                  { key: "Alt + Z", desc: "翻面可見股票卡片" },
                   { key: "Shift + A", desc: "開啟 新增股票 對話框" },
+                  { key: "Shift + U", desc: "管理持有中股票" },
+                  { key: "Alt + Z", desc: "翻面可見股票卡片" },
                   { key: "Shift + I", desc: "匯入現價 / AI 智能建議 (詳情頁)" },
                   { key: "Shift + S", desc: "儲存策略 (詳情頁)" },
                   { key: "Shift + B", desc: "從詳情頁面 返回主頁" },
@@ -3368,30 +3688,21 @@ export default function Dashboard() {
           </DialogContent>
         </Dialog>
 
-        {activeViewTab === "active" && (
+        {(activeViewTab === "active" || activeViewTab === "real") && (
           <div id="active-cards-section" className="grid grid-cols-1 gap-6">
             <div className="space-y-4">
               <ScrollIn delay={0.2} translateY={20}>
-                <div className="w-screen relative left-1/2 -translate-x-1/2 border-y border-emerald-500/10 bg-emerald-500/[0.01] flex flex-col group transition-all duration-500">
-                  <div className="py-2 border-b border-emerald-500/10 w-full">
+                <div className={`w-screen relative left-1/2 -translate-x-1/2 border-y flex flex-col group transition-all duration-500 ${activeViewTab === "real" ? "border-teal-500/10 bg-teal-500/[0.01]" : "border-emerald-500/10 bg-emerald-500/[0.01]"}`}>
+                  <div className={`py-2 border-b w-full ${activeViewTab === "real" ? "border-teal-500/10" : "border-emerald-500/10"}`}>
                     {/* Desktop/Tablet version */}
                     <div className="hidden md:flex max-w-6xl mx-auto px-4 items-center justify-between w-full">
                       <div className="flex items-center gap-4">
-                        <div className="w-1.5 h-6 bg-gradient-to-b from-emerald-400 to-emerald-600 rounded-full shadow-[0_0_10px_rgba(16,185,129,0.5)]"></div>
-                        <div className="flex bg-black/30 p-1 border border-white/5 rounded-xl gap-1">
-                          {(
-                            [
-                              "觀察中",
-                              "候選名單",
-                              "買進操作",
-                              "賣出操作",
-                              "平倉操作",
-                              "乖離名單",
-                            ] as const
-                          ).map((tab) => {
+                        <div className={`w-1.5 h-6 rounded-full transition-all duration-300 ${activeViewTab === "real" ? "bg-gradient-to-b from-teal-400 to-teal-600 shadow-[0_0_10px_rgba(20,184,166,0.5)]" : "bg-gradient-to-b from-emerald-400 to-emerald-600 rounded-full shadow-[0_0_10px_rgba(16,185,129,0.5)]"}`}></div>
+                        <div className="flex bg-zinc-100 p-1 border border-zinc-200/80 rounded-xl gap-1 shadow-inner">
+                          {visibleSubTabs.map((tab) => {
                             const conf = holdingTabConfig[tab];
                             const TabIcon = conf.icon;
-                            const tabCount = visibleActiveTabs.filter(
+                            const tabCount = effectiveVisibleActiveTabs.filter(
                               (t) => getDisplayHoldingStatus(t.holdingStatus) === tab,
                             ).length;
                             const isActive = activeHoldingSubTab === tab;
@@ -3403,7 +3714,7 @@ export default function Dashboard() {
                                 className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-2 border cursor-pointer ${
                                   isActive
                                     ? `${conf.colorClass} ${conf.bgClass} ${conf.borderClass} ${conf.shadowClass}`
-                                    : "text-white/50 hover:text-white hover:bg-white/5 border-transparent"
+                                    : "text-zinc-500 hover:text-zinc-800 hover:bg-zinc-200/50 border-transparent shadow-none"
                                 }`}
                               >
                                 <TabIcon className="w-3.5 h-3.5" />
@@ -3411,7 +3722,7 @@ export default function Dashboard() {
                                 <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full border ${
                                   isActive 
                                     ? conf.activeCountClass 
-                                    : "bg-white/5 border-white/10 opacity-70"
+                                    : "bg-zinc-200/50 border-zinc-300/40 text-zinc-650"
                                 }`}>
                                   <AnimatedNumber value={tabCount} />{" "}檔
                                 </span>
@@ -3419,10 +3730,10 @@ export default function Dashboard() {
                             );
                           })}
                         </div>
-                        {hiddenActiveTabs.length > 0 && (
-                          <span className="text-xs font-bold border border-white/10 bg-white/5 text-white/40 px-3 py-1 rounded-full flex items-center gap-1.5">
-                            <EyeOff className="w-3.5 h-3.5" />
-                            已隱藏 {hiddenActiveTabs.length} 檔
+                        {effectiveHiddenActiveTabs.length > 0 && (
+                          <span className="text-xs font-bold border border-zinc-200 bg-zinc-50 text-zinc-500 px-3 py-1 rounded-full flex items-center gap-1.5">
+                            <EyeOff className="w-3.5 h-3.5 text-zinc-400" />
+                            已隱藏 {effectiveHiddenActiveTabs.length} 檔
                           </span>
                         )}
                       </div>
@@ -3431,24 +3742,28 @@ export default function Dashboard() {
                           noGlow
                           as="button"
                           onClick={() => setIsManageHiddenOpen(true)}
-                          className="p-2 bg-white/5 border border-white/10 text-white/60 hover:text-white rounded-md transition-all cursor-pointer"
+                          className="p-2 bg-zinc-50 border border-zinc-200 text-zinc-500 hover:text-zinc-850 hover:bg-zinc-100 rounded-md transition-all cursor-pointer"
                         >
                           <Settings2 className="w-4 h-4" />
                         </InteractiveButton>
                         <Magnetic>
-                          <Activity className="h-6 w-6 text-emerald-500 opacity-80" />
+                          {activeViewTab === "real" ? (
+                            <ShieldCheck className="h-6 w-6 text-teal-400 opacity-80" />
+                          ) : (
+                            <Activity className="h-6 w-6 text-emerald-500 opacity-80" />
+                          )}
                         </Magnetic>
                       </div>
                     </div>
 
                     {/* Redesigned Premium Mobile version */}
                     <div className="flex md:hidden flex-col w-full gap-3.5 px-4 py-1.5">
-                      <div className="flex items-center justify-between pb-1.5 border-b border-white/[0.04] w-full">
+                      <div className="flex items-center justify-between pb-1.5 border-b border-zinc-150 w-full">
                         <div className="flex items-center gap-2">
-                          {hiddenActiveTabs.length > 0 && (
-                            <span className="text-[10px] font-black border border-white/10 bg-white/5 text-white/40 px-2.5 py-0.5 rounded-lg flex items-center gap-1">
-                              <EyeOff className="w-3 h-3 text-white/40" />
-                              已隱藏 {hiddenActiveTabs.length} 檔
+                          {effectiveHiddenActiveTabs.length > 0 && (
+                            <span className="text-[10px] font-black border border-zinc-250 bg-zinc-50 text-zinc-500 px-2.5 py-0.5 rounded-lg flex items-center gap-1">
+                              <EyeOff className="w-3 h-3 text-zinc-400" />
+                              已隱藏 {effectiveHiddenActiveTabs.length} 檔
                             </span>
                           )}
                         </div>
@@ -3457,34 +3772,29 @@ export default function Dashboard() {
                             noGlow
                             as="button"
                             onClick={() => setIsManageHiddenOpen(true)}
-                            className="px-2.5 py-1 bg-white/5 border border-white/10 text-white/60 hover:text-white rounded-lg transition-all text-[11px] flex items-center gap-1 font-extrabold cursor-pointer"
+                            className="px-2.5 py-1 bg-zinc-50 border border-zinc-200 text-zinc-650 hover:text-zinc-850 hover:bg-zinc-100 rounded-lg transition-all text-[11px] flex items-center gap-1 font-extrabold cursor-pointer"
                           >
                             <Settings2 className="w-3 h-3" />
                             管理
                           </InteractiveButton>
-                          <Activity className="h-4 w-4 text-emerald-500 opacity-60" />
+                          {activeViewTab === "real" ? (
+                            <ShieldCheck className="h-4 w-4 text-teal-605 opacity-80" />
+                          ) : (
+                            <Activity className="h-4 w-4 text-emerald-600 opacity-80" />
+                          )}
                         </div>
                       </div>
 
                       <div className="relative w-full overflow-hidden">
                         {/* Smooth scroll masks */}
-                        <div className="absolute left-0 top-0 bottom-0 w-4 bg-gradient-to-r from-[#0d0e12]/90 to-transparent pointer-events-none z-10" />
-                        <div className="absolute right-0 top-0 bottom-0 w-4 bg-gradient-to-l from-[#0d0e12]/90 to-transparent pointer-events-none z-10" />
+                        <div className="absolute left-0 top-0 bottom-0 w-4 bg-gradient-to-r from-zinc-50 to-transparent pointer-events-none z-10" />
+                        <div className="absolute right-0 top-0 bottom-0 w-4 bg-gradient-to-l from-zinc-50 to-transparent pointer-events-none z-10" />
 
                         <div className="flex items-center gap-2.5 overflow-x-auto scrollbar-hide py-1 pl-4 pr-4 -mx-4 snap-x snap-mandatory">
-                          {(
-                            [
-                              "觀察中",
-                              "候選名單",
-                              "買進操作",
-                              "賣出操作",
-                              "平倉操作",
-                              "乖離名單",
-                            ] as const
-                          ).map((tab) => {
+                          {visibleSubTabs.map((tab) => {
                             const conf = holdingTabConfig[tab];
                             const TabIcon = conf.icon;
-                            const tabCount = visibleActiveTabs.filter(
+                            const tabCount = effectiveVisibleActiveTabs.filter(
                               (t) => getDisplayHoldingStatus(t.holdingStatus) === tab,
                             ).length;
                             const isActive = activeHoldingSubTab === tab;
@@ -3503,16 +3813,16 @@ export default function Dashboard() {
                                 className={`flex-shrink-0 snap-center flex items-center gap-1.5 px-3.5 py-2 rounded-xl border font-bold text-xs transition-all duration-300 relative cursor-pointer ${
                                   isActive
                                     ? `${conf.colorClass} ${conf.bgClass} ${conf.borderClass} ${conf.shadowClass} scale-[1.03] z-10`
-                                    : "bg-white/[0.01] border-white/[0.04] text-white/50"
+                                    : "bg-zinc-50 border-zinc-200/60 text-zinc-500 hover:bg-zinc-100/75 hover:text-zinc-800"
                                 }`}
                               >
-                                <TabIcon className={`w-3.5 h-3.5 ${isActive ? conf.colorClass : "text-white/40"}`} />
+                                <TabIcon className={`w-3.5 h-3.5 ${isActive ? conf.colorClass : "text-zinc-400"}`} />
                                 <span>{tab}</span>
                                 <span
                                   className={`text-[9px] font-black px-1.5 py-0.5 rounded-lg border ${
                                     isActive
                                       ? conf.activeCountClass
-                                      : "bg-white/5 border-white/10 opacity-60"
+                                      : "bg-zinc-200/50 border-zinc-250/50 text-zinc-600 font-bold"
                                   }`}
                                 >
                                   {tabCount}
@@ -3540,236 +3850,302 @@ export default function Dashboard() {
                         if (!open) setConfirmDeleteId(null);
                       }}
                     >
-                          <DialogContent className="glass-panel border-white/10 shadow-2xl bg-slate-900/90 backdrop-blur-3xl text-white outline-none sm:max-w-3xl max-h-[80vh] overflow-y-auto overflow-x-hidden scrollbar-hide w-11/12 max-w-lg fixed top-[50%] left-[50%] translate-x-[-50%] translate-y-[-50%] !rounded-2xl z-50">
-                            <DialogHeader>
-                              <DialogTitle className="font-bold text-xl">
-                                管理持有中股票
-                              </DialogTitle>
-                            </DialogHeader>
-                            <div className="space-y-6 py-4">
-                              <div className="flex bg-black/40 p-1 rounded-lg w-full overflow-x-auto scrollbar-hide mb-2 border border-white/5">
-                                {(
-                                  [
-                                    "觀察中",
-                                    "候選名單",
-                                    "買進操作",
-                                    "賣出操作",
-                                    "平倉操作",
-                                    "乖離名單",
-                                    "持股監控",
-                                  ] as const
-                                ).map((tab) => (
-                                  <button
-                                    key={tab}
-                                    onClick={() => setActiveManageTab(tab)}
-                                    className={`flex-shrink-0 px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-bold rounded-md transition-all flex items-center gap-1.5 sm:gap-2 cursor-pointer ${
-                                      activeManageTab === tab
-                                        ? "bg-emerald-500/20 text-emerald-400 font-extrabold"
-                                        : "text-white/50 hover:text-white/80 hover:bg-white/5"
-                                    }`}
+                      <DialogContent className="border border-zinc-250 shadow-2xl bg-white text-zinc-800 outline-none sm:max-w-3xl max-h-[81vh] overflow-y-auto overflow-x-hidden scrollbar-hide w-11/12 max-w-lg fixed top-[50%] left-[50%] translate-x-[-50%] translate-y-[-50%] !rounded-2xl z-50">
+                        <DialogHeader>
+                          <DialogTitle className="font-black text-xl text-zinc-900 border-b border-zinc-150 pb-3">
+                            管理持有中股票
+                          </DialogTitle>
+                        </DialogHeader>
+                        <div className="space-y-6 py-4">
+                          <div className="flex bg-zinc-100 p-1 rounded-xl w-full overflow-x-auto scrollbar-hide mb-2 border border-zinc-200">
+                            {(
+                              [
+                                "觀察中",
+                                "候選名單",
+                                "買進操作",
+                                "賣出操作",
+                                "平倉操作",
+                                "乖離名單",
+                                "持股監控",
+                              ] as const
+                            ).map((tab) => (
+                              <button
+                                key={tab}
+                                onClick={() => setActiveManageTab(tab)}
+                                className={`flex-shrink-0 px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-black rounded-lg transition-all flex items-center gap-1.5 sm:gap-2 cursor-pointer ${
+                                  activeManageTab === tab
+                                    ? "bg-emerald-500 text-white font-black shadow-sm"
+                                    : "text-zinc-600 hover:text-black hover:bg-zinc-200/50"
+                                }`}
+                              >
+                                <span>{tab}</span>
+                                {tab === "持股監控" && (
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black border ${
+                                    activeManageTab === tab
+                                      ? "bg-white/20 text-white border-white/20"
+                                      : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                  }`}>
+                                    {effectiveHiddenActiveTabs.length}
+                                  </span>
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="space-y-4">
+                            {(() => {
+                              const categoryTabs = activeManageTab === "持股監控"
+                                ? effectiveHiddenActiveTabs
+                                : effectiveActiveTabs.filter(
+                                    (t) => getDisplayHoldingStatus(t.holdingStatus) === activeManageTab
+                                  );
+                              if (categoryTabs.length === 0) {
+                                return (
+                                  <div className="text-center text-zinc-450 py-12 text-sm font-black bg-zinc-50 border border-zinc-150 border-dashed rounded-xl">
+                                    {activeManageTab === "持股監控"
+                                      ? "目前無隱藏的個股名單"
+                                      : `此分類下沒有持有中股票`}
+                                  </div>
+                                );
+                              }
+                              return categoryTabs.map((tab) => {
+                                const idx = effectiveActiveTabs.findIndex(t => t.id === tab.id);
+                                return (
+                                  <div
+                                    className="flex flex-col gap-3.5 p-4 rounded-xl border border-zinc-200 bg-zinc-50/55 hover:bg-zinc-50 transition-colors relative overflow-hidden shadow-xs"
+                                    key={tab.id}
                                   >
-                                    <span>{tab}</span>
-                                    {tab === "持股監控" && (
-                                      <span className="text-[10px] bg-emerald-500/25 px-1.5 py-0.5 rounded-full text-emerald-300 font-black border border-emerald-400/25">
-                                        {hiddenActiveTabs.length}
-                                      </span>
-                                    )}
-                                  </button>
-                                ))}
-                              </div>
-                              <div className="space-y-3">
-                                {(() => {
-                                  const categoryTabs = activeManageTab === "持股監控"
-                                    ? hiddenActiveTabs
-                                    : activeTabs.filter(
-                                        (t) => getDisplayHoldingStatus(t.holdingStatus) === activeManageTab
-                                      );
-                                  if (categoryTabs.length === 0) {
-                                    return (
-                                      <div className="text-center text-white/40 py-8 text-sm font-medium">
-                                        {activeManageTab === "持股監控"
-                                          ? "目前無隱藏的個股名單"
-                                          : `此分類下沒有持有中股票`}
-                                      </div>
-                                    );
-                                  }
-                                  return categoryTabs.map((tab) => {
-                                      const idx = activeTabs.findIndex(t => t.id === tab.id);
-                                      return (
-                                        <div
-                                          className="flex flex-col gap-3 p-3 rounded-lg border border-white/5 bg-white/[0.02] hover:bg-white/[0.05] transition-colors relative overflow-hidden"
-                                          key={tab.id}
+                                    <div className="flex items-center justify-between z-10 w-full relative border-b border-zinc-150 pb-2">
+                                      <div className="flex items-center gap-3">
+                                        <span
+                                          className={`font-black text-base ${tab.isHidden ? "text-zinc-400 line-through decoration-zinc-350" : "text-zinc-800"}`}
                                         >
-                                          <div className="flex items-center justify-between z-10 w-full relative">
-                                    <div className="flex items-center gap-3">
-                                      <span
-                                        className={`font-bold ${tab.isHidden ? "text-white/40 line-through" : "text-white"}`}
-                                      >
-                                        {tab.symbol}
-                                      </span>
-                                      {tab.tradeType === "simulated" ? (
-                                        <Badge className="bg-amber-500/20 text-amber-500">
-                                          模擬
-                                        </Badge>
-                                      ) : (
-                                        <Badge className="bg-emerald-500/20 text-emerald-500">
-                                          真實
-                                        </Badge>
-                                      )}
-                                    </div>
-                                    <div className="flex items-center gap-1">
-                                      <button
-                                        onClick={() => moveTabUp(idx)}
-                                        disabled={idx === 0}
-                                        className="p-1.5 rounded bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                                        title="往上移"
-                                      >
-                                        <ArrowUp className="w-4 h-4 text-white/70" />
-                                      </button>
-                                      <button
-                                        onClick={() => moveTabDown(idx)}
-                                        disabled={idx === activeTabs.length - 1}
-                                        className="p-1.5 rounded bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                                        title="往下移"
-                                      >
-                                        <ArrowDown className="w-4 h-4 text-white/70" />
-                                      </button>
-                                    </div>
-                                  </div>
-                                  <div className="grid grid-cols-3 gap-2 mt-1">
-                                    {(
-                                      [
-                                        "觀察中",
-                                        "候選名單",
-                                        "買進操作",
-                                        "賣出操作",
-                                        "平倉操作",
-                                        "乖離名單",
-                                      ] as const
-                                    ).map((cat) => (
-                                      <button
-                                        key={cat}
-                                        onClick={() =>
-                                          updateTab(tab.id, {
-                                            holdingStatus: cat,
-                                          })
-                                        }
-                                        className={`flex-1 py-1.5 rounded text-xs font-bold transition-all ${
-                                          getDisplayHoldingStatus(
-                                            tab.holdingStatus,
-                                          ) === cat
-                                            ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                                            : "bg-white/5 text-white/50 hover:bg-white/10 border border-transparent"
-                                        }`}
-                                      >
-                                        {cat}
-                                      </button>
-                                    ))}
-                                  </div>
-                                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 mt-2 w-full relative">
-                                    <button
-                                      onClick={() =>
-                                        updateTabHidden(tab.id, !tab.isHidden)
-                                      }
-                                      className={`flex-1 h-[48px] sm:h-[44px] rounded-lg sm:rounded-md border transition-all flex flex-row items-center justify-center gap-2 font-bold text-base sm:text-sm ${tab.isHidden ? "bg-white/10 border-white/20 text-white hover:bg-white/20" : "bg-amber-500/10 border-amber-500/20 text-amber-500 hover:bg-amber-500/20"}`}
-                                    >
-                                      {tab.isHidden ? (
-                                        <EyeOff className="w-5 h-5 sm:w-4 sm:h-4 opacity-50" />
-                                      ) : (
-                                        <Eye className="w-5 h-5 sm:w-4 sm:h-4" />
-                                      )}
-                                      {tab.isHidden ? "取消隱藏" : "隱藏"}
-                                    </button>
-
-                                    <button
-                                      onClick={() => toggleTabGroup(tab)}
-                                      className={`flex-1 h-[48px] sm:h-[44px] rounded-lg sm:rounded-md border transition-all flex flex-row items-center justify-center gap-2 font-bold text-base sm:text-sm ${tab.groupId ? "bg-purple-500/20 border-purple-500/30 text-purple-400 hover:bg-purple-500/30" : "bg-white/5 border-white/10 text-white/70 hover:bg-white/10"}`}
-                                    >
-                                      <Link className="w-5 h-5 sm:w-4 sm:h-4" />
-                                      {tab.groupId ? "解除區塊" : "區塊"}
-                                    </button>
-
-                                    {confirmDeleteId === tab.id ? (
-                                      <div className="absolute right-0 top-0 bottom-0 bg-slate-900 border border-slate-700 flex flex-col sm:flex-row items-stretch sm:items-center justify-end w-full rounded-lg sm:rounded-md px-1 py-1 sm:py-0 z-10 gap-2">
-                                        <span className="text-white/70 text-sm font-medium mr-auto ml-3 hidden sm:inline">
-                                          確定刪除?
+                                          {tab.symbol}
                                         </span>
-                                        <div className="flex gap-2 h-full w-full sm:w-auto">
+                                        {tab.tradeType === "simulated" ? (
+                                          <Badge className="bg-amber-50 border border-amber-250 text-amber-700 font-extrabold rounded-md shadow-xs">
+                                            模擬
+                                          </Badge>
+                                        ) : (
+                                          <Badge className="bg-emerald-50 border border-emerald-250 text-emerald-700 font-extrabold rounded-md shadow-xs">
+                                            真實
+                                          </Badge>
+                                        )}
+                                      </div>
+                                      <div className="flex items-center gap-1.5">
+                                        <button
+                                          onClick={() => moveTabUp(idx)}
+                                          disabled={idx === 0}
+                                          className="p-1.5 rounded-lg bg-white hover:bg-zinc-100 disabled:opacity-20 disabled:cursor-not-allowed border border-zinc-200 shadow-xs transition-colors cursor-pointer"
+                                          title="往上移"
+                                        >
+                                          <ArrowUp className="w-3.5 h-3.5 text-zinc-600" />
+                                        </button>
+                                        <button
+                                          onClick={() => moveTabDown(idx)}
+                                          disabled={idx === effectiveActiveTabs.length - 1}
+                                          className="p-1.5 rounded-lg bg-white hover:bg-zinc-100 disabled:opacity-20 disabled:cursor-not-allowed border border-zinc-200 shadow-xs transition-colors cursor-pointer"
+                                          title="往下移"
+                                        >
+                                          <ArrowDown className="w-3.5 h-3.5 text-zinc-600" />
+                                        </button>
+                                      </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-3 gap-2 mt-1">
+                                      {(
+                                        [
+                                          "觀察中",
+                                          "候選名單",
+                                          "買進操作",
+                                          "賣出操作",
+                                          "平倉操作",
+                                          "乖離名單",
+                                        ] as const
+                                      ).map((cat) => {
+                                        const isSelected = getDisplayHoldingStatus(tab.holdingStatus) === cat;
+                                        return (
                                           <button
+                                            key={cat}
                                             onClick={() =>
-                                              setConfirmDeleteId(null)
+                                              updateTab(tab.id, {
+                                                holdingStatus: cat,
+                                              })
                                             }
-                                            className="flex-1 sm:flex-none p-2 px-3 h-full sm:h-[36px] rounded bg-white/10 text-white hover:bg-white/20 text-base sm:text-sm font-bold"
+                                            className={`flex-1 py-1.5 rounded-lg text-xs font-black transition-all border cursor-pointer ${
+                                              isSelected
+                                                ? "bg-emerald-500 text-white border-emerald-600 shadow-xs"
+                                                : "bg-white text-zinc-700 hover:bg-zinc-100 border-zinc-200 shadow-xs"
+                                            }`}
+                                          >
+                                            {cat}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 mt-1.5 w-full relative">
+                                      <button
+                                        onClick={() =>
+                                          updateTabHidden(tab.id, !tab.isHidden)
+                                        }
+                                        className={`flex-1 h-[48px] sm:h-[44px] rounded-lg sm:rounded-md border transition-all flex flex-row items-center justify-center gap-2 font-black text-base sm:text-xs cursor-pointer ${tab.isHidden ? "bg-zinc-250 border-zinc-350 text-zinc-700 hover:bg-zinc-300 shadow-xs" : "bg-amber-50 border-amber-250 text-amber-700 hover:bg-amber-100 shadow-sm"}`}
+                                      >
+                                        {tab.isHidden ? (
+                                          <EyeOff className="w-5 h-5 sm:w-3.5 sm:h-3.5 text-zinc-505" />
+                                        ) : (
+                                          <Eye className="w-5 h-5 sm:w-3.5 sm:h-3.5 text-amber-600 font-extrabold" />
+                                        )}
+                                        {tab.isHidden ? "取消隱藏" : "隱藏"}
+                                      </button>
+
+                                      <button
+                                        onClick={() => toggleTabGroup(tab)}
+                                        className={`flex-1 h-[48px] sm:h-[44px] rounded-lg sm:rounded-md border transition-all flex flex-row items-center justify-center gap-2 font-black text-base sm:text-xs cursor-pointer ${tab.groupId ? "bg-purple-100 border-purple-250 text-purple-700 hover:bg-purple-150 shadow-sm" : "bg-zinc-50 border-zinc-200 text-zinc-700 hover:bg-zinc-100 shadow-xs"}`}
+                                      >
+                                        <Link className={`w-5 h-5 sm:w-3.5 sm:h-3.5 ${tab.groupId ? 'text-purple-650 font-black' : 'text-zinc-550'}`} />
+                                        {tab.groupId ? "解除區塊" : "區塊"}
+                                      </button>
+
+                                      {confirmDeleteId === tab.id ? (
+                                        <div className="absolute right-0 top-0 bottom-0 bg-white border border-rose-300 flex flex-col sm:flex-row items-stretch sm:items-center justify-end w-full rounded-lg sm:rounded-md px-1 py-1 sm:py-0 z-10 gap-2 shadow-lg">
+                                          <span className="text-zinc-800 text-xs font-black mr-auto ml-3 hidden sm:inline">
+                                            確定刪除股票 【{tab.symbol}】？
+                                          </span>
+                                          <div className="flex gap-2 h-full w-full sm:w-auto p-1 sm:p-0">
+                                            <button
+                                              onClick={() =>
+                                                setConfirmDeleteId(null)
+                                              }
+                                              className="flex-1 sm:flex-none p-1.5 px-3 h-full sm:h-[32px] rounded-lg bg-zinc-100 border border-zinc-250 text-zinc-700 hover:bg-zinc-200 text-base sm:text-xs font-black cursor-pointer"
+                                            >
+                                              取消
+                                            </button>
+                                            <button
+                                              onClick={() => {
+                                                deleteTab(tab.id);
+                                                setConfirmDeleteId(null);
+                                              }}
+                                              className="flex-1 sm:flex-none p-1.5 px-3 h-full sm:h-[32px] rounded-lg bg-rose-600 border border-rose-700 text-white hover:bg-rose-700 text-base sm:text-xs font-black cursor-pointer shadow-sm"
+                                            >
+                                              確認刪除
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ) : groupingTabId === tab.id ? (
+                                        <div className="absolute right-0 top-0 bottom-0 bg-white border border-purple-250 shadow-xl flex flex-col items-center justify-center w-full rounded-lg px-2 py-2 z-10 gap-2 backdrop-blur-xl">
+                                          <div className="text-zinc-800 text-xs font-black w-full text-center">選擇要連動的股票 (同一代號)</div>
+                                          <div className="flex flex-wrap gap-2 w-full items-center justify-center">
+                                             {activeTabs.filter(t => t.symbol === tab.symbol && t.id !== tab.id).length === 0 ? (
+                                                <span className="text-rose-650 text-xs font-black">無其他相同代號的持有中股票</span>
+                                             ) : (
+                                                activeTabs.filter(t => t.symbol === tab.symbol && t.id !== tab.id).map(target => (
+                                                   <button 
+                                                      key={target.id}
+                                                      onClick={(e) => { e.stopPropagation(); handleGroupWith(tab.id, target); }}
+                                                      className={`px-3 py-1 bg-white hover:bg-zinc-50 border border-zinc-250 rounded-lg text-xs font-black transition-colors cursor-pointer ${target.groupId ? "bg-purple-10s text-purple-705 border-purple-200" : "text-zinc-700 hover:text-black hover:border-zinc-300"}`}
+                                                   >
+                                                      {target.holdingStatus || '未分類'}
+                                                   </button>
+                                                ))
+                                             )}
+                                          </div>
+                                          <button 
+                                            onClick={() => setGroupingTabId(null)}
+                                            className="absolute right-2 top-2 p-1 text-zinc-450 hover:text-zinc-800 bg-zinc-150 hover:bg-zinc-200 border border-zinc-250 rounded cursor-pointer"
                                           >
                                             取消
                                           </button>
-                                          <button
-                                            onClick={() => {
-                                              deleteTab(tab.id);
-                                              setConfirmDeleteId(null);
-                                            }}
-                                            className="flex-1 sm:flex-none p-2 px-3 h-full sm:h-[36px] rounded bg-red-600 text-white hover:bg-red-700 text-base sm:text-sm font-bold"
-                                          >
-                                            確認刪除
-                                          </button>
                                         </div>
-                                      </div>
-                                    ) : groupingTabId === tab.id ? (
-                                      <div className="absolute right-0 top-0 bottom-0 bg-slate-900/95 border border-purple-500/50 shadow-xl flex flex-col items-center justify-center w-full rounded-lg px-2 py-2 z-10 gap-2 backdrop-blur-xl">
-                                        <div className="text-white text-xs font-bold w-full text-center">選擇要連動的股票 (同一代號)</div>
-                                        <div className="flex flex-wrap gap-2 w-full items-center justify-center">
-                                           {activeTabs.filter(t => t.symbol === tab.symbol && t.id !== tab.id).length === 0 ? (
-                                              <span className="text-red-400 text-xs">無其他相同代號的持有中股票</span>
-                                           ) : (
-                                              activeTabs.filter(t => t.symbol === tab.symbol && t.id !== tab.id).map(target => (
-                                                 <button 
-                                                    key={target.id}
-                                                    onClick={(e) => { e.stopPropagation(); handleGroupWith(tab.id, target); }}
-                                                    className={`px-3 py-1.5 border rounded-md text-xs font-bold transition-colors ${target.groupId ? "bg-purple-500/10 border-purple-500/30 text-purple-400" : "bg-white/10 hover:bg-white/20 border-white/20 text-white"}`}
-                                                 >
-                                                    {target.holdingStatus || '未分類'}
-                                                 </button>
-                                              ))
-                                           )}
-                                        </div>
-                                        <button 
-                                          onClick={() => setGroupingTabId(null)}
-                                          className="absolute right-2 top-2 p-1 text-white/40 hover:text-white bg-white/5 hover:bg-white/10 rounded"
+                                      ) : (
+                                        <button
+                                          onClick={() =>
+                                            setConfirmDeleteId(tab.id)
+                                          }
+                                          className="flex-1 h-[48px] sm:h-[44px] rounded-lg sm:rounded-md border transition-all bg-rose-50 border-rose-200 text-rose-600 hover:bg-rose-100 flex flex-row items-center justify-center gap-2 font-black text-base sm:text-xs cursor-pointer"
                                         >
-                                          取消
+                                          <Trash2 className="w-5 h-5 sm:w-3.5 sm:h-3.5 text-rose-605 font-bold" />
+                                          刪除
                                         </button>
-                                      </div>
-                                    ) : (
-                                      <button
-                                        onClick={() =>
-                                          setConfirmDeleteId(tab.id)
-                                        }
-                                        className="flex-1 h-[48px] sm:h-[44px] rounded-lg sm:rounded-md border transition-all bg-transparent sm:bg-red-500/5 border-red-500/20 text-red-500 hover:bg-red-500/10 flex flex-row items-center justify-center gap-2 font-bold text-base sm:text-sm"
-                                      >
-                                        <Trash2 className="w-5 h-5 sm:w-4 sm:h-4" />
-                                        刪除
-                                      </button>
-                                    )}
+                                      )}
+                                    </div>
                                   </div>
-                                </div>
-                              );
-                            });
-                          })()}
+                                );
+                              });
+                            })()}
                           </div>
-                              {activeTabs.length === 0 && (
-                                <div className="text-white/50 text-center py-4">
-                                  目前無持有中股票
-                                </div>
-                              )}
+                          {activeTabs.length === 0 && (
+                            <div className="text-zinc-400 text-center py-8 font-black bg-zinc-50 rounded-2xl border border-dashed border-zinc-150">
+                              目前無持有中股票
                             </div>
-                          </DialogContent>
-                        </Dialog>
+                          )}
+                        </div>
+                      </DialogContent>
+                    </Dialog>
+
+                      {/* Sub tab row of small colored blocks */}
+                      <div className="py-2.5 px-6 max-w-6xl mx-auto w-full flex items-center justify-between border-t border-zinc-200 sm:border-t-0 select-none">
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <span className="text-[11px] font-extrabold text-zinc-650">分組篩選</span>
+                          <div className="flex items-center gap-2 bg-zinc-150 p-1 border border-zinc-250/70 rounded-lg">
+                            {[
+                              { id: "all", tooltip: "全部", color: "bg-zinc-300 hover:bg-zinc-400", activeColor: "bg-zinc-800 ring-2 ring-zinc-300", count: currentSubTabVisibleTabs.length },
+                              { id: "highlight", tooltip: "重點關注", color: "bg-[#B1C28D]/50 hover:bg-[#B1C28D]", activeColor: "bg-[#B1C28D] ring-2 ring-[#B1C28D]/30", count: currentSubTabVisibleTabs.filter(t => !!t.isFavoriteHighlight).length },
+                              { id: "operation", tooltip: "操作確認", color: "bg-[#A3A3A3]/50 hover:bg-[#A3A3A3]", activeColor: "bg-[#A3A3A3] ring-2 ring-[#A3A3A3]/30", count: currentSubTabVisibleTabs.filter(t => !!t.isOperationConfirmed).length },
+                              { id: "deviation", tooltip: "乖離確認", color: "bg-[#F0D1B9]/50 hover:bg-[#F0D1B9]", activeColor: "bg-[#F0D1B9] ring-2 ring-[#F0D1B9]/30", count: currentSubTabVisibleTabs.filter(t => !!t.isDeviationConfirmed).length },
+                              { id: "group", tooltip: "連動區塊", color: "bg-sky-500/50 hover:bg-sky-450", activeColor: "bg-sky-400 ring-2 ring-sky-500/35", count: currentSubTabVisibleTabs.filter(t => !!t.groupId).length },
+                            ].filter(item => item.count > 0).map((filterItem) => {
+                              const isActive = activeCardDefinitionFilter === filterItem.id;
+                              return (
+                                <button
+                                  key={filterItem.id}
+                                  onClick={() => setActiveCardDefinitionFilter(filterItem.id as any)}
+                                  title={`${filterItem.tooltip} (${filterItem.count} 檔)`}
+                                  className={`w-6 h-3 rounded transition-all duration-300 relative cursor-pointer ${
+                                    isActive ? `${filterItem.activeColor} scale-110 shadow-md` : `${filterItem.color} opacity-80 hover:opacity-100 hover:scale-105`
+                                  }`}
+                                >
+                                  {isActive && (
+                                    <span className="absolute inset-0 m-auto w-1 h-1 rounded-full bg-white shadow-sm" />
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          {/* Dynamic label showing active category & count */}
+                          <span className="text-[11px] font-black text-zinc-700 tracking-wider flex items-center gap-1.5 ml-1 border-l border-zinc-250 pl-3 h-4">
+                            {
+                              (() => {
+                                const activeObj = [
+                                  { id: "all", label: "全部" },
+                                  { id: "highlight", label: "重點關注" },
+                                  { id: "operation", label: "操作確認" },
+                                  { id: "deviation", label: "乖離確認" },
+                                  { id: "group", label: "連動區塊" },
+                                ].find(f => f.id === activeCardDefinitionFilter);
+                                const activeCount = activeObj ? (
+                                  activeObj.id === "all" ? currentSubTabVisibleTabs.length :
+                                  activeObj.id === "highlight" ? currentSubTabVisibleTabs.filter(t => !!t.isFavoriteHighlight).length :
+                                  activeObj.id === "operation" ? currentSubTabVisibleTabs.filter(t => !!t.isOperationConfirmed).length :
+                                  activeObj.id === "deviation" ? currentSubTabVisibleTabs.filter(t => !!t.isDeviationConfirmed).length :
+                                  currentSubTabVisibleTabs.filter(t => !!t.groupId).length
+                                ) : 0;
+                                return activeObj ? `${activeObj.label} (${activeCount} 檔)` : "";
+                              })()
+                            }
+                          </span>
+                        </div>
+
+                        <div className="hidden sm:block text-[10px] font-bold text-white/30 tracking-wider">
+                          點擊色塊切換卡片屬性分組與篩選
+                        </div>
                       </div>
+                    </div>
+
                   <div className="bg-transparent w-full">
                     <div className="overflow-hidden w-full">
                       <div className="pt-0 pb-4 sm:pt-0 sm:pb-6 min-h-[200px] w-full">
                         <AnimatePresence mode="wait">
-                          {currentSubTabVisibleTabs.length === 0 ? (
+                          {filteredSubTabVisibleTabs.length === 0 ? (
                             <motion.div
                               initial={{ opacity: 0, scale: 0.95 }}
                               animate={{ opacity: 1, scale: 1 }}
@@ -3786,10 +4162,12 @@ export default function Dashboard() {
                           ) : (
                             <div
                               ref={carouselRef}
-                              className="relative w-full overflow-x-auto snap-x snap-mandatory scrollbar-hide cursor-grab"
+                              className="relative w-full overflow-x-auto scrollbar-hide cursor-grab select-none border-y border-zinc-200/5 bg-zinc-50/[0.02] rounded-2xl"
                               onMouseDown={onDragStart}
+                              onTouchStart={onDragStart}
+                              style={{ touchAction: "pan-y" }}
                             >
-                              <div className="flex flex-nowrap gap-4 sm:gap-6 px-6 sm:px-[max(15%,calc((100vw-1152px)/2+16px))] pt-2 pb-4 w-max">
+                              <div className="flex flex-nowrap items-stretch gap-6 px-4 md:px-8 py-4 w-max">
                                 {renderGroups.map((group, groupIdx) => {
                                   const renderCard = (tab: any, idx: number) => {
                                     const getCardStatusInfo = (tabItem: any) => {
@@ -3803,8 +4181,109 @@ export default function Dashboard() {
                                       return { text: statusName, color };
                                     };
 
-                                    const plannedOrders =
+                                    let plannedOrders =
                                     activeTabOrders[tab.id] || [];
+                                    const getStrategyTargets = (tabId: string) => {
+                                      const strat = activeTabStrategies[tabId] || {};
+                                      const targets: {
+                                        id: string;
+                                        price: number | string;
+                                        notes: string;
+                                        direction?: string;
+                                        categoryType: "止損設定" | "止盈設定" | "分批進出場規劃" | "支撐門檻" | "壓力門檻";
+                                      }[] = [];
+
+                                      // 1. tpTargets
+                                      if (Array.isArray(strat.tpTargets)) {
+                                        strat.tpTargets.forEach((tp: any, i: number) => {
+                                          if (tp.price > 0) {
+                                            targets.push({
+                                              id: `tp-${i}`,
+                                              price: tp.price,
+                                              notes: tp.quantity ? `預定量: ${tp.quantity}股` : "止盈目標價",
+                                              categoryType: "止盈設定"
+                                            });
+                                          }
+                                        });
+                                      }
+
+                                      // 2. slTargets
+                                      if (Array.isArray(strat.slTargets)) {
+                                        strat.slTargets.forEach((sl: any, i: number) => {
+                                          let priceVal = sl.price || 0;
+                                          let n = "";
+                                          if (sl.quantity) {
+                                            n += `股數: ${sl.quantity}股`;
+                                          }
+                                          if (sl.percentage) {
+                                            n += (n ? "，" : "") + `百分比: ${sl.percentage}%`;
+                                          }
+                                          if (priceVal > 0 || sl.percentage > 0) {
+                                            targets.push({
+                                              id: `sl-${i}`,
+                                              price: priceVal || `止損 %: ${sl.percentage}%`,
+                                              notes: n || "止損目標價",
+                                              categoryType: "止損設定"
+                                            });
+                                          }
+                                        });
+                                      }
+
+                                      // 3. entries
+                                      if (Array.isArray(strat.entries)) {
+                                        strat.entries.forEach((entry: any, i: number) => {
+                                          if (entry.priceStr) {
+                                            targets.push({
+                                              id: `entry-${i}`,
+                                              price: entry.priceStr,
+                                              notes: `批次 ${i + 1} (${entry.quantityStr ? entry.quantityStr + "股" : ""}): ${entry.notes || ""}`.trim(),
+                                              direction: entry.type,
+                                              categoryType: "分批進出場規劃"
+                                            });
+                                          }
+                                        });
+                                      }
+
+                                      // 4. resistanceZones
+                                      if (Array.isArray(strat.resistanceZones)) {
+                                        strat.resistanceZones.forEach((res: any, i: number) => {
+                                          if (res.price > 0) {
+                                            targets.push({
+                                              id: `res-${i}`,
+                                              price: res.price,
+                                              notes: res.notes || "壓力門檻價",
+                                              categoryType: "壓力門檻"
+                                            });
+                                          }
+                                        });
+                                      }
+
+                                      // 5. supportZones
+                                      if (Array.isArray(strat.supportZones)) {
+                                        strat.supportZones.forEach((sup: any, i: number) => {
+                                          if (sup.price > 0) {
+                                            targets.push({
+                                              id: `sup-${i}`,
+                                              price: sup.price,
+                                              notes: sup.notes || "支撐門檻價",
+                                              categoryType: "支撐門檻"
+                                            });
+                                          }
+                                        });
+                                      }
+
+                                      return targets;
+                                    };
+
+                                    const strategyTargets = getStrategyTargets(tab.id); plannedOrders = strategyTargets.map(t => ({ ...t, category: t.categoryType, direction: t.categoryType === "止損設定" || t.categoryType === "止盈設定" || t.categoryType === "壓力門檻" ? "SELL" : "BUY", isManualHighlight: !!strategyHighlights[`${tab.id}-${t.id}`] }));
+                                    const groupedTargets = strategyTargets.reduce((acc: Record<string, any[]>, target) => {
+                                      const displayCategory = `[${target.categoryType}]`;
+                                      if (!acc[displayCategory]) {
+                                        acc[displayCategory] = [];
+                                      }
+                                      acc[displayCategory].push(target);
+                                      return acc;
+                                    }, {});
                                   const trades = activeTabTrades[tab.id] || [];
                                   const stats = calculateStats(
                                     trades,
@@ -3867,11 +4346,13 @@ export default function Dashboard() {
                                     }
                                   }
 
+                                  const isCardExpanded = tab.groupId ? (expandedCards[tab.groupId] !== false) : (expandedCards[tab.id] !== false);
+
                                   return (
                                     <div
                                       key={tab.id}
                                       id={`stock-card-${tab.id}`}
-                                      className="card-wrapper shrink-0 w-[88vw] sm:w-[460px] min-h-[460px] flex flex-col snap-center transition-transform duration-500"
+                                      className={`card-wrapper w-[calc(100vw-32px)] sm:w-[410px] md:w-[410px] shrink-0 flex flex-col transition-all duration-300 ${isCardExpanded ? "min-h-[460px] h-[460px]" : "min-h-[135px] h-[135px]"}`}
                                       onClickCapture={(e) => {
                                         if (
                                           dragRef.current
@@ -3890,6 +4371,13 @@ export default function Dashboard() {
                                           e.stopPropagation();
                                           return;
                                         }
+                                        if (!isCardExpanded) {
+                                          setExpandedCards((prev) => ({
+                                            ...prev,
+                                            [tab.groupId || tab.id]: true,
+                                          }));
+                                          return;
+                                        }
                                         setFlippedCards((prev) => ({
                                           ...prev,
                                           [tab.id]: !prev[tab.id],
@@ -3897,7 +4385,7 @@ export default function Dashboard() {
                                       }}
                                     >
                                       <div
-                                        className="card-inner-parallax w-full h-full min-h-[460px] flex flex-col"
+                                        className={`card-inner-parallax w-full h-full flex flex-col transition-all duration-300 ${isCardExpanded ? "min-h-[460px] h-[460px]" : "min-h-[135px] h-[135px]"}`}
                                         style={{ perspective: "1200px" }}
                                       >
                                         <motion.div
@@ -3915,8 +4403,8 @@ export default function Dashboard() {
                                             delay: idx * 0.05,
                                           }}
                                           key={tab.id}
-                                          className={`relative w-full h-full flex-1 flex flex-col min-h-[460px] cursor-pointer slide-drawer-container ${
-                                            flippedCards[tab.id] ? "show-back" : ""
+                                          className={`relative w-full h-full flex-1 flex flex-col cursor-pointer slide-drawer-container transition-all duration-300 ${isCardExpanded ? "min-h-[460px] h-[460px]" : "min-h-[135px] h-[135px]"} ${
+                                            flippedCards[tab.id] && isCardExpanded ? "show-back" : ""
                                           } ${activeTabStrategies[tab.id]?.observeChecked ? "card-breathe-observe" : activeTabStrategies[tab.id]?.closeChecked ? "card-breathe-close" : activeTabStrategies[tab.id]?.slChecked ? "card-breathe-sl" : activeTabStrategies[tab.id]?.addChecked ? "card-breathe-add" : activeTabStrategies[tab.id]?.tpChecked ? "card-breathe-tp" : ""}`}
                                         >
                                           {/* Corner label badges - stacked vertically (render on container level to avoid clip truncation) */}
@@ -3976,8 +4464,10 @@ export default function Dashboard() {
                                                 ? "none"
                                                 : "auto",
                                             }}
-                                            className="card-front absolute inset-0 glass-card flex flex-col group/item w-full h-full transition-all duration-500 overflow-hidden"
+                                            className="card-front absolute inset-0 glass-card rounded-2xl flex flex-col group/item w-full h-full transition-all duration-500 overflow-hidden"
                                           >
+                                            {/* Removed old redundant child elements since they are now declared on container level */}
+
                                             {/* 左側色條 */}
                                             {(() => {
                                               const strat = activeTabStrategies[tab.id] || {};
@@ -4003,22 +4493,22 @@ export default function Dashboard() {
                                               const bannerBgColor = tab.isDeviationConfirmed
                                                 ? "#F0D1B9"
                                                 : tab.isOperationConfirmed
-                                                  ? "#A3A3A3"
+                                                  ? "#D1D5DB"
                                                   : tab.isFavoriteHighlight
-                                                    ? "#B1C28D"
+                                                    ? "#DCE6C1"
                                                     : shouldHighlightTitle
-                                                      ? "#F5DAD5"
+                                                      ? "#FCDAD7"
                                                       : "transparent";
 
                                               const bannerTextColor = tab.isDeviationConfirmed
-                                                ? "#7a4a1e"
+                                                ? "#823b0a"
                                                 : tab.isOperationConfirmed
-                                                  ? "#7a4a1e"
+                                                  ? "#1f2937"
                                                   : tab.isFavoriteHighlight
-                                                    ? "#7a4a1e"
+                                                    ? "#3f4d21"
                                                     : shouldHighlightTitle
-                                                      ? "#7a4a1e"
-                                                      : "rgba(255, 255, 255, 0.7)";
+                                                      ? "#9c2c2c"
+                                                      : "#71717a";
 
                                               const statusInfo = getCardStatusInfo(tab);
                                               const dotColor = isBannerActive ? bannerTextColor : statusInfo.color;
@@ -4031,7 +4521,7 @@ export default function Dashboard() {
                                                     setIsActionDialogOpen(true);
                                                   }}
                                                   style={{ backgroundColor: bannerBgColor }}
-                                                  className={`w-full h-[18px] flex items-center justify-between px-3 transition-colors duration-500 shrink-0 border-b ${isBannerActive ? "border-transparent" : "border-white/5"} select-none cursor-pointer`}
+                                                  className={`w-full h-[18px] flex items-center justify-between px-3 transition-colors duration-500 shrink-0 border-b ${isBannerActive ? "border-transparent" : "border-zinc-200/50"} select-none cursor-pointer`}
                                                 >
                                                   {/* Status with dot */}
                                                   <div className="flex items-center gap-1.5 font-sans">
@@ -4041,11 +4531,11 @@ export default function Dashboard() {
                                                     />
                                                   </div>
 
-                                                  {/* Timestamp shifted to right side of title bar */}
+                                                  {/* Timestamp shifted to right side of title bar (conditional margin to accommodate NEW corner tag) */}
                                                   {tab.updatedAt && (
                                                     <span 
                                                       style={{ color: bannerTextColor }}
-                                                      className="text-[9.5px] font-black tracking-wider opacity-80 transition-colors duration-500 font-bold"
+                                                      className={`text-[9.5px] font-black tracking-wider opacity-80 transition-colors duration-500 font-bold transition-all duration-300 ${tab.isNew ? 'mr-[45px]' : ''}`}
                                                     >
                                                       {typeof tab.updatedAt.toDate === 'function' 
                                                         ? format(tab.updatedAt.toDate(), 'yyyy/MM/dd HH:mm') 
@@ -4057,7 +4547,7 @@ export default function Dashboard() {
                                             })()}
 
                                             {/* Main Card Content Body with padding */}
-                                            <div className="flex-1 flex flex-col p-3 pt-2 pb-16 w-full overflow-y-auto scrollbar-hide relative">
+                                            <div className={`flex-1 flex flex-col p-3 pt-2 ${isCardExpanded ? "pb-16" : "pb-2"} w-full overflow-y-auto scrollbar-hide relative`}>
                                             {/* 左側色條 */}
                                             {(() => {
                                               const strat = activeTabStrategies[tab.id] || {};
@@ -4079,7 +4569,7 @@ export default function Dashboard() {
 
                                             {/* Symbol, Price, Scores Row */}
                                             <div
-                                              className="flex items-center justify-between relative z-10 w-full overflow-hidden rounded-lg p-1.5 hover:bg-white/5 transition-colors duration-200 shrink-0"
+                                              className="flex items-center justify-between relative z-10 w-full overflow-hidden rounded-lg p-1.5 hover:bg-zinc-150/40 transition-colors duration-200 shrink-0"
                                               onClick={(e) => {
                                                 e.stopPropagation();
                                                 setSelectedActionTab(tab);
@@ -4097,17 +4587,17 @@ export default function Dashboard() {
                                                   {/* Row 1: Symbol & Name & SIM/LIVE Badge */}
                                                   <div className="flex items-baseline gap-2 mb-1.5">
                                                     <span
-                                                      className={`font-black text-2xl tracking-tighter leading-none ${typeof tab.updatedAt?.toDate === 'function' && (new Date().getTime() - tab.updatedAt.toDate().getTime() > 17 * 60 * 60 * 1000) ? "text-red-500 animate-pulse font-bold" : "text-white"}`}
+                                                      className={`font-black text-2xl tracking-tighter leading-none ${typeof tab.updatedAt?.toDate === 'function' && (new Date().getTime() - tab.updatedAt.toDate().getTime() > 17 * 60 * 60 * 1000) ? "text-red-500 animate-pulse font-bold" : "text-zinc-900"}`}
                                                     >
                                                       {tab.symbol}
                                                     </span>
                                                     {tab.currentPrice !== undefined && (
                                                       <div className="flex items-baseline gap-2">
-                                                        <span className="text-lg font-black tabular-nums text-white">
+                                                        <span className="text-lg font-black tabular-nums text-zinc-900">
                                                           ${tab.currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                         </span>
                                                         {unrealizedPnL !== 0 && (
-                                                          <span className={`text-sm font-black tabular-nums ${unrealizedPnL > 0 ? "text-emerald-500" : "text-rose-500"}`}>
+                                                          <span className={`text-sm font-black tabular-nums ${unrealizedPnL > 0 ? "text-emerald-600" : "text-rose-600"}`}>
                                                             {unrealizedPnL > 0 ? "▲" : "▼"}{Math.abs(unrealizedPnL).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                           </span>
                                                         )}
@@ -4117,8 +4607,8 @@ export default function Dashboard() {
                                                       className={`flex items-center gap-1 text-[9px] font-black px-1.5 py-0.5 rounded-full border uppercase tracking-widest ml-auto ${
                                                         tab.tradeType ===
                                                         "simulated"
-                                                          ? "bg-amber-500/10 text-amber-500 border-amber-500/30"
-                                                          : "bg-emerald-500/10 text-emerald-500 border-emerald-500/30"
+                                                          ? "bg-amber-50 text-amber-800 border-amber-200"
+                                                          : "bg-emerald-50 text-emerald-800 border-emerald-200"
                                                       }`}
                                                     >
                                                       {tab.tradeType === "simulated" ? (
@@ -4128,51 +4618,64 @@ export default function Dashboard() {
                                                       )}
                                                       {tab.tradeType === "simulated" ? "SIM" : "LIVE"}
                                                     </div>
+                                                    <button
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setExpandedCards((prev) => ({
+                                                          ...prev,
+                                                          [tab.groupId || tab.id]: !isCardExpanded
+                                                        }));
+                                                      }}
+                                                      className="p-1 text-zinc-500 hover:text-zinc-800 bg-zinc-100/80 hover:bg-zinc-200 rounded-full transition-colors ml-1.5 flex items-center justify-center shrink-0"
+                                                      title={isCardExpanded ? "收合個股卡片" : "展開個股卡片"}
+                                                    >
+                                                      <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-300 ${isCardExpanded ? "rotate-180" : ""}`} />
+                                                    </button>
                                                   </div>
 
                                                   {/* Row 2: Score & Sentiment Groups */}
                                                   <div className="flex flex-wrap items-center gap-2 mb-1">
-                                                    <div className="flex items-center border border-white/10 rounded-md overflow-hidden h-5 bg-white/5">
-                                                      <div className="px-1.5 h-full flex items-center border-r border-white/10 bg-white/5">
-                                                        <span className="text-[10px] font-black text-yellow-500">
+                                                    <div className="flex items-center border border-zinc-200 rounded-md overflow-hidden h-5 bg-zinc-50">
+                                                      <div className="px-1.5 h-full flex items-center border-r border-zinc-200 bg-zinc-100/50">
+                                                        <span className="text-[10px] font-black text-yellow-600">
                                                           ★ {tab.rating || 8}
                                                         </span>
                                                       </div>
-                                                      <div className="px-1.5 h-full flex items-center border-r border-white/10 bg-white/5">
-                                                        <span className="text-[10px] font-black text-purple-400">
+                                                      <div className="px-1.5 h-full flex items-center border-r border-zinc-200 bg-zinc-100/50">
+                                                        <span className="text-[10px] font-black text-purple-600">
                                                           Q {tab.qualityScore || 5}
                                                         </span>
                                                       </div>
-                                                      <div className="px-1.5 h-full flex items-center border-r border-white/10 bg-white/5">
-                                                        <span className="text-[10px] font-black text-amber-500">
+                                                      <div className="px-1.5 h-full flex items-center border-r border-zinc-200 bg-zinc-100/50">
+                                                        <span className="text-[10px] font-black text-amber-700">
                                                           V {tab.valueScore || 5}
                                                         </span>
                                                       </div>
-                                                      <div className="px-1.5 h-full flex items-center bg-emerald-500/10 text-emerald-400">
+                                                      <div className="px-1.5 h-full flex items-center bg-emerald-50 text-emerald-600">
                                                         <span className="text-[10px] font-black">
                                                           B {tab.buyRate || 5}
                                                         </span>
                                                       </div>
-                                                      <div className="px-1.5 h-full flex items-center bg-rose-500/10 text-rose-400">
+                                                      <div className="px-1.5 h-full flex items-center bg-rose-50 text-rose-600 font-bold">
                                                         <span className="text-[10px] font-black">
                                                           S {tab.sellRate || 5}
                                                         </span>
                                                       </div>
                                                     </div>
 
-                                                    <div className="flex items-center border border-white/10 rounded-md overflow-hidden h-5 bg-white/5">
-                                                      <div className="px-1.5 h-full flex items-center border-r border-white/10 bg-white/5">
-                                                        <span className="text-[10px] font-black text-indigo-400">
+                                                    <div className="flex items-center border border-zinc-200 rounded-md overflow-hidden h-5 bg-zinc-50">
+                                                      <div className="px-1.5 h-full flex items-center border-r border-zinc-200 bg-zinc-100/50">
+                                                        <span className="text-[10px] font-black text-indigo-600">
                                                           🌊 {tab.volatility || "中"}
                                                         </span>
                                                       </div>
-                                                      <div className="px-1.5 h-full flex items-center border-r border-white/10 bg-white/5" title="Positive Value">
-                                                        <span className="text-[10px] font-black text-emerald-400">
+                                                      <div className="px-1.5 h-full flex items-center border-r border-zinc-200 bg-zinc-100/50" title="Positive Value">
+                                                        <span className="text-[10px] font-black text-emerald-600 font-bold">
                                                           P+ {calculatePositiveValue(Number(tab.rating||5), Number(tab.qualityScore||5), Number(tab.valueScore||5), Number(tab.buyRate||5))}
                                                         </span>
                                                       </div>
-                                                      <div className="px-1.5 h-full flex items-center bg-white/5" title="Negative Value">
-                                                        <span className="text-[10px] font-black text-red-500">
+                                                      <div className="px-1.5 h-full flex items-center bg-zinc-100/50" title="Negative Value">
+                                                        <span className="text-[10px] font-black text-red-600 font-bold">
                                                           N- {calculateNegativeValue(Number(tab.rating||5), Number(tab.qualityScore||5), Number(tab.valueScore||5), Number(tab.sellRate||5))}
                                                         </span>
                                                       </div>
@@ -4180,23 +4683,14 @@ export default function Dashboard() {
                                                   </div>
                                                 </div>
                                               </div>
-
-                                              {/* Right side: Action Button */}
-                                              <div className="flex flex-col items-end justify-center self-stretch ml-2">
-                                                <div className={`${tab.groupId ? 'opacity-100 translate-x-0' : 'opacity-100 sm:opacity-0 sm:group-hover/item:opacity-100 translate-x-0 sm:translate-x-4 sm:group-hover/item:translate-x-0'} transition-all duration-500 transform`}>
-                                                  <button
-                                                    className={`whitespace-nowrap text-sm font-black rounded-full px-5 py-2.5 sm:hover:scale-105 active:scale-95 transition-all ${tab.tradeDirection === '看跌' ? '!bg-red-500 !text-white' : tab.tradeDirection === '看漲' ? '!bg-emerald-500 !text-white' : 'bg-white text-black shadow-[0_0_20px_rgba(255,255,255,0.3)]'}`}
-                                                  >
-                                                    {tab.tradeDirection ? `${tab.tradeDirection}操作` : "檢視細節"}
-                                                  </button>
-                                                </div>
-                                              </div>
                                             </div>
 
-                                            {plannedOrders.length > 0 && (
-                                              <div className="mt-2 pt-2 border-t border-white/10 relative z-10">
-                                                <p className="text-[12px] font-medium text-white/40 mb-[6px] tracking-wide uppercase">
-                                                  預定訂單 (
+                                            {isCardExpanded && (
+                                              <>
+                                                {plannedOrders.length > 0 && (
+                                                  <div className="mt-2 pt-2 border-t border-zinc-200/55 relative z-10">
+                                                <p className="text-[12px] font-bold text-zinc-550 text-zinc-500 mb-[6px] tracking-wide uppercase">
+                                                  交易計畫與策略目標價 (
                                                   {plannedOrders.length})
                                                 </p>
                                                 <div className="flex flex-col gap-1">
@@ -4367,32 +4861,32 @@ export default function Dashboard() {
                                                                 className={`h-1 w-1 rounded-full ${
                                                                   categoryType ===
                                                                   "止損設定"
-                                                                    ? "bg-red-400"
+                                                                    ? "bg-red-500"
                                                                     : categoryType ===
                                                                         "止盈設定"
-                                                                      ? "bg-emerald-400"
+                                                                      ? "bg-emerald-500"
                                                                       : categoryType ===
                                                                             "支撐門檻" ||
                                                                           categoryType ===
                                                                             "壓力門檻"
-                                                                        ? "bg-amber-400"
-                                                                        : "bg-blue-400"
+                                                                        ? "bg-amber-500"
+                                                                        : "bg-blue-500"
                                                                 }`}
                                                               ></div>
                                                               <span
                                                                 className={`text-[11px] font-bold tracking-widest uppercase leading-none ${
                                                                   categoryType ===
                                                                   "止損設定"
-                                                                    ? "text-red-400/80"
+                                                                    ? "text-red-600"
                                                                     : categoryType ===
                                                                         "止盈設定"
-                                                                      ? "text-emerald-400/80"
+                                                                      ? "text-emerald-600"
                                                                       : categoryType ===
                                                                             "支撐門檻" ||
                                                                           categoryType ===
                                                                             "壓力門檻"
-                                                                        ? "text-amber-400/80"
-                                                                        : "text-white/40"
+                                                                        ? "text-amber-600"
+                                                                        : "text-zinc-500"
                                                                 }`}
                                                               >
                                                                 {category}
@@ -4455,25 +4949,25 @@ export default function Dashboard() {
                                                                       isHighlighted
                                                                     ) {
                                                                       colorClass =
-                                                                        "bg-[#ED8900] text-[#0F0F0F] border-transparent shadow-[0_0_15px_rgba(237,137,0,0.5)]";
+                                                                        "bg-amber-500 text-zinc-950 border-amber-600 shadow-sm font-semibold";
                                                                       borderClass =
-                                                                        "";
+                                                                        "border";
                                                                     } else if (
                                                                       isStopLoss
                                                                     ) {
                                                                       colorClass =
-                                                                        "border-[#D6B2AB]/20 text-[#D6B2AB] bg-[#D6B2AB]/5";
+                                                                        "border-red-200 text-red-700 bg-red-50";
                                                                     } else if (
                                                                       isKeyPrice
                                                                     ) {
                                                                       colorClass =
-                                                                        "bg-amber-500/5 border-amber-500/20 text-amber-400";
+                                                                        "bg-amber-50/50 border-amber-200 text-amber-800";
                                                                     } else {
                                                                       colorClass =
                                                                         order.direction ===
                                                                         "BUY"
-                                                                          ? "bg-emerald-500/5 border-emerald-500/20 text-emerald-400"
-                                                                          : "bg-blue-500/5 border-blue-500/20 text-blue-400";
+                                                                          ? "bg-emerald-50/50 border-emerald-200 text-emerald-800 font-medium"
+                                                                          : "bg-blue-50/50 border-blue-200 text-blue-800 font-medium";
                                                                     }
 
                                                                     return (
@@ -4496,7 +4990,7 @@ export default function Dashboard() {
                                                                           e,
                                                                         ) => {
                                                                           e.stopPropagation();
-                                                                          handleToggleOrderHighlight(
+                                                                          order.id.startsWith("tp-") || order.id.startsWith("sl-") || order.id.startsWith("entry-") || order.id.startsWith("res-") || order.id.startsWith("sup-") ? setStrategyHighlights(prev => ({ ...prev, [`${tab.id}-${order.id}`]: !prev[`${tab.id}-${order.id}`] })) : handleToggleOrderHighlight(
                                                                             tab.id,
                                                                             order.id,
                                                                             order.isManualHighlight,
@@ -4507,8 +5001,8 @@ export default function Dashboard() {
                                                                           <span
                                                                             className={`text-[9px] tracking-wider font-extrabold px-1 py-0.5 rounded leading-none ${
                                                                               isHighlighted
-                                                                                ? "bg-black/20 text-[#ED8900]"
-                                                                                : "bg-amber-500/10 text-amber-400"
+                                                                                ? "bg-black/10 text-amber-950"
+                                                                                : "bg-amber-100 text-amber-800"
                                                                             }`}
                                                                           >
                                                                             {keyLabel}
@@ -4541,7 +5035,7 @@ export default function Dashboard() {
                                             {trades.length > 0 && (
                                               <div className="mt-2 pt-2 border-t border-white/10 relative z-10">
                                                 <div className="flex items-center justify-between mb-[4px]">
-                                                  <p className="text-[12px] font-medium text-white/40 tracking-wide uppercase">
+                                                  <p className="text-[12px] font-bold text-zinc-500 tracking-wide uppercase">
                                                     近期操作記錄 (
                                                     {trades.length})
                                                   </p>
@@ -4579,7 +5073,7 @@ export default function Dashboard() {
                                                     .map((trade) => (
                                                       <div
                                                         key={trade.id}
-                                                        className={`text-[11px] rounded border px-[8px] py-[2px] flex items-center gap-[4px] backdrop-blur-md ${trade.type === "BUY" ? "bg-emerald-500/5 border-emerald-500/20 text-emerald-400" : "bg-blue-500/5 border-blue-500/20 text-blue-400"}`}
+                                                        className={`text-[11px] rounded border px-[8px] py-[2px] flex items-center gap-[4px] backdrop-blur-md ${trade.type === "BUY" ? "bg-emerald-50 border-emerald-200/80 text-emerald-800" : "bg-blue-50 border-blue-200/80 text-blue-800"}`}
                                                       >
                                                         <span className="font-bold">
                                                           {trade.type === "BUY"
@@ -4596,12 +5090,12 @@ export default function Dashboard() {
                                                           <span className="text-red-500 font-bold ml-0.5">(機器)</span>
                                                         )}
                                                         {trade.operator === "人" && (
-                                                          <span className="text-white/40 font-bold ml-0.5">(人)</span>
+                                                          <span className="text-zinc-500 font-bold ml-0.5">(人)</span>
                                                         )}
                                                       </div>
                                                     ))}
                                                   {trades.length > 3 && (
-                                                    <div className="text-[11px] rounded border border-white/10 px-[8px] py-[2px] flex items-center gap-[4px] text-white/40">
+                                                    <div className="text-[11px] rounded border border-zinc-200 bg-zinc-100/50 px-[8px] py-[2px] flex items-center gap-[4px] text-zinc-500">
                                                       +{trades.length - 3} 更多
                                                     </div>
                                                   )}
@@ -4636,12 +5130,15 @@ export default function Dashboard() {
                                                 數據圖視化
                                               </div>
                                             </div>
+                                              </>
+                                            )}
                                             </div>
                                           </div>
 
                                           {/* Back Face */}
-                                          <div
-                                            style={{
+                                          {isCardExpanded && (
+                                            <div
+                                              style={{
                                               pointerEvents: flippedCards[tab.id]
                                                 ? "auto"
                                                 : "none",
@@ -4776,11 +5273,12 @@ export default function Dashboard() {
                                               <StockCardVisualizer
                                                 plannedOrders={plannedOrders}
                                                 currentPrice={tab.currentPrice}
-                                                onToggleHighlight={(orderId, currentStatus) => handleToggleOrderHighlight(tab.id, orderId, currentStatus)}
+                                                onToggleHighlight={(orderId, currentStatus) => { if (orderId.startsWith("tp-") || orderId.startsWith("sl-") || orderId.startsWith("entry-") || orderId.startsWith("res-") || orderId.startsWith("sup-")) { setStrategyHighlights(prev => ({ ...prev, [`${tab.id}-${orderId}`]: !prev[`${tab.id}-${orderId}`] })); } else { handleToggleOrderHighlight(tab.id, orderId, currentStatus); } }}
                                                 tabId={tab.id}
                                                 annotations={tab.chartAnnotations || []}
                                                 onUpdateAnnotations={(newAnn) => updateTab(tab.id, { chartAnnotations: newAnn })}
                                                 averageCost={stats.totalQuantity !== 0 ? stats.averagePrice : undefined}
+                                                averageCostQuantity={stats.totalQuantity !== 0 ? stats.totalQuantity : undefined}
                                                 stockName={tab.symbol}
                                                 rating={tab.rating}
                                                 qualityScore={tab.qualityScore}
@@ -4806,7 +5304,29 @@ export default function Dashboard() {
                                               />
                                             </div>
                                           </div>
+                                          )}
                                         </div>
+
+
+
+                                        {/* NEW Corner Block Tag - placed at container level */}
+                                        {tab.isNew && (
+                                          <div 
+                                            className="absolute top-0 right-0 z-[100] flex items-center justify-center select-none whitespace-nowrap pointer-events-none"
+                                            style={{ 
+                                              background: "linear-gradient(135deg, #ff6b35 0%, #e03030 100%)",
+                                              color: "#ffffff",
+                                              fontSize: "10px",
+                                              fontWeight: "700",
+                                              letterSpacing: "0.12em",
+                                              padding: "5px 13px 5px 10px",
+                                              borderRadius: "0 14px 0 12px",
+                                              fontFamily: "var(--font-sans)",
+                                            }}
+                                          >
+                                            NEW
+                                          </div>
+                                        )}
                                       </motion.div>
                                       </div>
                                     </div>
@@ -4815,7 +5335,11 @@ export default function Dashboard() {
 
                                   if (group.isGroup) {
                                     return (
-                                      <div key={group.id} className="relative flex p-1.5 sm:p-2 bg-gradient-to-r from-white/[0.04] to-white/[0.01] border border-white/5 shadow-2xl rounded-[36px] shrink-0 gap-4 group/box transition-all">
+                                      <div 
+                                        key={group.id} 
+                                        className="relative flex p-1.5 sm:p-2 bg-gradient-to-r from-white/[0.04] to-white/[0.01] rounded-[36px] shrink-0 gap-4 group/box transition-all"
+                                        style={{ border: '0.8px solid #D9FF00', boxShadow: 'none' }}
+                                      >
                                         {/* Optional Label / Indicator indicating this is a paired block could go here */}
                                         <div className="absolute -top-2 left-1/2 -translate-x-1/2 bg-white/10 px-3 py-0.5 rounded-full text-[10px] font-bold text-white/50 opacity-0 group-hover/box:opacity-100 transition-opacity whitespace-nowrap pointer-events-none border border-white/10">
                                           連動區塊
@@ -4844,15 +5368,15 @@ export default function Dashboard() {
           <div className="grid grid-cols-1 gap-6">
             <div className="space-y-4">
               <ScrollIn delay={0.2} translateY={20}>
-                <div className="glass-panel overflow-hidden drop-shadow-2xl flex flex-col group transition-all duration-500 h-auto">
-                  <div className="px-6 py-5 flex items-center justify-between bg-blue-500/[0.03] border-b border-blue-500/10">
-                    <div className="flex items-center gap-4">
-                      <div className="w-1.5 h-6 bg-gradient-to-b from-blue-400 to-blue-600 rounded-full shadow-[0_0_10px_rgba(59,130,246,0.5)]"></div>
-                      <h3 className="font-bold text-xl tracking-tight text-white/90">
-                        已完成
+                <div className="bg-white border border-zinc-200/90 rounded-[2rem] overflow-hidden shadow-sm flex flex-col group transition-all duration-500 h-auto">
+                  <div className="px-6 py-5 flex items-center justify-between bg-zinc-50/60 border-b border-zinc-150">
+                    <div className="flex items-center gap-3">
+                      <div className="w-1.5 h-6 bg-gradient-to-b from-blue-500 to-blue-600 rounded-full shadow-[0_0_10px_rgba(59,130,246,0.25)]"></div>
+                      <h3 className="font-extrabold text-lg sm:text-xl tracking-tight text-zinc-800">
+                        已完成交易
                       </h3>
-                      <span className="text-xs font-bold border border-blue-500/30 bg-blue-500/10 text-blue-400 px-2.5 py-1 rounded-full shadow-[0_0_10px_rgba(59,130,246,0.2)]">
-                        <AnimatedNumber value={completedTabs.length} /> 檔
+                      <span className="text-xs font-black border border-blue-200 bg-blue-50 text-blue-700 px-3 py-1 rounded-full shadow-sm">
+                        <AnimatedNumber value={completedTabs.length} /> 檔個股
                       </span>
                     </div>
                     <div className="flex items-center gap-3">
@@ -4863,27 +5387,30 @@ export default function Dashboard() {
                         ref={completedJsonFileInputRef}
                         onChange={handleImportCompletedTabsJson}
                       />
-                      <button
-                        type="button"
-                        onClick={handleExportCompletedTabsJson}
-                        disabled={isExportingCompleted}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 border border-violet-500/20 transition-all text-xs font-bold leading-none shadow-sm cursor-pointer"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        匯出Json
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => completedJsonFileInputRef.current?.click()}
-                        disabled={isImportingCompleted}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 border border-amber-500/20 transition-all text-xs font-bold leading-none shadow-sm cursor-pointer"
-                      >
-                        <Upload className="w-3.5 h-3.5" />
-                        匯入Json
-                      </button>
-                      <Magnetic>
-                        <TrendingUp className="h-6 w-6 text-blue-400 opacity-80 group-hover:text-blue-300 transition-colors" />
-                      </Magnetic>
+                      <div className="flex items-center gap-1 bg-white border border-zinc-200 rounded-xl p-1 shadow-sm">
+                        <button
+                          type="button"
+                          onClick={handleExportCompletedTabsJson}
+                          disabled={isExportingCompleted}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-zinc-600 hover:text-zinc-800 hover:bg-zinc-100 transition-all text-xs font-bold leading-none select-none cursor-pointer disabled:opacity-50"
+                          title="匯出 JSON 備份"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          匯出 Json
+                        </button>
+                        <div className="w-[1px] h-3 bg-zinc-200 shrink-0" />
+                        <button
+                          type="button"
+                          onClick={() => completedJsonFileInputRef.current?.click()}
+                          disabled={isImportingCompleted}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-zinc-600 hover:text-zinc-800 hover:bg-zinc-100 transition-all text-xs font-bold leading-none select-none cursor-pointer disabled:opacity-50"
+                          title="匯入 JSON 備份"
+                        >
+                          <Upload className="w-3.5 h-3.5" />
+                          匯入 Json
+                        </button>
+                      </div>
+                      <TrendingUp className="h-5 w-5 text-zinc-500 opacity-80" />
                     </div>
                   </div>
                   <div className="bg-transparent">
@@ -4895,23 +5422,25 @@ export default function Dashboard() {
                               initial={{ opacity: 0, scale: 0.95 }}
                               animate={{ opacity: 1, scale: 1 }}
                               exit={{ opacity: 0, scale: 0.95 }}
-                              className="h-full flex flex-col items-center justify-center text-white/30 flex-1 py-16"
+                              className="h-full flex flex-col items-center justify-center text-zinc-500 flex-1 py-16"
                             >
-                              <div className="bg-white/5 p-5 border border-white/10 rounded-full mb-4">
-                                <TrendingUp className="h-10 w-10 opacity-40" />
+                              <div className="bg-zinc-50 p-5 border border-zinc-200 rounded-full mb-4">
+                                <TrendingUp className="h-10 w-10 text-zinc-400" />
                               </div>
-                              <p className="text-base font-bold text-white/50 tracking-wide">
+                              <p className="text-base font-black text-zinc-700 tracking-wide">
                                 尚無已完成交易
+                              </p>
+                              <p className="text-xs text-zinc-405 mt-1 text-center max-w-xs leading-relaxed">
+                                您可以在個股頁面將其狀態更新為「已完成」，交易紀錄即會整理並儲存在此。
                               </p>
                             </motion.div>
                           ) : (
                             <div className="space-y-8">
                               {realCompletedTabs.length > 0 && (
                                 <div className="space-y-4">
-                                  <div className="flex items-center gap-2">
-                                    <div className="h-1.5 w-1.5 rounded-full bg-emerald-400/80 shadow-[0_0_5px_rgba(52,211,153,0.5)]"></div>
-                                    <h4 className="text-xs font-bold text-emerald-400/80 tracking-widest uppercase">
-                                      真實交易
+                                  <div className="flex items-center gap-2 border-l-4 border-emerald-500 pl-3">
+                                    <h4 className="text-xs font-black text-emerald-800 tracking-widest uppercase">
+                                      真實交易 (Real Trades)
                                     </h4>
                                   </div>
                                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -4927,21 +5456,33 @@ export default function Dashboard() {
                                           navigate(`/stock/${tab.id}`)
                                         }
                                         onMouseEnter={() => tab.symbol && prefetchStockPrice(tab.symbol)}
-                                        className="glass-card flex items-center justify-between p-4 cursor-pointer relative overflow-hidden group/item border border-emerald-500/10 hover:border-emerald-500/30"
+                                        className="bg-white border border-zinc-200/85 hover:border-zinc-350 shadow-sm hover:shadow-md p-5 rounded-2xl cursor-pointer relative overflow-hidden group/item flex items-center justify-between transition-all duration-300"
                                       >
-                                        <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/10 sm:from-emerald-500/5 to-transparent opacity-100 sm:opacity-0 sm:group-hover/item:opacity-100 transition-opacity duration-500"></div>
-                                        <div className="relative z-10 flex flex-col gap-1.5">
-                                          <div className="font-black text-xl tracking-wide text-white/90">
+                                        <div className="relative z-10 flex flex-col gap-1">
+                                          <div className="font-extrabold text-xl tracking-tight text-zinc-850">
                                             {tab.symbol}
                                           </div>
+                                          <div className="text-xs font-semibold text-zinc-500 truncate max-w-[150px]">
+                                            {tab.companyName || "實盤交易已結算"}
+                                          </div>
                                         </div>
-                                        <div
-                                          className={`relative z-10 text-xl font-black ${tab.finalPnL && tab.finalPnL >= 0 ? "text-emerald-400 color-glow-emerald" : "text-red-400 color-glow-red"}`}
-                                        >
-                                          {tab.finalPnL && tab.finalPnL >= 0
-                                            ? "+"
-                                            : ""}
-                                          ${tab.finalPnL?.toLocaleString() || 0}
+                                        <div className="relative z-10">
+                                          {(() => {
+                                            const val = tab.finalPnL || 0;
+                                            const isProfit = val >= 0;
+                                            return (
+                                              <div className={`px-4 py-2 rounded-xl flex flex-col items-end border transition-all ${
+                                                isProfit 
+                                                  ? "bg-emerald-50 text-emerald-700 border-emerald-200/80 shadow-[0_2px_8px_rgba(16,185,129,0.03)]" 
+                                                  : "bg-rose-50 text-rose-700 border-rose-200/80 shadow-[0_2px_8px_rgba(244,63,94,0.03)]"
+                                              }`}>
+                                                <span className="text-[9px] font-black uppercase tracking-wider opacity-80 mb-0.5">結算損益</span>
+                                                <span className="font-mono text-base font-black">
+                                                  {isProfit ? "+" : ""}${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                </span>
+                                              </div>
+                                            );
+                                          })()}
                                         </div>
                                       </motion.div>
                                     ))}
@@ -4953,10 +5494,9 @@ export default function Dashboard() {
                                 (t) => t.tradeType === "simulated",
                               ).length > 0 && (
                                 <div className="space-y-4">
-                                  <div className="flex items-center gap-2">
-                                    <div className="h-1.5 w-1.5 rounded-full bg-amber-400/80 shadow-[0_0_5px_rgba(251,191,36,0.5)]"></div>
-                                    <h4 className="text-xs font-bold text-amber-400/80 tracking-widest uppercase">
-                                      模擬交易
+                                  <div className="flex items-center gap-2 border-l-4 border-amber-500 pl-3">
+                                    <h4 className="text-xs font-black text-amber-800 tracking-widest uppercase">
+                                      模擬交易 (Simulated Trades)
                                     </h4>
                                   </div>
                                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -4976,163 +5516,106 @@ export default function Dashboard() {
                                             navigate(`/stock/${tab.id}`)
                                           }
                                           onMouseEnter={() => tab.symbol && prefetchStockPrice(tab.symbol)}
-                                          className="glass-card flex items-center justify-between p-4 cursor-pointer relative overflow-hidden group/item border border-amber-500/10 hover:border-amber-500/30"
+                                          className="bg-white border border-zinc-200/85 hover:border-zinc-350 shadow-sm hover:shadow-md p-5 rounded-2xl cursor-pointer relative overflow-hidden group/item flex items-center justify-between transition-all duration-300"
                                         >
-                                          <div className="absolute inset-0 bg-gradient-to-br from-amber-500/10 sm:from-amber-500/5 to-transparent opacity-100 sm:opacity-0 sm:group-hover/item:opacity-100 transition-opacity duration-500"></div>
-                                          <div className="relative z-10 flex flex-col gap-1.5">
-                                            <div className="font-black text-xl tracking-wide text-white/90">
+                                          <div className="relative z-10 flex flex-col gap-1">
+                                            <div className="font-extrabold text-xl tracking-tight text-zinc-850">
                                               {tab.symbol}
                                             </div>
+                                            <div className="text-xs font-semibold text-zinc-500 truncate max-w-[150px]">
+                                              {tab.companyName || "模擬交易已結算"}
+                                            </div>
                                           </div>
-                                          <div
-                                            className={`relative z-10 text-xl font-black ${tab.finalPnL && tab.finalPnL >= 0 ? "text-emerald-400 color-glow-emerald" : "text-red-400 color-glow-red"}`}
-                                          >
-                                            {tab.finalPnL && tab.finalPnL >= 0
-                                              ? "+"
-                                              : ""}
-                                            $
-                                            {tab.finalPnL?.toLocaleString() ||
-                                              0}
+                                          <div className="relative z-10">
+                                            {(() => {
+                                              const val = tab.finalPnL || 0;
+                                              const isProfit = val >= 0;
+                                              return (
+                                                <div className={`px-4 py-2 rounded-xl flex flex-col items-end border transition-all ${
+                                                  isProfit 
+                                                    ? "bg-emerald-50 text-emerald-700 border-emerald-200/80 shadow-[0_2px_8px_rgba(16,185,129,0.03)]" 
+                                                    : "bg-rose-50 text-rose-700 border-rose-200/80 shadow-[0_2px_8px_rgba(244,63,94,0.03)]"
+                                                }`}>
+                                                  <span className="text-[9px] font-black uppercase tracking-wider opacity-80 mb-0.5">預估損益</span>
+                                                  <span className="font-mono text-base font-black">
+                                                    {isProfit ? "+" : ""}${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                  </span>
+                                                </div>
+                                              );
+                                            })()}
                                           </div>
                                         </motion.div>
                                       ))}
+                                    </div>
                                   </div>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </AnimatePresence>
+                                )}
+                              </div>
+                            )}
+                          </AnimatePresence>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              </ScrollIn>
-            </div>
-          </div>
-        )}
-
-        
-
-        {activeViewTab === "notes" && (
-          <div className="space-y-6 animate-in fade-in duration-500">
-            {/* Header / Intro block */}
-            <div className="glass-panel p-5 sm:p-6 rounded-3xl sm:rounded-[2rem] border border-white/5 bg-[#0F0F12]/80 backdrop-blur-xl overflow-hidden shadow-2xl relative">
-              <div className="absolute top-0 left-1/4 -translate-y-1/2 w-96 h-48 bg-amber-500/10 blur-[80px] rounded-full pointer-events-none"></div>
-              
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-5 sm:gap-4 relative z-10 w-full">
-                <div className="space-y-1.5 w-full sm:w-auto">
-                  <h2 className="text-xl font-black text-white tracking-tight flex items-center gap-2.5 whitespace-nowrap">
-                    <div className="w-1.5 h-6 shrink-0 bg-gradient-to-b from-amber-400 to-amber-600 rounded-full shadow-[0_0_12px_rgba(245,158,11,0.5)]"></div>
-                    個股操作備註總覽
-                  </h2>
-                  <p className="text-xs text-white/40 leading-relaxed">
-                    整合所有持有中個股的執行計畫與操作備註，依據目前所屬的交易進度分類呈現。
-                  </p>
-                </div>
-                
-                <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 w-full sm:w-auto shrink-0 justify-start sm:justify-end">
-                  <input
-                    type="file"
-                    accept="application/json"
-                    className="hidden"
-                    ref={notesJsonFileInputRef}
-                    onChange={handleImportNotesJson}
-                  />
-                  <button
-                    type="button"
-                    onClick={handleExportNotesJson}
-                    disabled={isExportingNotes}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 border border-violet-500/20 transition-all text-xs font-bold leading-none shadow-sm cursor-pointer"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    匯出Json
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => notesJsonFileInputRef.current?.click()}
-                    disabled={isImportingNotes}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 border border-amber-500/20 transition-all text-xs font-bold leading-none shadow-sm cursor-pointer"
-                  >
-                    <Upload className="w-3.5 h-3.5" />
-                    匯入Json
-                  </button>
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-full">
-                    共 {visibleActiveTabs.length} 檔個股
-                  </span>
-                </div>
+                </ScrollIn>
               </div>
             </div>
+          )}
 
-            {/* Categories and tables */}
-            {(() => {
-              const categories: ("觀察中" | "候選名單" | "買進操作" | "賣出操作" | "平倉操作" | "乖離名單")[] = [
-                "觀察中",
-                "候選名單",
-                "買進操作",
-                "賣出操作",
-                "平倉操作",
-                "乖離名單"
-              ];
-              
-              const filledCategories = categories.filter(cat => 
-                visibleActiveTabs.some(t => getDisplayHoldingStatus(t.holdingStatus) === cat)
-              );
-
-              if (filledCategories.length === 0) {
-                return (
-                  <div className="text-center py-12 glass-panel rounded-[2rem]">
-                    <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center mx-auto mb-4">
-                      <FileText className="w-6 h-6 text-white/30" />
-                    </div>
-                    <p className="text-white/50 font-bold text-sm">目前尚無任何持有中的股票</p>
-                    <p className="text-white/30 text-xs mt-1">請先至「持有中」頁面新增或個股設定交易階段</p>
-                  </div>
-                );
-              }
-
-              return (
-                <div className="space-y-6">
-                  {filledCategories.map((cat) => {
+        {activeViewTab === "notes" && (() => {
+          return (
+            <div className="space-y-6">
+              {filledCategories.map((cat) => {
                     const filteredTabs = visibleActiveTabs.filter(
                       (t) => getDisplayHoldingStatus(t.holdingStatus) === cat
                     );
-                    const isExpanded = !!notesExpandedCategories[cat];
+                    const isExpanded = notesExpandedCategories[cat] !== false;
                     const highlightedStocksInCat = filteredTabs.filter(
                       (t) => !!activeTabStrategies[t.id]?.notesHighlighted
                     );
+                    const conf = holdingTabConfig[cat];
 
                     return (
                       <div
                         key={cat}
-                        className="glass-panel rounded-[2rem] border border-white/5 bg-[#0F0F12]/60 overflow-hidden shadow-xl"
+                        className={`bg-white border rounded-[1.5rem] shadow-sm transition-all duration-300 overflow-hidden ${
+                          isExpanded ? "border-zinc-300 shadow-md ring-1 ring-zinc-100" : "border-zinc-200 hover:border-zinc-300 hover:shadow-md"
+                        }`}
                       >
                         {/* Section Header */}
                         <div 
-                          className={`px-6 py-4 flex items-center justify-between cursor-pointer hover:bg-white/[0.03] select-none transition-colors duration-200 ${
-                            isExpanded ? "border-b border-white/5 bg-white/[0.02]" : ""
+                          className={`px-5 py-4 flex items-center justify-between cursor-pointer select-none transition-all duration-300 ${
+                            isExpanded ? `border-b border-zinc-200 ${conf.bgClass}/50` : "hover:bg-zinc-50/50"
                           }`}
                           onClick={() => toggleNotesCategory(cat)}
                         >
                           <div className="flex flex-wrap items-center gap-2 flex-1 min-w-0 mr-4">
-                            <div className="flex items-center gap-2 shrink-0">
-                              <span className="text-sm font-black text-white/95">
+                            <div className="flex items-center gap-3 shrink-0">
+                              {(() => {
+                                const CatIcon = conf.icon;
+                                return (
+                                  <div className={`p-1.5 rounded-lg border ${conf.borderClass} ${conf.bgClass} flex items-center justify-center`}>
+                                    <CatIcon className={`w-3.5 h-3.5 ${conf.colorClass}`} />
+                                  </div>
+                                );
+                              })()}
+                              <span className="text-base font-extrabold text-zinc-900 tracking-tight">
                                 {cat}
                               </span>
-                              <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded-full bg-white/10 text-white/60">
-                                {filteredTabs.length}
+                              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${conf.activeCountClass}`}>
+                                {filteredTabs.length} 檔
                               </span>
                             </div>
                             
                             {highlightedStocksInCat.length > 0 && (
-                              <div className="flex flex-wrap items-center gap-1.5 ml-1 border-l border-white/10 pl-3">
+                              <div className="flex flex-wrap items-center gap-1.5 ml-1.5 border-l border-zinc-200 pl-3">
                                 {highlightedStocksInCat.map((tab) => {
                                   const strat = activeTabStrategies[tab.id] || {};
                                   const actions = [];
-                                  if (strat.tpChecked) actions.push({ label: "止盈", color: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" });
-                                  if (strat.slChecked) actions.push({ label: "止損", color: "bg-rose-500/15 text-rose-400 border-rose-500/30" });
-                                  if (strat.addChecked) actions.push({ label: "加碼", color: "bg-sky-500/15 text-sky-400 border-sky-500/30" });
-                                  if (strat.closeChecked) actions.push({ label: "平倉", color: "bg-violet-500/15 text-violet-400 border-violet-500/30" });
-                                  if (strat.observeChecked) actions.push({ label: "觀察", color: "bg-[#C9C9C9]/15 text-[#C9C9C9] border-[#C9C9C9]/30" });
+                                  if (strat.tpChecked) actions.push({ label: "止盈", color: "bg-emerald-50 text-emerald-700 border-emerald-200/80" });
+                                  if (strat.slChecked) actions.push({ label: "止損", color: "bg-rose-50 text-rose-700 border-rose-200/80" });
+                                  if (strat.addChecked) actions.push({ label: "加碼", color: "bg-sky-50 text-sky-700 border-sky-200/80" });
+                                  if (strat.closeChecked) actions.push({ label: "平倉", color: "bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200/80" });
+                                  if (strat.observeChecked) actions.push({ label: "觀察", color: "bg-zinc-100 text-zinc-700 border-zinc-300" });
                                   
                                   return (
                                     <div 
@@ -5141,10 +5624,10 @@ export default function Dashboard() {
                                         // Prevent clicking the stock badge from collapsing/expanding the accordion
                                         e.stopPropagation();
                                       }}
-                                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-[10px] font-bold"
+                                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-50 border border-zinc-200 text-[10px] font-bold"
                                     >
-                                      <span className="text-amber-400 whitespace-nowrap">{tab.symbol}</span>
-                                      <span className="text-white/40 font-medium max-w-[60px] truncate hidden md:inline">({tab.companyName || "-"})</span>
+                                      <span className="text-amber-805 whitespace-nowrap font-extrabold">{tab.symbol}</span>
+                                      <span className="text-zinc-500 font-medium max-w-[60px] truncate hidden md:inline">({tab.companyName || "-"})</span>
                                       {actions.length > 0 && (
                                         <div className="flex items-center gap-0.5 ml-0.5">
                                           {actions.map((act, i) => (
@@ -5163,10 +5646,10 @@ export default function Dashboard() {
                               </div>
                             )}
                           </div>
-                          <div className="flex items-center justify-center p-1 rounded-lg bg-white/5 border border-white/10 hover:border-white/20 transition-all shrink-0">
+                          <div className="flex items-center justify-center p-1.5 rounded-lg border border-zinc-200 bg-zinc-50 hover:bg-zinc-100 transition-all shrink-0">
                             <ChevronDown 
-                              className={`w-4 h-4 text-white/50 transition-transform duration-300 ${
-                                isExpanded ? "rotate-180 text-amber-400" : ""
+                              className={`w-4 h-4 text-zinc-650 transition-transform duration-300 ${
+                                isExpanded ? "rotate-180 text-amber-500" : ""
                               }`}
                             />
                           </div>
@@ -5174,11 +5657,11 @@ export default function Dashboard() {
 
                         {/* Collapsible Content */}
                         {isExpanded && (
-                          <div className="border-t border-white/5 animate-in slide-in-from-top-2 duration-300">
+                          <div className="border-t border-zinc-200 animate-in slide-in-from-top-2 duration-300 bg-white">
                             {/* Mobile Card View */}
-                            <div className="flex flex-col lg:hidden divide-y divide-white/5">
+                            <div className="flex flex-col lg:hidden divide-y divide-zinc-200">
                               {filteredTabs.map((tab) => {
-                                const isHighlighted = !!activeTabStrategies[tab.id]?.notesHighlighted;
+                                const isHighlighted = Boolean(activeTabStrategies[tab.id]?.notesHighlighted);
                                 const trades = activeTabTrades[tab.id] || [];
                                 const stats = calculateStats(trades, tab.currentPrice);
                                 const unrealizedPnL = stats.unrealizedPnL || 0;
@@ -5187,7 +5670,7 @@ export default function Dashboard() {
                                   <div 
                                     key={`mobile-note-${tab.id}`}
                                     className={`p-4 transition-colors duration-200 ${
-                                      isHighlighted ? "bg-[#F29657]/15" : "hover:bg-white/[0.02]"
+                                      isHighlighted ? "bg-amber-500/[0.04]" : "hover:bg-zinc-50/50"
                                     }`}
                                   >
                                     <div className="flex items-center justify-between mb-4">
@@ -5196,10 +5679,10 @@ export default function Dashboard() {
                                           type="checkbox"
                                           checked={isHighlighted}
                                           onChange={(e) => handleUpdateNotesHighlighted(tab.id, e.target.checked)}
-                                          className="h-5 w-5 rounded border border-white/20 bg-white/5 checked:bg-[#F29657] checked:border-[#F29657] text-[#F29657] focus:ring-0 cursor-pointer accent-[#F29657] transition-all shrink-0"
+                                          className="h-4.5 w-4.5 rounded border-zinc-300 text-amber-500 focus:ring-offset-0 focus:ring-amber-500 cursor-pointer accent-amber-500 transition-all"
                                         />
                                         <div className="flex flex-col">
-                                          <span className="text-base font-black text-white tracking-wider">
+                                          <span className="text-base font-extrabold text-zinc-900 tracking-wider">
                                             {tab.symbol}
                                           </span>
                                           <span 
@@ -5210,78 +5693,78 @@ export default function Dashboard() {
                                                 [tab.id]: true,
                                               }));
                                             }}
-                                            className="text-[11px] font-semibold text-white/50 hover:text-amber-400 truncate max-w-[160px] cursor-pointer transition-colors mt-0.5"
+                                            className="text-[11px] font-bold text-zinc-500 hover:text-amber-805 hover:underline truncate max-w-[160px] cursor-pointer transition-colors mt-0.5"
                                           >
                                             {tab.companyName || tab.symbol}
                                           </span>
                                         </div>
                                       </div>
                                       <div className="text-right flex flex-col items-end">
-                                        <span className="text-sm font-mono text-white/95 font-bold">
+                                        <span className="text-sm font-mono text-zinc-900 font-extrabold">
                                           {tab.currentPrice !== undefined && tab.currentPrice > 0 ? tab.currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "-"}
                                         </span>
-                                        <span className="text-[10px] text-white/40 mt-1 uppercase font-bold tracking-wider">現價</span>
+                                        <span className="text-[10px] text-zinc-400 mt-0.5 uppercase font-black tracking-wider">現價</span>
                                       </div>
                                     </div>
 
-                                    <div className="grid grid-cols-3 gap-3 mb-4 bg-black/20 p-3.5 rounded-xl border border-white/5">
+                                    <div className="grid grid-cols-3 gap-3 mb-4 bg-zinc-50/50 p-3.5 rounded-xl border border-zinc-150">
                                       <div className="flex flex-col">
-                                        <span className="text-[10px] font-bold text-white/40 uppercase mb-1.5 tracking-wider">平均成本</span>
-                                        <span className="text-xs font-mono text-white/90">
+                                        <span className="text-[10px] font-black text-zinc-400 uppercase mb-1 tracking-wider">平均成本</span>
+                                        <span className="text-xs font-mono text-zinc-800 font-bold">
                                           {Math.abs(stats.totalQuantity) > 0 && stats.averagePrice > 0 ? stats.averagePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "-"}
                                         </span>
                                       </div>
                                       <div className="flex flex-col">
-                                        <span className="text-[10px] font-bold text-white/40 uppercase mb-1.5 tracking-wider">未實現損益</span>
+                                        <span className="text-[10px] font-black text-zinc-400 uppercase mb-1 tracking-wider">未實現損益</span>
                                         <span className="text-xs font-mono font-bold">
                                           {Math.abs(stats.totalQuantity) > 0 && unrealizedPnL !== 0 ? (
-                                            <span className={unrealizedPnL > 0 ? "text-emerald-400" : "text-rose-400"}>
+                                            <span className={unrealizedPnL > 0 ? "text-emerald-700 font-extrabold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100" : "text-rose-700 font-extrabold bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100"}>
                                               {unrealizedPnL > 0 ? "+" : ""}{unrealizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                             </span>
                                           ) : (
-                                            <span className="text-white/40">-</span>
+                                            <span className="text-zinc-400">-</span>
                                           )}
                                         </span>
                                       </div>
                                       <div className="flex flex-col text-right">
-                                        <span className="text-[10px] font-bold text-white/40 uppercase mb-1.5 tracking-wider">持有股數</span>
-                                        <span className="text-xs font-mono text-white/90">
+                                        <span className="text-[10px] font-black text-zinc-400 uppercase mb-1 tracking-wider">持有股數</span>
+                                        <span className="text-xs font-mono text-zinc-800 font-bold">
                                           {Math.abs(stats.totalQuantity) > 0 ? stats.totalQuantity.toLocaleString(undefined, { maximumFractionDigits: 4 }) : "-"}
                                         </span>
                                       </div>
                                     </div>
 
-                                    <div className="grid grid-cols-5 gap-2 mb-4">
-                                      <div className="flex flex-col items-center justify-center bg-white/[0.02] border border-white/5 rounded-xl py-2.5">
-                                        <span className="text-[10px] font-bold text-white/50 mb-2">止盈</span>
-                                        <input type="checkbox" checked={!!activeTabStrategies[tab.id]?.tpChecked} onChange={(e) => handleUpdateTPChecked(tab.id, e.target.checked)} className="h-4 w-4 rounded border border-white/20 bg-white/5 checked:bg-emerald-500 checked:border-emerald-500 text-emerald-500 focus:ring-0 cursor-pointer accent-emerald-500 transition-all" />
+                                    <div className="grid grid-cols-5 gap-2 mb-4 bg-zinc-50/20 p-2 border border-zinc-150 rounded-xl">
+                                      <div className="flex flex-col items-center justify-center py-1.5">
+                                        <span className="text-[10px] font-black text-zinc-500 mb-2">止盈</span>
+                                        <input type="checkbox" checked={!!activeTabStrategies[tab.id]?.tpChecked} onChange={(e) => handleUpdateTPChecked(tab.id, e.target.checked)} className="h-4.5 w-4.5 rounded border-zinc-350 bg-white checked:bg-emerald-600 checked:border-emerald-600 text-emerald-600 focus:ring-0 cursor-pointer accent-emerald-600 transition-all shadow-sm" />
                                       </div>
-                                      <div className="flex flex-col items-center justify-center bg-white/[0.02] border border-white/5 rounded-xl py-2.5">
-                                        <span className="text-[10px] font-bold text-white/50 mb-2">止損</span>
-                                        <input type="checkbox" checked={!!activeTabStrategies[tab.id]?.slChecked} onChange={(e) => handleUpdateSLChecked(tab.id, e.target.checked)} className="h-4 w-4 rounded border border-white/20 bg-white/5 checked:bg-rose-500 checked:border-rose-500 text-rose-500 focus:ring-0 cursor-pointer accent-rose-500 transition-all" />
+                                      <div className="flex flex-col items-center justify-center py-1.5">
+                                        <span className="text-[10px] font-black text-zinc-500 mb-2">止損</span>
+                                        <input type="checkbox" checked={!!activeTabStrategies[tab.id]?.slChecked} onChange={(e) => handleUpdateSLChecked(tab.id, e.target.checked)} className="h-4.5 w-4.5 rounded border-zinc-350 bg-white checked:bg-rose-600 checked:border-rose-600 text-rose-600 focus:ring-0 cursor-pointer accent-rose-600 transition-all shadow-sm" />
                                       </div>
-                                      <div className="flex flex-col items-center justify-center bg-white/[0.02] border border-white/5 rounded-xl py-2.5">
-                                        <span className="text-[10px] font-bold text-white/50 mb-2">加碼</span>
-                                        <input type="checkbox" checked={!!activeTabStrategies[tab.id]?.addChecked} onChange={(e) => handleUpdateAddChecked(tab.id, e.target.checked)} className="h-4 w-4 rounded border border-white/20 bg-white/5 checked:bg-sky-500 checked:border-sky-500 text-sky-500 focus:ring-0 cursor-pointer accent-sky-500 transition-all" />
+                                      <div className="flex flex-col items-center justify-center py-1.5">
+                                        <span className="text-[10px] font-black text-zinc-500 mb-2">加碼</span>
+                                        <input type="checkbox" checked={!!activeTabStrategies[tab.id]?.addChecked} onChange={(e) => handleUpdateAddChecked(tab.id, e.target.checked)} className="h-4.5 w-4.5 rounded border-zinc-350 bg-white checked:bg-sky-600 checked:border-sky-600 text-sky-600 focus:ring-0 cursor-pointer accent-sky-600 transition-all shadow-sm" />
                                       </div>
-                                      <div className="flex flex-col items-center justify-center bg-white/[0.02] border border-white/5 rounded-xl py-2.5">
-                                        <span className="text-[10px] font-bold text-white/50 mb-2">平倉</span>
-                                        <input type="checkbox" checked={!!activeTabStrategies[tab.id]?.closeChecked} onChange={(e) => handleUpdateCloseChecked(tab.id, e.target.checked)} className="h-4 w-4 rounded border border-white/20 bg-white/5 checked:bg-violet-500 checked:border-violet-500 text-violet-500 focus:ring-0 cursor-pointer accent-violet-500 transition-all" />
+                                      <div className="flex flex-col items-center justify-center py-1.5">
+                                        <span className="text-[10px] font-black text-zinc-500 mb-2">平倉</span>
+                                        <input type="checkbox" checked={!!activeTabStrategies[tab.id]?.closeChecked} onChange={(e) => handleUpdateCloseChecked(tab.id, e.target.checked)} className="h-4.5 w-4.5 rounded border-zinc-350 bg-white checked:bg-violet-600 checked:border-violet-600 text-violet-600 focus:ring-0 cursor-pointer accent-violet-600 transition-all shadow-sm" />
                                       </div>
-                                      <div className="flex flex-col items-center justify-center bg-white/[0.02] border border-white/5 rounded-xl py-2.5">
-                                        <span className="text-[10px] font-bold text-white/50 mb-2">觀察</span>
-                                        <input id="observe-input-tab" type="checkbox" checked={!!activeTabStrategies[tab.id]?.observeChecked} onChange={(e) => handleUpdateObserveChecked(tab.id, e.target.checked)} className="h-4 w-4 rounded border border-white/20 bg-white/5 checked:bg-[#C9C9C9] checked:border-[#C9C9C9] text-[#C9C9C9] focus:ring-0 cursor-pointer accent-[#C9C9C9] transition-all" />
+                                      <div className="flex flex-col items-center justify-center py-1.5">
+                                        <span className="text-[10px] font-black text-zinc-500 mb-2">觀察</span>
+                                        <input id="observe-input-tab" type="checkbox" checked={!!activeTabStrategies[tab.id]?.observeChecked} onChange={(e) => handleUpdateObserveChecked(tab.id, e.target.checked)} className="h-4.5 w-4.5 rounded border-zinc-350 bg-white checked:bg-zinc-650 checked:border-zinc-650 text-zinc-650 focus:ring-0 cursor-pointer accent-zinc-650 transition-all shadow-sm" />
                                       </div>
                                     </div>
 
                                     <div>
-                                      <span className="text-[10px] font-bold text-white/40 uppercase mb-2 block tracking-wider">操作重點</span>
+                                      <span className="text-[10px] font-black text-zinc-500 mb-2 block tracking-wider">操作重點</span>
                                       <textarea
                                         value={activeTabStrategies[tab.id]?.operationFocus || ""}
                                         onChange={(e) => handleUpdateOperationFocus(tab.id, e.target.value)}
                                         placeholder="點擊輸入操作重點..."
                                         rows={4}
-                                        className="w-full bg-black/40 border border-white/5 hover:border-white/10 focus:border-amber-500/50 text-white text-xs rounded-xl p-3 focus:ring-1 focus:ring-amber-500/50 outline-none resize-y transition-colors min-h-[100px] font-medium overflow-auto"
+                                        className="w-full bg-white border border-zinc-250/80 focus:border-amber-500 focus:shadow-[0_0_12px_rgba(245,158,11,0.08)] text-zinc-800 text-xs rounded-xl p-3 focus:ring-0 outline-none resize-y transition-all min-h-[100px] font-medium leading-relaxed font-sans shadow-inner overflow-auto"
                                       />
                                     </div>
                                   </div>
@@ -5293,46 +5776,46 @@ export default function Dashboard() {
                             <div className="overflow-x-auto hidden lg:block pb-1">
                               <table className="w-full text-left border-collapse table-fixed">
                               <thead>
-                                <tr className="border-b border-white/5 bg-white/[0.01]">
-                                  <th className="w-[115px] py-2.5 px-4 text-[10px] font-black text-white/40 uppercase tracking-wider">
+                                <tr className="border-b border-zinc-200 bg-zinc-50/50">
+                                  <th className="w-[115px] py-2.5 px-4 text-[10px] font-black text-zinc-500 uppercase tracking-wider">
                                     選取 / 股票代號
                                   </th>
-                                  <th className="w-[125px] py-2.5 px-3 text-[10px] font-black text-white/40 uppercase tracking-wider">
+                                  <th className="w-[125px] py-2.5 px-3 text-[10px] font-black text-zinc-500 uppercase tracking-wider">
                                     股票名稱
                                   </th>
-                                  <th className="w-[85px] py-2.5 px-3 text-[10px] font-black text-white/40 uppercase tracking-wider text-right">
+                                  <th className="w-[85px] py-2.5 px-3 text-[10px] font-black text-zinc-500 uppercase tracking-wider text-right">
                                     現價
                                   </th>
-                                  <th className="w-[85px] py-2.5 px-3 text-[10px] font-black text-white/40 uppercase tracking-wider text-right">
+                                  <th className="w-[85px] py-2.5 px-3 text-[10px] font-black text-zinc-500 uppercase tracking-wider text-right">
                                     平均成本
                                   </th>
-                                  <th className="w-[100px] py-2.5 px-3 text-[10px] font-black text-white/40 uppercase tracking-wider text-right">
+                                  <th className="w-[100px] py-2.5 px-3 text-[10px] font-black text-zinc-500 uppercase tracking-wider text-right">
                                     未實現損益
                                   </th>
-                                  <th className="w-[85px] py-2.5 px-3 text-[10px] font-black text-white/40 uppercase tracking-wider text-right">
+                                  <th className="w-[85px] py-2.5 px-3 text-[10px] font-black text-zinc-500 uppercase tracking-wider text-right">
                                     持有股數
                                   </th>
-                                  <th className="w-[54px] py-2.5 px-2 text-[10px] font-black text-white/40 uppercase tracking-wider text-center">
+                                  <th className="w-[54px] py-2.5 px-2 text-[10px] font-black text-zinc-500 uppercase tracking-wider text-center">
                                     止盈
                                   </th>
-                                  <th className="w-[54px] py-2.5 px-2 text-[10px] font-black text-white/40 uppercase tracking-wider text-center">
+                                  <th className="w-[54px] py-2.5 px-2 text-[10px] font-black text-zinc-500 uppercase tracking-wider text-center">
                                     止損
                                   </th>
-                                  <th className="w-[54px] py-2.5 px-2 text-[10px] font-black text-white/40 uppercase tracking-wider text-center">
+                                  <th className="w-[54px] py-2.5 px-2 text-[10px] font-black text-zinc-500 uppercase tracking-wider text-center">
                                     加碼
                                   </th>
-                                  <th className="w-[54px] py-2.5 px-2 text-[10px] font-black text-white/40 uppercase tracking-wider text-center">
+                                  <th className="w-[54px] py-2.5 px-2 text-[10px] font-black text-zinc-500 uppercase tracking-wider text-center">
                                     平倉
                                   </th>
-                                  <th className="w-[54px] py-2.5 px-2 text-[10px] font-black text-white/40 uppercase tracking-wider text-center">
+                                  <th className="w-[54px] py-2.5 px-2 text-[10px] font-black text-zinc-500 uppercase tracking-wider text-center">
                                     觀察
                                   </th>
-                                  <th className="py-2.5 px-4 text-[10px] font-black text-white/40 uppercase tracking-wider">
+                                  <th className="py-2.5 px-4 text-[10px] font-black text-zinc-500 uppercase tracking-wider">
                                     操作重點
                                   </th>
                                 </tr>
                               </thead>
-                              <tbody className="divide-y divide-white/5">
+                              <tbody className="divide-y divide-zinc-200">
                                 {filteredTabs.map((tab) => {
                                   const isHighlighted = !!activeTabStrategies[tab.id]?.notesHighlighted;
                                   const trades = activeTabTrades[tab.id] || [];
@@ -5345,8 +5828,8 @@ export default function Dashboard() {
                                       id={`notes-row-${tab.id}`}
                                       className={`transition-colors duration-200 ${
                                         isHighlighted
-                                          ? "bg-[#F29657]/15 hover:bg-[#F29657]/20"
-                                          : "hover:bg-white/[0.02]"
+                                          ? "bg-amber-500/10 hover:bg-amber-500/15"
+                                          : "hover:bg-zinc-50"
                                       }`}
                                     >
                                       <td className="py-2.5 px-4 whitespace-nowrap">
@@ -5355,9 +5838,9 @@ export default function Dashboard() {
                                             type="checkbox"
                                             checked={isHighlighted}
                                             onChange={(e) => handleUpdateNotesHighlighted(tab.id, e.target.checked)}
-                                            className="h-4 w-4 rounded border border-white/20 bg-white/5 checked:bg-[#F29657] checked:border-[#F29657] text-[#F29657] focus:ring-0 cursor-pointer accent-[#F29657] transition-all"
+                                            className="h-4 w-4 rounded border border-zinc-300 bg-white checked:bg-amber-500 checked:border-amber-500 text-amber-500 focus:ring-0 cursor-pointer accent-amber-500 transition-all"
                                           />
-                                          <span className="text-xs font-bold text-white tracking-wide">
+                                          <span className="text-xs font-bold text-zinc-800 tracking-wide">
                                             {tab.symbol}
                                           </span>
                                         </div>
@@ -5371,28 +5854,28 @@ export default function Dashboard() {
                                               [tab.id]: true,
                                             }));
                                           }}
-                                          className="text-xs font-semibold text-white/70 hover:text-amber-400 block truncate cursor-pointer transition-colors duration-200 hover:underline" 
+                                          className="text-xs font-semibold text-zinc-650 hover:text-amber-700 block truncate cursor-pointer transition-colors duration-200 hover:underline" 
                                           title="點擊前往持有中該股卡片並翻面數據圖示化"
                                         >
                                           {tab.companyName || tab.symbol}
                                         </span>
                                       </td>
-                                      <td className="py-2.5 px-3 text-right font-mono text-xs text-white/90">
+                                      <td className="py-2.5 px-3 text-right font-mono text-xs text-zinc-800 font-bold">
                                         {tab.currentPrice !== undefined && tab.currentPrice > 0 ? tab.currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "-"}
                                       </td>
-                                      <td className="py-2.5 px-3 text-right font-mono text-xs text-white/90">
+                                      <td className="py-2.5 px-3 text-right font-mono text-xs text-zinc-800">
                                         {Math.abs(stats.totalQuantity) > 0 && stats.averagePrice > 0 ? stats.averagePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "-"}
                                       </td>
                                       <td className="py-2.5 px-3 text-right font-mono text-xs">
                                         {Math.abs(stats.totalQuantity) > 0 && unrealizedPnL !== 0 ? (
-                                          <span className={`${unrealizedPnL > 0 ? "text-emerald-400" : "text-rose-400"} font-semibold`}>
+                                          <span className={`${unrealizedPnL > 0 ? "text-emerald-700 font-extrabold" : "text-rose-700 font-extrabold"}`}>
                                             {unrealizedPnL > 0 ? "+" : ""}{unrealizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                           </span>
                                         ) : (
-                                          <span className="text-white/30">-</span>
+                                          <span className="text-zinc-400">-</span>
                                         )}
                                       </td>
-                                      <td className="py-2.5 px-3 text-right font-mono text-xs text-white/90">
+                                      <td className="py-2.5 px-3 text-right font-mono text-xs text-zinc-800">
                                         {Math.abs(stats.totalQuantity) > 0 ? stats.totalQuantity.toLocaleString(undefined, { maximumFractionDigits: 4 }) : "-"}
                                       </td>
                                       <td className="py-2.5 px-2 text-center">
@@ -5400,7 +5883,7 @@ export default function Dashboard() {
                                           type="checkbox"
                                           checked={!!activeTabStrategies[tab.id]?.tpChecked}
                                           onChange={(e) => handleUpdateTPChecked(tab.id, e.target.checked)}
-                                          className="h-4 w-4 rounded border border-white/20 bg-white/5 checked:bg-emerald-500 checked:border-emerald-500 text-emerald-500 focus:ring-0 cursor-pointer accent-emerald-500 transition-all mx-auto"
+                                          className="h-4 w-4 rounded border border-zinc-300 bg-white checked:bg-emerald-500 checked:border-emerald-500 text-emerald-500 focus:ring-0 cursor-pointer accent-emerald-500 transition-all mx-auto"
                                         />
                                       </td>
                                       <td className="py-2.5 px-2 text-center">
@@ -5408,7 +5891,7 @@ export default function Dashboard() {
                                           type="checkbox"
                                           checked={!!activeTabStrategies[tab.id]?.slChecked}
                                           onChange={(e) => handleUpdateSLChecked(tab.id, e.target.checked)}
-                                          className="h-4 w-4 rounded border border-white/20 bg-white/5 checked:bg-rose-500 checked:border-rose-500 text-rose-500 focus:ring-0 cursor-pointer accent-rose-500 transition-all mx-auto"
+                                          className="h-4 w-4 rounded border border-zinc-300 bg-white checked:bg-rose-500 checked:border-rose-500 text-rose-500 focus:ring-0 cursor-pointer accent-rose-500 transition-all mx-auto"
                                         />
                                       </td>
                                       <td className="py-2.5 px-2 text-center">
@@ -5416,7 +5899,7 @@ export default function Dashboard() {
                                           type="checkbox"
                                           checked={!!activeTabStrategies[tab.id]?.addChecked}
                                           onChange={(e) => handleUpdateAddChecked(tab.id, e.target.checked)}
-                                          className="h-4 w-4 rounded border border-white/20 bg-white/5 checked:bg-sky-500 checked:border-sky-500 text-sky-500 focus:ring-0 cursor-pointer accent-sky-500 transition-all mx-auto"
+                                          className="h-4 w-4 rounded border border-zinc-300 bg-white checked:bg-sky-500 checked:border-sky-500 text-sky-500 focus:ring-0 cursor-pointer accent-sky-500 transition-all mx-auto"
                                         />
                                       </td>
                                       <td className="py-2.5 px-2 text-center">
@@ -5424,7 +5907,7 @@ export default function Dashboard() {
                                           type="checkbox"
                                           checked={!!activeTabStrategies[tab.id]?.closeChecked}
                                           onChange={(e) => handleUpdateCloseChecked(tab.id, e.target.checked)}
-                                          className="h-4 w-4 rounded border border-white/20 bg-white/5 checked:bg-violet-500 checked:border-violet-500 text-violet-500 focus:ring-0 cursor-pointer accent-violet-500 transition-all mx-auto"
+                                          className="h-4 w-4 rounded border border-zinc-300 bg-white checked:bg-violet-500 checked:border-violet-500 text-violet-500 focus:ring-0 cursor-pointer accent-violet-500 transition-all mx-auto"
                                         />
                                       </td>
                                       <td className="py-2.5 px-2 text-center">
@@ -5433,7 +5916,7 @@ export default function Dashboard() {
                                           type="checkbox"
                                           checked={!!activeTabStrategies[tab.id]?.observeChecked}
                                           onChange={(e) => handleUpdateObserveChecked(tab.id, e.target.checked)}
-                                          className="h-4 w-4 rounded border border-white/20 bg-white/5 checked:bg-[#C9C9C9] checked:border-[#C9C9C9] text-[#C9C9C9] focus:ring-0 cursor-pointer accent-[#C9C9C9] transition-all mx-auto"
+                                          className="h-4 w-4 rounded border border-zinc-300 bg-white checked:bg-[#929292] checked:border-[#929292] text-[#929292] focus:ring-0 cursor-pointer accent-[#929292] transition-all mx-auto"
                                         />
                                       </td>
                                       <td className="py-2 px-4">
@@ -5442,7 +5925,7 @@ export default function Dashboard() {
                                           onChange={(e) => handleUpdateOperationFocus(tab.id, e.target.value)}
                                           placeholder="點擊輸入操作重點..."
                                           rows={4}
-                                          className="w-full bg-white/5 border border-white/10 hover:border-white/20 focus:border-amber-400 text-white text-xs rounded-lg p-2 focus:ring-1 focus:ring-amber-400 outline-none resize-y transition-colors min-h-[90px] font-medium overflow-auto"
+                                          className="w-full bg-zinc-50 border border-zinc-200 hover:border-zinc-300 focus:border-amber-500/50 text-zinc-800 text-xs rounded-lg p-2 focus:ring-1 focus:ring-amber-500/50 outline-none resize-y transition-colors min-h-[90px] font-medium overflow-auto"
                                         />
                                       </td>
                                     </tr>
@@ -5460,8 +5943,6 @@ export default function Dashboard() {
               );
             })()}
           </div>
-        )}
-      </div>
 
       {/* Operation Focus and Flip Dialog */}
       <Dialog
@@ -5470,9 +5951,9 @@ export default function Dashboard() {
           if (!open) setVisualizerFocusTabId(null);
         }}
       >
-        <DialogContent className="glass-panel border-white/10 shadow-2xl bg-[#09090c]/98 backdrop-blur-3xl text-white max-w-[420px] p-6 rounded-3xl border border-white/15">
+        <DialogContent className="border-zinc-300 shadow-2xl bg-white text-zinc-900 max-w-[420px] p-6 rounded-3xl border">
           <DialogHeader className="mb-4">
-            <DialogTitle className="font-extrabold text-xl text-white flex items-center justify-center gap-2">
+            <DialogTitle className="font-extrabold text-xl text-zinc-900 flex items-center justify-center gap-2">
               <span className="text-xl">📊</span>
               {(() => {
                 const t = tabs.find((x) => x.id === visualizerFocusTabId);
@@ -5483,41 +5964,41 @@ export default function Dashboard() {
           
           <div className="space-y-4 py-2">
             <div className="flex flex-col gap-2">
-              <label className="text-xs font-bold text-amber-400 tracking-wider flex items-center gap-1.5 font-sans">
+              <label className="text-xs font-black text-indigo-650 tracking-wider flex items-center gap-1.5 font-sans">
                 <span>📝 編輯個股操作重點</span>
               </label>
               <textarea
                 value={visualizerFocusText}
                 onChange={(e) => setVisualizerFocusText(e.target.value)}
                 placeholder="在此編輯您的操作策略或關鍵觀察..."
-                className="w-full h-36 bg-white/[0.03] border border-white/10 focus:border-amber-400/50 text-white placeholder-white/20 text-sm rounded-xl p-3 focus:ring-1 focus:ring-amber-400/30 outline-none resize-none transition-all font-medium font-sans"
+                className="w-full h-36 bg-zinc-50 border border-zinc-200 focus:border-indigo-500 text-zinc-850 placeholder-zinc-450 text-sm rounded-xl p-3 focus:ring-1 focus:ring-indigo-500/30 outline-none resize-none transition-all font-semibold font-sans text-zinc-800"
               />
             </div>
             {visualizerFocusTabId && (
               <div className="grid grid-cols-6 gap-2">
-                <div className="flex flex-col items-center justify-center bg-white/[0.02] border border-white/5 rounded-xl py-2.5 hover:bg-white/[0.04] transition-colors cursor-pointer" onClick={() => handleUpdateNotesHighlighted(visualizerFocusTabId, !activeTabStrategies[visualizerFocusTabId]?.notesHighlighted)}>
-                  <span className="text-[10px] font-bold text-white/50 mb-2 pointer-events-none">選取</span>
-                  <input type="checkbox" checked={!!activeTabStrategies[visualizerFocusTabId]?.notesHighlighted} onChange={(e) => handleUpdateNotesHighlighted(visualizerFocusTabId, e.target.checked)} onClick={(e) => e.stopPropagation()} className="h-4 w-4 rounded border border-white/20 bg-white/5 checked:bg-amber-500 checked:border-amber-500 text-amber-500 focus:ring-0 cursor-pointer accent-amber-500 transition-all" />
+                <div className="flex flex-col items-center justify-center bg-zinc-50 border border-zinc-200 rounded-xl py-2.5 hover:bg-zinc-100 transition-colors cursor-pointer" onClick={() => handleUpdateNotesHighlighted(visualizerFocusTabId, !activeTabStrategies[visualizerFocusTabId]?.notesHighlighted)}>
+                  <span className="text-[10px] font-black text-zinc-600 mb-2 pointer-events-none">選取</span>
+                  <input type="checkbox" checked={!!activeTabStrategies[visualizerFocusTabId]?.notesHighlighted} onChange={(e) => handleUpdateNotesHighlighted(visualizerFocusTabId, e.target.checked)} onClick={(e) => e.stopPropagation()} className="h-4 w-4 rounded border border-zinc-300 bg-white checked:bg-indigo-600 checked:border-indigo-600 text-indigo-600 focus:ring-0 cursor-pointer accent-indigo-600 transition-all" />
                 </div>
-                <div className="flex flex-col items-center justify-center bg-white/[0.02] border border-white/5 rounded-xl py-2.5 hover:bg-white/[0.04] transition-colors cursor-pointer" onClick={() => handleUpdateTPChecked(visualizerFocusTabId, !activeTabStrategies[visualizerFocusTabId]?.tpChecked)}>
-                  <span className="text-[10px] font-bold text-white/50 mb-2 pointer-events-none">止盈</span>
-                  <input type="checkbox" checked={!!activeTabStrategies[visualizerFocusTabId]?.tpChecked} onChange={(e) => handleUpdateTPChecked(visualizerFocusTabId, e.target.checked)} onClick={(e) => e.stopPropagation()} className="h-4 w-4 rounded border border-white/20 bg-white/5 checked:bg-emerald-500 checked:border-emerald-500 text-emerald-500 focus:ring-0 cursor-pointer accent-emerald-500 transition-all" />
+                <div className="flex flex-col items-center justify-center bg-zinc-50 border border-zinc-200 rounded-xl py-2.5 hover:bg-zinc-100 transition-colors cursor-pointer" onClick={() => handleUpdateTPChecked(visualizerFocusTabId, !activeTabStrategies[visualizerFocusTabId]?.tpChecked)}>
+                  <span className="text-[10px] font-black text-zinc-600 mb-2 pointer-events-none">止盈</span>
+                  <input type="checkbox" checked={!!activeTabStrategies[visualizerFocusTabId]?.tpChecked} onChange={(e) => handleUpdateTPChecked(visualizerFocusTabId, e.target.checked)} onClick={(e) => e.stopPropagation()} className="h-4 w-4 rounded border-zinc-300 bg-white checked:bg-emerald-600 checked:border-emerald-600 text-emerald-600 focus:ring-0 cursor-pointer accent-emerald-600 transition-all font-black" />
                 </div>
-                <div className="flex flex-col items-center justify-center bg-white/[0.02] border border-white/5 rounded-xl py-2.5 hover:bg-white/[0.04] transition-colors cursor-pointer" onClick={() => handleUpdateSLChecked(visualizerFocusTabId, !activeTabStrategies[visualizerFocusTabId]?.slChecked)}>
-                  <span className="text-[10px] font-bold text-white/50 mb-2 pointer-events-none">止損</span>
-                  <input type="checkbox" checked={!!activeTabStrategies[visualizerFocusTabId]?.slChecked} onChange={(e) => handleUpdateSLChecked(visualizerFocusTabId, e.target.checked)} onClick={(e) => e.stopPropagation()} className="h-4 w-4 rounded border border-white/20 bg-white/5 checked:bg-rose-500 checked:border-rose-500 text-rose-500 focus:ring-0 cursor-pointer accent-rose-500 transition-all" />
+                <div className="flex flex-col items-center justify-center bg-zinc-50 border border-zinc-200 rounded-xl py-2.5 hover:bg-zinc-100 transition-colors cursor-pointer" onClick={() => handleUpdateSLChecked(visualizerFocusTabId, !activeTabStrategies[visualizerFocusTabId]?.slChecked)}>
+                  <span className="text-[10px] font-black text-zinc-600 mb-2 pointer-events-none">止損</span>
+                  <input type="checkbox" checked={!!activeTabStrategies[visualizerFocusTabId]?.slChecked} onChange={(e) => handleUpdateSLChecked(visualizerFocusTabId, e.target.checked)} onClick={(e) => e.stopPropagation()} className="h-4 w-4 rounded border-zinc-300 bg-white checked:bg-rose-500 checked:border-rose-500 text-rose-500 focus:ring-0 cursor-pointer accent-rose-500 transition-all font-black" />
                 </div>
-                <div className="flex flex-col items-center justify-center bg-white/[0.02] border border-white/5 rounded-xl py-2.5 hover:bg-white/[0.04] transition-colors cursor-pointer" onClick={() => handleUpdateAddChecked(visualizerFocusTabId, !activeTabStrategies[visualizerFocusTabId]?.addChecked)}>
-                  <span className="text-[10px] font-bold text-white/50 mb-2 pointer-events-none">加碼</span>
-                  <input type="checkbox" checked={!!activeTabStrategies[visualizerFocusTabId]?.addChecked} onChange={(e) => handleUpdateAddChecked(visualizerFocusTabId, e.target.checked)} onClick={(e) => e.stopPropagation()} className="h-4 w-4 rounded border border-white/20 bg-white/5 checked:bg-sky-500 checked:border-sky-500 text-sky-500 focus:ring-0 cursor-pointer accent-sky-500 transition-all" />
+                <div className="flex flex-col items-center justify-center bg-zinc-50 border border-zinc-200 rounded-xl py-2.5 hover:bg-zinc-100 transition-colors cursor-pointer" onClick={() => handleUpdateAddChecked(visualizerFocusTabId, !activeTabStrategies[visualizerFocusTabId]?.addChecked)}>
+                  <span className="text-[10px] font-black text-zinc-600 mb-2 pointer-events-none">加碼</span>
+                  <input type="checkbox" checked={!!activeTabStrategies[visualizerFocusTabId]?.addChecked} onChange={(e) => handleUpdateAddChecked(visualizerFocusTabId, e.target.checked)} onClick={(e) => e.stopPropagation()} className="h-4 w-4 rounded border border-zinc-300 bg-white checked:bg-sky-500 checked:border-sky-500 text-sky-500 focus:ring-0 cursor-pointer accent-sky-500 transition-all font-black" />
                 </div>
-                <div className="flex flex-col items-center justify-center bg-white/[0.02] border border-white/5 rounded-xl py-2.5 hover:bg-white/[0.04] transition-colors cursor-pointer" onClick={() => handleUpdateCloseChecked(visualizerFocusTabId, !activeTabStrategies[visualizerFocusTabId]?.closeChecked)}>
-                  <span className="text-[10px] font-bold text-white/50 mb-2 pointer-events-none">平倉</span>
-                  <input type="checkbox" checked={!!activeTabStrategies[visualizerFocusTabId]?.closeChecked} onChange={(e) => handleUpdateCloseChecked(visualizerFocusTabId, e.target.checked)} onClick={(e) => e.stopPropagation()} className="h-4 w-4 rounded border border-white/20 bg-white/5 checked:bg-violet-500 checked:border-violet-500 text-violet-500 focus:ring-0 cursor-pointer accent-violet-500 transition-all" />
+                <div className="flex flex-col items-center justify-center bg-zinc-50 border border-zinc-200 rounded-xl py-2.5 hover:bg-zinc-100 transition-colors cursor-pointer" onClick={() => handleUpdateCloseChecked(visualizerFocusTabId, !activeTabStrategies[visualizerFocusTabId]?.closeChecked)}>
+                  <span className="text-[10px] font-black text-zinc-600 mb-2 pointer-events-none">平倉</span>
+                  <input type="checkbox" checked={!!activeTabStrategies[visualizerFocusTabId]?.closeChecked} onChange={(e) => handleUpdateCloseChecked(visualizerFocusTabId, e.target.checked)} onClick={(e) => e.stopPropagation()} className="h-4 w-4 rounded border border-zinc-300 bg-white checked:bg-violet-500 checked:border-violet-500 text-violet-500 focus:ring-0 cursor-pointer accent-violet-500 transition-all font-black" />
                 </div>
-                <div className="flex flex-col items-center justify-center bg-white/[0.02] border border-white/5 rounded-xl py-2.5 hover:bg-white/[0.04] transition-colors cursor-pointer" onClick={() => handleUpdateObserveChecked(visualizerFocusTabId, !activeTabStrategies[visualizerFocusTabId]?.observeChecked)}>
-                  <span className="text-[10px] font-bold text-white/50 mb-2 pointer-events-none">觀察</span>
-                  <input id="observe-input-focus" type="checkbox" checked={!!activeTabStrategies[visualizerFocusTabId]?.observeChecked} onChange={(e) => handleUpdateObserveChecked(visualizerFocusTabId, e.target.checked)} onClick={(e) => e.stopPropagation()} className="h-4 w-4 rounded border border-white/20 bg-white/5 checked:bg-[#C9C9C9] checked:border-[#C9C9C9] text-[#C9C9C9] focus:ring-0 cursor-pointer accent-[#C9C9C9] transition-all" />
+                <div className="flex flex-col items-center justify-center bg-zinc-50 border border-zinc-200 rounded-xl py-2.5 hover:bg-zinc-100 transition-colors cursor-pointer" onClick={() => handleUpdateObserveChecked(visualizerFocusTabId, !activeTabStrategies[visualizerFocusTabId]?.observeChecked)}>
+                  <span className="text-[10px] font-black text-zinc-600 mb-2 pointer-events-none">觀察</span>
+                  <input id="observe-input-focus" type="checkbox" checked={!!activeTabStrategies[visualizerFocusTabId]?.observeChecked} onChange={(e) => handleUpdateObserveChecked(visualizerFocusTabId, e.target.checked)} onClick={(e) => e.stopPropagation()} className="h-4 w-4 rounded border border-zinc-300 bg-white checked:bg-zinc-500 checked:border-zinc-500 text-zinc-500 focus:ring-0 cursor-pointer accent-zinc-500 transition-all font-black" />
                 </div>
               </div>
             )}
@@ -5532,7 +6013,7 @@ export default function Dashboard() {
                 }
                 setVisualizerFocusTabId(null);
               }}
-              className="w-full py-3 px-4 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 hover:border-emerald-500/50 text-sm font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(16,185,129,0.05)]"
+              className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 shadow-[0_4px_12px_rgba(16,185,129,0.2)]"
             >
               <span>儲存操作重點</span>
             </button>
@@ -5576,7 +6057,7 @@ export default function Dashboard() {
                 }
                 setVisualizerFocusTabId(null);
               }}
-              className="w-full py-3 px-4 bg-amber-500/15 hover:bg-amber-500/25 text-amber-400 border border-amber-500/30 hover:border-amber-500/50 text-sm font-bold rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-[0_0_15px_rgba(245,158,11,0.05)]"
+              className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-sm rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-[0_4px_12px_rgba(79,70,229,0.2)]"
             >
               <span>前往該操作重點</span>
             </button>
@@ -5592,14 +6073,14 @@ export default function Dashboard() {
                   }
                   setVisualizerFocusTabId(null);
                 }}
-                className="py-2.5 px-3 bg-white/5 hover:bg-white/10 text-white/80 border border-white/5 hover:border-white/10 text-xs font-semibold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                className="py-2.5 px-3 bg-zinc-100 hover:bg-zinc-200 text-zinc-850 border border-zinc-200 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-sm"
               >
                 <span>僅翻回前面</span>
               </button>
               
               <button
                 onClick={() => setVisualizerFocusTabId(null)}
-                className="py-2.5 px-3 bg-white/5 hover:bg-red-500/10 text-white/40 hover:text-red-400 border border-transparent hover:border-red-500/10 text-xs font-semibold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                className="py-2.5 px-3 bg-zinc-50 hover:bg-rose-50 text-zinc-500 hover:text-rose-600 border border-zinc-200 hover:border-rose-200 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-sm"
               >
                 <span>取消</span>
               </button>

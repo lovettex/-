@@ -309,8 +309,8 @@ export default function ChipAnalysisTab({ tabId, symbol }: { tabId: string; symb
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 text-white/50 space-y-3">
-        <Loader2 className="w-8 h-8 animate-spin text-emerald-400" />
+      <div className="flex flex-col items-center justify-center py-20 text-zinc-500 space-y-3">
+        <Loader2 className="w-8 h-8 animate-spin text-emerald-705 font-bold" />
         <p className="text-xs">主力籌碼頁面載入中...</p>
       </div>
     );
@@ -318,29 +318,29 @@ export default function ChipAnalysisTab({ tabId, symbol }: { tabId: string; symb
 
   // Helper color logic based on signals
   const getSignalColor = (sig: string) => {
-    if (sig === '買入') return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30';
-    if (sig === '賣出') return 'bg-red-500/10 text-red-400 border-red-500/30';
-    return 'bg-amber-500/10 text-amber-400 border-amber-500/30';
+    if (sig === '買入') return 'bg-emerald-500/10 text-emerald-705 font-bold border-emerald-500/30';
+    if (sig === '賣出') return 'bg-red-500/10 text-rose-700 font-bold border-red-500/30';
+    return 'bg-amber-500/10 text-amber-705 font-bold border-amber-500/30';
   };
 
   const getWarningBadgeColor = (type: string) => {
-    if (type === '買入警告') return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30';
-    if (type === '賣出警告') return 'bg-red-500/10 text-red-400 border-red-500/30';
-    return 'bg-white/5 text-white/40 border-white/10';
+    if (type === '買入警告') return 'bg-emerald-500/10 text-emerald-705 font-bold border-emerald-500/30';
+    if (type === '賣出警告') return 'bg-red-500/10 text-rose-700 font-bold border-red-500/30';
+    return 'bg-zinc-50 text-zinc-400 font-semibold border-zinc-205';
   };
 
   return (
     <div className="space-y-6 pb-20">
-      <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-white/10 pb-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-zinc-205 pb-4">
         <div>
           <p className="text-[10px] font-bold tracking-widest text-[#10B981] uppercase font-mono">Market Maker & Chips</p>
-          <h2 className="text-xl font-bold tracking-tight text-white/95 flex items-center gap-2">
+          <h2 className="text-xl font-bold tracking-tight text-zinc-900 font-bold flex items-center gap-2">
             主力與籌碼分析
-            <span className="text-xs font-normal text-white/40 font-mono ml-1">({symbol})</span>
+            <span className="text-xs font-normal text-zinc-400 font-semibold font-mono ml-1">({symbol})</span>
           </h2>
         </div>
         {data.scannedAt && (
-          <span className="text-[11px] text-white/40 font-mono mt-1 md:mt-0">
+          <span className="text-[11px] text-zinc-400 font-semibold font-mono mt-1 md:mt-0">
             上次分析時間：{data.scannedAt}
           </span>
         )}
@@ -358,8 +358,8 @@ export default function ChipAnalysisTab({ tabId, symbol }: { tabId: string; symb
               isDragActive 
                 ? 'border-emerald-500 bg-emerald-500/5' 
                 : previewUrl 
-                  ? 'border-white/10 bg-[#121212]' 
-                  : 'border-white/10 hover:border-emerald-500/50 bg-[#121212]/50'
+                  ? 'border-zinc-205 bg-zinc-50/90' 
+                  : 'border-zinc-205 hover:border-emerald-500/50 bg-zinc-50/50'
             }`}
             onClick={() => document.getElementById('chip-file-uploader')?.click()}
           >
@@ -376,23 +376,23 @@ export default function ChipAnalysisTab({ tabId, symbol }: { tabId: string; symb
                 <img 
                   src={previewUrl} 
                   alt="K-line preview image" 
-                  className="max-h-[220px] object-contain rounded-xl border border-white/10 shadow-2xl transition-all"
+                  className="max-h-[220px] object-contain rounded-xl border border-zinc-205 shadow-2xl transition-all"
                 />
                 <div className="absolute inset-0 bg-[#000]/70 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-xl">
-                  <div className="text-center text-xs text-white/70 space-y-1">
-                    <Upload className="w-5 h-5 mx-auto text-emerald-400" />
+                  <div className="text-center text-xs text-zinc-650 font-medium space-y-1">
+                    <Upload className="w-5 h-5 mx-auto text-emerald-705 font-bold" />
                     <p>重置/拖曳上傳新圖檔</p>
                   </div>
                 </div>
               </div>
             ) : (
               <div className="text-center space-y-3">
-                <div className="w-12 h-12 rounded-full bg-white/5 border border-white/10 flex items-center justify-center mx-auto text-white/40">
-                  <Upload className="w-6 h-6 text-emerald-400 animate-pulse" />
+                <div className="w-12 h-12 rounded-full bg-zinc-50 border border-zinc-205 flex items-center justify-center mx-auto text-zinc-400 font-semibold">
+                  <Upload className="w-6 h-6 text-emerald-705 font-bold animate-pulse" />
                 </div>
                 <div className="space-y-1">
-                  <p className="font-bold text-sm text-white/80">拖曳或點選上傳走走勢截圖</p>
-                  <p className="text-xs text-white/40 max-w-[200px] mx-auto">支援 png, jpeg, webp 等格式</p>
+                  <p className="font-bold text-sm text-zinc-750 font-medium">拖曳或點選上傳走走勢截圖</p>
+                  <p className="text-xs text-zinc-400 font-semibold max-w-[200px] mx-auto">支援 png, jpeg, webp 等格式</p>
                 </div>
               </div>
             )}
@@ -402,7 +402,7 @@ export default function ChipAnalysisTab({ tabId, symbol }: { tabId: string; symb
             id="scan-chips-btn"
             disabled={scanning || !previewUrl}
             onClick={handleScan}
-            className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-emerald-500 hover:bg-emerald-600 disabled:bg-white/5 disabled:text-white/30 text-black font-extrabold rounded-xl transition-all text-sm shadow-lg shadow-emerald-500/10 disabled:shadow-none"
+            className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-emerald-500 hover:bg-emerald-600 disabled:bg-zinc-50 disabled:text-zinc-400 text-black font-extrabold rounded-xl transition-all text-sm shadow-lg shadow-emerald-500/10 disabled:shadow-none"
           >
             {scanning ? (
               <>
@@ -421,12 +421,12 @@ export default function ChipAnalysisTab({ tabId, symbol }: { tabId: string; symb
         {/* Right Column: Tickboxes & Diagnostic Indicators */}
         <div id="diagnostics-panel" className="lg:col-span-7 space-y-6">
           {/* Main tickbox stage indicator */}
-          <div id="institutional-stages-box" className="p-5 rounded-2xl bg-[#121212]/90 border border-white/10 space-y-4">
-            <div className="flex items-center justify-between border-b border-white/5 pb-2">
-              <span className="text-xs font-extrabold tracking-wider text-white/60 flex items-center gap-1.5 uppercase font-mono">
-                <Gauge className="w-3.5 h-3.5 text-emerald-400" /> 主力資金操作所處階段
+          <div id="institutional-stages-box" className="p-5 rounded-2xl bg-zinc-50/80 border border-zinc-205 space-y-4">
+            <div className="flex items-center justify-between border-b border-zinc-200/50 pb-2">
+              <span className="text-xs font-extrabold tracking-wider text-zinc-500 flex items-center gap-1.5 uppercase font-mono">
+                <Gauge className="w-3.5 h-3.5 text-emerald-705 font-bold" /> 主力資金操作所處階段
               </span>
-              <span className="text-[10px] text-white/30">點按微調狀態</span>
+              <span className="text-[10px] text-zinc-400">點按微調狀態</span>
             </div>
             
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
@@ -446,10 +446,10 @@ export default function ChipAnalysisTab({ tabId, symbol }: { tabId: string; symb
                     className={`flex items-center justify-center gap-1.5 py-2 px-1.5 rounded-xl border text-xs font-bold transition-all ${
                       isChecked 
                         ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 shadow-md' 
-                        : 'bg-white/5 border-white/5 text-white/30 hover:border-white/10 hover:text-white/50'
+                        : 'bg-zinc-50 border-zinc-200/50 text-zinc-400 hover:border-zinc-205 hover:text-zinc-500'
                     }`}
                   >
-                    <CheckCircle2 className={`w-3.5 h-3.5 transition-all ${isChecked ? 'scale-100 text-emerald-400' : 'scale-0 text-transparent opacity-0 w-0'}`} />
+                    <CheckCircle2 className={`w-3.5 h-3.5 transition-all ${isChecked ? 'scale-100 text-emerald-705 font-bold' : 'scale-0 text-transparent opacity-0 w-0'}`} />
                     <span>{stg.label}</span>
                   </button>
                 );
@@ -460,47 +460,47 @@ export default function ChipAnalysisTab({ tabId, symbol }: { tabId: string; symb
           {/* Quick analysis details badges */}
           <div id="analysis-badges-grid" className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {/* Signal Badge Card */}
-            <div className="p-4 rounded-xl bg-white/5 border border-white/10 space-y-2 flex flex-col justify-between">
-              <span className="text-[11px] font-bold text-white/40 flex items-center gap-1">K線技術型態信號</span>
+            <div className="p-4 rounded-xl bg-zinc-50 border border-zinc-205 space-y-2 flex flex-col justify-between">
+              <span className="text-[11px] font-bold text-zinc-400 font-semibold flex items-center gap-1">K線技術型態信號</span>
               <div className="flex items-center gap-2">
                 <span className={`px-2.5 py-1 text-xs font-black rounded-lg border ${getSignalColor(data.signalType)}`}>
                   {data.signalType}
                 </span>
-                <span className="text-[10px] text-white/50 line-clamp-2 leading-tight">
+                <span className="text-[10px] text-zinc-500 line-clamp-2 leading-tight">
                   {data.signalExplanation || '尚未掃描'}
                 </span>
               </div>
             </div>
 
             {/* Warnings Badge Card */}
-            <div className="p-4 rounded-xl bg-white/5 border border-white/10 space-y-2 flex flex-col justify-between">
-              <span className="text-[11px] font-bold text-white/40 flex items-center gap-1">
-                <AlertTriangle className="w-3 h-3 text-red-400" /> 趨勢偏離/暴跌警告
+            <div className="p-4 rounded-xl bg-zinc-50 border border-zinc-205 space-y-2 flex flex-col justify-between">
+              <span className="text-[11px] font-bold text-zinc-400 font-semibold flex items-center gap-1">
+                <AlertTriangle className="w-3 h-3 text-rose-700 font-bold" /> 趨勢偏離/暴跌警告
               </span>
               <div className="flex items-center gap-2">
                 <span className={`px-2 py-0.5 text-[10px] font-black rounded border whitespace-nowrap ${getWarningBadgeColor(data.warnings.type)}`}>
                   {data.warnings.type || '無'}
                 </span>
-                <span className="text-[10px] text-white/50 line-clamp-2 leading-tight">
+                <span className="text-[10px] text-zinc-500 line-clamp-2 leading-tight">
                   {data.warnings.details || '安全無虞。'}
                 </span>
               </div>
             </div>
 
             {/* Micro Candlestick Badge Card */}
-            <div className="p-4 rounded-xl bg-white/5 border border-white/10 space-y-2 flex flex-col justify-between">
-              <span className="text-[11px] font-bold text-white/40 flex items-center gap-1">
+            <div className="p-4 rounded-xl bg-zinc-50 border border-zinc-205 space-y-2 flex flex-col justify-between">
+              <span className="text-[11px] font-bold text-zinc-400 font-semibold flex items-center gap-1">
                 十字星 / 影線強力支撐
               </span>
               <div className="flex items-center gap-2">
                 <span className={`px-2 py-0.5 text-[10px] font-black rounded border whitespace-nowrap ${
                   data.candlestickSupport.hasSupport 
-                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
-                    : 'bg-white/5 text-white/40 border-white/10'
+                    ? 'bg-emerald-500/10 text-emerald-705 font-bold border-emerald-500/30' 
+                    : 'bg-zinc-50 text-zinc-400 font-semibold border-zinc-205'
                 }`}>
                   {data.candlestickSupport.type || '無'}
                 </span>
-                <span className="text-[10px] text-white/50 line-clamp-2 leading-tight">
+                <span className="text-[10px] text-zinc-500 line-clamp-2 leading-tight">
                   {data.candlestickSupport.details || '無。'}
                 </span>
               </div>
@@ -509,18 +509,18 @@ export default function ChipAnalysisTab({ tabId, symbol }: { tabId: string; symb
 
           {/* Technical pattern and layout details text areas */}
           <div id="narrative-analysis-box" className="space-y-4">
-            <div className="p-5 rounded-2xl bg-[#121212]/90 border border-white/10 space-y-3">
-              <h3 className="text-white font-bold text-sm leading-none flex items-center gap-1.5 border-b border-white/5 pb-2">
-                <FileText className="w-4 h-4 text-emerald-400" /> 技術與籌碼型態說明
+            <div className="p-5 rounded-2xl bg-zinc-50/80 border border-zinc-205 space-y-3">
+              <h3 className="text-zinc-850 font-bold text-sm leading-none flex items-center gap-1.5 border-b border-zinc-200/50 pb-2">
+                <FileText className="w-4 h-4 text-emerald-705 font-bold" /> 技術與籌碼型態說明
               </h3>
-              <div id="pattern-explanation-details" className="text-xs text-white/70 leading-relaxed max-h-[140px] overflow-y-auto whitespace-pre-wrap pr-1">
+              <div id="pattern-explanation-details" className="text-xs text-zinc-650 font-medium leading-relaxed max-h-[140px] overflow-y-auto whitespace-pre-wrap pr-1">
                 {data.patternExplanation || '尚未分析。請上傳並掃描股票主產圖或走勢圖。'}
               </div>
             </div>
 
             <div className="p-5 rounded-2xl bg-emerald-500/5 border border-emerald-500/10 space-y-3">
-              <h3 className="text-emerald-400 font-bold text-sm leading-none flex items-center gap-1.5 border-b border-emerald-500/10 pb-2">
-                <UserCheck className="w-4 h-4 text-emerald-400" /> 散戶應對策略與操作建議
+              <h3 className="text-emerald-705 font-bold font-bold text-sm leading-none flex items-center gap-1.5 border-b border-emerald-500/10 pb-2">
+                <UserCheck className="w-4 h-4 text-emerald-705 font-bold" /> 散戶應對策略與操作建議
               </h3>
               <div id="retail-action-details" className="text-xs text-emerald-200/80 leading-relaxed max-h-[140px] overflow-y-auto whitespace-pre-wrap pr-1">
                 {data.actionSuggestions || '尚未提供。掃描成功後，此處將顯示專業級防守建倉操作策略。'}

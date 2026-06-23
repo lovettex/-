@@ -119,6 +119,19 @@ service cloud.firestore {
         && ( !('weak' in data) || (data.weak is list && data.weak.size() <= 500) );
     }
 
+    // Validation for UserSettings
+    function isValidUserSettings(data) {
+      return data.keys().hasAll(['totalCapital'])
+        && data.totalCapital is number && data.totalCapital >= 0
+        && ( !('updatedAt' in data) || data.updatedAt is timestamp || data.updatedAt == request.time );
+    }
+
+    match /userSettings/{userId} {
+      allow get: if isSignedIn() && userId == request.auth.uid;
+      allow create, update: if isSignedIn() && userId == request.auth.uid && isValidUserSettings(incoming());
+      allow delete: if isSignedIn() && userId == request.auth.uid;
+    }
+
     match /users/{userId}/socratesData/{dateKey} {
       allow list: if isSignedIn() && userId == request.auth.uid;
       allow get: if isSignedIn() && userId == request.auth.uid;

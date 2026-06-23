@@ -29,7 +29,9 @@ export interface StockTab {
   updatedAt: Timestamp;
   isFavoriteHighlight?: boolean;
   isDeviationConfirmed?: boolean;
+  isNew?: boolean;
   chartAnnotations?: ChartAnnotation[];
+  plannedBuyQty?: number;
 }
 
 export interface ChartAnnotation {

@@ -102,9 +102,23 @@
         "scannedAt": { "type": "string" }
       },
       "required": ["stage", "patternExplanation", "actionSuggestions", "warnings", "candlestickSupport", "signalType", "signalExplanation"]
+    },
+    "UserSettings": {
+      "title": "User Settings",
+      "description": "Global user settings such as total capital.",
+      "type": "object",
+      "properties": {
+        "totalCapital": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "timestamp" }
+      },
+      "required": ["totalCapital"]
     }
   },
   "firestore": {
+    "/userSettings/{userId}": {
+      "schema": "UserSettings",
+      "description": "Global settings for a specific user."
+    },
     "/users/{userId}/socratesData/{dateKey}": {
       "schema": "SocratesData",
       "description": "User-specific market signal data by date."

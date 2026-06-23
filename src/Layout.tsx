@@ -13,66 +13,81 @@ export default function Layout() {
 
   if (!user) {
     return (
-      <div className="h-screen w-full flex flex-col items-center justify-center space-y-8 px-4 relative overflow-hidden bg-[#0A0A0A] text-white">
+      <div className="h-screen w-full flex flex-col items-center justify-center px-4 relative overflow-hidden bg-[#F5F1F0] text-zinc-800">
         {/* Background ambient lighting effects */}
         <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
-          <div className="absolute top-[-10%] left-[10%] w-[50%] h-[50%] rounded-full bg-emerald-500/20 blur-[120px] mix-blend-screen opacity-50 animate-pulse" style={{ animationDuration: '8s' }}></div>
-          <div className="absolute bottom-[-10%] right-[10%] w-[40%] h-[40%] rounded-full bg-blue-500/20 blur-[120px] mix-blend-screen opacity-40 animate-pulse" style={{ animationDuration: '10s' }}></div>
+          <div className="absolute top-[-10%] left-[10%] w-[50%] h-[50%] rounded-full bg-emerald-500/15 blur-[120px] mix-blend-multiply opacity-60 animate-pulse" style={{ animationDuration: '8s' }}></div>
+          <div className="absolute bottom-[-10%] right-[10%] w-[45%] h-[45%] rounded-full bg-blue-500/12 blur-[120px] mix-blend-multiply opacity-50 animate-pulse" style={{ animationDuration: '10s' }}></div>
         </div>
-        <div className="text-center space-y-6 mb-2 relative z-10">
-          <div className="inline-flex justify-center items-center bg-white/5 p-5 border border-white/10 shadow-[0_0_30px_rgba(16,185,129,0.2)] rounded-2xl mb-4 backdrop-blur-xl">
-            <ActivitySquare className="h-14 w-14 text-emerald-400" />
+
+        {/* Elegant Frosted Container Card */}
+        <div className="w-full max-w-[420px] p-8 sm:p-10 bg-white/75 backdrop-blur-xl border border-white/60 shadow-[0_20px_50px_rgba(0,0,0,0.04)] rounded-[2.5rem] flex flex-col items-center text-center space-y-8 relative z-10">
+          <div className="space-y-5 flex flex-col items-center">
+            <div className="inline-flex justify-center items-center bg-zinc-100 p-4 border border-zinc-200/80 shadow-[0_10px_35px_rgba(16,185,129,0.12)] rounded-2xl backdrop-blur-xl hover:scale-105 transition-transform duration-300">
+              <ActivitySquare className="h-12 w-12 text-emerald-600" />
+            </div>
+            <div className="space-y-2">
+              <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-zinc-900 uppercase">
+                美股交易日誌
+              </h1>
+              <p className="text-[11px] text-zinc-500 font-extrabold tracking-widest uppercase bg-zinc-100 border border-zinc-200/60 px-3.5 py-1.5 rounded-full inline-block">
+                Trading Log System
+              </p>
+            </div>
+            <p className="text-zinc-600 text-sm font-semibold max-w-[280px] leading-relaxed">
+              登入以管理您的個人交易策略、進度與操作日誌
+            </p>
           </div>
-          <h1 className="text-5xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-white to-white/60 drop-shadow-sm uppercase">美股交易日誌</h1>
-          <p className="text-white/60 font-medium tracking-widest text-sm uppercase bg-white/5 border border-white/10 px-4 py-2 rounded-full inline-block backdrop-blur-sm">登入以管理您的個人交易策略與日誌</p>
-        </div>
-        <button 
-          onClick={login} 
-          className="relative z-10 glass-button py-4 px-10 text-lg font-semibold flex items-center justify-center min-w-[280px] hover:scale-105"
-        >
-          <svg className="w-5 h-5 mr-3" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-             <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
-             <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
-             <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
-             <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
-          </svg>
-          <span className="text-white/90">Google 登入</span>
-        </button>
-        {window.self !== window.top && (
-          <p className="text-xs font-medium text-white/40 mt-6 text-center max-w-sm relative z-10 tracking-wider">
-            如遇到無法登入的情況，請使用下方按鈕以獨立新分頁開啟本站。
-          </p>
-        )}
-        {window.self !== window.top && (
-          <a
-            href={window.location.href}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm font-medium text-blue-400 hover:text-blue-300 transition-colors relative z-10 px-4 py-2 rounded-full bg-blue-500/10 border border-blue-500/20"
+
+          <button 
+            onClick={login} 
+            className="w-full py-4 px-6 text-sm sm:text-base font-extrabold flex items-center justify-center bg-white hover:bg-zinc-50 text-zinc-900 border border-zinc-200 rounded-2xl shadow-sm hover:shadow-md hover:border-zinc-300/80 transition-all duration-300 active:scale-[0.98] cursor-pointer gap-3"
           >
-            以新視窗開啟
-          </a>
+            <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+               <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
+               <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+               <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
+               <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
+            </svg>
+            <span>使用 Google 帳號登入</span>
+          </button>
+        </div>
+
+        {window.self !== window.top && (
+          <div className="flex flex-col items-center space-y-3 relative z-10 max-w-sm w-full">
+            <p className="text-xs font-bold text-zinc-500 text-center leading-relaxed bg-white/50 border border-zinc-200/40 px-5 py-2.5 rounded-2xl backdrop-blur-sm shadow-xs">
+              如遇到無法登入的情況，請點擊下方按鈕以獨立新分頁開啟本站。
+            </p>
+            <a
+              href={window.location.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs font-black text-emerald-700 hover:text-emerald-800 transition-colors px-4 py-2 rounded-xl bg-emerald-150 hover:bg-emerald-200 border border-emerald-250/50 shadow-xs active:scale-95 duration-150"
+            >
+              開啟獨立新分頁
+            </a>
+          </div>
         )}
       </div>
     );
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#0A0A0A] text-white relative">
+    <div className="flex h-screen overflow-hidden bg-[#F5F1F0] text-zinc-800 relative">
       {/* Background ambient lighting effects (organic fluid shapes) */}
       <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
         {/* Glow 1 */}
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-emerald-500/10 blur-[120px] mix-blend-screen opacity-50 animate-pulse" style={{ animationDuration: '8s' }}></div>
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-emerald-500/5 blur-[120px] mix-blend-multiply opacity-50 animate-pulse" style={{ animationDuration: '8s' }}></div>
         {/* Glow 2 */}
-        <div className="absolute top-[20%] right-[-5%] w-[35%] h-[35%] rounded-full bg-blue-500/10 blur-[120px] mix-blend-screen opacity-40 animate-pulse" style={{ animationDuration: '10s' }}></div>
+        <div className="absolute top-[20%] right-[-5%] w-[35%] h-[35%] rounded-full bg-blue-500/5 blur-[120px] mix-blend-multiply opacity-40 animate-pulse" style={{ animationDuration: '10s' }}></div>
         {/* Glow 3 */}
-        <div className="absolute bottom-[-10%] left-[20%] w-[50%] h-[40%] rounded-full bg-purple-500/10 blur-[140px] mix-blend-screen opacity-30 animate-pulse" style={{ animationDuration: '12s' }}></div>
+        <div className="absolute bottom-[-10%] left-[20%] w-[50%] h-[40%] rounded-full bg-purple-500/5 blur-[140px] mix-blend-multiply opacity-30 animate-pulse" style={{ animationDuration: '12s' }}></div>
       </div>
       
       {/* Top right auth corner */}
       <div className="fixed top-4 right-6 z-[100] flex items-center gap-3">
         <div className="hidden sm:block text-right">
-          <p className="text-xs font-bold text-white/50 uppercase tracking-widest">{user.displayName}</p>
+          <p className="text-xs font-bold text-zinc-500 uppercase tracking-widest">{user.displayName}</p>
         </div>
       </div>
 
