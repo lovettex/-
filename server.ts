@@ -4,6 +4,29 @@ import path from "path";
 import { GoogleGenAI, Type } from "@google/genai";
 import "dotenv/config";
 
+async function generateContentWithRetry(ai: GoogleGenAI, params: any, maxRetries = 3, initialDelay = 1000) {
+  let attempt = 0;
+  while (true) {
+    try {
+      return await ai.models.generateContent(params);
+    } catch (error: any) {
+      attempt++;
+      console.error(`Gemini API attempt ${attempt} failed:`, error);
+      
+      const errStr = String(error?.message || error || "");
+      const isTransient = errStr.includes("503") || errStr.includes("UNAVAILABLE") || errStr.includes("high demand") || errStr.includes("429") || errStr.includes("ResourceExhausted") || errStr.includes("RESOURCE_EXHAUSTED") || errStr.includes("overloaded");
+      
+      if (attempt >= maxRetries || !isTransient) {
+        throw error;
+      }
+      
+      const delay = initialDelay * Math.pow(2, attempt - 1);
+      console.log(`Retrying in ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -75,7 +98,7 @@ async function startServer() {
 - 是否屬於 買入 / 賣出 / 等待 交易信號型態，以及原因。
 `;
 
-      const response = await ai.models.generateContent({
+      const response = await generateContentWithRetry(ai, {
         model: "gemini-3.5-flash",
         contents: [
           {
@@ -249,7 +272,7 @@ async function startServer() {
         下方支撐區: ${JSON.stringify(strategyData?.supportZones || [])}
       `;
 
-      const response = await ai.models.generateContent({
+      const response = await generateContentWithRetry(ai, {
         model: "gemini-3.5-flash",
         contents: prompt,
         config: {
@@ -286,7 +309,7 @@ async function startServer() {
         }
       });
 
-      const response = await ai.models.generateContent({
+      const response = await generateContentWithRetry(ai, {
         model: "gemini-3.5-flash",
         contents: [
           {

@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import { motion, AnimatePresence } from 'motion/react';
 import { db } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
+import { safeSessionStorage } from '../lib/utils';
 import { ScrollIn, InteractiveButton, Magnetic } from '../components/MotionWrappers';
 import StrategyTab from '../components/StrategyTab';
 import ChipAnalysisTab from '../components/ChipAnalysisTab';
@@ -53,6 +54,22 @@ export default function StockTabDetail() {
   const tradesJsonFileInputRef = React.useRef<HTMLInputElement>(null);
   const { user } = useAuth();
 
+  // 5 rows for stock averaging
+  const [averagingRows, setAveragingRows] = useState([
+    { price: '', quantity: '' },
+    { price: '', quantity: '' },
+    { price: '', quantity: '' },
+    { price: '', quantity: '' },
+    { price: '', quantity: '' }
+  ]);
+  const [includeCurrentHolding, setIncludeCurrentHolding] = useState(true);
+
+  // Percentage calculator states
+  const [calcExpression, setCalcExpression] = useState('');
+  const [calcBasePrice, setCalcBasePrice] = useState('');
+  const [calcPercent, setCalcPercent] = useState('');
+  const [calcType, setCalcType] = useState('SUB'); // 'ADD' or 'SUB'
+
   // Update currentPriceInput when tab data loads or changes
   React.useEffect(() => {
     if (tab?.currentPrice !== undefined) {
@@ -85,7 +102,7 @@ export default function StockTabDetail() {
   React.useEffect(() => {
     if (tab?.holdingStatus) {
        const displayStatus = ['觀察中', '買進操作', '賣出操作', '平倉操作', '乖離名單'].includes(tab.holdingStatus) ? tab.holdingStatus : '候選名單';
-       sessionStorage.setItem('preferredHoldingSubTab', displayStatus);
+       safeSessionStorage.setItem('preferredHoldingSubTab', displayStatus);
     }
   }, [tab?.holdingStatus]);
 
@@ -107,9 +124,128 @@ export default function StockTabDetail() {
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, [navigate]);
 
+  const stats = calculateStats(trades, tab?.currentPrice);
+
+  // Prefill percentage calculator base price when data loaded
+  React.useEffect(() => {
+    if (tab && stats) {
+      const baseVal = tab.currentPrice || stats.averagePrice || 0;
+      if (baseVal > 0 && !calcBasePrice) {
+        setCalcBasePrice(baseVal.toFixed(2));
+        setCalcPercent('7');
+        setCalcType('SUB');
+      }
+    }
+  }, [tab?.id, tab?.currentPrice, stats?.averagePrice]);
+
+  // Keep expression in sync with manual inputs (section 2 -> section 1)
+  React.useEffect(() => {
+    const base = parseFloat(calcBasePrice) || 0;
+    const op = calcType === 'ADD' ? '+' : '-';
+    const pctStr = calcPercent === '' ? '' : calcPercent;
+    
+    if (base > 0) {
+      if (pctStr !== '') {
+        setCalcExpression(`${base.toFixed(2)} ${op} ${pctStr}%`);
+      } else {
+        setCalcExpression(`${base.toFixed(2)} ${op} 0%`);
+      }
+    }
+  }, [calcBasePrice, calcType, calcPercent]);
+
   if (!tab) return <div className="text-slate-500">找不到該股票分頁，或已被刪除。</div>;
 
-  const stats = calculateStats(trades, tab.currentPrice);
+  // Helper to parse and calculate: e.g. "56 - 7%" or "56 + 8%"
+  const parseAndCalculatePercentage = (expr: string) => {
+    if (!expr) return { success: false };
+    
+    // Clean string: remove leading/trailing spaces, remove leading $, and remove all spaces
+    const clean = expr.trim().replace(/^\$/, '').replace(/\s+/g, '');
+    
+    // Regex matches:
+    // Group 1: Base price (can have commas, digits, dots)
+    // Group 2: Operator (+ or -)
+    // Group 3: Percentage value (can have commas, digits, dots)
+    // Optional trailing %
+    const regex = /^([\d\.,]+)([\+\-])([\d\.,]+)%?$/;
+    const match = clean.match(regex);
+    
+    if (match) {
+      const baseStr = match[1].replace(/,/g, '');
+      const op = match[2];
+      const percentStr = match[3].replace(/,/g, '');
+      
+      const base = parseFloat(baseStr);
+      const percent = parseFloat(percentStr);
+      
+      if (!isNaN(base) && !isNaN(percent)) {
+        const isAdd = op === '+';
+        const factor = isAdd ? (1 + percent / 100) : (1 - percent / 100);
+        const result = base * factor;
+        return { success: true, result, base, percent, isAdd };
+      }
+    }
+    
+    // If it's just a simple number (without operator)
+    const simpleNumStr = clean.replace(/,/g, '');
+    const simpleNum = parseFloat(simpleNumStr);
+    if (!isNaN(simpleNum) && !clean.includes('+') && !clean.includes('-')) {
+      return { success: true, result: simpleNum, base: simpleNum, percent: 0, isAdd: true };
+    }
+    
+    return { success: false };
+  };
+
+  const handlePresetClick = (p: string) => {
+    const base = parseFloat(calcBasePrice) || tab?.currentPrice || stats?.averagePrice || 0;
+    if (base > 0) {
+      const isNeg = p.startsWith('-');
+      const val = p.replace(/[\+\-%]/g, '');
+      setCalcType(isNeg ? 'SUB' : 'ADD');
+      setCalcPercent(val);
+      setCalcBasePrice(base.toFixed(2));
+    }
+  };
+
+  // Calculation of stock averaging
+  const calculateAveraging = () => {
+    let newSharesSum = 0;
+    let newCostSum = 0;
+
+    averagingRows.forEach(row => {
+      const p = parseFloat(row.price);
+      const q = parseFloat(row.quantity);
+      if (!isNaN(p) && p > 0 && !isNaN(q) && q > 0) {
+        newSharesSum += q;
+        newCostSum += p * q;
+      }
+    });
+
+    const currentShares = includeCurrentHolding ? stats.totalQuantity : 0;
+    const currentPrice = includeCurrentHolding ? stats.averagePrice : 0;
+    const currentCost = currentShares * currentPrice;
+
+    const totalShares = currentShares + newSharesSum;
+    const totalCost = currentCost + newCostSum;
+    const finalAveragePrice = totalShares > 0 ? (totalCost / totalShares) : 0;
+
+    let costReducedPercent = 0;
+    if (stats.averagePrice > 0 && finalAveragePrice < stats.averagePrice) {
+      costReducedPercent = ((stats.averagePrice - finalAveragePrice) / stats.averagePrice) * 100;
+    }
+
+    return {
+      newSharesSum,
+      newCostSum,
+      totalShares,
+      totalCost,
+      finalAveragePrice,
+      costReducedPercent
+    };
+  };
+
+  const avgResult = calculateAveraging();
+  const parsedCalc = parseAndCalculatePercentage(calcExpression);
 
   // Four-batch transaction planning calculations
   const totalBought = trades
@@ -449,7 +585,7 @@ export default function StockTabDetail() {
                 <div className="flex items-center gap-2">
                   <motion.h1 
                     layoutId="tab-title"
-                    className={`text-2xl sm:text-2xl font-bold tracking-tight ${isStaleData ? 'text-red-600 animate-pulse' : 'text-zinc-800'}`}
+                    className="text-2xl sm:text-2xl font-bold tracking-tight text-black"
                   >
                     {tab.symbol}
                   </motion.h1>
@@ -459,11 +595,6 @@ export default function StockTabDetail() {
                 </div>
                 <div className="flex flex-col mt-0.5 sm:mt-0">
                   <p className="text-zinc-500 text-[10px] tracking-wider truncate max-w-[200px] sm:max-w-[120px]">{tab.companyName}</p>
-                  {tab.updatedAt && (
-                    <p className={`text-[9px] sm:text-[8px] mt-1 sm:mt-0.5 tracking-widest ${isStaleData ? 'text-red-600 font-bold animate-pulse' : 'text-zinc-400'}`}>
-                      UPD: {typeof tab.updatedAt.toDate === 'function' ? format(tab.updatedAt.toDate(), 'yyyy/MM/dd HH:mm') : ''}
-                    </p>
-                  )}
                 </div>
               </div>
 
@@ -787,6 +918,251 @@ export default function StockTabDetail() {
                     <div className="flex flex-col">
                       <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest">交易次數</span>
                       <span className="text-xl font-bold text-zinc-800 tracking-tight">{trades.length} <span className="text-[10px] font-normal text-zinc-400">筆</span></span>
+                    </div>
+                  </div>
+
+                  {/* 股價攤平與比例計算工具 */}
+                  <div className="mt-6 pt-6 border-t border-zinc-200/80 grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Left Column: 股價向下攤平試算 */}
+                    <div className="space-y-4">
+                      <div className="flex items-center space-x-2">
+                        <div className="p-1 bg-emerald-50 text-emerald-700 rounded-md">
+                          <span className="text-xs">📉</span>
+                        </div>
+                        <h4 className="font-bold text-sm tracking-wide text-zinc-800">股價向下攤平試算</h4>
+                      </div>
+                      <p className="text-[11px] text-zinc-500">
+                        輸入預計加碼的股價與數量，系統會實時估算攤平後的平均持有成本。
+                      </p>
+
+                      <div className="space-y-2 mt-2">
+                        <div className="grid grid-cols-12 gap-2 text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-1">
+                          <span className="col-span-2 text-center">組別</span>
+                          <span className="col-span-5">預計購入股價 ($)</span>
+                          <span className="col-span-5">預計購入數量 (股)</span>
+                        </div>
+
+                        {averagingRows.map((row, idx) => (
+                          <div key={idx} className="grid grid-cols-12 gap-2 items-center">
+                            <span className="col-span-2 text-center text-xs text-zinc-400 font-bold">#{idx + 1}</span>
+                            <div className="col-span-5 relative">
+                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-zinc-400 font-semibold">$</span>
+                              <Input
+                                type="number"
+                                placeholder="股價"
+                                value={row.price}
+                                onChange={(e) => {
+                                  const newRows = [...averagingRows];
+                                  newRows[idx].price = e.target.value;
+                                  setAveragingRows(newRows);
+                                }}
+                                className="h-8 pl-6 pr-1 text-xs text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500"
+                              />
+                            </div>
+                            <div className="col-span-5 flex items-center gap-1">
+                              <Input
+                                type="number"
+                                placeholder="數量"
+                                value={row.quantity}
+                                onChange={(e) => {
+                                  const newRows = [...averagingRows];
+                                  newRows[idx].quantity = e.target.value;
+                                  setAveragingRows(newRows);
+                                }}
+                                className="h-8 px-2 text-xs text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500"
+                              />
+                              <button
+                                onClick={() => {
+                                  const newRows = [...averagingRows];
+                                  newRows[idx] = { price: '', quantity: '' };
+                                  setAveragingRows(newRows);
+                                }}
+                                className="h-8 w-8 text-zinc-400 hover:text-red-650 hover:bg-zinc-100 rounded-md shrink-0 transition-colors flex items-center justify-center font-bold text-xs"
+                                title="清除這組"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 pt-2">
+                        <label className="flex items-center gap-2 cursor-pointer select-none text-[11px] text-zinc-600 font-medium">
+                          <input
+                            type="checkbox"
+                            checked={includeCurrentHolding}
+                            onChange={(e) => setIncludeCurrentHolding(e.target.checked)}
+                            className="rounded border-zinc-300 text-[#0F6E56] focus:ring-[#0F6E56] h-3.5 w-3.5"
+                          />
+                          <span>包含當前庫存 ({stats.totalQuantity} 股 @ ${stats.averagePrice.toFixed(2)})</span>
+                        </label>
+                        <button
+                          onClick={() => {
+                            setAveragingRows([
+                              { price: '', quantity: '' },
+                              { price: '', quantity: '' },
+                              { price: '', quantity: '' },
+                              { price: '', quantity: '' },
+                              { price: '', quantity: '' }
+                            ]);
+                          }}
+                          className="text-[10px] font-bold text-zinc-400 hover:text-zinc-600 transition-colors self-end sm:self-auto"
+                        >
+                          ✕ 清除所有輸入
+                        </button>
+                      </div>
+
+                      <div className="p-4 rounded-xl bg-zinc-50 border border-zinc-100 space-y-2.5">
+                        <div className="flex justify-between text-xs text-zinc-500">
+                          <span>加碼購入總股數:</span>
+                          <span className="font-bold font-mono text-zinc-800">{avgResult.newSharesSum} 股</span>
+                        </div>
+                        <div className="flex justify-between text-xs text-zinc-500">
+                          <span>加碼所需資金:</span>
+                          <span className="font-bold font-mono text-zinc-800">${avgResult.newCostSum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        </div>
+                        <div className="h-[0.5px] bg-zinc-200/80 my-1" />
+                        <div className="flex justify-between items-baseline">
+                          <span className="text-xs font-semibold text-zinc-600">攤平後總股數:</span>
+                          <span className="text-sm font-bold font-mono text-zinc-800">{avgResult.totalShares} 股</span>
+                        </div>
+                        <div className="flex justify-between items-baseline">
+                          <span className="text-xs font-semibold text-zinc-600">攤平後平均成本:</span>
+                          <span className="text-base font-black font-mono text-[#0F6E56]">
+                            ${avgResult.finalAveragePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                        {includeCurrentHolding && avgResult.costReducedPercent > 0 && (
+                          <div className="text-[11px] text-emerald-700 font-semibold text-center bg-emerald-50/50 py-1.5 px-2.5 rounded-lg border border-emerald-100/50 mt-1">
+                            📉 平均成本較原先降低了 {avgResult.costReducedPercent.toFixed(2)}%
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Right Column: 比例股價變動計算器 */}
+                    <div className="space-y-4">
+                      <div className="flex items-center space-x-2">
+                        <div className="p-1 bg-emerald-50 text-emerald-700 rounded-md">
+                          <span className="text-xs">🧮</span>
+                        </div>
+                        <h4 className="font-bold text-sm tracking-wide text-zinc-800">比例股價變動計算器</h4>
+                      </div>
+                      <p className="text-[11px] text-zinc-500">
+                        依據百分比增減計算目標價（例如：設定停損限價、獲利目標、滿足點）。
+                      </p>
+
+                      <div className="space-y-3.5">
+                        <div className="space-y-1.5">
+                          <Label className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wide">1. 算式計算（例: 56 - 7% 或 56 + 8%）</Label>
+                          <div className="relative">
+                            <Input
+                              type="text"
+                              placeholder="56 - 7% 或 56 + 8%"
+                              value={calcExpression}
+                              onChange={(e) => setCalcExpression(e.target.value)}
+                              className="h-10 text-sm font-semibold tracking-wide text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500"
+                            />
+                            {calcExpression && (
+                              <button 
+                                onClick={() => {
+                                  setCalcExpression('');
+                                  setCalcBasePrice('');
+                                  setCalcPercent('');
+                                }}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-zinc-400 hover:text-zinc-600 font-bold"
+                              >
+                                清除
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Preset Buttons */}
+                          <div className="flex flex-wrap gap-1.5 pt-1">
+                            {['-10%', '-7%', '-5%', '-3%', '+3%', '+5%', '+8%', '+10%'].map((p) => {
+                              const isNeg = p.startsWith('-');
+                              return (
+                                <button
+                                  key={p}
+                                  onClick={() => handlePresetClick(p)}
+                                  className={`text-[10px] font-bold px-2 py-1 rounded-md transition-all cursor-pointer ${
+                                    isNeg 
+                                      ? 'bg-rose-50 text-rose-700 hover:bg-rose-100/80 border border-rose-200/50' 
+                                      : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100/80 border border-emerald-200/50'
+                                  }`}
+                                >
+                                  {p}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Structured adjustment */}
+                        <div className="space-y-2 pt-3 border-t border-zinc-200/60">
+                          <Label className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wide">2. 數值微調與輔助設定</Label>
+                          <div className="grid grid-cols-3 gap-2">
+                            <div>
+                              <span className="text-[9px] text-zinc-400 font-bold block mb-1">基準股價 ($)</span>
+                              <Input
+                                type="number"
+                                value={calcBasePrice}
+                                onChange={(e) => setCalcBasePrice(e.target.value)}
+                                className="h-8 text-xs text-zinc-800 bg-white border-zinc-200"
+                              />
+                            </div>
+                            <div>
+                              <span className="text-[9px] text-zinc-400 font-bold block mb-1">運算符</span>
+                              <div className="flex h-8 border border-zinc-200 rounded-md overflow-hidden bg-white">
+                                <button
+                                  onClick={() => setCalcType('SUB')}
+                                  className={`flex-1 text-[10px] font-bold transition-all cursor-pointer ${calcType === 'SUB' ? 'bg-rose-500 text-white font-black' : 'text-zinc-500 hover:bg-zinc-50'}`}
+                                >
+                                  減 (-)
+                                </button>
+                                <button
+                                  onClick={() => setCalcType('ADD')}
+                                  className={`flex-1 text-[10px] font-bold transition-all cursor-pointer ${calcType === 'ADD' ? 'bg-emerald-600 text-white font-black' : 'text-zinc-500 hover:bg-zinc-50'}`}
+                                >
+                                  加 (+)
+                                </button>
+                              </div>
+                            </div>
+                            <div>
+                              <span className="text-[9px] text-zinc-400 font-bold block mb-1">百分比 (%)</span>
+                              <Input
+                                type="number"
+                                value={calcPercent}
+                                placeholder="例 7"
+                                onChange={(e) => setCalcPercent(e.target.value)}
+                                className="h-8 text-xs text-zinc-800 bg-white border-zinc-200"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Display Area */}
+                        <div className={`p-4 rounded-xl border flex flex-col justify-center transition-all ${parsedCalc.success ? 'bg-emerald-50/30 border-emerald-100/60' : 'bg-zinc-50 border-zinc-150'} min-h-[78px]`}>
+                          {parsedCalc.success && parsedCalc.result !== undefined ? (
+                            <div className="text-center">
+                              <div className="text-[10px] text-zinc-400 font-bold tracking-wider uppercase mb-0.5">計算結果</div>
+                              <div className="text-2xl font-black text-[#0F6E56] font-mono tracking-tight leading-none py-1">
+                                ${parsedCalc.result.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </div>
+                              {parsedCalc.percent !== 0 && (
+                                <div className="text-[10px] text-zinc-500 font-medium mt-1">
+                                  以 <span className="font-semibold text-zinc-800">${parsedCalc.base?.toFixed(2)}</span> 為基準，{parsedCalc.isAdd ? '增加' : '減少'} <span className="font-black text-zinc-700">{parsedCalc.percent}%</span>
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="text-center text-xs text-zinc-400 font-medium leading-relaxed">
+                              請於上方直接輸入（如 <span className="font-mono">56 - 7%</span> 或 <span className="font-mono">56 + 8%</span>）<br/>或點擊快捷按鈕。
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>

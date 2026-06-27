@@ -6,7 +6,8 @@ import {
   GoogleAuthProvider, 
   signOut,
   signInWithRedirect,
-  getRedirectResult
+  getRedirectResult,
+  browserPopupRedirectResolver
 } from 'firebase/auth';
 import { auth } from './firebase';
 import { toast } from 'sonner';
@@ -36,7 +37,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     // Handle redirect result if any
-    getRedirectResult(auth).catch((error) => {
+    getRedirectResult(auth, browserPopupRedirectResolver).catch((error) => {
       if (error.code !== 'auth/no-recent-redirect-operation') {
         console.error("Redirect result error:", error);
         toast.error("登入失敗，請稍後再試");
@@ -57,18 +58,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (isMobile) {
         // Always try popup first, but if it fails on mobile, fall back to redirect and tell user to configure
         try {
-          await signInWithPopup(auth, provider);
+          await signInWithPopup(auth, provider, browserPopupRedirectResolver);
         } catch (error: any) {
           console.error("Popup failed, trying redirect", error);
           if (isIframe) {
             toast.error("手機版於預覽畫面中可能無法登入，建議「以新分頁開啟」或使用桌面版", { duration: 5000 });
           }
-          await signInWithRedirect(auth, provider);
+          await signInWithRedirect(auth, provider, browserPopupRedirectResolver);
         }
       } else {
         // Desktop
         try {
-          await signInWithPopup(auth, provider);
+          await signInWithPopup(auth, provider, browserPopupRedirectResolver);
         } catch (error: any) {
           if (error.code === 'auth/popup-blocked') {
             toast.error("登入視窗被阻擋，請允許彈出式視窗或手動點擊再次嘗試");
@@ -76,7 +77,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             // Ignore cancel
           } else {
             console.error("Login failed:", error);
-            if (!isIframe) await signInWithRedirect(auth, provider);
+            if (!isIframe) await signInWithRedirect(auth, provider, browserPopupRedirectResolver);
           }
         }
       }

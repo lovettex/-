@@ -1,11 +1,31 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { 
+  getAuth,
+  initializeAuth, 
+  indexedDBLocalPersistence, 
+  browserLocalPersistence, 
+  inMemoryPersistence,
+  browserPopupRedirectResolver
+} from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 export const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-export const auth = getAuth(app);
+
+// Initialize Firebase Auth with multiple persistence targets to prevent WKWebView/Chrome iOS sandboxed storage crashes.
+let authInstance;
+try {
+  authInstance = initializeAuth(app, {
+    persistence: [indexedDBLocalPersistence, browserLocalPersistence, inMemoryPersistence],
+    popupRedirectResolver: browserPopupRedirectResolver
+  });
+} catch (e) {
+  console.warn("initializeAuth failed, falling back to standard getAuth:", e);
+  authInstance = getAuth(app);
+}
+
+export const auth = authInstance;
 
 export enum OperationType {
   CREATE = 'create',

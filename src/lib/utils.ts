@@ -52,3 +52,51 @@ export const safeLocalStorage = {
     delete memoryStorage[key];
   }
 };
+
+const isSessionStorageAvailable = (): boolean => {
+  try {
+    const key = "__test_session_storage_avail__";
+    window.sessionStorage.setItem(key, key);
+    window.sessionStorage.removeItem(key);
+    return true;
+  } catch (e) {
+    return false;
+  }
+};
+
+const memorySessionStorage: Record<string, string> = {};
+
+export const safeSessionStorage = {
+  getItem: (key: string): string | null => {
+    try {
+      if (isSessionStorageAvailable()) {
+        return window.sessionStorage.getItem(key);
+      }
+    } catch (e) {
+      console.warn("SessionStorage access denied. Falling back to memory storage.", e);
+    }
+    return memorySessionStorage[key] !== undefined ? memorySessionStorage[key] : null;
+  },
+  setItem: (key: string, value: string): void => {
+    try {
+      if (isSessionStorageAvailable()) {
+        window.sessionStorage.setItem(key, value);
+        return;
+      }
+    } catch (e) {
+      console.warn("SessionStorage access denied. Saving to memory instead.", e);
+    }
+    memorySessionStorage[key] = value;
+  },
+  removeItem: (key: string): void => {
+    try {
+      if (isSessionStorageAvailable()) {
+        window.sessionStorage.removeItem(key);
+        return;
+      }
+    } catch (e) {
+      console.warn("SessionStorage access denied. Removing from memory instead.", e);
+    }
+    delete memorySessionStorage[key];
+  }
+};

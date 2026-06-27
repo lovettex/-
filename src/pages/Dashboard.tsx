@@ -89,7 +89,7 @@ import {
   LogOut,
 } from "lucide-react";
 import { calculateStats } from "../lib/calculations";
-import { safeLocalStorage } from "../lib/utils";
+import { safeLocalStorage, safeSessionStorage } from "../lib/utils";
 import { format } from "date-fns";
 import { StockCardVisualizer, prefetchStockPrice } from "../components/StockCardVisualizer";
 
@@ -324,14 +324,14 @@ export default function Dashboard() {
   >("active");
   const [activeHoldingSubTab, setActiveHoldingSubTab] = useState<
     "觀察中" | "候選名單" | "買進操作" | "賣出操作" | "平倉操作" | "乖離名單"
-  >((sessionStorage.getItem('preferredHoldingSubTab') as any) || "候選名單");
+  >((safeSessionStorage.getItem('preferredHoldingSubTab') as any) || "候選名單");
 
   const [activeCardDefinitionFilter, setActiveCardDefinitionFilter] = useState<
     "all" | "highlight" | "operation" | "deviation" | "group"
   >("all");
 
   useEffect(() => {
-    sessionStorage.setItem('preferredHoldingSubTab', activeHoldingSubTab);
+    safeSessionStorage.setItem('preferredHoldingSubTab', activeHoldingSubTab);
     setActiveCardDefinitionFilter("all");
   }, [activeHoldingSubTab]);
   const [activeManageTab, setActiveManageTab] = useState<
@@ -862,6 +862,15 @@ export default function Dashboard() {
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isManageHiddenOpen, setIsManageHiddenOpen] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [manageTradeType, setManageTradeType] = useState<"simulated" | "real">("simulated");
+  const [isEditingCapital, setIsEditingCapital] = useState(false);
+  const [editCapitalVal, setEditCapitalVal] = useState("");
+
+  useEffect(() => {
+    if (isManageHiddenOpen) {
+      setManageTradeType(activeViewTab === "real" ? "real" : "simulated");
+    }
+  }, [isManageHiddenOpen, activeViewTab]);
 
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -2747,6 +2756,110 @@ export default function Dashboard() {
 
   visibleTabsRef.current = filteredSubTabVisibleTabs;
 
+  // Active Card Tab & Sliding Indicator state for desktop carousel
+  const [activeCardTabId, setActiveCardTabId] = useState<string | null>(null);
+  const [indicatorStyle, setIndicatorStyle] = useState<{ left: number; width: number }>({ left: 0, width: 0 });
+  const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const isProgrammaticScrollRef = useRef(false);
+  const programmaticScrollTimeoutRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (filteredSubTabVisibleTabs.length > 0) {
+      const exists = filteredSubTabVisibleTabs.some(t => t.id === activeCardTabId);
+      if (!exists) {
+        setActiveCardTabId(filteredSubTabVisibleTabs[0].id);
+      }
+    } else {
+      setActiveCardTabId(null);
+    }
+  }, [filteredSubTabVisibleTabs, activeCardTabId]);
+
+  useEffect(() => {
+    const updateIndicator = () => {
+      const activeId = activeCardTabId || (filteredSubTabVisibleTabs.length > 0 ? filteredSubTabVisibleTabs[0].id : null);
+      if (activeId) {
+        const el = tabRefs.current[activeId];
+        if (el) {
+          setIndicatorStyle({
+            left: el.offsetLeft,
+            width: el.offsetWidth,
+          });
+
+          // Smoothly scroll the tabs bar container to keep the active tab visible
+          const container = el.parentElement;
+          if (container) {
+            const containerScrollLeft = container.scrollLeft;
+            const containerWidth = container.clientWidth;
+            const elLeft = el.offsetLeft;
+            const elWidth = el.offsetWidth;
+            
+            if (elLeft < containerScrollLeft) {
+              container.scrollTo({ left: elLeft - 24, behavior: "smooth" });
+            } else if (elLeft + elWidth > containerScrollLeft + containerWidth) {
+              container.scrollTo({ left: elLeft + elWidth - containerWidth + 24, behavior: "smooth" });
+            }
+          }
+        }
+      }
+    };
+
+    const animId = requestAnimationFrame(updateIndicator);
+    window.addEventListener("resize", updateIndicator);
+    return () => {
+      cancelAnimationFrame(animId);
+      window.removeEventListener("resize", updateIndicator);
+    };
+  }, [activeCardTabId, filteredSubTabVisibleTabs]);
+
+  const handleCarouselScroll = () => {
+    if (isProgrammaticScrollRef.current) return;
+    const carousel = carouselRef.current;
+    if (!carousel || filteredSubTabVisibleTabs.length === 0) return;
+    
+    const containerRect = carousel.getBoundingClientRect();
+    const containerCenter = containerRect.left + containerRect.width / 2;
+    
+    let closestTabId = null;
+    let minDistance = Infinity;
+    
+    filteredSubTabVisibleTabs.forEach((tab) => {
+      const el = document.getElementById(`stock-card-${tab.id}`);
+      if (el) {
+        const rect = el.getBoundingClientRect();
+        const cardCenter = rect.left + rect.width / 2;
+        const distance = Math.abs(cardCenter - containerCenter);
+        if (distance < minDistance) {
+          minDistance = distance;
+          closestTabId = tab.id;
+        }
+      }
+    });
+    
+    if (closestTabId && closestTabId !== activeCardTabId) {
+      setActiveCardTabId(closestTabId);
+    }
+  };
+
+  const handleTabIndicatorClick = (tabId: string) => {
+    setActiveCardTabId(tabId);
+    isProgrammaticScrollRef.current = true;
+    if (programmaticScrollTimeoutRef.current) {
+      clearTimeout(programmaticScrollTimeoutRef.current);
+    }
+    programmaticScrollTimeoutRef.current = setTimeout(() => {
+      isProgrammaticScrollRef.current = false;
+    }, 800);
+
+    const cardElement = document.getElementById(`stock-card-${tabId}`);
+    if (cardElement && carouselRef.current) {
+      cardElement.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+        inline: "center",
+      });
+    }
+  };
+
   const renderGroups = useMemo(() => {
     const groups: { isGroup: boolean; id: string; tabs: any[] }[] = [];
     const processedGroupIds = new Set<string>();
@@ -2889,24 +3002,36 @@ export default function Dashboard() {
     );
   }
 
-  const moveTabUp = async (index: number) => {
-    if (index === 0) return;
+  const moveTabUp = async (index: number, list: any[] = effectiveActiveTabs) => {
+    if (index <= 0) return;
+    const currentTab = list[index];
+    const prevTab = list[index - 1];
     const newTabs = [...activeTabs];
-    const temp = newTabs[index];
-    newTabs[index] = newTabs[index - 1];
-    newTabs[index - 1] = temp;
-    const updates = newTabs.map((tab, idx) => ({ id: tab.id, sortOrder: idx }));
-    await updateTabOrder(updates);
+    const globalIdxCurrent = newTabs.findIndex(t => t.id === currentTab.id);
+    const globalIdxPrev = newTabs.findIndex(t => t.id === prevTab.id);
+    if (globalIdxCurrent !== -1 && globalIdxPrev !== -1) {
+      const temp = newTabs[globalIdxCurrent];
+      newTabs[globalIdxCurrent] = newTabs[globalIdxPrev];
+      newTabs[globalIdxPrev] = temp;
+      const updates = newTabs.map((tab, idx) => ({ id: tab.id, sortOrder: idx }));
+      await updateTabOrder(updates);
+    }
   };
 
-  const moveTabDown = async (index: number) => {
-    if (index === activeTabs.length - 1) return;
+  const moveTabDown = async (index: number, list: any[] = effectiveActiveTabs) => {
+    if (index >= list.length - 1) return;
+    const currentTab = list[index];
+    const nextTab = list[index + 1];
     const newTabs = [...activeTabs];
-    const temp = newTabs[index];
-    newTabs[index] = newTabs[index + 1];
-    newTabs[index + 1] = temp;
-    const updates = newTabs.map((tab, idx) => ({ id: tab.id, sortOrder: idx }));
-    await updateTabOrder(updates);
+    const globalIdxCurrent = newTabs.findIndex(t => t.id === currentTab.id);
+    const globalIdxNext = newTabs.findIndex(t => t.id === nextTab.id);
+    if (globalIdxCurrent !== -1 && globalIdxNext !== -1) {
+      const temp = newTabs[globalIdxCurrent];
+      newTabs[globalIdxCurrent] = newTabs[globalIdxNext];
+      newTabs[globalIdxNext] = temp;
+      const updates = newTabs.map((tab, idx) => ({ id: tab.id, sortOrder: idx }));
+      await updateTabOrder(updates);
+    }
   };
 
   const realCompletedTabs = completedTabs.filter((t) => t.tradeType === "real");
@@ -2958,189 +3083,354 @@ export default function Dashboard() {
   };
 
   return (
-    <div className={`space-y-4 sm:space-y-6 mx-auto pb-12 px-3 sm:px-4 mt-0 transition-all duration-300 ${activeViewTab === "notes" ? "max-w-6xl lg:max-w-[96%] xl:max-w-[1760px]" : "max-w-6xl"}`}>
-      <ScrollIn>
-        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-end glass-panel pt-5 pb-5 px-5 sm:px-4 sm:py-4 mb-4 relative overflow-hidden group">
-          <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/5 via-transparent to-blue-500/5 opacity-50 group-hover:opacity-100 transition-opacity duration-700"></div>
-          
-          <button
-            onClick={logout}
-            className="absolute top-5 right-5 sm:top-4 sm:right-4 z-20 h-8 w-8 flex items-center justify-center bg-zinc-100 hover:bg-rose-55 hover:bg-rose-50 border border-zinc-200 hover:border-rose-300 text-zinc-500 hover:text-rose-650 transition-all rounded-lg"
-            title="登出"
-          >
-            <LogOut className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
-          </button>
-
-          <div className="relative z-10 w-full flex flex-col md:flex-row justify-between items-start md:items-end gap-5 sm:gap-4 border-b border-zinc-200 pb-3 sm:pb-2">
-            <div className="text-left pt-1 sm:pt-0 flex-1">
-              <div className="flex items-center justify-start md:justify-start gap-2">
-                <p className="text-[10px] sm:text-[10px] font-bold sm:font-medium tracking-[0.2em] sm:tracking-[0.25em] text-emerald-600 uppercase mb-1">
-                  Portfolio Overview
-                </p>
+    <div className="w-full pb-12 mt-0 transition-all duration-300">
+      {/* 1. Full-width Green Ribbon Header (Desktop: sm and above) */}
+      <ScrollIn className="hidden sm:block">
+        <div className="-mx-2 sm:-mx-4 md:-mx-6 bg-[#085041] text-white pt-[18px] pb-[20px] px-5 sm:px-6 md:px-8 flex flex-col gap-4 text-left border-none rounded-none shadow-none relative z-10 select-none">
+          <div className="w-full max-w-7xl mx-auto flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6">
+            {/* Left section: Portfolio Overview badge & Title */}
+            <div className="flex flex-col text-left">
+              <div className="flex justify-between items-center w-full lg:w-auto gap-3">
+                <span className="px-2.5 py-1 text-[10px] tracking-[0.07em] font-bold text-[#9FE1CB] bg-white/10 rounded-full uppercase">
+                  PORTFOLIO OVERVIEW
+                </span>
                 <button
-                  onClick={() => setIsHelpOpen(true)}
-                  className="mb-1 text-zinc-400 hover:text-zinc-700 transition-colors p-1"
-                  title="快捷鍵一覽"
+                  onClick={logout}
+                  className="block lg:hidden text-white/60 hover:text-white transition-colors p-1"
+                  title="登出"
                 >
-                  <HelpCircle className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+                  <LogOut className="w-4 h-4" />
                 </button>
               </div>
-              <div className="flex flex-col md:flex-row md:items-center gap-4 md:gap-6">
-                <h1 className="text-4xl md:text-4xl font-black tracking-tighter text-zinc-800 leading-tight pb-1 whitespace-nowrap">
+              
+              <div className="flex items-center gap-1.5 mt-2">
+                <h1 className="text-[20px] sm:text-[24px] font-bold text-white leading-none">
                   交易總覽
                 </h1>
-                
-                <div className="flex flex-col md:flex-row md:items-center gap-1.5 md:gap-3 bg-zinc-100/60 border border-zinc-200 p-3 md:px-3.5 md:py-1.5 rounded-2xl backdrop-blur-md w-full md:w-auto divide-y divide-zinc-200 md:divide-none">
-                  <div className="flex items-center justify-between md:justify-start gap-2 py-1.5 md:py-0">
-                    <span className="text-[11px] text-zinc-500 font-bold whitespace-nowrap">目前的總資金</span>
-                    <div className="relative">
-                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[10px] text-emerald-600 font-extrabold">$</span>
-                      <input
-                        type="number"
-                        placeholder="設定總資金"
-                        className="bg-white border border-zinc-200 text-emerald-700 font-bold text-xs h-7 w-24 sm:w-28 pl-5 pr-1.5 rounded-lg focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 transition-all font-mono"
-                        value={totalCapital || ""}
-                        onChange={(e) => {
-                          const val = e.target.value === "" ? 0 : parseFloat(e.target.value);
-                          handleUpdateTotalCapital(val);
-                        }}
-                      />
-                    </div>
-                  </div>
-                  <div className="hidden md:block h-4 w-[1px] bg-zinc-200/80" />
-                  <div className="flex items-center justify-between md:justify-start gap-2 py-1.5 md:py-0 md:pt-0">
-                    <span className="text-[11px] text-zinc-500 font-bold whitespace-nowrap">剩餘額度</span>
-                    <span className={`text-xs sm:text-sm font-black font-mono tracking-tight ${remainingBalance >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
-                      ${remainingBalance.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
-                    </span>
-                  </div>
-                  <div className="hidden md:block h-4 w-[1px] bg-zinc-200/80" />
-                  <div className="flex items-center justify-between md:justify-start gap-2 py-1.5 md:py-0 md:pt-0">
-                    <span className="text-[11px] text-zinc-500 font-bold whitespace-nowrap">真實交易總持有成本</span>
-                    <span className="text-xs sm:text-sm font-black font-mono tracking-tight text-teal-600">
-                      ${totalRealHoldingCost.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
-                    </span>
-                  </div>
-                </div>
+                <button
+                  onClick={() => setIsHelpOpen(true)}
+                  className="text-white/40 hover:text-white/70 transition-colors p-1"
+                  title="快捷鍵一覽"
+                >
+                  <HelpCircle className="w-4 h-4" />
+                </button>
               </div>
             </div>
-            <div className="flex flex-col sm:flex-row w-full md:w-auto items-stretch sm:items-center gap-2.5 sm:gap-2">
-              <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
-                <DialogTrigger
-                  render={
-                    <InteractiveButton
-                      noGlow
-                      as="button"
-                      className="h-[44px] sm:h-8 w-full sm:w-auto sm:min-w-[100px] px-3 flex items-center justify-center text-emerald-700 bg-emerald-500/10 border border-emerald-500/20 text-[13px] sm:text-[11px] font-bold transition-all hover:bg-emerald-500/20 rounded-xl sm:rounded shadow-sm"
-                    >
-                      <span>新增股票</span>
-                    </InteractiveButton>
-                  }
-                />
-                <DialogContent className="glass-panel border-zinc-200/80 shadow-2xl bg-white/95 backdrop-blur-3xl text-zinc-800 outline-none w-[95vw] max-w-[400px] h-auto max-h-[90vh] overflow-y-auto !rounded-3xl p-5 sm:p-6 p-safe">
-                  <DialogHeader>
-                    <DialogTitle className="font-bold text-2xl tracking-tight text-zinc-900 mb-2">
-                      新增股票分頁
-                    </DialogTitle>
-                  </DialogHeader>
-                  <form
-                    onSubmit={handleAddSubmit}
-                    className="space-y-5 outline-none"
-                  >
-                    <div className="space-y-2">
-                      <Label
-                        htmlFor="symbol_dashboard"
-                        className="font-medium text-zinc-700 text-base sm:text-sm"
-                      >
-                        股票代號 (Ticker)
-                      </Label>
-                      <Input
-                        id="symbol_dashboard"
-                        value={newSymbol}
-                        onChange={(e) =>
-                          setNewSymbol(e.target.value.toUpperCase())
-                        }
-                        placeholder="例如：AAPL"
-                        required
-                        className="bg-zinc-50 border-zinc-200 text-zinc-800 placeholder-zinc-400 focus-visible:ring-emerald-500/20 focus-visible:border-emerald-500 h-[48px] text-base"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label
-                        htmlFor="company_dashboard"
-                        className="font-medium text-zinc-700 text-base sm:text-sm"
-                      >
-                        公司名稱 (選填)
-                      </Label>
-                      <Input
-                        id="company_dashboard"
-                        value={newCompany}
-                        onChange={(e) => setNewCompany(e.target.value)}
-                        placeholder="例如：Apple Inc."
-                        className="bg-zinc-50 border-zinc-200 text-zinc-800 placeholder-zinc-400 focus-visible:ring-emerald-500/20 focus-visible:border-emerald-500 h-[48px] text-base"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="font-medium text-zinc-700 text-base sm:text-sm">
-                        交易模式
-                      </Label>
-                      <Select
-                        value={newTradeType}
-                        onValueChange={(val: any) => setNewTradeType(val)}
-                      >
-                        <SelectTrigger className="w-full bg-zinc-50 border-zinc-200 text-zinc-800 focus-visible:ring-emerald-500/20 focus-visible:border-emerald-500 h-[48px] text-base">
-                          <SelectValue placeholder="選擇交易模式" />
-                        </SelectTrigger>
-                        <SelectContent className="bg-white border-zinc-200 text-zinc-800 outline-none rounded-xl shadow-lg">
-                          <SelectItem
-                            value="simulated"
-                            className="font-medium focus:bg-zinc-100 focus:text-zinc-900 cursor-pointer text-zinc-700 px-4 text-base sm:text-sm py-3 sm:py-1"
-                          >
-                            <div className="flex items-center gap-3">
-                              <Gamepad2 className="h-5 w-5 sm:h-4 sm:w-4 text-amber-600" />
-                              模擬交易 (Simulated)
-                            </div>
-                          </SelectItem>
-                          <SelectItem
-                            value="real"
-                            className="font-medium focus:bg-zinc-100 focus:text-zinc-900 cursor-pointer text-zinc-700 px-4 text-base sm:text-sm py-3 sm:py-1"
-                          >
-                            <div className="flex items-center gap-3">
-                              <ShieldCheck className="h-5 w-5 sm:h-4 sm:w-4 text-emerald-600" />
-                              真實交易 (Real)
-                            </div>
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <DialogFooter className="pt-4 pb-2">
-                      <button
-                        type="submit"
-                        className="glass-button w-full h-[52px] sm:h-auto justify-center bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 hover:bg-emerald-500/20 py-0 sm:py-6 text-[17px] font-bold transition-all rounded-xl"
-                      >
-                        建立交易日誌檔案
-                      </button>
-                    </DialogFooter>
-                  </form>
-                </DialogContent>
-              </Dialog>
 
-              <InteractiveButton
+            {/* Middle section: 3 Indicators */}
+            <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6 md:gap-8 bg-black/10 backdrop-blur-md px-5 py-3 rounded-2xl border border-white/5 w-full lg:w-auto">
+              {/* Metric 1: Total Capital */}
+              <div className="flex flex-col text-left">
+                <span className="text-[11px] text-[#9FE1CB] font-medium opacity-80">目前的總資金</span>
+                {isEditingCapital ? (
+                  <div className="flex items-center gap-0.5 mt-1">
+                    <span className="text-[15px] sm:text-[16px] font-semibold text-white">$</span>
+                    <input
+                      type="number"
+                      autoFocus
+                      value={editCapitalVal}
+                      onBlur={() => {
+                        const val = editCapitalVal === "" ? 0 : parseFloat(editCapitalVal);
+                        handleUpdateTotalCapital(val);
+                        setIsEditingCapital(false);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          const val = editCapitalVal === "" ? 0 : parseFloat(editCapitalVal);
+                          handleUpdateTotalCapital(val);
+                          setIsEditingCapital(false);
+                        }
+                      }}
+                      onChange={(e) => setEditCapitalVal(e.target.value)}
+                      className="bg-transparent text-white font-semibold text-[15px] sm:text-[16px] focus:outline-none w-20 border-none p-0 focus:ring-0 leading-none h-5"
+                      style={{ caretColor: 'white' }}
+                    />
+                  </div>
+                ) : (
+                  <div 
+                    onClick={() => {
+                      setEditCapitalVal(totalCapital.toString());
+                      setIsEditingCapital(true);
+                    }}
+                    className="text-[15px] sm:text-[16px] font-semibold text-white cursor-pointer select-none leading-none mt-1 flex items-center gap-1 group/cap"
+                    title="點擊修改總資金"
+                  >
+                    <span>${totalCapital.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    <span className="text-[9px] text-white/30 group-hover/cap:text-white/60 transition-colors">(修改)</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Vertical divider */}
+              <div className="hidden sm:block h-6 w-[0.5px] bg-white/20" />
+
+              {/* Metric 2: Remaining Balance */}
+              <div className="flex flex-col text-left">
+                <span className="text-[11px] text-[#9FE1CB] font-medium opacity-80">剩餘額度</span>
+                <span className="text-[15px] sm:text-[16px] font-semibold font-mono text-white mt-1 leading-none">
+                  ${remainingBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+
+              {/* Vertical divider */}
+              <div className="hidden sm:block h-6 w-[0.5px] bg-white/20" />
+
+              {/* Metric 3: Real Cost */}
+              <div className="flex flex-col text-left">
+                <span className="text-[11px] text-[#9FE1CB] font-medium opacity-80">真實交易總持有成本</span>
+                <span className="text-[15px] sm:text-[16px] font-semibold font-mono text-white mt-1 leading-none">
+                  ${totalRealHoldingCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+            </div>
+
+            {/* Right section: Actions & Logout */}
+            <div className="flex items-center gap-2.5 w-full lg:w-auto justify-end sm:justify-start">
+              <button
+                onClick={() => setIsAddOpen(true)}
+                className="flex-1 lg:flex-initial px-4 py-2.5 lg:py-2 bg-transparent hover:bg-white/10 text-white border border-white/20 rounded-xl text-[13px] font-medium transition-colors cursor-pointer flex items-center justify-center gap-1"
+              >
+                <span>＋ 新增股票</span>
+              </button>
+
+              <button
                 onClick={handleImportLatestPrices}
                 disabled={isImportingPrices || !user}
-                noGlow
-                as="button"
-                className={`h-[44px] sm:h-8 w-full sm:w-auto sm:min-w-[100px] px-2 sm:px-3 flex items-center justify-center text-zinc-700 text-[13px] sm:text-[11px] font-bold sm:font-semibold transition-all hover:text-zinc-900 hover:bg-zinc-100 border border-zinc-200 rounded-xl sm:rounded bg-white shadow-sm ${!user || isImportingPrices ? "opacity-50 cursor-not-allowed" : ""}`}
+                className="flex-1 lg:flex-initial px-4 py-2.5 lg:py-2 bg-transparent hover:bg-white/10 text-white border border-white/20 rounded-xl text-[13px] font-medium transition-colors cursor-pointer flex items-center justify-center gap-1 disabled:opacity-50"
               >
-                <span>匯入最新現價</span>
-              </InteractiveButton>
+                <span>↻ 匯入最新現價</span>
+              </button>
+
+              <button
+                onClick={logout}
+                className="hidden lg:block text-white/60 hover:text-white transition-colors p-2 rounded-lg"
+                title="登出"
+              >
+                <LogOut className="w-5 h-5" />
+              </button>
             </div>
           </div>
         </div>
       </ScrollIn>
 
-      {/* Top Metrics Row - Hover Expandable */}
-      <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2.5 sm:gap-3 mt-3 sm:mt-4">
+      {/* 2. Mobile-only Compact Investment Portfolio Card Section */}
+      <ScrollIn className="block sm:hidden my-4 px-3">
+        <div className="w-full max-w-[340px] mx-auto bg-transparent rounded-[32px] select-none">
+          {/* Header section (rich deep green background: bg-[#084D38]) */}
+          <div className="bg-[#084D38] p-6 pb-6 text-left flex flex-col gap-3 relative rounded-t-[32px]">
+            {/* Top row: small pill badge "PORTFOLIO OVERVIEW" | logout icon on the right */}
+            <div className="flex items-center justify-between w-full">
+              <span className="px-3 py-1.5 text-[10px] tracking-[0.06em] font-medium text-[#9FE1CB] bg-white/10 rounded-full uppercase leading-none">
+                PORTFOLIO OVERVIEW
+              </span>
+              <button
+                onClick={logout}
+                className="text-white/80 hover:text-white transition-colors p-1"
+                title="登出"
+              >
+                <LogOut className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Below badge: title "交易總覽" */}
+            <div className="flex items-center gap-1.5 mt-1">
+              <span className="text-[22px] font-bold text-white tracking-tight leading-none">
+                交易總覽
+              </span>
+              <button
+                onClick={() => setIsHelpOpen(true)}
+                className="text-white/40 hover:text-white/70 transition-colors p-1"
+                title="快捷鍵一覽"
+              >
+                <HelpCircle className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Below title: hero number (totalCapital) */}
+            <div className="text-[32px] font-semibold text-white tracking-tight leading-none font-sans mt-1">
+              {isEditingCapital ? (
+                <div className="flex items-center gap-0.5">
+                  <span className="text-[26px] font-medium text-white">$</span>
+                  <input
+                    type="number"
+                    autoFocus
+                    value={editCapitalVal}
+                    onBlur={() => {
+                      const val = editCapitalVal === "" ? 0 : parseFloat(editCapitalVal);
+                      handleUpdateTotalCapital(val);
+                      setIsEditingCapital(false);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        const val = editCapitalVal === "" ? 0 : parseFloat(editCapitalVal);
+                        handleUpdateTotalCapital(val);
+                        setIsEditingCapital(false);
+                      }
+                    }}
+                    onChange={(e) => setEditCapitalVal(e.target.value)}
+                    className="bg-transparent text-white font-semibold text-[32px] focus:outline-none w-full border-none p-0 focus:ring-0 leading-none h-10"
+                    style={{ caretColor: 'white' }}
+                  />
+                </div>
+              ) : (
+                <div 
+                  onClick={() => {
+                    setEditCapitalVal(totalCapital.toString());
+                    setIsEditingCapital(true);
+                  }}
+                  className="cursor-pointer flex items-baseline gap-1.5 group/cap"
+                  title="點擊修改總資金"
+                >
+                  <span>${totalCapital.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  <span className="text-[12px] text-white/50 group-hover/cap:text-white/80 transition-colors font-normal">(修改)</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Body section (white) */}
+          <div className="p-6 pt-5 pb-6 flex flex-col gap-4 bg-white text-left rounded-b-[32px]">
+            {/* Row 1: label "剩餘額度" + value */}
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-zinc-500 font-normal">
+                剩餘額度
+              </span>
+              <span className="text-[15px] font-bold text-[#084D38] font-sans">
+                ${remainingBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+            </div>
+
+            {/* Thin divider line */}
+            <div className="h-[0.5px] bg-zinc-100" />
+
+            {/* Row 2: label "真實交易總持有成本" + value */}
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-zinc-500 font-normal">
+                真實交易總持有成本
+              </span>
+              <span className="text-[15px] font-bold text-[#084D38] font-sans">
+                ${totalRealHoldingCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+            </div>
+
+            {/* Thin divider line */}
+            <div className="h-[0.5px] bg-zinc-100" />
+
+            {/* Primary button: full-width, background bg-[#084D38], rounded-2xl, font-semibold */}
+            <button
+              onClick={() => setIsAddOpen(true)}
+              className="w-full bg-[#084D38] hover:bg-[#063d2c] text-white rounded-2xl py-3.5 text-sm font-semibold border-none outline-none cursor-pointer transition-all active:scale-[0.98] flex items-center justify-center gap-1.5 shadow-sm"
+            >
+              <span>+ 新增股票</span>
+            </button>
+
+            {/* Secondary button: full-width, white bg, border, rounded-2xl, text-zinc-800 */}
+            <button
+              onClick={handleImportLatestPrices}
+              disabled={isImportingPrices || !user}
+              className="w-full bg-white hover:bg-zinc-50 text-zinc-800 border border-zinc-200/80 rounded-2xl py-3 text-sm font-medium outline-none cursor-pointer transition-all active:scale-[0.98] flex items-center justify-center gap-1.5 disabled:opacity-50"
+            >
+              <span>↻ 匯入最新現價</span>
+            </button>
+          </div>
+        </div>
+      </ScrollIn>
+
+      {/* Shared Add Stock Dialog */}
+      <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+        <DialogContent className="glass-panel border-zinc-200/80 shadow-2xl bg-white/95 backdrop-blur-3xl text-zinc-800 outline-none w-[95vw] max-w-[400px] h-auto max-h-[90vh] overflow-y-auto !rounded-3xl p-5 sm:p-6 p-safe">
+          <DialogHeader>
+            <DialogTitle className="font-bold text-2xl tracking-tight text-zinc-900 mb-2">
+              新增股票分頁
+            </DialogTitle>
+          </DialogHeader>
+          <form
+            onSubmit={handleAddSubmit}
+            className="space-y-5 outline-none"
+          >
+            <div className="space-y-2">
+              <Label
+                htmlFor="symbol_dashboard"
+                className="font-medium text-zinc-700 text-base sm:text-sm"
+              >
+                股票代號 (Ticker)
+              </Label>
+              <Input
+                id="symbol_dashboard"
+                value={newSymbol}
+                onChange={(e) =>
+                  setNewSymbol(e.target.value.toUpperCase())
+                }
+                placeholder="例如：AAPL"
+                required
+                className="bg-zinc-50 border-zinc-200 text-zinc-800 placeholder-zinc-400 focus-visible:ring-emerald-500/20 focus-visible:border-emerald-500 h-[48px] text-base"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label
+                htmlFor="company_dashboard"
+                className="font-medium text-zinc-700 text-base sm:text-sm"
+              >
+                公司名稱 (選填)
+              </Label>
+              <Input
+                id="company_dashboard"
+                value={newCompany}
+                onChange={(e) => setNewCompany(e.target.value)}
+                placeholder="例如：Apple Inc."
+                className="bg-zinc-50 border-zinc-200 text-zinc-800 placeholder-zinc-400 focus-visible:ring-emerald-500/20 focus-visible:border-emerald-500 h-[48px] text-base"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="font-medium text-zinc-700 text-base sm:text-sm">
+                交易模式
+              </Label>
+              <Select
+                value={newTradeType}
+                onValueChange={(val: any) => setNewTradeType(val)}
+              >
+                <SelectTrigger className="w-full bg-zinc-50 border-zinc-200 text-zinc-800 focus-visible:ring-emerald-500/20 focus-visible:border-emerald-500 h-[48px] text-base">
+                  <SelectValue placeholder="選擇交易模式" />
+                </SelectTrigger>
+                <SelectContent className="bg-white border-zinc-200 text-zinc-800 outline-none rounded-xl shadow-lg">
+                  <SelectItem
+                    value="simulated"
+                    className="font-medium focus:bg-zinc-100 focus:text-zinc-900 cursor-pointer text-zinc-700 px-4 text-base sm:text-sm py-3 sm:py-1"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Gamepad2 className="h-5 w-5 sm:h-4 sm:w-4 text-amber-600" />
+                      模擬交易 (Simulated)
+                    </div>
+                  </SelectItem>
+                  <SelectItem
+                    value="real"
+                    className="font-medium focus:bg-zinc-100 focus:text-zinc-900 cursor-pointer text-zinc-700 px-4 text-base sm:text-sm py-3 sm:py-1"
+                  >
+                    <div className="flex items-center gap-3">
+                      <ShieldCheck className="h-5 w-5 sm:h-4 sm:w-4 text-emerald-600" />
+                      真實交易 (Real)
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <DialogFooter className="pt-4 pb-2">
+              <button
+                type="submit"
+                className="glass-button w-full h-[52px] sm:h-auto justify-center bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 hover:bg-emerald-500/20 py-0 sm:py-6 text-[17px] font-bold transition-all rounded-xl"
+              >
+                建立交易日誌檔案
+              </button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* 2. Main content container, aligned nicely with responsive layout */}
+      <div className={`space-y-4 sm:space-y-6 mx-auto mt-4 sm:mt-6 px-3 sm:px-4 ${activeViewTab === "notes" ? "max-w-7xl lg:max-w-[96%] xl:max-w-[1760px]" : "max-w-7xl"}`}>
+
+      {/* Floating Metrics Section - Desktop Only (no cards, no shadows, no outer borders, pure seamless fusion with F2F1ED) */}
+      <div className="hidden sm:grid sm:grid-cols-5 gap-y-6 gap-x-0 py-6 select-none">
         {[
           {
             title: "總持股數",
@@ -3148,21 +3438,15 @@ export default function Dashboard() {
             prefix: "",
             suffix: "",
             decimals: 0,
-            icon: Activity,
-            color: "red",
-            sub: `${activeTabs.length} 持有中, ${completedTabs.length} 已完成`,
+            pnl: undefined,
             showPlus: false,
-            badge: undefined as number | undefined,
           },
           {
             title: "總實現損益",
             rawValue: totalCompletedPnL,
             prefix: "$",
             suffix: "",
-            decimals: 1,
-            icon: TrendingUp,
-            color: "emerald",
-            sub: `↗ ${realCompletedTabs.length} 檔已結清`,
+            decimals: 2,
             pnl: totalCompletedPnL,
             showPlus: true,
           },
@@ -3171,10 +3455,7 @@ export default function Dashboard() {
             rawValue: simulatedCompletedPnL,
             prefix: "$",
             suffix: "",
-            decimals: 1,
-            icon: Gamepad2,
-            color: "amber",
-            sub: "🎮 模擬模式績效記錄",
+            decimals: 2,
             pnl: simulatedCompletedPnL,
             showPlus: true,
           },
@@ -3184,10 +3465,7 @@ export default function Dashboard() {
             prefix: "",
             suffix: "%",
             decimals: 0,
-            icon: Target,
-            color: "emerald",
-            sub: `共 ${realCompletedTabs.length} 筆真實交易`,
-            progress: realWinRate,
+            pnl: undefined,
             showPlus: false,
           },
           {
@@ -3196,150 +3474,146 @@ export default function Dashboard() {
             prefix: "",
             suffix: "%",
             decimals: 0,
-            icon: Gamepad2,
-            color: "amber",
-            sub: `共 ${simulatedCompletedTabs.length} 筆模擬交易`,
-            progress: simulatedWinRate,
+            pnl: undefined,
             showPlus: false,
           },
-        ].map((metric: any, i) => (
-          <ScrollIn key={i} delay={i * 0.1} className={i === 4 ? "col-span-2 sm:col-span-1" : ""}>
-            <motion.div
-              whileHover="hover"
-              initial="rest"
-              variants={cardVariants}
-              className="glass-card relative group z-10 transition-all duration-300 flex flex-col justify-center min-h-[85px] sm:min-h-[90px]"
+        ].map((metric: any, i) => {
+          const isPnl = metric.pnl !== undefined;
+          const isPositive = metric.rawValue >= 0;
+          const valueColor = isPnl 
+            ? (isPositive ? "text-[#085041]" : "text-rose-700") 
+            : "text-[#2C2C2A]";
+
+          return (
+            <div 
+              key={i} 
+              className={`flex flex-col items-center justify-center text-center py-2 px-4 border-r border-black/[0.07] last:border-r-0`}
             >
-              {metric.badge !== undefined && metric.badge > 0 && (
-                <div className="absolute -top-2 -right-2 w-5 h-5 sm:w-6 sm:h-6 bg-red-500/90 text-white rounded-full flex items-center justify-center font-bold text-[10px] sm:text-xs border border-white/20 shadow-[0_0_15px_rgba(239,68,68,0.5)] z-30">
-                  {metric.badge}
-                </div>
-              )}
-              <div className="py-4 px-3 sm:p-4 flex justify-between items-center cursor-default">
-                <div className="flex flex-col min-w-0 w-full">
-                  <span className="text-[10px] sm:text-[11px] font-bold tracking-wider text-zinc-500 uppercase truncate leading-none">
-                    {metric.title}
-                  </span>
-                  <div
-                    className={`text-xl sm:text-xl lg:text-lg xl:text-xl 2xl:text-2xl font-black tracking-tight mt-1.5 sm:mt-[6px] leading-none ${metric.pnl !== undefined ? (metric.pnl >= 0 ? "text-emerald-650" : "text-rose-650") : "text-zinc-800"} truncate`}
-                    title={`${metric.showPlus && metric.rawValue > 0 ? "+" : ""}${metric.prefix}${metric.rawValue.toLocaleString(undefined, { minimumFractionDigits: metric.decimals, maximumFractionDigits: metric.decimals })}${metric.suffix}`}
-                  >
-                    <AnimatedNumber
-                      value={metric.rawValue}
-                      prefix={metric.prefix}
-                      suffix={metric.suffix}
-                      decimals={metric.decimals}
-                      showPlus={metric.showPlus}
-                    />
-                  </div>
-                </div>
+              <span className="text-xs text-[#888780] font-medium tracking-wide uppercase">
+                {metric.title}
+              </span>
+              <div className={`text-3xl font-bold tracking-tight mt-1.5 font-mono ${valueColor}`}>
+                <AnimatedNumber
+                  value={metric.rawValue}
+                  prefix={metric.prefix}
+                  suffix={metric.suffix}
+                  decimals={metric.decimals}
+                  showPlus={metric.showPlus}
+                />
               </div>
-              <div className="grid grid-rows-[0fr] group-hover:grid-rows-[1fr] transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]">
-                <div className="overflow-hidden px-3 sm:px-4">
-                  <div className="pb-4 md:pb-4 border-t border-zinc-200 pt-3 md:pt-3">
-                    {metric.progress !== undefined ? (
-                      <>
-                        <div className="w-full bg-zinc-100 rounded-full h-1 sm:h-1.5 border border-zinc-200 overflow-hidden">
-                          <motion.div
-                            initial={{ width: 0 }}
-                            whileInView={{ width: `${metric.progress}%` }}
-                            transition={{ duration: 1, ease: "easeOut" }}
-                            className="bg-gradient-to-r from-rose-500 to-amber-500 h-full rounded-full"
-                          ></motion.div>
-                        </div>
-                        <p className="text-[9px] sm:text-[10px] font-medium text-zinc-500 mt-1.5 md:mt-2 tracking-wide truncate">
-                          {metric.sub}
-                        </p>
-                      </>
-                    ) : (
-                      <p className="text-[9px] sm:text-[10px] font-medium text-zinc-500 tracking-wide truncate">
-                        {metric.sub}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          </ScrollIn>
-        ))}
+            </div>
+          );
+        })}
       </div>
 
-      {/* Main Panels - Tabs */}
-      <div className="flex flex-row snap-x flex-nowrap w-full gap-2 sm:gap-3 border-b border-zinc-200 mb-4 sm:mb-6 mt-4 sm:mt-5 overflow-x-auto pt-2 pb-px scrollbar-hide">
+      {/* Floating Metrics Section - Mobile Only (Ultra-Compact & Designed for Mobile Reading proportions) */}
+      <div className="block sm:hidden select-none px-4 py-4 mb-3 bg-transparent">
+        <div className="grid grid-cols-2 gap-y-3.5 gap-x-0 text-center">
+          {/* Row 1, Col 1: 總持股數 */}
+          <div className="flex flex-col items-center justify-center border-r border-black/[0.06] py-1">
+            <span className="text-[11px] text-[#888780] font-medium tracking-wide">
+              總持股數
+            </span>
+            <div className="text-[19px] font-bold tracking-tight mt-0.5 text-[#2C2C2A] font-mono leading-none">
+              <AnimatedNumber value={activeTabs.length} prefix="" suffix="" decimals={0} showPlus={false} />
+            </div>
+          </div>
+
+          {/* Row 1, Col 2: 總實現損益 */}
+          <div className="flex flex-col items-center justify-center py-1">
+            <span className="text-[11px] text-[#888780] font-medium tracking-wide">
+              總實現損益
+            </span>
+            <div className={`text-[19px] font-bold tracking-tight mt-0.5 font-mono leading-none ${totalCompletedPnL >= 0 ? "text-[#085041]" : "text-rose-700"}`}>
+              <AnimatedNumber value={totalCompletedPnL} prefix="$" suffix="" decimals={2} showPlus={true} />
+            </div>
+          </div>
+
+          {/* Divider 1 */}
+          <div className="col-span-2 h-[0.5px] bg-black/[0.06] mx-2" />
+
+          {/* Row 2, Col 1: 模擬實現損益 */}
+          <div className="flex flex-col items-center justify-center border-r border-black/[0.06] py-1">
+            <span className="text-[11px] text-[#888780] font-medium tracking-wide">
+              模擬實現損益
+            </span>
+            <div className={`text-[19px] font-bold tracking-tight mt-0.5 font-mono leading-none ${simulatedCompletedPnL >= 0 ? "text-[#085041]" : "text-rose-700"}`}>
+              <AnimatedNumber value={simulatedCompletedPnL} prefix="$" suffix="" decimals={2} showPlus={true} />
+            </div>
+          </div>
+
+          {/* Row 2, Col 2: 真實交易勝率 */}
+          <div className="flex flex-col items-center justify-center py-1">
+            <span className="text-[11px] text-[#888780] font-medium tracking-wide">
+              真實交易勝率
+            </span>
+            <div className="text-[19px] font-bold tracking-tight mt-0.5 text-[#2C2C2A] font-mono leading-none">
+              <AnimatedNumber value={Number(realWinRate)} prefix="" suffix="%" decimals={0} showPlus={false} />
+            </div>
+          </div>
+
+          {/* Divider 2 */}
+          <div className="col-span-2 h-[0.5px] bg-black/[0.06] mx-2" />
+
+          {/* Row 3, Center: 模擬交易勝率 */}
+          <div className="col-span-2 flex flex-col items-center justify-center py-1">
+            <span className="text-[11px] text-[#888780] font-medium tracking-wide">
+              模擬交易勝率
+            </span>
+            <div className="text-[19px] font-bold tracking-tight mt-0.5 text-[#2C2C2A] font-mono leading-none">
+              <AnimatedNumber value={Number(simulatedWinRate)} prefix="" suffix="%" decimals={0} showPlus={false} />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Tab Row (No bottom border, pill styling for selected tab, extremely lightweight) */}
+      <div className="flex flex-row snap-x flex-nowrap w-full gap-2 sm:gap-3 mb-4 sm:mb-6 mt-4 sm:mt-5 overflow-x-auto pt-2 pb-px scrollbar-hide">
         <button
           onClick={() => setActiveViewTab("active")}
-          className={`h-[48px] snap-start flex-shrink-0 flex items-center justify-center gap-2 px-5 sm:px-6 py-3 font-bold text-base tracking-wide rounded-t-xl transition-all duration-300 relative overflow-hidden ${
+          className={`h-[38px] snap-start flex-shrink-0 flex items-center justify-center gap-2 px-4 py-2 font-bold text-sm tracking-wide rounded-full transition-all duration-300 relative overflow-hidden cursor-pointer select-none border-none outline-none ${
             activeViewTab === "active"
-              ? "bg-emerald-500/[0.08] text-emerald-700 border border-t-emerald-500/25 border-x-emerald-500/25 border-b-transparent shadow-[0_-10px_20px_rgba(16,185,129,0.02)]"
-              : "bg-transparent text-zinc-500 hover:bg-zinc-200/50 hover:text-zinc-800 border border-transparent"
+              ? "bg-[#085041]/10 text-[#085041]"
+              : "bg-transparent text-[#888780] hover:text-[#2C2C2A]"
           }`}
         >
-          {activeViewTab === "active" && (
-            <motion.div
-              layoutId="tab-indicator-active"
-              className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-600"
-            />
-          )}
-          <Activity
-            className={`w-5 h-5 ${activeViewTab === "active" ? "text-emerald-600" : "opacity-60"}`}
-          />
+          <Activity className="w-4 h-4" />
           持有中 (<AnimatedNumber value={visibleActiveTabs.filter((t) => t.tradeType === "simulated").length} />)
         </button>
+        
         <button
           onClick={() => setActiveViewTab("real")}
-          className={`h-[48px] snap-start flex-shrink-0 flex items-center justify-center gap-2 px-5 sm:px-6 py-3 font-bold text-base tracking-wide rounded-t-xl transition-all duration-300 relative overflow-hidden ${
+          className={`h-[38px] snap-start flex-shrink-0 flex items-center justify-center gap-2 px-4 py-2 font-bold text-sm tracking-wide rounded-full transition-all duration-300 relative overflow-hidden cursor-pointer select-none border-none outline-none ${
             activeViewTab === "real"
-              ? "bg-teal-500/[0.08] text-teal-700 border border-t-teal-500/25 border-x-teal-500/25 border-b-transparent shadow-[0_-10px_20px_rgba(20,184,166,0.02)]"
-              : "bg-transparent text-zinc-500 hover:bg-zinc-200/50 hover:text-zinc-800 border border-transparent"
+              ? "bg-[#085041]/10 text-[#085041]"
+              : "bg-transparent text-[#888780] hover:text-[#2C2C2A]"
           }`}
         >
-          {activeViewTab === "real" && (
-            <motion.div
-              layoutId="tab-indicator-real"
-              className="absolute bottom-0 left-0 right-0 h-0.5 bg-teal-600"
-            />
-          )}
-          <ShieldCheck
-            className={`w-5 h-5 ${activeViewTab === "real" ? "text-teal-600" : "opacity-60"}`}
-          />
+          <ShieldCheck className="w-4 h-4" />
           真實交易 (<AnimatedNumber value={visibleActiveTabs.filter((t) => t.tradeType === "real").length} />)
         </button>
+        
         <button
           onClick={() => setActiveViewTab("completed")}
-          className={`h-[48px] snap-start flex-shrink-0 flex items-center justify-center gap-2 px-5 sm:px-6 py-3 font-bold text-base tracking-wide rounded-t-xl transition-all duration-300 relative overflow-hidden ${
+          className={`h-[38px] snap-start flex-shrink-0 flex items-center justify-center gap-2 px-4 py-2 font-bold text-sm tracking-wide rounded-full transition-all duration-300 relative overflow-hidden cursor-pointer select-none border-none outline-none ${
             activeViewTab === "completed"
-              ? "bg-blue-500/[0.08] text-blue-700 border border-t-blue-500/25 border-x-blue-500/25 border-b-transparent shadow-[0_-10px_20px_rgba(59,130,246,0.02)]"
-              : "bg-transparent text-zinc-500 hover:bg-zinc-200/50 hover:text-zinc-800 border border-transparent"
+              ? "bg-[#085041]/10 text-[#085041]"
+              : "bg-transparent text-[#888780] hover:text-[#2C2C2A]"
           }`}
         >
-          {activeViewTab === "completed" && (
-            <motion.div
-              layoutId="tab-indicator-completed"
-              className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"
-            />
-          )}
-          <TrendingUp
-            className={`w-5 h-5 ${activeViewTab === "completed" ? "text-blue-600" : "opacity-60"}`}
-          />
+          <TrendingUp className="w-4 h-4" />
           已完成 (<AnimatedNumber value={completedTabs.length} />)
         </button>
+        
         <button
           onClick={() => setActiveViewTab("notes")}
-          className={`h-[48px] snap-start flex-shrink-0 flex items-center justify-center gap-2 px-5 sm:px-6 py-3 font-bold text-base tracking-wide rounded-t-xl transition-all duration-300 relative overflow-hidden ${
+          className={`h-[38px] snap-start flex-shrink-0 flex items-center justify-center gap-2 px-4 py-2 font-bold text-sm tracking-wide rounded-full transition-all duration-300 relative overflow-hidden cursor-pointer select-none border-none outline-none ${
             activeViewTab === "notes"
-              ? "bg-amber-500/[0.08] text-amber-700 border border-t-amber-500/25 border-x-amber-500/25 border-b-transparent shadow-[0_-10px_20px_rgba(245,158,11,0.02)]"
-              : "bg-transparent text-zinc-500 hover:bg-zinc-200/50 hover:text-zinc-800 border border-transparent"
+              ? "bg-[#085041]/10 text-[#085041]"
+              : "bg-transparent text-[#888780] hover:text-[#2C2C2A]"
           }`}
         >
-          {activeViewTab === "notes" && (
-            <motion.div
-              layoutId="tab-indicator-notes"
-              className="absolute bottom-0 left-0 right-0 h-0.5 bg-amber-600"
-            />
-          )}
-          <FileText
-            className={`w-5 h-5 ${activeViewTab === "notes" ? "text-amber-600" : "opacity-60"}`}
-          />
+          <FileText className="w-4 h-4" />
           操作備註
         </button>
       </div>
@@ -3857,7 +4131,36 @@ export default function Dashboard() {
                           </DialogTitle>
                         </DialogHeader>
                         <div className="space-y-6 py-4">
-                          <div className="flex bg-zinc-100 p-1 rounded-xl w-full overflow-x-auto scrollbar-hide mb-2 border border-zinc-200">
+                          {/* 主要交易類型分頁 (持有中 vs 真實交易) */}
+                          <div className="flex bg-zinc-100 p-1 rounded-xl w-full border border-zinc-200 shadow-inner">
+                            <button
+                              type="button"
+                              onClick={() => setManageTradeType("simulated")}
+                              className={`flex-1 py-2 text-xs sm:text-sm font-black rounded-lg transition-all flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer ${
+                                manageTradeType === "simulated"
+                                  ? "bg-emerald-500 text-white shadow-sm font-black"
+                                  : "text-zinc-600 hover:text-zinc-800 hover:bg-zinc-200/40"
+                              }`}
+                            >
+                              <Activity className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                              <span>持有中 ({activeTabs.filter((t) => t.tradeType === "simulated").length})</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setManageTradeType("real")}
+                              className={`flex-1 py-2 text-xs sm:text-sm font-black rounded-lg transition-all flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer ${
+                                manageTradeType === "real"
+                                  ? "bg-teal-600 text-white shadow-sm font-black"
+                                  : "text-zinc-600 hover:text-zinc-800 hover:bg-zinc-200/40"
+                              }`}
+                            >
+                              <ShieldCheck className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                              <span>真實交易 ({activeTabs.filter((t) => t.tradeType === "real").length})</span>
+                            </button>
+                          </div>
+
+                          {/* 子分頁列 (觀察中 | 候選名單 | 買進操作 | 賣出操作 | 平倉操作 | 乖離名單 | 持股監控) */}
+                          <div className="flex bg-zinc-50 p-1 rounded-xl w-full overflow-x-auto scrollbar-hide border border-zinc-200/60">
                             {(
                               [
                                 "觀察中",
@@ -3868,47 +4171,65 @@ export default function Dashboard() {
                                 "乖離名單",
                                 "持股監控",
                               ] as const
-                            ).map((tab) => (
-                              <button
-                                key={tab}
-                                onClick={() => setActiveManageTab(tab)}
-                                className={`flex-shrink-0 px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-black rounded-lg transition-all flex items-center gap-1.5 sm:gap-2 cursor-pointer ${
-                                  activeManageTab === tab
-                                    ? "bg-emerald-500 text-white font-black shadow-sm"
-                                    : "text-zinc-600 hover:text-black hover:bg-zinc-200/50"
-                                }`}
-                              >
-                                <span>{tab}</span>
-                                {tab === "持股監控" && (
-                                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black border ${
+                            ).map((tab) => {
+                              const dialogEffectiveHiddenActiveTabs = hiddenActiveTabs.filter(
+                                (t) => t.tradeType === manageTradeType
+                              );
+                              return (
+                                <button
+                                  key={tab}
+                                  onClick={() => setActiveManageTab(tab)}
+                                  className={`flex-shrink-0 px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-black rounded-lg transition-all flex items-center gap-1.5 sm:gap-2 cursor-pointer ${
                                     activeManageTab === tab
-                                      ? "bg-white/20 text-white border-white/20"
-                                      : "bg-emerald-50 text-emerald-700 border-emerald-200"
-                                  }`}>
-                                    {effectiveHiddenActiveTabs.length}
-                                  </span>
-                                )}
-                              </button>
-                            ))}
+                                      ? manageTradeType === "real"
+                                        ? "bg-teal-600 text-white font-black shadow-sm"
+                                        : "bg-emerald-500 text-white font-black shadow-sm"
+                                      : "text-zinc-600 hover:text-black hover:bg-zinc-200/50"
+                                  }`}
+                                >
+                                  <span>{tab}</span>
+                                  {tab === "持股監控" && (
+                                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black border ${
+                                      activeManageTab === tab
+                                        ? "bg-white/20 text-white border-white/20"
+                                        : manageTradeType === "real"
+                                        ? "bg-teal-50 text-teal-700 border-teal-200"
+                                        : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                    }`}>
+                                      {dialogEffectiveHiddenActiveTabs.length}
+                                    </span>
+                                  )}
+                                </button>
+                              );
+                            })}
                           </div>
+
                           <div className="space-y-4">
                             {(() => {
+                              const dialogEffectiveHiddenActiveTabs = hiddenActiveTabs.filter(
+                                (t) => t.tradeType === manageTradeType
+                              );
+                              const dialogEffectiveActiveTabs = activeTabs.filter(
+                                (t) => t.tradeType === manageTradeType
+                              );
+
                               const categoryTabs = activeManageTab === "持股監控"
-                                ? effectiveHiddenActiveTabs
-                                : effectiveActiveTabs.filter(
+                                ? dialogEffectiveHiddenActiveTabs
+                                : dialogEffectiveActiveTabs.filter(
                                     (t) => getDisplayHoldingStatus(t.holdingStatus) === activeManageTab
                                   );
+
                               if (categoryTabs.length === 0) {
                                 return (
                                   <div className="text-center text-zinc-450 py-12 text-sm font-black bg-zinc-50 border border-zinc-150 border-dashed rounded-xl">
                                     {activeManageTab === "持股監控"
                                       ? "目前無隱藏的個股名單"
-                                      : `此分類下沒有持有中股票`}
+                                      : `此分類下沒有${manageTradeType === "real" ? "真實交易" : "持有中"}股票`}
                                   </div>
                                 );
                               }
                               return categoryTabs.map((tab) => {
-                                const idx = effectiveActiveTabs.findIndex(t => t.id === tab.id);
+                                const idx = dialogEffectiveActiveTabs.findIndex(t => t.id === tab.id);
                                 return (
                                   <div
                                     className="flex flex-col gap-3.5 p-4 rounded-xl border border-zinc-200 bg-zinc-50/55 hover:bg-zinc-50 transition-colors relative overflow-hidden shadow-xs"
@@ -3933,7 +4254,7 @@ export default function Dashboard() {
                                       </div>
                                       <div className="flex items-center gap-1.5">
                                         <button
-                                          onClick={() => moveTabUp(idx)}
+                                          onClick={() => moveTabUp(idx, dialogEffectiveActiveTabs)}
                                           disabled={idx === 0}
                                           className="p-1.5 rounded-lg bg-white hover:bg-zinc-100 disabled:opacity-20 disabled:cursor-not-allowed border border-zinc-200 shadow-xs transition-colors cursor-pointer"
                                           title="往上移"
@@ -3941,8 +4262,8 @@ export default function Dashboard() {
                                           <ArrowUp className="w-3.5 h-3.5 text-zinc-600" />
                                         </button>
                                         <button
-                                          onClick={() => moveTabDown(idx)}
-                                          disabled={idx === effectiveActiveTabs.length - 1}
+                                          onClick={() => moveTabDown(idx, dialogEffectiveActiveTabs)}
+                                          disabled={idx === dialogEffectiveActiveTabs.length - 1}
                                           className="p-1.5 rounded-lg bg-white hover:bg-zinc-100 disabled:opacity-20 disabled:cursor-not-allowed border border-zinc-200 shadow-xs transition-colors cursor-pointer"
                                           title="往下移"
                                         >
@@ -4160,8 +4481,10 @@ export default function Dashboard() {
                               </p>
                             </motion.div>
                           ) : (
+                            <>
                             <div
                               ref={carouselRef}
+                              onScroll={handleCarouselScroll}
                               className="relative w-full overflow-x-auto scrollbar-hide cursor-grab select-none border-y border-zinc-200/5 bg-zinc-50/[0.02] rounded-2xl"
                               onMouseDown={onDragStart}
                               onTouchStart={onDragStart}
@@ -4530,18 +4853,6 @@ export default function Dashboard() {
                                                       style={{ backgroundColor: dotColor }}
                                                     />
                                                   </div>
-
-                                                  {/* Timestamp shifted to right side of title bar (conditional margin to accommodate NEW corner tag) */}
-                                                  {tab.updatedAt && (
-                                                    <span 
-                                                      style={{ color: bannerTextColor }}
-                                                      className={`text-[9.5px] font-black tracking-wider opacity-80 transition-colors duration-500 font-bold transition-all duration-300 ${tab.isNew ? 'mr-[45px]' : ''}`}
-                                                    >
-                                                      {typeof tab.updatedAt.toDate === 'function' 
-                                                        ? format(tab.updatedAt.toDate(), 'yyyy/MM/dd HH:mm') 
-                                                        : ''}
-                                                    </span>
-                                                  )}
                                                 </div>
                                               );
                                             })()}
@@ -4587,7 +4898,7 @@ export default function Dashboard() {
                                                   {/* Row 1: Symbol & Name & SIM/LIVE Badge */}
                                                   <div className="flex items-baseline gap-2 mb-1.5">
                                                     <span
-                                                      className={`font-black text-2xl tracking-tighter leading-none ${typeof tab.updatedAt?.toDate === 'function' && (new Date().getTime() - tab.updatedAt.toDate().getTime() > 17 * 60 * 60 * 1000) ? "text-red-500 animate-pulse font-bold" : "text-zinc-900"}`}
+                                                      className="font-black text-2xl tracking-tighter leading-none text-black"
                                                     >
                                                       {tab.symbol}
                                                     </span>
@@ -4637,27 +4948,27 @@ export default function Dashboard() {
                                                   <div className="flex flex-wrap items-center gap-2 mb-1">
                                                     <div className="flex items-center border border-zinc-200 rounded-md overflow-hidden h-5 bg-zinc-50">
                                                       <div className="px-1.5 h-full flex items-center border-r border-zinc-200 bg-zinc-100/50">
-                                                        <span className="text-[10px] font-black text-yellow-600">
+                                                        <span className="text-[10px] font-black text-zinc-600">
                                                           ★ {tab.rating || 8}
                                                         </span>
                                                       </div>
                                                       <div className="px-1.5 h-full flex items-center border-r border-zinc-200 bg-zinc-100/50">
-                                                        <span className="text-[10px] font-black text-purple-600">
+                                                        <span className="text-[10px] font-black text-zinc-600">
                                                           Q {tab.qualityScore || 5}
                                                         </span>
                                                       </div>
                                                       <div className="px-1.5 h-full flex items-center border-r border-zinc-200 bg-zinc-100/50">
-                                                        <span className="text-[10px] font-black text-amber-700">
+                                                        <span className="text-[10px] font-black text-zinc-600">
                                                           V {tab.valueScore || 5}
                                                         </span>
                                                       </div>
-                                                      <div className="px-1.5 h-full flex items-center bg-emerald-50 text-emerald-600">
-                                                        <span className="text-[10px] font-black">
+                                                      <div className="px-1.5 h-full flex items-center border-r border-zinc-200 bg-zinc-100/50">
+                                                        <span className="text-[10px] font-black text-zinc-600">
                                                           B {tab.buyRate || 5}
                                                         </span>
                                                       </div>
-                                                      <div className="px-1.5 h-full flex items-center bg-rose-50 text-rose-600 font-bold">
-                                                        <span className="text-[10px] font-black">
+                                                      <div className="px-1.5 h-full flex items-center bg-zinc-100/50">
+                                                        <span className="text-[10px] font-black text-zinc-600">
                                                           S {tab.sellRate || 5}
                                                         </span>
                                                       </div>
@@ -4665,17 +4976,17 @@ export default function Dashboard() {
 
                                                     <div className="flex items-center border border-zinc-200 rounded-md overflow-hidden h-5 bg-zinc-50">
                                                       <div className="px-1.5 h-full flex items-center border-r border-zinc-200 bg-zinc-100/50">
-                                                        <span className="text-[10px] font-black text-indigo-600">
-                                                          🌊 {tab.volatility || "中"}
+                                                        <span className="text-[10px] font-black text-zinc-600">
+                                                          {tab.volatility || "中"}
                                                         </span>
                                                       </div>
                                                       <div className="px-1.5 h-full flex items-center border-r border-zinc-200 bg-zinc-100/50" title="Positive Value">
-                                                        <span className="text-[10px] font-black text-emerald-600 font-bold">
+                                                        <span className="text-[10px] font-black text-zinc-600">
                                                           P+ {calculatePositiveValue(Number(tab.rating||5), Number(tab.qualityScore||5), Number(tab.valueScore||5), Number(tab.buyRate||5))}
                                                         </span>
                                                       </div>
                                                       <div className="px-1.5 h-full flex items-center bg-zinc-100/50" title="Negative Value">
-                                                        <span className="text-[10px] font-black text-red-600 font-bold">
+                                                        <span className="text-[10px] font-black text-zinc-600">
                                                           N- {calculateNegativeValue(Number(tab.rating||5), Number(tab.qualityScore||5), Number(tab.valueScore||5), Number(tab.sellRate||5))}
                                                         </span>
                                                       </div>
@@ -5353,6 +5664,58 @@ export default function Dashboard() {
                                 })}
                               </div>
                             </div>
+
+                            {/* 底線滑動指示器導覽列 - Desktop Only */}
+                            {filteredSubTabVisibleTabs.length > 0 && (
+                              <div className="hidden sm:block mt-6 px-4 md:px-8 w-full">
+                                <div className="flex justify-center w-full">
+                                  <div className="relative max-w-4xl pb-2">
+                                    {/* Scrollable Container if there are many tabs */}
+                                    <div className="flex flex-row items-center justify-center gap-6 overflow-x-auto scrollbar-hide relative pb-1.5">
+                                      {filteredSubTabVisibleTabs.map((tab) => {
+                                        const isActive = (activeCardTabId || filteredSubTabVisibleTabs[0]?.id) === tab.id;
+                                        return (
+                                          <button
+                                            key={tab.id}
+                                            ref={(el) => {
+                                              tabRefs.current[tab.id] = el;
+                                            }}
+                                            onClick={() => handleTabIndicatorClick(tab.id)}
+                                            className="px-2 py-1 text-sm font-medium transition-colors duration-200 cursor-pointer outline-none shrink-0"
+                                            style={{
+                                              color: isActive ? "#1a1a1a" : "#999999",
+                                              fontWeight: isActive ? 500 : 400,
+                                            }}
+                                          >
+                                            {tab.symbol}
+                                          </button>
+                                        );
+                                      })}
+                                      
+                                      {/* Track Line */}
+                                      <div 
+                                        className="absolute bottom-0 left-0 right-0" 
+                                        style={{ height: "1.5px", backgroundColor: "#e0e0e0" }}
+                                      />
+                                      
+                                      {/* Sliding Indicator Line */}
+                                      <div
+                                        className="absolute bottom-0"
+                                        style={{
+                                          height: "2px",
+                                          backgroundColor: "#1a1a1a",
+                                          borderRadius: "2px",
+                                          left: `${indicatorStyle.left}px`,
+                                          width: `${indicatorStyle.width}px`,
+                                          transition: "left 0.3s cubic-bezier(0.16, 1, 0.3, 1), width 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
+                                        }}
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                            </>
                           )}
                         </AnimatePresence>
                       </div>
@@ -6088,6 +6451,7 @@ export default function Dashboard() {
           </div>
         </DialogContent>
       </Dialog>
+    </div>
     </div>
   );
 }

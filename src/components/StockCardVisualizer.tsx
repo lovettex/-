@@ -1703,6 +1703,19 @@ export const StockCardVisualizer: React.FC<Props> = ({
       style={{ isolation: "isolate" }}
       onClick={(e) => e.stopPropagation()}
     >
+      {/* Absolute Share/Export Button in the Top-Right Corner */}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setShowExportModal(true);
+        }}
+        className="absolute top-1.5 right-1.5 z-40 flex items-center justify-center rounded-full bg-zinc-100/90 hover:bg-zinc-200 hover:scale-105 active:scale-95 border border-zinc-200 text-zinc-650 hover:text-zinc-900 transition-all cursor-pointer shadow-sm h-5 w-5 sm:h-7 sm:w-7"
+        title="匯出圖表模式..."
+      >
+        <Share2 className="w-2.5 h-2.5 sm:w-3.5 sm:h-3.5" />
+      </button>
+
       <div 
         className={`flex flex-wrap sm:flex-wrap items-center justify-center sm:justify-center gap-1 sm:gap-1.5 mb-2 shrink-0 select-none cursor-pointer w-full ${hasActiveStrategy ? "pl-[36px] sm:pl-[54px]" : ""}`}
         onDoubleClick={onRatingBarDoubleClick}
@@ -1715,51 +1728,51 @@ export const StockCardVisualizer: React.FC<Props> = ({
           (e.currentTarget as any).dataset.lastTap = now;
         }}
       >
-        <div className="flex items-center border border-white/10 rounded overflow-hidden h-4 sm:h-5 bg-white/5 shrink-0">
-          <div className="px-1 sm:px-1.5 h-full flex items-center border-r border-white/10">
-            <span className="text-[9px] sm:text-[10px] font-black text-yellow-500">
+        <div className="flex items-center border border-zinc-200 rounded overflow-hidden h-4 sm:h-5 bg-zinc-50/80 shrink-0">
+          <div className="px-1 sm:px-1.5 h-full flex items-center border-r border-zinc-200">
+            <span className="text-[9px] sm:text-[10px] font-black text-zinc-600">
               ★ {ratingVal}
             </span>
           </div>
-          <div className="px-1 sm:px-1.5 h-full flex items-center border-r border-white/10">
-            <span className="text-[9px] sm:text-[10px] font-black text-purple-400">
+          <div className="px-1 sm:px-1.5 h-full flex items-center border-r border-zinc-200">
+            <span className="text-[9px] sm:text-[10px] font-black text-zinc-600">
               Q {qualityVal}
             </span>
           </div>
-          <div className="px-1 sm:px-1.5 h-full flex items-center border-r border-white/10">
-            <span className="text-[9px] sm:text-[10px] font-black text-amber-500">
+          <div className="px-1 sm:px-1.5 h-full flex items-center border-r border-zinc-200">
+            <span className="text-[9px] sm:text-[10px] font-black text-zinc-600">
               V {valueVal}
             </span>
           </div>
-          <div className="px-1 sm:px-1.5 h-full flex items-center border-r border-white/10 bg-emerald-500/10 text-emerald-400">
-            <span className="text-[9px] sm:text-[10px] font-black">
+          <div className="px-1 sm:px-1.5 h-full flex items-center border-r border-zinc-200">
+            <span className="text-[9px] sm:text-[10px] font-black text-zinc-600">
               B {buyVal}
             </span>
           </div>
-          <div className="px-1 sm:px-1.5 h-full flex items-center border-r border-white/10 bg-rose-500/10 text-rose-400">
-            <span className="text-[9px] sm:text-[10px] font-black">
+          <div className="px-1 sm:px-1.5 h-full flex items-center border-r border-zinc-200">
+            <span className="text-[9px] sm:text-[10px] font-black text-zinc-600">
               S {sellVal}
             </span>
           </div>
-          <div className="px-1 sm:px-1.5 h-full flex items-center bg-cyan-500/10 text-cyan-400 border-none">
-            <span className="text-[9px] sm:text-[10px] font-black">
+          <div className="px-1 sm:px-1.5 h-full flex items-center border-none">
+            <span className="text-[9px] sm:text-[10px] font-black text-zinc-600">
               C {crashVal}
             </span>
           </div>
         </div>
 
-        <div className="flex items-center border border-white/10 rounded overflow-hidden h-4 sm:h-5 bg-white/5 shrink-0">
-          <div className="px-1 sm:px-1.5 h-full flex items-center border-r border-white/10 text-indigo-400">
+        <div className="flex items-center border border-zinc-200 rounded overflow-hidden h-4 sm:h-5 bg-zinc-50/80 shrink-0">
+          <div className="px-1 sm:px-1.5 h-full flex items-center border-r border-zinc-200 text-zinc-600">
             <span className="text-[9px] sm:text-[10px] font-black">
-              🌊 {volatility || "中等"}
+              {volatility || "中等"}
             </span>
           </div>
-          <div className="px-1 sm:px-1.5 h-full flex items-center border-r border-white/10 bg-emerald-500/10 text-emerald-400" title="Positive Value">
+          <div className="px-1 sm:px-1.5 h-full flex items-center border-r border-zinc-200 text-zinc-600" title="Positive Value">
             <span className="text-[9px] sm:text-[10px] font-black">
               P+ {posValue}
             </span>
           </div>
-          <div className="px-1 sm:px-1.5 h-full flex items-center bg-rose-500/10 text-rose-400" title="Negative Value">
+          <div className="px-1 sm:px-1.5 h-full flex items-center text-zinc-600" title="Negative Value">
             <span className="text-[9px] sm:text-[10px] font-black">
               N- {negValue}
             </span>
@@ -1863,19 +1876,6 @@ export const StockCardVisualizer: React.FC<Props> = ({
                 </label>
               </div>
             )}
-
-            {/* Elegant Export Button */}
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowExportModal(true);
-              }}
-              className="flex items-center justify-center rounded-full bg-zinc-100 hover:bg-zinc-200 hover:scale-105 active:scale-95 border border-zinc-200 text-zinc-650 hover:text-zinc-900 transition-all cursor-pointer shadow-sm h-5 w-5 sm:h-7 sm:w-7 shrink-0"
-              title="匯出圖表模式..."
-            >
-              <Share2 className="w-2.5 h-2.5 sm:w-3.5 sm:h-3.5" />
-            </button>
           </div>
         </div>
 

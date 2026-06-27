@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from './lib/AuthContext';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { LogOut, ActivitySquare } from 'lucide-react';
+import { LogOut, ActivitySquare, ExternalLink, HelpCircle } from 'lucide-react';
 
 export default function Layout() {
   const { user, login, logout, loading: authLoading } = useAuth();
@@ -9,11 +9,84 @@ export default function Layout() {
   const match = location.pathname.match(/\/stock\/(.+)/);
   const stockId = match ? match[1] : null;
 
-  if (authLoading) return <div className="h-screen w-full flex items-center justify-center">載入中...</div>;
+  const [loadingTimeout, setLoadingTimeout] = useState(false);
+
+  useEffect(() => {
+    if (authLoading) {
+      const timer = setTimeout(() => {
+        setLoadingTimeout(true);
+      }, 3500);
+      return () => clearTimeout(timer);
+    } else {
+      setLoadingTimeout(false);
+    }
+  }, [authLoading]);
+
+  if (authLoading) {
+    if (loadingTimeout) {
+      return (
+        <div className="h-screen w-full flex flex-col items-center justify-center px-4 relative overflow-hidden bg-[#F5F5F5] max-sm:bg-[#F7F7F7] text-zinc-800">
+          {/* Background ambient light */}
+          <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
+            <div className="absolute top-[-10%] left-[10%] w-[50%] h-[50%] rounded-full bg-emerald-500/10 blur-[120px] mix-blend-multiply opacity-60"></div>
+            <div className="absolute bottom-[-10%] right-[10%] w-[45%] h-[45%] rounded-full bg-blue-500/8 blur-[120px] mix-blend-multiply opacity-50"></div>
+          </div>
+
+          <div className="w-full max-w-[440px] p-8 sm:p-10 bg-white/80 backdrop-blur-xl border border-white/60 shadow-[0_20px_50px_rgba(0,0,0,0.04)] rounded-[2.5rem] flex flex-col items-center text-center space-y-6 relative z-10">
+            <div className="inline-flex justify-center items-center bg-zinc-100 p-4 border border-zinc-200/80 shadow-inner rounded-2xl">
+              <HelpCircle className="h-10 w-10 text-emerald-600 animate-pulse" />
+            </div>
+
+            <div className="space-y-2">
+              <h2 className="text-2xl font-black tracking-tight text-zinc-900">
+                網頁載入時間較長
+              </h2>
+              <p className="text-[11px] text-zinc-500 font-extrabold tracking-widest uppercase bg-zinc-100 border border-zinc-200/60 px-3.5 py-1 rounded-full inline-block">
+                Connection Check
+              </p>
+            </div>
+
+            <div className="text-zinc-600 text-sm font-semibold text-left space-y-2.5 leading-relaxed bg-zinc-50 border border-zinc-200/50 p-4 rounded-xl">
+              <p className="text-[13px] font-bold text-zinc-700">這通常是因為您目前的瀏覽器：</p>
+              <ul className="list-disc pl-5 space-y-1.5 text-xs text-zinc-500">
+                <li>在行動裝置（如 iPhone Chrome 或 Safari）中開啟，且限制了第三方 Cookie。</li>
+                <li>啟用了「防止跨網站追蹤」或是處於無痕模式（Private Mode），阻擋了資料庫與登入驗證連線。</li>
+              </ul>
+            </div>
+
+            <div className="w-full space-y-3 pt-2">
+              <a
+                href={window.location.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full py-4 px-6 text-sm sm:text-base font-extrabold flex items-center justify-center bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl shadow-sm hover:shadow-md transition-all duration-300 active:scale-[0.98] cursor-pointer gap-2"
+              >
+                <ExternalLink className="w-4 h-4" />
+                <span>在獨立新分頁中開啟</span>
+              </a>
+
+              <p className="text-[11px] text-zinc-400 font-medium">
+                💡 iOS 用戶可至「設定」&gt;「Chrome」或「Safari」&gt; 啟用「允許跨網站追蹤」
+              </p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="h-screen w-full flex flex-col items-center justify-center bg-[#F5F5F5] max-sm:bg-[#F7F7F7] text-zinc-800">
+        <div className="flex flex-col items-center space-y-4">
+          <div className="h-8 w-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+          <span className="text-sm font-bold tracking-wider text-zinc-500">系統載入中，請稍候...</span>
+        </div>
+      </div>
+    );
+  }
 
   if (!user) {
     return (
-      <div className="h-screen w-full flex flex-col items-center justify-center px-4 relative overflow-hidden bg-[#F5F1F0] text-zinc-800">
+      <div className="h-screen w-full flex flex-col items-center justify-center px-4 relative overflow-hidden bg-[#F5F5F5] max-sm:bg-[#F7F7F7] text-zinc-800">
         {/* Background ambient lighting effects */}
         <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
           <div className="absolute top-[-10%] left-[10%] w-[50%] h-[50%] rounded-full bg-emerald-500/15 blur-[120px] mix-blend-multiply opacity-60 animate-pulse" style={{ animationDuration: '8s' }}></div>
@@ -73,7 +146,7 @@ export default function Layout() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#F5F1F0] text-zinc-800 relative">
+    <div className="flex h-screen overflow-hidden bg-[#F5F5F5] max-sm:bg-[#F7F7F7] text-zinc-800 relative">
       {/* Background ambient lighting effects (organic fluid shapes) */}
       <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
         {/* Glow 1 */}
