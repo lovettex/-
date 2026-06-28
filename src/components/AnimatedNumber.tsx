@@ -1,5 +1,6 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { motion, useSpring, useTransform } from 'motion/react';
+import { playTickSound } from '../lib/audio';
 
 export function AnimatedNumber({ 
   value, 
@@ -28,8 +29,15 @@ export function AnimatedNumber({
     return `${sign}${prefix}${formatted}${suffix}`;
   });
 
+  const isMounted = useRef(false);
+
   useEffect(() => {
     spring.set(value);
+    if (isMounted.current) {
+      playTickSound();
+    } else {
+      isMounted.current = true;
+    }
   }, [value, spring]);
 
   return <motion.span className={className}>{display}</motion.span>;

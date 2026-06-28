@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useStockTabs } from '../hooks/useStockTabs';
+import { playClickSound, playSuccessSound } from '../lib/audio';
 import { useTrades } from '../hooks/useTrades';
 import { calculateStats } from '../lib/calculations';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
@@ -48,6 +49,14 @@ export default function StockTabDetail() {
   const [isTradeListOpen, setIsTradeListOpen] = useState(false);
   const [finalPnLInput, setFinalPnLInput] = useState('');
   const [activeTab, setActiveTab] = useState('trades');
+  const isInitialActiveTabMount = React.useRef(true);
+  React.useEffect(() => {
+    if (isInitialActiveTabMount.current) {
+      isInitialActiveTabMount.current = false;
+    } else {
+      playClickSound();
+    }
+  }, [activeTab]);
   const [currentPriceInput, setCurrentPriceInput] = useState('');
   const [plannedBuyQtyInput, setPlannedBuyQtyInput] = useState<string>('');
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -542,6 +551,7 @@ export default function StockTabDetail() {
       fees: Number(tradeForm.fees) || 0,
       notes: tradeForm.notes
     });
+    playSuccessSound();
     setTradeForm({ ...tradeForm, price: '', quantity: '', fees: '', notes: '' });
     setIsTradeOpen(false);
   };
@@ -549,6 +559,7 @@ export default function StockTabDetail() {
   const handleCompleteSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     updateTabStatus(tab.id, 'COMPLETED', Number(finalPnLInput));
+    playSuccessSound();
     setIsCompleteOpen(false);
   };
 

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from './lib/AuthContext';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { LogOut, ActivitySquare, ExternalLink, HelpCircle } from 'lucide-react';
+import { Premium3DGrid } from './components/Premium3DGrid';
 
 export default function Layout() {
   const { user, login, logout, loading: authLoading } = useAuth();
@@ -25,12 +26,9 @@ export default function Layout() {
   if (authLoading) {
     if (loadingTimeout) {
       return (
-        <div className="h-screen w-full flex flex-col items-center justify-center px-4 relative overflow-hidden bg-[#F5F5F5] max-sm:bg-[#F7F7F7] text-zinc-800">
-          {/* Background ambient light */}
-          <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
-            <div className="absolute top-[-10%] left-[10%] w-[50%] h-[50%] rounded-full bg-emerald-500/10 blur-[120px] mix-blend-multiply opacity-60"></div>
-            <div className="absolute bottom-[-10%] right-[10%] w-[45%] h-[45%] rounded-full bg-blue-500/8 blur-[120px] mix-blend-multiply opacity-50"></div>
-          </div>
+        <div className="h-screen w-full flex flex-col items-center justify-center px-4 relative overflow-hidden text-zinc-800">
+          {/* Nike Premium 3D Grid Background with depth-of-field effect */}
+          <Premium3DGrid />
 
           <div className="w-full max-w-[440px] p-8 sm:p-10 bg-white/80 backdrop-blur-xl border border-white/60 shadow-[0_20px_50px_rgba(0,0,0,0.04)] rounded-[2.5rem] flex flex-col items-center text-center space-y-6 relative z-10">
             <div className="inline-flex justify-center items-center bg-zinc-100 p-4 border border-zinc-200/80 shadow-inner rounded-2xl">
@@ -75,8 +73,9 @@ export default function Layout() {
     }
 
     return (
-      <div className="h-screen w-full flex flex-col items-center justify-center bg-[#F5F5F5] max-sm:bg-[#F7F7F7] text-zinc-800">
-        <div className="flex flex-col items-center space-y-4">
+      <div className="h-screen w-full flex flex-col items-center justify-center text-zinc-800 relative overflow-hidden">
+        <Premium3DGrid />
+        <div className="flex flex-col items-center space-y-4 relative z-10 p-8 bg-white/80 backdrop-blur-md rounded-2xl border border-zinc-200/50 shadow-lg">
           <div className="h-8 w-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
           <span className="text-sm font-bold tracking-wider text-zinc-500">系統載入中，請稍候...</span>
         </div>
@@ -86,12 +85,9 @@ export default function Layout() {
 
   if (!user) {
     return (
-      <div className="h-screen w-full flex flex-col items-center justify-center px-4 relative overflow-hidden bg-[#F5F5F5] max-sm:bg-[#F7F7F7] text-zinc-800">
-        {/* Background ambient lighting effects */}
-        <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
-          <div className="absolute top-[-10%] left-[10%] w-[50%] h-[50%] rounded-full bg-emerald-500/15 blur-[120px] mix-blend-multiply opacity-60 animate-pulse" style={{ animationDuration: '8s' }}></div>
-          <div className="absolute bottom-[-10%] right-[10%] w-[45%] h-[45%] rounded-full bg-blue-500/12 blur-[120px] mix-blend-multiply opacity-50 animate-pulse" style={{ animationDuration: '10s' }}></div>
-        </div>
+      <div className="h-screen w-full flex flex-col items-center justify-center px-4 relative overflow-hidden text-zinc-800">
+        {/* Nike Premium 3D Grid Background with depth-of-field effect */}
+        <Premium3DGrid />
 
         {/* Elegant Frosted Container Card */}
         <div className="w-full max-w-[420px] p-8 sm:p-10 bg-white/75 backdrop-blur-xl border border-white/60 shadow-[0_20px_50px_rgba(0,0,0,0.04)] rounded-[2.5rem] flex flex-col items-center text-center space-y-8 relative z-10">
@@ -146,16 +142,9 @@ export default function Layout() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#F5F5F5] max-sm:bg-[#F7F7F7] text-zinc-800 relative">
-      {/* Background ambient lighting effects (organic fluid shapes) */}
-      <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
-        {/* Glow 1 */}
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-emerald-500/5 blur-[120px] mix-blend-multiply opacity-50 animate-pulse" style={{ animationDuration: '8s' }}></div>
-        {/* Glow 2 */}
-        <div className="absolute top-[20%] right-[-5%] w-[35%] h-[35%] rounded-full bg-blue-500/5 blur-[120px] mix-blend-multiply opacity-40 animate-pulse" style={{ animationDuration: '10s' }}></div>
-        {/* Glow 3 */}
-        <div className="absolute bottom-[-10%] left-[20%] w-[50%] h-[40%] rounded-full bg-purple-500/5 blur-[140px] mix-blend-multiply opacity-30 animate-pulse" style={{ animationDuration: '12s' }}></div>
-      </div>
+    <div className="flex h-screen overflow-hidden text-zinc-800 relative">
+      {/* Nike Premium 3D Grid Background with depth-of-field effect */}
+      <Premium3DGrid />
       
       {/* Top right auth corner */}
       <div className="fixed top-4 right-6 z-[100] flex items-center gap-3">

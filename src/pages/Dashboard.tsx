@@ -7,6 +7,7 @@ import React, {
   useMemo,
 } from "react";
 import { useStockTabs } from "../hooks/useStockTabs";
+import { playClickSound, playSwipeSound, playSuccessSound } from "../lib/audio";
 import { useNavigate, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "motion/react";
 import {
@@ -334,6 +335,7 @@ export default function Dashboard() {
     safeSessionStorage.setItem('preferredHoldingSubTab', activeHoldingSubTab);
     setActiveCardDefinitionFilter("all");
   }, [activeHoldingSubTab]);
+
   const [activeManageTab, setActiveManageTab] = useState<
     "觀察中" | "候選名單" | "買進操作" | "賣出操作" | "平倉操作" | "乖離名單" | "持股監控"
   >("觀察中");
@@ -404,6 +406,61 @@ export default function Dashboard() {
 
     socratesLoadedUserRef.current = userKey;
   }, [user]);
+
+  // Premium Audio feedback on tab/state changes
+  const isInitialViewTabMount = useRef(true);
+  useEffect(() => {
+    if (isInitialViewTabMount.current) {
+      isInitialViewTabMount.current = false;
+    } else {
+      playClickSound();
+    }
+  }, [activeViewTab]);
+
+  const isInitialHoldingSubTabMount = useRef(true);
+  useEffect(() => {
+    if (isInitialHoldingSubTabMount.current) {
+      isInitialHoldingSubTabMount.current = false;
+    } else {
+      playClickSound();
+    }
+  }, [activeHoldingSubTab]);
+
+  const isInitialManageTabMount = useRef(true);
+  useEffect(() => {
+    if (isInitialManageTabMount.current) {
+      isInitialManageTabMount.current = false;
+    } else {
+      playClickSound();
+    }
+  }, [activeManageTab]);
+
+  const isInitialCardFilterMount = useRef(true);
+  useEffect(() => {
+    if (isInitialCardFilterMount.current) {
+      isInitialCardFilterMount.current = false;
+    } else {
+      playClickSound();
+    }
+  }, [activeCardDefinitionFilter]);
+
+  const lastFlippedCards = useRef<Record<string, boolean>>({});
+  useEffect(() => {
+    if (Object.keys(lastFlippedCards.current).length > 0) {
+      let changed = false;
+      const allKeys = new Set([...Object.keys(flippedCards), ...Object.keys(lastFlippedCards.current)]);
+      for (const k of allKeys) {
+        if (!!flippedCards[k] !== !!lastFlippedCards.current[k]) {
+          changed = true;
+          break;
+        }
+      }
+      if (changed) {
+        playSwipeSound();
+      }
+    }
+    lastFlippedCards.current = { ...flippedCards };
+  }, [flippedCards]);
 
   // Save highlights when modified
   useEffect(() => {
@@ -876,6 +933,7 @@ export default function Dashboard() {
     e.preventDefault();
     if (newSymbol.trim()) {
       addTab(newSymbol.trim(), newCompany.trim(), newTradeType);
+      playSuccessSound();
       setNewSymbol("");
       setNewCompany("");
       setNewTradeType("simulated");
@@ -2773,6 +2831,14 @@ export default function Dashboard() {
       setActiveCardTabId(null);
     }
   }, [filteredSubTabVisibleTabs, activeCardTabId]);
+
+  const lastActiveCardTabId = useRef<string | null>(null);
+  useEffect(() => {
+    if (activeCardTabId && lastActiveCardTabId.current && activeCardTabId !== lastActiveCardTabId.current) {
+      playSwipeSound();
+    }
+    lastActiveCardTabId.current = activeCardTabId;
+  }, [activeCardTabId]);
 
   useEffect(() => {
     const updateIndicator = () => {
