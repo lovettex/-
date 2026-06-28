@@ -120,7 +120,7 @@
   .glass-card {
     background-color: rgba(255, 255, 255, 0.6);
     backdrop-filter: blur(24px);
-    border: 1.2px solid #D9FF00 !important;
+    border: 3.2px solid #59804F !important;
     border-radius: 0.75rem;
     box-shadow: none !important;
     transition: all 500ms ease-out;
@@ -128,7 +128,7 @@
   .glass-card:hover {
     transform: translateY(-4px);
     background-color: rgba(255, 255, 255, 0.95);
-    border-color: #D9FF00 !important;
+    border-color: #59804F !important;
     box-shadow: none !important;
   }
 
