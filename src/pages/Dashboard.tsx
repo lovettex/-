@@ -4058,7 +4058,7 @@ export default function Dashboard() {
                                 }`}
                               >
                                 <TabIcon className="w-3.5 h-3.5" />
-                                {tab}
+                                {tab === "觀察中" && activeViewTab === "active" ? "虛擬交易" : tab}
                                 <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full border ${
                                   isActive 
                                     ? conf.activeCountClass 
@@ -4157,7 +4157,7 @@ export default function Dashboard() {
                                 }`}
                               >
                                 <TabIcon className={`w-3.5 h-3.5 ${isActive ? conf.colorClass : "text-zinc-400"}`} />
-                                <span>{tab}</span>
+                                <span>{tab === "觀察中" && activeViewTab === "active" ? "虛擬交易" : tab}</span>
                                 <span
                                   className={`text-[9px] font-black px-1.5 py-0.5 rounded-lg border ${
                                     isActive
@@ -4253,7 +4253,7 @@ export default function Dashboard() {
                                       : "text-zinc-600 hover:text-black hover:bg-zinc-200/50"
                                   }`}
                                 >
-                                  <span>{tab}</span>
+                                  <span>{tab === "觀察中" && manageTradeType === "simulated" ? "虛擬交易" : tab}</span>
                                   {tab === "持股監控" && (
                                     <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black border ${
                                       activeManageTab === tab
@@ -4364,7 +4364,7 @@ export default function Dashboard() {
                                                 : "bg-white text-zinc-700 hover:bg-zinc-100 border-zinc-200 shadow-xs"
                                             }`}
                                           >
-                                            {cat}
+                                            {cat === "觀察中" && tab.tradeType === "simulated" ? "虛擬交易" : cat}
                                           </button>
                                         );
                                       })}
@@ -4543,7 +4543,7 @@ export default function Dashboard() {
                                 <Activity className="h-10 w-10 opacity-40" />
                               </div>
                               <p className="text-base font-bold text-white/50 tracking-wide">
-                                尚無可見的{activeHoldingSubTab}股票
+                                尚無可見的{activeHoldingSubTab === "觀察中" && activeViewTab === "active" ? "虛擬交易" : activeHoldingSubTab}股票
                               </p>
                             </motion.div>
                           ) : (

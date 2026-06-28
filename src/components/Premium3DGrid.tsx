@@ -211,6 +211,11 @@ export function Premium3DGrid() {
           background: "radial-gradient(circle at center, transparent 30%, rgba(243,243,245,0.15) 60%, rgba(243,243,245,0.7) 100%)"
         }}
       />
+
+      {/* Matte Frosted Glass (磨砂玻璃) backdrop-blur overlay to soften the entire terrazzo background and maximize foreground legibility */}
+      <div 
+        className="absolute inset-0 pointer-events-none backdrop-blur-[10px] bg-[#F3F3F5]/45"
+      />
     </div>
   );
 }
