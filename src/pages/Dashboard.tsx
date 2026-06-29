@@ -4980,34 +4980,40 @@ export default function Dashboard() {
                                                         )}
                                                       </div>
                                                     )}
-                                                    <div
-                                                      className={`flex items-center gap-1 text-[9px] font-black px-1.5 py-0.5 rounded-full border uppercase tracking-widest ml-auto ${
-                                                        tab.tradeType ===
-                                                        "simulated"
-                                                          ? "bg-amber-50 text-amber-800 border-amber-200"
-                                                          : "bg-emerald-50 text-emerald-800 border-emerald-200"
-                                                      }`}
-                                                    >
-                                                      {tab.tradeType === "simulated" ? (
-                                                        <Gamepad2 className="h-2.5 w-2.5" />
-                                                      ) : (
-                                                        <ShieldCheck className="h-2.5 w-2.5" />
-                                                      )}
-                                                      {tab.tradeType === "simulated" ? "SIM" : "LIVE"}
+                                                    
+                                                    {/* Right side alignment stack */}
+                                                    <div className="flex flex-col items-end gap-1 ml-auto self-center shrink-0">
+                                                      <div className="flex items-center gap-1.5">
+                                                        <div
+                                                          className={`flex items-center gap-1 text-[9px] font-black px-1.5 py-0.5 rounded-full border uppercase tracking-widest ${
+                                                            tab.tradeType ===
+                                                            "simulated"
+                                                              ? "bg-amber-50 text-amber-800 border-amber-200"
+                                                              : "bg-emerald-50 text-emerald-800 border-emerald-200"
+                                                          }`}
+                                                        >
+                                                          {tab.tradeType === "simulated" ? (
+                                                            <Gamepad2 className="h-2.5 w-2.5" />
+                                                          ) : (
+                                                            <ShieldCheck className="h-2.5 w-2.5" />
+                                                          )}
+                                                          {tab.tradeType === "simulated" ? "SIM" : "LIVE"}
+                                                        </div>
+                                                        <button
+                                                          onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setExpandedCards((prev) => ({
+                                                              ...prev,
+                                                              [tab.groupId || tab.id]: !isCardExpanded
+                                                            }));
+                                                          }}
+                                                          className="p-1 text-zinc-500 hover:text-zinc-800 bg-zinc-100/80 hover:bg-zinc-200 rounded-full transition-colors flex items-center justify-center shrink-0"
+                                                          title={isCardExpanded ? "收合個股卡片" : "展開個股卡片"}
+                                                        >
+                                                          <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-300 ${isCardExpanded ? "rotate-180" : ""}`} />
+                                                        </button>
+                                                      </div>
                                                     </div>
-                                                    <button
-                                                      onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        setExpandedCards((prev) => ({
-                                                          ...prev,
-                                                          [tab.groupId || tab.id]: !isCardExpanded
-                                                        }));
-                                                      }}
-                                                      className="p-1 text-zinc-500 hover:text-zinc-800 bg-zinc-100/80 hover:bg-zinc-200 rounded-full transition-colors ml-1.5 flex items-center justify-center shrink-0"
-                                                      title={isCardExpanded ? "收合個股卡片" : "展開個股卡片"}
-                                                    >
-                                                      <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-300 ${isCardExpanded ? "rotate-180" : ""}`} />
-                                                    </button>
                                                   </div>
 
                                                   {/* Row 2: Score & Sentiment Groups */}
@@ -5057,6 +5063,41 @@ export default function Dashboard() {
                                                         </span>
                                                       </div>
                                                     </div>
+
+                                                    {/* Single-segment Unrealized PnL badge aligned horizontally with scores */}
+                                                    {((activeHoldingSubTab === "觀察中" && activeViewTab === "active" && activeCardDefinitionFilter === "operation") || 
+                                                      (activeViewTab === "real" && activeHoldingSubTab === "買進操作")) && unrealizedPnL !== 0 && (
+                                                      (() => {
+                                                        const isPositive = unrealizedPnL > 0;
+                                                        const formattedPnL = (isPositive ? "+" : "") + unrealizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                                                        
+                                                        const bgClass = isPositive ? "bg-[#E1F5EE]" : "bg-[#FCEBEB]";
+                                                        const textColor = isPositive ? "#085041" : "#791F1F";
+                                                        const borderColor = isPositive ? "#1D9E75" : "#E24B4A";
+                                                        
+                                                        return (
+                                                          <div 
+                                                            className={`inline-flex items-center gap-0.5 px-1.5 rounded-[5px] select-none shrink-0 h-5 border ${bgClass}`}
+                                                            style={{ borderColor, color: textColor }}
+                                                          >
+                                                            {isPositive ? (
+                                                              <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                                                <line x1="7" y1="17" x2="17" y2="7"></line>
+                                                                <polyline points="7 7 17 7 17 17"></polyline>
+                                                              </svg>
+                                                            ) : (
+                                                              <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                                                <line x1="7" y1="7" x2="17" y2="17"></line>
+                                                                <polyline points="17 7 17 17 7 17"></polyline>
+                                                              </svg>
+                                                            )}
+                                                            <span className="text-[9px] font-medium tabular-nums tracking-tight">
+                                                              {formattedPnL}
+                                                            </span>
+                                                          </div>
+                                                        );
+                                                      })()
+                                                    )}
                                                   </div>
                                                 </div>
                                               </div>
