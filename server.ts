@@ -4,20 +4,36 @@ import path from "path";
 import { GoogleGenAI, Type } from "@google/genai";
 import "dotenv/config";
 
-async function generateContentWithRetry(ai: GoogleGenAI, params: any, maxRetries = 3, initialDelay = 1000) {
+async function generateContentWithRetry(ai: GoogleGenAI, params: any, maxRetries = 4, initialDelay = 1000) {
   let attempt = 0;
+  const originalModel = params.model;
+  // Recommended fallback models for text and multimodal tasks when gemini-3.5-flash is overloaded
+  const fallbackList = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
+  
   while (true) {
     try {
       return await ai.models.generateContent(params);
     } catch (error: any) {
       attempt++;
-      console.error(`Gemini API attempt ${attempt} failed:`, error);
+      console.error(`Gemini API attempt ${attempt} failed with model ${params.model}:`, error);
       
       const errStr = String(error?.message || error || "");
       const isTransient = errStr.includes("503") || errStr.includes("UNAVAILABLE") || errStr.includes("high demand") || errStr.includes("429") || errStr.includes("ResourceExhausted") || errStr.includes("RESOURCE_EXHAUSTED") || errStr.includes("overloaded");
       
       if (attempt >= maxRetries || !isTransient) {
+        // Restore the original model name before throwing
+        params.model = originalModel;
         throw error;
+      }
+      
+      // If we got a 503 or 429 error and current model is in our fallback list, transition to next model
+      if (fallbackList.includes(params.model)) {
+        const currentIndex = fallbackList.indexOf(params.model);
+        if (currentIndex !== -1 && currentIndex < fallbackList.length - 1) {
+          const nextModel = fallbackList[currentIndex + 1];
+          console.warn(`Attempt ${attempt} failed on ${params.model}. Falling back to ${nextModel} for the next attempt.`);
+          params.model = nextModel;
+        }
       }
       
       const delay = initialDelay * Math.pow(2, attempt - 1);
