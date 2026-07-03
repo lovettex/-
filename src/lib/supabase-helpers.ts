@@ -16,6 +16,11 @@ export function subscribeTabs(
   userId: string,
   callback: (tabs: StockTab[]) => void
 ) {
+  if (!userId) {
+    console.warn('subscribeTabs: userId is missing, skipping');
+    return () => {};
+  }
+
   // Initial fetch
   fetchTabs(userId).then(({ data }) => {
     if (data) callback(data);

@@ -886,14 +886,12 @@ export default function Dashboard() {
 
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (newSymbol.trim()) {
-      addTab(newSymbol.trim(), newCompany.trim(), newTradeType);
-      playAddStockSound();
-      setNewSymbol("");
-      setNewCompany("");
-      setNewTradeType("simulated");
-      setIsAddOpen(false);
-    }
+    addTab(newSymbol.trim(), newCompany.trim(), newTradeType);
+    playAddStockSound();
+    setNewSymbol("");
+    setNewCompany("");
+    setNewTradeType("simulated");
+    setIsAddOpen(false);
   };
 
   useEffect(() => {

@@ -1,5 +1,5 @@
 -- StockFlow Pro Supabase Migration
--- 替代 Firebase Firestore 資料結構
+-- 可重複執行（已加 DROP IF EXISTS）
 
 -- stock_tabs 主表
 CREATE TABLE IF NOT EXISTS stock_tabs (
@@ -108,7 +108,7 @@ CREATE TABLE IF NOT EXISTS daily_reports (
 );
 CREATE INDEX IF NOT EXISTS idx_daily_reports_tab ON daily_reports(stock_tab_id);
 
--- social_data (替代 socrates_data)
+-- social_data
 CREATE TABLE IF NOT EXISTS social_data (
   id TEXT PRIMARY KEY,
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -117,7 +117,7 @@ CREATE TABLE IF NOT EXISTS social_data (
 );
 CREATE INDEX IF NOT EXISTS idx_social_user ON social_data(user_id);
 
--- RLS
+-- 啟用 RLS
 ALTER TABLE stock_tabs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE trades ENABLE ROW LEVEL SECURITY;
 ALTER TABLE planned_orders ENABLE ROW LEVEL SECURITY;
@@ -125,13 +125,32 @@ ALTER TABLE strategies ENABLE ROW LEVEL SECURITY;
 ALTER TABLE daily_reports ENABLE ROW LEVEL SECURITY;
 ALTER TABLE social_data ENABLE ROW LEVEL SECURITY;
 
--- stock_tabs policies
+-- 刪除舊 policy（避免重複執行錯誤）
+DROP POLICY IF EXISTS "Users can view own stock tabs" ON stock_tabs;
+DROP POLICY IF EXISTS "Users can insert own stock tabs" ON stock_tabs;
+DROP POLICY IF EXISTS "Users can update own stock tabs" ON stock_tabs;
+DROP POLICY IF EXISTS "Users can delete own stock tabs" ON stock_tabs;
+DROP POLICY IF EXISTS "trades_select" ON trades;
+DROP POLICY IF EXISTS "trades_insert" ON trades;
+DROP POLICY IF EXISTS "trades_update" ON trades;
+DROP POLICY IF EXISTS "trades_delete" ON trades;
+DROP POLICY IF EXISTS "planned_orders_select" ON planned_orders;
+DROP POLICY IF EXISTS "planned_orders_insert" ON planned_orders;
+DROP POLICY IF EXISTS "planned_orders_update" ON planned_orders;
+DROP POLICY IF EXISTS "planned_orders_delete" ON planned_orders;
+DROP POLICY IF EXISTS "strategies_all" ON strategies;
+DROP POLICY IF EXISTS "daily_reports_select" ON daily_reports;
+DROP POLICY IF EXISTS "daily_reports_insert" ON daily_reports;
+DROP POLICY IF EXISTS "daily_reports_update" ON daily_reports;
+DROP POLICY IF EXISTS "daily_reports_delete" ON daily_reports;
+DROP POLICY IF EXISTS "social_data_all" ON social_data;
+
+-- 重新建立 policy
 CREATE POLICY "Users can view own stock tabs" ON stock_tabs FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Users can insert own stock tabs" ON stock_tabs FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "Users can update own stock tabs" ON stock_tabs FOR UPDATE USING (auth.uid() = user_id);
 CREATE POLICY "Users can delete own stock tabs" ON stock_tabs FOR DELETE USING (auth.uid() = user_id);
 
--- trades policies
 CREATE POLICY "trades_select" ON trades FOR SELECT USING (
   EXISTS (SELECT 1 FROM stock_tabs WHERE stock_tabs.id = trades.stock_tab_id AND stock_tabs.user_id = auth.uid())
 );
@@ -145,7 +164,6 @@ CREATE POLICY "trades_delete" ON trades FOR DELETE USING (
   EXISTS (SELECT 1 FROM stock_tabs WHERE stock_tabs.id = trades.stock_tab_id AND stock_tabs.user_id = auth.uid())
 );
 
--- planned_orders policies
 CREATE POLICY "planned_orders_select" ON planned_orders FOR SELECT USING (
   EXISTS (SELECT 1 FROM stock_tabs WHERE stock_tabs.id = planned_orders.stock_tab_id AND stock_tabs.user_id = auth.uid())
 );
@@ -159,14 +177,12 @@ CREATE POLICY "planned_orders_delete" ON planned_orders FOR DELETE USING (
   EXISTS (SELECT 1 FROM stock_tabs WHERE stock_tabs.id = planned_orders.stock_tab_id AND stock_tabs.user_id = auth.uid())
 );
 
--- strategies policies
 CREATE POLICY "strategies_all" ON strategies FOR ALL USING (
   EXISTS (SELECT 1 FROM stock_tabs WHERE stock_tabs.id = strategies.stock_tab_id AND stock_tabs.user_id = auth.uid())
 ) WITH CHECK (
   EXISTS (SELECT 1 FROM stock_tabs WHERE stock_tabs.id = strategies.stock_tab_id AND stock_tabs.user_id = auth.uid())
 );
 
--- daily_reports policies
 CREATE POLICY "daily_reports_select" ON daily_reports FOR SELECT USING (
   EXISTS (SELECT 1 FROM stock_tabs WHERE stock_tabs.id = daily_reports.stock_tab_id AND stock_tabs.user_id = auth.uid())
 );
@@ -180,5 +196,4 @@ CREATE POLICY "daily_reports_delete" ON daily_reports FOR DELETE USING (
   EXISTS (SELECT 1 FROM stock_tabs WHERE stock_tabs.id = daily_reports.stock_tab_id AND stock_tabs.user_id = auth.uid())
 );
 
--- social_data policies
 CREATE POLICY "social_data_all" ON social_data FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
