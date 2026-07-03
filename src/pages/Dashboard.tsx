@@ -7,7 +7,7 @@ import React, {
   useMemo,
 } from "react";
 import { useStockTabs } from "../hooks/useStockTabs";
-import { playClickSound, playSwipeSound, playSuccessSound } from "../lib/audio";
+import { playClickSound, playSwipeSound, playSuccessSound, playPriceImportSound, playAddStockSound } from "../lib/audio";
 import { useNavigate, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "motion/react";
 import {
@@ -933,7 +933,7 @@ export default function Dashboard() {
     e.preventDefault();
     if (newSymbol.trim()) {
       addTab(newSymbol.trim(), newCompany.trim(), newTradeType);
-      playSuccessSound();
+      playAddStockSound();
       setNewSymbol("");
       setNewCompany("");
       setNewTradeType("simulated");
@@ -1730,6 +1730,7 @@ export default function Dashboard() {
       }
 
       if (updatedCount > 0) {
+        playPriceImportSound();
         toast.success(`成功更新 ${updatedCount} 筆股票現價！`, {
           id: "importPrices",
         });

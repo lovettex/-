@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useStockTabs } from '../hooks/useStockTabs';
-import { playClickSound, playSuccessSound } from '../lib/audio';
+import { playClickSound, playSuccessSound, playPriceImportSound } from '../lib/audio';
 import { useTrades } from '../hooks/useTrades';
 import { calculateStats } from '../lib/calculations';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
@@ -536,6 +536,7 @@ export default function StockTabDetail() {
     e.preventDefault();
     if (currentPriceInput && !isNaN(Number(currentPriceInput))) {
       updateCurrentPrice(tab.id, Number(currentPriceInput));
+      playPriceImportSound();
     }
   };
 

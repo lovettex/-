@@ -248,3 +248,140 @@ export function playSuccessSound() {
     console.warn("Nike Success Sound failed", e);
   }
 }
+
+/**
+ * Play a high-precision premium "Price Import/Data Refresh" sound.
+ * Evokes the speed, efficiency, and light physical haptics of Nike digital platforms.
+ * Layers a rapid sub-bass sweep with a dual-tone ascending clean high-frequency chime.
+ */
+export function playPriceImportSound() {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+
+  try {
+    const now = ctx.currentTime;
+
+    // 1. Sleek fast "data flight" sweep (0.08s)
+    const sweepOsc = ctx.createOscillator();
+    const sweepGain = ctx.createGain();
+    sweepOsc.type = "sine";
+    sweepOsc.frequency.setValueAtTime(440, now);
+    sweepOsc.frequency.exponentialRampToValueAtTime(1200, now + 0.08);
+
+    sweepGain.gain.setValueAtTime(0, now);
+    sweepGain.gain.linearRampToValueAtTime(0.06, now + 0.02);
+    sweepGain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+
+    sweepOsc.connect(sweepGain);
+    sweepGain.connect(ctx.destination);
+    sweepOsc.start(now);
+    sweepOsc.stop(now + 0.09);
+
+    // 2. Twin ultra-crisp chime (Nike digital watch/timing aesthetic)
+    // Note 1: G5 (783.99Hz) at 0.05s
+    // Note 2: C6 (1046.50Hz) at 0.09s
+    const chime1 = ctx.createOscillator();
+    const chime1Gain = ctx.createGain();
+    chime1.type = "sine";
+    chime1.frequency.setValueAtTime(783.99, now + 0.05);
+    chime1Gain.gain.setValueAtTime(0, now + 0.05);
+    chime1Gain.gain.linearRampToValueAtTime(0.05, now + 0.07);
+    chime1Gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+
+    chime1.connect(chime1Gain);
+    chime1Gain.connect(ctx.destination);
+    chime1.start(now + 0.05);
+    chime1.stop(now + 0.3);
+
+    const chime2 = ctx.createOscillator();
+    const chime2Gain = ctx.createGain();
+    chime2.type = "sine";
+    chime2.frequency.setValueAtTime(1046.50, now + 0.09);
+    chime2Gain.gain.setValueAtTime(0, now + 0.09);
+    chime2Gain.gain.linearRampToValueAtTime(0.08, now + 0.11);
+    chime2Gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+
+    chime2.connect(chime2Gain);
+    chime2Gain.connect(ctx.destination);
+    chime2.start(now + 0.09);
+    chime2.stop(now + 0.4);
+
+  } catch (e) {
+    console.warn("Price Import Sound failed", e);
+  }
+}
+
+/**
+ * Play an inspiring, premium "Stock Confirmed / Item Added" sound.
+ * Emulates Nike's rewarding product-snapping haptic and major-key chord chime.
+ * Integrates a warm physical shoe-sole bottom thump, mechanical click, and beautiful ascending 9th chord.
+ */
+export function playAddStockSound() {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+
+  try {
+    const now = ctx.currentTime;
+
+    // 1. Physical sneaker-sole or snap-action bottom thump
+    const thumpOsc = ctx.createOscillator();
+    const thumpGain = ctx.createGain();
+    thumpOsc.type = "sine";
+    thumpOsc.frequency.setValueAtTime(150, now);
+    thumpOsc.frequency.exponentialRampToValueAtTime(60, now + 0.06);
+
+    thumpGain.gain.setValueAtTime(0.2, now);
+    thumpGain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+
+    thumpOsc.connect(thumpGain);
+    thumpGain.connect(ctx.destination);
+    thumpOsc.start(now);
+    thumpOsc.stop(now + 0.07);
+
+    // 2. Mechanical clean transient (snap)
+    const snapOsc = ctx.createOscillator();
+    const snapGain = ctx.createGain();
+    snapOsc.type = "triangle";
+    snapOsc.frequency.setValueAtTime(1400, now);
+    snapOsc.frequency.exponentialRampToValueAtTime(400, now + 0.02);
+
+    snapGain.gain.setValueAtTime(0.08, now);
+    snapGain.gain.exponentialRampToValueAtTime(0.001, now + 0.02);
+
+    snapOsc.connect(snapGain);
+    snapGain.connect(ctx.destination);
+    snapOsc.start(now);
+    snapOsc.stop(now + 0.03);
+
+    // 3. Shimmering, inspiring Nike "Product Confirmed" Chime
+    // Notes of G-Major 7th / Major 9th: G5 (783.99Hz), B5 (987.77Hz), D6 (1174.66Hz), F#6 (1479.98Hz)
+    // Quick arpeggio trigger (20ms spacing) creating an elegant, uplifting, premium notification feel
+    const tones = [
+      { freq: 783.99, delay: 0.03, volume: 0.05, dur: 0.45 },
+      { freq: 987.77, delay: 0.05, volume: 0.05, dur: 0.5 },
+      { freq: 1174.66, delay: 0.07, volume: 0.06, dur: 0.55 },
+      { freq: 1479.98, delay: 0.09, volume: 0.06, dur: 0.65 }
+    ];
+
+    tones.forEach((t) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(t.freq, now + t.delay);
+
+      gain.gain.setValueAtTime(0, now + t.delay);
+      gain.gain.linearRampToValueAtTime(t.volume, now + t.delay + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + t.delay + t.dur);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(now + t.delay);
+      osc.stop(now + t.delay + t.dur + 0.05);
+    });
+
+  } catch (e) {
+    console.warn("Add Stock Sound failed", e);
+  }
+}
+
