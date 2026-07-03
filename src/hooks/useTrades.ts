@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
-import { collection, query, onSnapshot, addDoc, serverTimestamp, doc, updateDoc, deleteDoc, Timestamp } from 'firebase/firestore';
-import { db, OperationType, handleFirestoreError } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
-import { Trade } from '../types';
+import { subscribeTrades, createTrade as dbCreateTrade, deleteTrade as dbDeleteTrade } from '../lib/supabase-helpers';
+import type { Trade } from '../types';
 import { toast } from 'sonner';
 
 export function useTrades(tabId: string | undefined) {
@@ -17,21 +16,9 @@ export function useTrades(tabId: string | undefined) {
       return;
     }
 
-    const q = query(
-      collection(db, `stockTabs/${tabId}/trades`)
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(docSnap => ({
-        id: docSnap.id,
-        ...docSnap.data()
-      })) as Trade[];
-      // sort by tradeDate desc
-      const sorted = data.sort((a, b) => (b.tradeDate?.toMillis() || 0) - (a.tradeDate?.toMillis() || 0));
+    const unsubscribe = subscribeTrades(tabId, (data) => {
+      const sorted = [...data].sort((a, b) => new Date(b.tradeDate || 0).getTime() - new Date(a.tradeDate || 0).getTime());
       setTrades(sorted);
-      setLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, `stockTabs/${tabId}/trades`);
       setLoading(false);
     });
 
@@ -40,31 +27,17 @@ export function useTrades(tabId: string | undefined) {
 
   const addTrade = async (trade: Partial<Trade>) => {
     if (!tabId || !user) return;
-    try {
-      const sanitized: any = { ...trade };
-      Object.keys(sanitized).forEach(k => {
-        if (sanitized[k] === undefined) delete sanitized[k];
-      });
-      await addDoc(collection(db, `stockTabs/${tabId}/trades`), {
-        ...sanitized,
-        createdAt: serverTimestamp()
-      });
-      toast.success('交易紀錄已新增');
-    } catch (error) {
-      toast.error('新增失敗');
-      handleFirestoreError(error, OperationType.CREATE, `stockTabs/${tabId}/trades`);
-    }
+    const { error } = await dbCreateTrade(tabId, trade);
+    if (error) { toast.error('新增失敗'); console.error(error); }
+    else { toast.success('交易紀錄已新增'); }
   };
 
-  const deleteTrade = async (id: string) => {
+  const deleteTradeById = async (id: string) => {
     if (!tabId || !user) return;
-    try {
-      await deleteDoc(doc(db, `stockTabs/${tabId}/trades`, id));
-      toast.success('交易紀錄已刪除');
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `stockTabs/${tabId}/trades/${id}`);
-    }
+    const { error } = await dbDeleteTrade(id);
+    if (error) { toast.error('刪除失敗'); console.error(error); }
+    else { toast.success('交易紀錄已刪除'); }
   };
 
-  return { trades, loading, addTrade, deleteTrade };
+  return { trades, loading, addTrade, deleteTrade: deleteTradeById };
 }

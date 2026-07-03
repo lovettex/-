@@ -10,20 +10,24 @@ import { useStockTabs } from "../hooks/useStockTabs";
 import { playClickSound, playSwipeSound, playSuccessSound, playPriceImportSound, playAddStockSound } from "../lib/audio";
 import { useNavigate, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "motion/react";
+import { supabase } from "../lib/supabase";
 import {
-  collection,
-  query,
-  where,
-  getDocs,
-  getDoc,
-  deleteDoc,
-  doc,
-  setDoc,
-  updateDoc,
-  serverTimestamp,
-  Timestamp,
-} from "firebase/firestore";
-import { db } from "../lib/firebase";
+  upsertStrategy,
+  fetchTabs,
+  fetchTrades,
+  fetchPlannedOrders,
+  fetchStrategy,
+  fetchDailyReports,
+  fetchSocratesData,
+  upsertSocratesData,
+  updateTab,
+  deleteTab,
+  createTab,
+  createTrade,
+  createPlannedOrder,
+  deleteTrade,
+  deletePlannedOrder,
+} from "../lib/supabase-helpers";
 import { useAuth } from "../lib/AuthContext";
 import { toast } from "sonner";
 import {
@@ -93,46 +97,6 @@ import { calculateStats } from "../lib/calculations";
 import { safeLocalStorage, safeSessionStorage } from "../lib/utils";
 import { format } from "date-fns";
 import { StockCardVisualizer, prefetchStockPrice } from "../components/StockCardVisualizer";
-
-enum OperationType {
-  CREATE = "create",
-  UPDATE = "update",
-  DELETE = "delete",
-  LIST = "list",
-  GET = "get",
-  WRITE = "write",
-}
-
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId?: string | null;
-    email?: string | null;
-    emailVerified?: boolean | null;
-  };
-}
-
-function handleFirestoreError(
-  error: unknown,
-  operationType: OperationType,
-  path: string | null,
-  user: any,
-): never {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: user?.uid,
-      email: user?.email,
-      emailVerified: user?.emailVerified,
-    },
-    operationType,
-    path,
-  };
-  console.error("Firestore Error: ", JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
-}
 
 const getDisplayHoldingStatus = (
   status: string | undefined,
@@ -251,18 +215,17 @@ export default function Dashboard() {
     if (!user) return;
     const fetchSettings = async () => {
       try {
-        const docRef = doc(db, "userSettings", user.uid);
-        const snapshot = await getDoc(docRef);
-        if (snapshot.exists()) {
-          const data = snapshot.data();
-          if (typeof data.totalCapital === "number") {
-            setTotalCapital(data.totalCapital);
-            safeLocalStorage.setItem(`total-capital-${user.uid}`, data.totalCapital.toString());
-          }
+        const { data, error } = await supabase
+          .from("user_settings")
+          .select("total_capital")
+          .eq("user_id", user.uid)
+          .maybeSingle();
+        if (!error && data && typeof data.total_capital === "number") {
+          setTotalCapital(data.total_capital);
+          safeLocalStorage.setItem(`total-capital-${user.uid}`, data.total_capital.toString());
         }
       } catch (error) {
         console.error("Failed to fetch userSettings:", error);
-        handleFirestoreError(error, OperationType.GET, `userSettings/${user.uid}`, user);
       }
     };
     fetchSettings();
@@ -274,14 +237,15 @@ export default function Dashboard() {
     safeLocalStorage.setItem(`total-capital-${userKey}`, newVal.toString());
     if (user) {
       try {
-        await setDoc(
-          doc(db, "userSettings", user.uid),
-          { totalCapital: newVal, updatedAt: serverTimestamp() },
-          { merge: true }
-        );
+        const { error } = await supabase
+          .from("user_settings")
+          .upsert(
+            { user_id: user.uid, total_capital: newVal, updated_at: new Date().toISOString() },
+            { onConflict: "user_id" }
+          );
+        if (error) throw error;
       } catch (error) {
         console.error("Failed to save userSettings:", error);
-        handleFirestoreError(error, OperationType.WRITE, `userSettings/${user.uid}`, user);
       }
     }
   };
@@ -542,7 +506,7 @@ export default function Dashboard() {
       const updatedStrategy = { 
         ...currentStrategy, 
         operationNote: noteText, 
-        updatedAt: serverTimestamp() 
+        updatedAt: new Date().toISOString() 
       };
       
       setActiveTabStrategies((prev) => ({
@@ -550,8 +514,7 @@ export default function Dashboard() {
         [tabId]: updatedStrategy
       }));
       
-      const docRef = doc(db, `stockTabs/${tabId}/strategy`, 'main');
-      await setDoc(docRef, { operationNote: noteText, updatedAt: serverTimestamp() }, { merge: true });
+      await upsertStrategy(tabId, { operation_note: noteText });
     } catch (error) {
       console.error(error);
       toast.error("更新操作備註失敗");
@@ -564,7 +527,7 @@ export default function Dashboard() {
       const updatedStrategy = { 
         ...currentStrategy, 
         operationFocus: focusText, 
-        updatedAt: serverTimestamp() 
+        updatedAt: new Date().toISOString() 
       };
       
       setActiveTabStrategies((prev) => ({
@@ -572,8 +535,7 @@ export default function Dashboard() {
         [tabId]: updatedStrategy
       }));
       
-      const docRef = doc(db, `stockTabs/${tabId}/strategy`, 'main');
-      await setDoc(docRef, { operationFocus: focusText, updatedAt: serverTimestamp() }, { merge: true });
+      await upsertStrategy(tabId, { operation_focus: focusText });
     } catch (error) {
       console.error(error);
       toast.error("更新操作重點失敗");
@@ -586,7 +548,7 @@ export default function Dashboard() {
       const updatedStrategy = { 
         ...currentStrategy, 
         tpChecked: checked, 
-        updatedAt: serverTimestamp() 
+        updatedAt: new Date().toISOString() 
       };
       
       setActiveTabStrategies((prev) => ({
@@ -594,8 +556,7 @@ export default function Dashboard() {
         [tabId]: updatedStrategy
       }));
       
-      const docRef = doc(db, `stockTabs/${tabId}/strategy`, 'main');
-      await setDoc(docRef, { tpChecked: checked, updatedAt: serverTimestamp() }, { merge: true });
+      await upsertStrategy(tabId, { tp_checked: checked });
     } catch (error) {
       console.error(error);
       toast.error("更新止盈狀態失敗");
@@ -608,7 +569,7 @@ export default function Dashboard() {
       const updatedStrategy = { 
         ...currentStrategy, 
         slChecked: checked, 
-        updatedAt: serverTimestamp() 
+        updatedAt: new Date().toISOString() 
       };
       
       setActiveTabStrategies((prev) => ({
@@ -616,8 +577,7 @@ export default function Dashboard() {
         [tabId]: updatedStrategy
       }));
       
-      const docRef = doc(db, `stockTabs/${tabId}/strategy`, 'main');
-      await setDoc(docRef, { slChecked: checked, updatedAt: serverTimestamp() }, { merge: true });
+      await upsertStrategy(tabId, { sl_checked: checked });
     } catch (error) {
       console.error(error);
       toast.error("更新止損狀態失敗");
@@ -630,7 +590,7 @@ export default function Dashboard() {
       const updatedStrategy = { 
         ...currentStrategy, 
         addChecked: checked, 
-        updatedAt: serverTimestamp() 
+        updatedAt: new Date().toISOString() 
       };
       
       setActiveTabStrategies((prev) => ({
@@ -638,8 +598,7 @@ export default function Dashboard() {
         [tabId]: updatedStrategy
       }));
       
-      const docRef = doc(db, `stockTabs/${tabId}/strategy`, 'main');
-      await setDoc(docRef, { addChecked: checked, updatedAt: serverTimestamp() }, { merge: true });
+      await upsertStrategy(tabId, { add_checked: checked });
     } catch (error) {
       console.error(error);
       toast.error("更新加碼狀態失敗");
@@ -652,7 +611,7 @@ export default function Dashboard() {
       const updatedStrategy = { 
         ...currentStrategy, 
         closeChecked: checked, 
-        updatedAt: serverTimestamp() 
+        updatedAt: new Date().toISOString() 
       };
       
       setActiveTabStrategies((prev) => ({
@@ -660,8 +619,7 @@ export default function Dashboard() {
         [tabId]: updatedStrategy
       }));
       
-      const docRef = doc(db, `stockTabs/${tabId}/strategy`, 'main');
-      await setDoc(docRef, { closeChecked: checked, updatedAt: serverTimestamp() }, { merge: true });
+      await upsertStrategy(tabId, { close_checked: checked });
     } catch (error) {
       console.error(error);
       toast.error("更新平倉狀態失敗");
@@ -674,7 +632,7 @@ export default function Dashboard() {
       const updatedStrategy = { 
         ...currentStrategy, 
         observeChecked: checked, 
-        updatedAt: serverTimestamp() 
+        updatedAt: new Date().toISOString() 
       };
       
       setActiveTabStrategies((prev) => ({
@@ -682,8 +640,7 @@ export default function Dashboard() {
         [tabId]: updatedStrategy
       }));
       
-      const docRef = doc(db, `stockTabs/${tabId}/strategy`, 'main');
-      await setDoc(docRef, { observeChecked: checked, updatedAt: serverTimestamp() }, { merge: true });
+      await upsertStrategy(tabId, { observe_checked: checked });
     } catch (error) {
       console.error(error);
       toast.error("更新觀察狀態失敗");
@@ -696,7 +653,7 @@ export default function Dashboard() {
       const updatedStrategy = { 
         ...currentStrategy, 
         notesHighlighted: checked, 
-        updatedAt: serverTimestamp() 
+        updatedAt: new Date().toISOString() 
       };
       
       setActiveTabStrategies((prev) => ({
@@ -704,8 +661,7 @@ export default function Dashboard() {
         [tabId]: updatedStrategy
       }));
       
-      const docRef = doc(db, `stockTabs/${tabId}/strategy`, 'main');
-      await setDoc(docRef, { notesHighlighted: checked, updatedAt: serverTimestamp() }, { merge: true });
+      await upsertStrategy(tabId, { notes_highlighted: checked });
     } catch (error) {
       console.error(error);
       toast.error("更新選取狀態失敗");
@@ -718,7 +674,7 @@ export default function Dashboard() {
       const updatedStrategy = { 
         ...currentStrategy, 
         [field]: checked, 
-        updatedAt: serverTimestamp() 
+        updatedAt: new Date().toISOString() 
       };
       
       setActiveTabStrategies((prev) => ({
@@ -726,8 +682,7 @@ export default function Dashboard() {
         [tabId]: updatedStrategy
       }));
       
-      const docRef = doc(db, `stockTabs/${tabId}/strategy`, 'main');
-      await setDoc(docRef, { [field]: checked, updatedAt: serverTimestamp() }, { merge: true });
+      await upsertStrategy(tabId, { [field]: checked });
     } catch (error) {
       console.error(error);
       toast.error("更新設定失敗");
@@ -948,30 +903,37 @@ export default function Dashboard() {
     }
 
     const fetchSocratesData = async () => {
-      const path = `users/${user.uid}/socratesData`;
       try {
-        const socratesDoc = await getDocs(query(collection(db, path)));
+        const { data: rows, error } = await supabase
+          .from("socrates_data")
+          .select("date_key, data")
+          .eq("user_id", user.uid);
+        
+        if (error) throw error;
+        
         const data: Record<string, any> = {};
-        socratesDoc.forEach((doc) => {
-          data[doc.id] = doc.data();
+        (rows || []).forEach((row) => {
+          data[row.date_key] = row.data;
         });
 
-        // Handle migration from localStorage if Firestore is empty but local has data
+        // Handle migration from localStorage if Supabase is empty but local has data
         const saved = safeLocalStorage.getItem("socrates-data");
         if (Object.keys(data).length === 0 && saved) {
           try {
             const parsed = JSON.parse(saved);
-            Object.keys(parsed).forEach(async (dateKey) => {
-              if (Array.isArray(parsed[dateKey])) {
-                parsed[dateKey] = { strong: parsed[dateKey] };
+            for (const [dateKey, value] of Object.entries(parsed)) {
+              let parsedValue = value;
+              if (Array.isArray(parsedValue)) {
+                parsedValue = { strong: parsedValue };
               }
-              const itemPath = `${path}/${dateKey}`;
-              try {
-                await setDoc(doc(db, itemPath), parsed[dateKey]);
-              } catch (e) {
-                handleFirestoreError(e, OperationType.WRITE, itemPath, user);
-              }
-            });
+              const { error: upsertError } = await supabase
+                .from("socrates_data")
+                .upsert(
+                  { user_id: user.uid, date_key: dateKey, data: parsedValue, updated_at: new Date().toISOString() },
+                  { onConflict: "user_id,date_key" }
+                );
+              if (upsertError) throw upsertError;
+            }
             setSocratesData(parsed);
             safeLocalStorage.removeItem("socrates-data");
             return;
@@ -982,7 +944,7 @@ export default function Dashboard() {
 
         setSocratesData(data);
       } catch (error) {
-        handleFirestoreError(error, OperationType.LIST, path, user);
+        console.error("Failed to fetch Socrates data:", error);
       }
     };
 
@@ -1159,10 +1121,15 @@ export default function Dashboard() {
           [type]: processedJson,
         };
 
-        const path = `users/${user.uid}/socratesData/${dateKey}`;
         try {
-          // Update Firestore
-          await setDoc(doc(db, path), updatedDayData);
+          // Update Supabase
+          const { error } = await supabase
+            .from("socrates_data")
+            .upsert(
+              { user_id: user.uid, date_key: dateKey, data: updatedDayData, updated_at: new Date().toISOString() },
+              { onConflict: "user_id,date_key" }
+            );
+          if (error) throw error;
 
           // Update local state
           setSocratesData((prev) => ({
@@ -1174,7 +1141,7 @@ export default function Dashboard() {
             `成功匯入 ${dateKey} ${type === "strong" ? "看漲名單" : "看跌名單"}（共 ${json.length} 筆）`,
           );
         } catch (error) {
-          handleFirestoreError(error, OperationType.WRITE, path, user);
+          console.error("Failed to upload Socrates data:", error);
           toast.error("匯入失敗，請檢查權限或網路連接");
         }
       } catch (error: any) {
@@ -1280,8 +1247,9 @@ export default function Dashboard() {
           weak: newWeak,
         };
 
-        const path = `users/${user.uid}/socratesData/${dateKeyToUse}`;
-        await setDoc(doc(db, path), updatedDayData);
+        await upsertSocratesData(user.uid, {
+          [dateKeyToUse]: updatedDayData,
+        });
 
         setSocratesData((prev) => ({
           ...prev,
@@ -1314,19 +1282,29 @@ export default function Dashboard() {
     const updatedDayData = { ...currentDayData };
     delete updatedDayData[type];
 
-    const path = `users/${user.uid}/socratesData/${dateKey}`;
     try {
       if (Object.keys(updatedDayData).length === 0) {
-        // Remove document if no data left for this date
-        await deleteDoc(doc(db, path));
+        // Remove row if no data left for this date
+        const { error } = await supabase
+          .from("socrates_data")
+          .delete()
+          .eq("user_id", user.uid)
+          .eq("date_key", dateKey);
+        if (error) throw error;
         setSocratesData((prev) => {
           const newData = { ...prev };
           delete newData[dateKey];
           return newData;
         });
       } else {
-        // Update document
-        await setDoc(doc(db, path), updatedDayData);
+        // Update row
+        const { error } = await supabase
+          .from("socrates_data")
+          .upsert(
+            { user_id: user.uid, date_key: dateKey, data: updatedDayData, updated_at: new Date().toISOString() },
+            { onConflict: "user_id,date_key" }
+          );
+        if (error) throw error;
         setSocratesData((prev) => ({
           ...prev,
           [dateKey]: updatedDayData,
@@ -1337,7 +1315,7 @@ export default function Dashboard() {
         `已刪除 ${dateKey} ${type === "strong" ? "看漲名單" : "看跌名單"}資料`,
       );
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, path, user);
+      console.error("Failed to delete Socrates data:", error);
       toast.error("刪除失敗，請檢查權限或網路連接");
     }
   };
@@ -1444,29 +1422,33 @@ export default function Dashboard() {
 
       const fetchSingleTab = async (tab: any) => {
         // Fetch pending orders
-        const qOrders = query(
-          collection(db, `stockTabs/${tab.id}/plannedOrders`),
-          where("status", "==", "PENDING"),
-        );
-        const snapshotOrders = await getDocs(qOrders);
-        const orders = snapshotOrders.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
+        const { data: ordersData, error: ordersError } = await supabase
+          .from("planned_orders")
+          .select("*")
+          .eq("stock_tab_id", tab.id)
+          .eq("status", "PENDING");
+        const orders = (ordersData || []).map((row: any) => ({
+          id: row.id,
+          ...row,
         }));
 
         // Fetch trades
-        const qTrades = query(collection(db, `stockTabs/${tab.id}/trades`));
-        const snapshotTrades = await getDocs(qTrades);
-        const trades = snapshotTrades.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
+        const { data: tradesData, error: tradesError } = await supabase
+          .from("trades")
+          .select("*")
+          .eq("stock_tab_id", tab.id);
+        const trades = (tradesData || []).map((row: any) => ({
+          id: row.id,
+          ...row,
         }));
 
         // Fetch strategy
-        const qStrategy = query(collection(db, `stockTabs/${tab.id}/strategy`));
-        const snapshotStrategy = await getDocs(qStrategy);
-        const mainStrategy = snapshotStrategy.docs.find((d) => d.id === "main");
-        const strategy = mainStrategy ? mainStrategy.data() : null;
+        const { data: strategyData } = await supabase
+          .from("strategies")
+          .select("*")
+          .eq("stock_tab_id", tab.id)
+          .maybeSingle();
+        const strategy = strategyData || null;
 
         return { id: tab.id, orders, trades, strategy };
       };
@@ -1664,10 +1646,7 @@ export default function Dashboard() {
     async (tabId: string, currentStatus: boolean | undefined) => {
       if (!user) return;
       try {
-        await updateDoc(doc(db, "stockTabs", tabId), {
-          isFavoriteHighlight: !currentStatus,
-          updatedAt: serverTimestamp(),
-        });
+        await updateTab(tabId, { isFavoriteHighlight: !currentStatus });
         setIsActionDialogOpen(false);
         toast.success(!currentStatus ? "已加入重點關注" : "已取消重點關注");
       } catch (err) {
@@ -1719,9 +1698,7 @@ export default function Dashboard() {
           }
 
           if (price && typeof price === "number") {
-            await updateDoc(doc(db, "stockTabs", tab.id), {
-              currentPrice: price,
-            });
+            await updateTab(tab.id, { currentPrice: price });
             updatedCount++;
           }
         } catch (err) {
@@ -1754,9 +1731,11 @@ export default function Dashboard() {
       if (!user) return;
       const path = `stockTabs/${tabId}/plannedOrders/${orderId}`;
       try {
-        await updateDoc(doc(db, path), {
-          isManualHighlight: !currentStatus,
-        });
+        const { error } = await supabase
+          .from("planned_orders")
+          .update({ isManualHighlight: !currentStatus })
+          .eq("id", orderId);
+        if (error) throw error;
         // Local state update
         setActiveTabOrders((prev) => {
           const orders = prev[tabId] || [];
@@ -2031,28 +2010,24 @@ export default function Dashboard() {
 
         if (matchedTab) {
           const tabId = matchedTab.id;
-          const strategyRef = doc(db, `stockTabs/${tabId}/strategy`, "main");
 
-          const strategyUpdate: any = {
-            notesHighlighted: item.notesHighlighted !== undefined ? !!item.notesHighlighted : false,
-            tpChecked: item.tpChecked !== undefined ? !!item.tpChecked : false,
-            slChecked: item.slChecked !== undefined ? !!item.slChecked : false,
-            addChecked: item.addChecked !== undefined ? !!item.addChecked : false,
-            closeChecked: item.closeChecked !== undefined ? !!item.closeChecked : false,
-            observeChecked: item.observeChecked !== undefined ? !!item.observeChecked : false,
-            operationFocus: typeof item.operationFocus === "string" ? item.operationFocus : "",
-            operationNote: typeof item.operationNote === "string" ? item.operationNote : "",
-            entries: Array.isArray(item.entries) ? item.entries : [],
-            tpTargets: Array.isArray(item.tpTargets) ? item.tpTargets : [],
-            slTargets: Array.isArray(item.slTargets) ? item.slTargets : [],
-            slConditions: typeof item.slConditions === "string" ? item.slConditions : "",
-            strategyNotes: typeof item.strategyNotes === "string" ? item.strategyNotes : "",
-            resistanceZones: Array.isArray(item.resistanceZones) ? item.resistanceZones : [],
-            supportZones: Array.isArray(item.supportZones) ? item.supportZones : [],
-            updatedAt: serverTimestamp()
-          };
-
-          await setDoc(strategyRef, strategyUpdate, { merge: true });
+          await upsertStrategy(tabId, {
+            notesHighlighted: item.notesHighlighted !== undefined ? !!item.notesHighlighted : undefined,
+            tpChecked: item.tpChecked !== undefined ? !!item.tpChecked : undefined,
+            slChecked: item.slChecked !== undefined ? !!item.slChecked : undefined,
+            addChecked: item.addChecked !== undefined ? !!item.addChecked : undefined,
+            closeChecked: item.closeChecked !== undefined ? !!item.closeChecked : undefined,
+            observeChecked: item.observeChecked !== undefined ? !!item.observeChecked : undefined,
+            operationFocus: typeof item.operationFocus === "string" ? item.operationFocus : undefined,
+            operationNote: typeof item.operationNote === "string" ? item.operationNote : undefined,
+            entries: Array.isArray(item.entries) ? item.entries : undefined,
+            tpTargets: Array.isArray(item.tpTargets) ? item.tpTargets : undefined,
+            slTargets: Array.isArray(item.slTargets) ? item.slTargets : undefined,
+            slConditions: typeof item.slConditions === "string" ? item.slConditions : undefined,
+            strategyNotes: typeof item.strategyNotes === "string" ? item.strategyNotes : undefined,
+            resistanceZones: Array.isArray(item.resistanceZones) ? item.resistanceZones : undefined,
+            supportZones: Array.isArray(item.supportZones) ? item.supportZones : undefined,
+          });
 
           updatedStrategies[tabId] = {
             ...(updatedStrategies[tabId] || {}),
@@ -2124,8 +2099,8 @@ export default function Dashboard() {
           isFavoriteHighlight: tab.isFavoriteHighlight || false,
           isOperationConfirmed: tab.isOperationConfirmed || false,
           isDeviationConfirmed: tab.isDeviationConfirmed || false,
-          createdAt: tab.createdAt instanceof Timestamp ? tab.createdAt.toDate().toISOString() : (tab.createdAt && (tab.createdAt as any).seconds ? new Date((tab.createdAt as any).seconds * 1000).toISOString() : new Date().toISOString()),
-          updatedAt: tab.updatedAt instanceof Timestamp ? tab.updatedAt.toDate().toISOString() : (tab.updatedAt && (tab.updatedAt as any).seconds ? new Date((tab.updatedAt as any).seconds * 1000).toISOString() : new Date().toISOString()),
+          createdAt: tab.createdAt || new Date().toISOString(),
+          updatedAt: tab.updatedAt || new Date().toISOString(),
           trades: [] as any[],
           plannedOrders: [] as any[],
           strategy: null as any,
@@ -2133,78 +2108,72 @@ export default function Dashboard() {
         };
 
         // Fetch Trades
-        const tradesSnapshot = await getDocs(
-          collection(db, `stockTabs/${tab.id}/trades`),
-        );
-        tabData.trades = tradesSnapshot.docs.map((d) => {
-          const t = d.data();
-          return {
-            type: t.type,
-            purpose: t.purpose || "加碼",
-            operator: t.operator || "人",
-            price: t.price,
-            quantity: t.quantity,
-            tradeDate: t.tradeDate instanceof Timestamp ? t.tradeDate.toDate().toISOString() : (t.tradeDate && (t.tradeDate as any).seconds ? new Date((t.tradeDate as any).seconds * 1000).toISOString() : new Date().toISOString()),
-            fees: t.fees || 0,
-            notes: t.notes || "",
-            createdAt: t.createdAt instanceof Timestamp ? t.createdAt.toDate().toISOString() : (t.createdAt && (t.createdAt as any).seconds ? new Date((t.createdAt as any).seconds * 1000).toISOString() : new Date().toISOString()),
-          };
-        });
+        const { data: tradesData } = await supabase
+          .from("trades")
+          .select("*")
+          .eq("stock_tab_id", tab.id);
+        tabData.trades = (tradesData || []).map((t: any) => ({
+          type: t.type,
+          purpose: t.purpose || "加碼",
+          operator: t.operator || "人",
+          price: t.price,
+          quantity: t.quantity,
+          tradeDate: t.trade_date || new Date().toISOString(),
+          fees: t.fees || 0,
+          notes: t.notes || "",
+          createdAt: t.created_at || new Date().toISOString(),
+        }));
 
         // Fetch Planned Orders
-        const ordersSnapshot = await getDocs(
-          collection(db, `stockTabs/${tab.id}/plannedOrders`),
-        );
-        tabData.plannedOrders = ordersSnapshot.docs.map((d) => {
-          const o = d.data();
-          return {
-            direction: o.direction,
-            purpose: o.purpose || "加碼",
-            price: o.price,
-            quantity: o.quantity,
-            conditions: o.conditions || "",
-            notes: o.notes || "",
-            status: o.status || "PENDING",
-            category: o.category || "分批進出場規劃",
-            plannedDate: o.plannedDate instanceof Timestamp ? o.plannedDate.toDate().toISOString() : (o.plannedDate && (o.plannedDate as any).seconds ? new Date((o.plannedDate as any).seconds * 1000).toISOString() : null),
-            createdAt: o.createdAt instanceof Timestamp ? o.createdAt.toDate().toISOString() : (o.createdAt && (o.createdAt as any).seconds ? new Date((o.createdAt as any).seconds * 1000).toISOString() : new Date().toISOString()),
-          };
-        });
+        const { data: ordersData } = await supabase
+          .from("planned_orders")
+          .select("*")
+          .eq("stock_tab_id", tab.id);
+        tabData.plannedOrders = (ordersData || []).map((o: any) => ({
+          direction: o.direction,
+          purpose: o.purpose || "加碼",
+          price: o.price,
+          quantity: o.quantity,
+          conditions: o.conditions || "",
+          notes: o.notes || "",
+          status: o.status || "PENDING",
+          category: o.category || "分批進出場規劃",
+          plannedDate: o.planned_date || null,
+          createdAt: o.created_at || new Date().toISOString(),
+        }));
 
         // Fetch Strategy
-        const strategySnapshot = await getDocs(
-          collection(db, `stockTabs/${tab.id}/strategy`),
-        );
-        const mainStrategy = strategySnapshot.docs.find((d) => d.id === "main");
-        if (mainStrategy) {
-          const s = mainStrategy.data();
+        const { data: strategyRow } = await supabase
+          .from("strategies")
+          .select("*")
+          .eq("stock_tab_id", tab.id)
+          .maybeSingle();
+        if (strategyRow) {
           tabData.strategy = {
-            entries: s.entries || [],
-            tpTargets: s.tpTargets || [],
-            slTargets: s.slTargets || [],
-            slConditions: s.slConditions || "",
-            strategyNotes: s.strategyNotes || "",
-            operationNote: s.operationNote || "",
-            resistanceZones: s.resistanceZones || [],
-            supportZones: s.supportZones || [],
-            updatedAt: s.updatedAt instanceof Timestamp ? s.updatedAt.toDate().toISOString() : (s.updatedAt && (s.updatedAt as any).seconds ? new Date((s.updatedAt as any).seconds * 1000).toISOString() : new Date().toISOString()),
+            entries: strategyRow.entries || [],
+            tpTargets: strategyRow.tp_targets || [],
+            slTargets: strategyRow.sl_targets || [],
+            slConditions: strategyRow.sl_conditions || "",
+            strategyNotes: strategyRow.strategy_notes || "",
+            operationNote: strategyRow.operation_note || "",
+            resistanceZones: strategyRow.resistance_zones || [],
+            supportZones: strategyRow.support_zones || [],
+            updatedAt: strategyRow.updated_at || new Date().toISOString(),
           };
         }
 
         // Fetch Daily Reports
-        const reportsSnapshot = await getDocs(
-          collection(db, `stockTabs/${tab.id}/dailyReports`),
-        );
-        tabData.dailyReports = reportsSnapshot.docs.map((d) => {
-          const r = d.data();
-          return {
-            date: r.date,
-            summary: r.summary || "",
-            score: r.score || 5,
-            notes: r.notes || "",
-            createdAt: r.createdAt instanceof Timestamp ? r.createdAt.toDate().toISOString() : (r.createdAt && (r.createdAt as any).seconds ? new Date((r.createdAt as any).seconds * 1000).toISOString() : new Date().toISOString()),
-          };
-        });
+        const { data: reportsData } = await supabase
+          .from("daily_reports")
+          .select("*")
+          .eq("stock_tab_id", tab.id);
+        tabData.dailyReports = (reportsData || []).map((r: any) => ({
+          date: r.date,
+          summary: r.summary || "",
+          score: r.score || 5,
+          notes: r.notes || "",
+          createdAt: r.created_at || new Date().toISOString(),
+        }));
 
         exportData.completedTabs.push(tabData);
       }
@@ -2235,37 +2204,6 @@ export default function Dashboard() {
     const file = e.target.files?.[0];
     if (!file || !user) return;
 
-    // Helper to recursively convert ISO strings to Firestore Timestamps
-    const processData = (obj: any): any => {
-      if (!obj || typeof obj !== "object" || obj instanceof Timestamp)
-        return obj;
-
-      if (Array.isArray(obj)) {
-        return obj.map((item) => processData(item));
-      }
-
-      if (
-        obj.type === "firestore/timestamp/1.0" &&
-        typeof obj.seconds === "number" &&
-        typeof obj.nanoseconds === "number"
-      ) {
-        return new Timestamp(obj.seconds, obj.nanoseconds);
-      }
-
-      const newObj: any = {};
-      for (const [key, value] of Object.entries(obj)) {
-        if (
-          typeof value === "string" &&
-          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)
-        ) {
-          newObj[key] = Timestamp.fromDate(new Date(value));
-        } else {
-          newObj[key] = processData(value);
-        }
-      }
-      return newObj;
-    };
-
     try {
       setIsImportingCompleted(true);
       toast.loading("正在解析已完成交易紀錄備份檔案...", { id: "import-completed" });
@@ -2292,38 +2230,43 @@ export default function Dashboard() {
       let count = 0;
       for (const rawTabData of rawTabs) {
         try {
-          const tabData = processData(rawTabData);
-          const { trades, plannedOrders, strategy, dailyReports, id, ...rest } =
-            tabData;
+          const { trades, plannedOrders, strategy, dailyReports, id: _, ...rest } =
+            rawTabData;
 
           if (!rest.symbol) {
-            console.warn("Skipping tab without symbol:", tabData);
+            console.warn("Skipping tab without symbol:", rawTabData);
             continue;
           }
 
           // Force status to COMPLETED
           rest.status = "COMPLETED";
 
-          // Generate a brand new document reference to avoid overwrites
-          const newTabRef = doc(collection(db, "stockTabs"));
-          const newId = newTabRef.id;
-
-          await setDoc(newTabRef, {
-            ...rest,
-            userId: user.uid,
-            createdAt: rest.createdAt || serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          });
+          // Create new tab via Supabase
+          const { data: createdTab, error: createError } = await supabase
+            .from("stock_tabs")
+            .insert({
+              ...rest,
+              user_id: user.uid,
+              created_at: rest.createdAt || new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .select()
+            .single();
+          if (createError) throw createError;
+          const newId = createdTab.id;
 
           // Restore Trades
           if (Array.isArray(trades)) {
             for (const trade of trades) {
               const { id: tradeId, ...tradeRest } = trade;
-              const newTradeRef = doc(collection(db, `stockTabs/${newId}/trades`));
-              await setDoc(newTradeRef, {
-                ...tradeRest,
-                createdAt: tradeRest.createdAt || serverTimestamp(),
-              });
+              const { error: tradeError } = await supabase
+                .from("trades")
+                .insert({
+                  stock_tab_id: newId,
+                  ...tradeRest,
+                  created_at: tradeRest.createdAt || new Date().toISOString(),
+                });
+              if (tradeError) throw tradeError;
             }
           }
 
@@ -2331,35 +2274,43 @@ export default function Dashboard() {
           if (Array.isArray(plannedOrders)) {
             for (const order of plannedOrders) {
               const { id: orderId, ...orderRest } = order;
-              const newOrderRef = doc(collection(db, `stockTabs/${newId}/plannedOrders`));
-              await setDoc(newOrderRef, {
-                ...orderRest,
-                createdAt: orderRest.createdAt || serverTimestamp(),
-              });
+              const { error: orderError } = await supabase
+                .from("planned_orders")
+                .insert({
+                  stock_tab_id: newId,
+                  ...orderRest,
+                  created_at: orderRest.createdAt || new Date().toISOString(),
+                });
+              if (orderError) throw orderError;
             }
           }
 
           // Restore Strategy
           if (strategy) {
             const { id: strategyId, ...strategyRest } = strategy;
-            await setDoc(
-              doc(db, `stockTabs/${newId}/strategy`, "main"),
-              {
+            const { error: strategyError } = await supabase
+              .from("strategies")
+              .upsert({
+                stock_tab_id: newId,
+                id: strategyId || "main",
                 ...strategyRest,
-                updatedAt: serverTimestamp(),
-              }
-            );
+                updated_at: new Date().toISOString(),
+              }, { onConflict: 'stock_tab_id' });
+            if (strategyError) throw strategyError;
           }
 
           // Restore Daily Reports
           if (Array.isArray(dailyReports)) {
             for (const report of dailyReports) {
               const { id: reportId, ...reportRest } = report;
-              const newReportRef = doc(collection(db, `stockTabs/${newId}/dailyReports`));
-              await setDoc(newReportRef, {
-                ...reportRest,
-                createdAt: reportRest.createdAt || serverTimestamp(),
-              });
+              const { error: reportError } = await supabase
+                .from("daily_reports")
+                .insert({
+                  stock_tab_id: newId,
+                  ...reportRest,
+                  created_at: reportRest.createdAt || new Date().toISOString(),
+                });
+              if (reportError) throw reportError;
             }
           }
 
@@ -2396,68 +2347,72 @@ export default function Dashboard() {
         stockTabs: [],
       };
 
-      const q = query(
-        collection(db, "stockTabs"),
-        where("userId", "==", user.uid),
-      );
-      const tabsSnapshot = await getDocs(q);
+      const { data: tabsData } = await supabase
+        .from("stock_tabs")
+        .select("*")
+        .eq("user_id", user.uid);
 
-      for (const docSnap of tabsSnapshot.docs) {
+      for (const tab of tabsData || []) {
         const tabData = {
-          id: docSnap.id,
-          ...(docSnap.data() as any),
-          trades: [],
-          plannedOrders: [],
-          strategy: null,
-          dailyReports: [],
+          id: tab.id,
+          ...tab,
+          trades: [] as any[],
+          plannedOrders: [] as any[],
+          strategy: null as any,
+          dailyReports: [] as any[],
         };
 
         // Fetch Trades
-        const tradesSnapshot = await getDocs(
-          collection(db, `stockTabs/${docSnap.id}/trades`),
-        );
-        tabData.trades = tradesSnapshot.docs.map((d) => ({
+        const { data: tradesData } = await supabase
+          .from("trades")
+          .select("*")
+          .eq("stock_tab_id", tab.id);
+        tabData.trades = (tradesData || []).map((d: any) => ({
           id: d.id,
-          ...d.data(),
+          ...d,
         }));
 
         // Fetch Planned Orders
-        const ordersSnapshot = await getDocs(
-          collection(db, `stockTabs/${docSnap.id}/plannedOrders`),
-        );
-        tabData.plannedOrders = ordersSnapshot.docs.map((d) => ({
+        const { data: ordersData } = await supabase
+          .from("planned_orders")
+          .select("*")
+          .eq("stock_tab_id", tab.id);
+        tabData.plannedOrders = (ordersData || []).map((d: any) => ({
           id: d.id,
-          ...d.data(),
+          ...d,
         }));
 
         // Fetch Strategy
-        const strategySnapshot = await getDocs(
-          collection(db, `stockTabs/${docSnap.id}/strategy`),
-        );
-        const mainStrategy = strategySnapshot.docs.find((d) => d.id === "main");
-        if (mainStrategy) {
-          tabData.strategy = { id: mainStrategy.id, ...mainStrategy.data() };
+        const { data: strategyRow } = await supabase
+          .from("strategies")
+          .select("*")
+          .eq("stock_tab_id", tab.id)
+          .maybeSingle();
+        if (strategyRow) {
+          tabData.strategy = { id: strategyRow.id, ...strategyRow };
         }
 
         // Fetch Daily Reports
-        const reportsSnapshot = await getDocs(
-          collection(db, `stockTabs/${docSnap.id}/dailyReports`),
-        );
-        tabData.dailyReports = reportsSnapshot.docs.map((d) => ({
+        const { data: reportsData } = await supabase
+          .from("daily_reports")
+          .select("*")
+          .eq("stock_tab_id", tab.id);
+        tabData.dailyReports = (reportsData || []).map((d: any) => ({
           id: d.id,
-          ...d.data(),
+          ...d,
         }));
 
         exportData.stockTabs.push(tabData);
       }
 
       // 3. Fetch Socrates Data
-      const socratesSnapshot = await getDocs(
-        query(collection(db, `users/${user.uid}/socratesData`)),
-      );
-      exportData.socratesData = socratesSnapshot.docs.map((d) => ({
+      const { data: socratesRow } = await supabase
+        .from("socrates_data")
+        .select("*")
+        .eq("user_id", user.uid);
+      exportData.socratesData = (socratesRow || []).map((d: any) => ({
         id: d.id,
-        ...d.data(),
+        ...d,
       }));
 
       const backupJson = JSON.stringify(exportData, null, 2);
@@ -2496,39 +2451,6 @@ export default function Dashboard() {
       return;
     }
 
-    // Helper to recursively convert ISO strings to Firestore Timestamps
-    const processData = (obj: any): any => {
-      if (!obj || typeof obj !== "object" || obj instanceof Timestamp)
-        return obj;
-
-      if (Array.isArray(obj)) {
-        return obj.map((item) => processData(item));
-      }
-
-      // Handle Firestore Timestamp JSON representation
-      if (
-        obj.type === "firestore/timestamp/1.0" &&
-        typeof obj.seconds === "number" &&
-        typeof obj.nanoseconds === "number"
-      ) {
-        return new Timestamp(obj.seconds, obj.nanoseconds);
-      }
-
-      const newObj: any = {};
-      for (const [key, value] of Object.entries(obj)) {
-        // Handle common date fields in ISO format
-        if (
-          typeof value === "string" &&
-          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)
-        ) {
-          newObj[key] = Timestamp.fromDate(new Date(value));
-        } else {
-          newObj[key] = processData(value);
-        }
-      }
-      return newObj;
-    };
-
     try {
       setIsImporting(true);
       console.log("Import process started...");
@@ -2554,42 +2476,34 @@ export default function Dashboard() {
       console.log(`Found ${backupData.stockTabs.length} tabs to restore.`);
       toast.loading("正在清理舊資料...", { id: "import" });
 
-      // 1. Find all user tabs
-      const q = query(
-        collection(db, "stockTabs"),
-        where("userId", "==", user.uid),
-      );
-      const oldTabs = await getDocs(q);
+      // 1. Find and delete all user tabs
+      const { data: existingTabs } = await supabase
+        .from("stock_tabs")
+        .select("id")
+        .eq("user_id", user.uid);
 
-      console.log(`Deleting ${oldTabs.size} existing tabs...`);
-      // Clean up subcollections for each old tab
-      for (const oldTab of oldTabs.docs) {
-        const docId = oldTab.id;
+      const existingIds: string[] = (existingTabs || []).map(t => t.id);
+      console.log(`Deleting ${existingIds.length} existing tabs...`);
+
+      // Clean up related data for each tab
+      for (const tabId of existingIds) {
         try {
-          const subCollections = [
-            "trades",
-            "plannedOrders",
-            "strategy",
-            "dailyReports",
-          ];
-          for (const sub of subCollections) {
-            const snap = await getDocs(
-              collection(db, `stockTabs/${docId}/${sub}`),
-            );
-            for (const d of snap.docs) await deleteDoc(d.ref);
-          }
-          await deleteDoc(oldTab.ref);
+          await supabase.from("trades").delete().eq("stock_tab_id", tabId);
+          await supabase.from("planned_orders").delete().eq("stock_tab_id", tabId);
+          await supabase.from("strategies").delete().eq("stock_tab_id", tabId);
+          await supabase.from("daily_reports").delete().eq("stock_tab_id", tabId);
         } catch (delError: any) {
-          console.warn(`Failed to clean up tab ${docId}:`, delError);
+          console.warn(`Failed to clean up tab ${tabId}:`, delError);
         }
+      }
+      // Delete the tabs themselves
+      if (existingIds.length > 0) {
+        await supabase.from("stock_tabs").delete().in("id", existingIds);
       }
 
       // Cleanup Socrates Data
       console.log("Cleaning up Socrates data...");
-      const socratesSnap = await getDocs(
-        query(collection(db, `users/${user.uid}/socratesData`)),
-      );
-      for (const d of socratesSnap.docs) await deleteDoc(d.ref);
+      await supabase.from("socrates_data").delete().eq("user_id", user.uid);
 
       toast.loading(`正在還原 ${backupData.stockTabs.length} 筆個股資料...`, {
         id: "import",
@@ -2599,12 +2513,11 @@ export default function Dashboard() {
       let count = 0;
       for (const rawTabData of backupData.stockTabs) {
         try {
-          const tabData = processData(rawTabData);
           const { trades, plannedOrders, strategy, dailyReports, id, ...rest } =
-            tabData;
+            rawTabData;
 
           if (!rest.symbol) {
-            console.warn("Skipping tab without symbol:", tabData);
+            console.warn("Skipping tab without symbol:", rawTabData);
             continue;
           }
 
@@ -2612,21 +2525,29 @@ export default function Dashboard() {
             `Restoring tab [${++count}/${backupData.stockTabs.length}]: ${rest.symbol} (${id})`,
           );
 
-          // Restore tab
-          await setDoc(doc(db, "stockTabs", id), {
-            ...rest,
-            userId: user.uid,
-            updatedAt: serverTimestamp(),
-          });
+          // Restore tab using insert
+          const { error: insertError } = await supabase
+            .from("stock_tabs")
+            .insert({
+              id,
+              ...rest,
+              user_id: user.uid,
+              updated_at: new Date().toISOString(),
+            });
+          if (insertError) throw insertError;
 
           // Restore Trades
           if (Array.isArray(trades)) {
             for (const trade of trades) {
               const { id: tradeId, ...tradeRest } = trade;
-              await setDoc(
-                doc(db, `stockTabs/${id}/trades`, tradeId),
-                tradeRest,
-              );
+              const { error: tradeError } = await supabase
+                .from("trades")
+                .insert({
+                  id: tradeId,
+                  stock_tab_id: id,
+                  ...tradeRest,
+                });
+              if (tradeError) throw tradeError;
             }
           }
 
@@ -2634,30 +2555,42 @@ export default function Dashboard() {
           if (Array.isArray(plannedOrders)) {
             for (const order of plannedOrders) {
               const { id: orderId, ...orderRest } = order;
-              await setDoc(
-                doc(db, `stockTabs/${id}/plannedOrders`, orderId),
-                orderRest,
-              );
+              const { error: orderError } = await supabase
+                .from("planned_orders")
+                .insert({
+                  id: orderId,
+                  stock_tab_id: id,
+                  ...orderRest,
+                });
+              if (orderError) throw orderError;
             }
           }
 
           // Restore Strategy
           if (strategy) {
             const { id: strategyId, ...strategyRest } = strategy;
-            await setDoc(
-              doc(db, `stockTabs/${id}/strategy`, strategyId),
-              strategyRest,
-            );
+            const { error: strategyError } = await supabase
+              .from("strategies")
+              .insert({
+                id: strategyId || "main",
+                stock_tab_id: id,
+                ...strategyRest,
+              });
+            if (strategyError) throw strategyError;
           }
 
           // Restore Daily Reports
           if (Array.isArray(dailyReports)) {
             for (const report of dailyReports) {
               const { id: reportId, ...reportRest } = report;
-              await setDoc(
-                doc(db, `stockTabs/${id}/dailyReports`, reportId),
-                reportRest,
-              );
+              const { error: reportError } = await supabase
+                .from("daily_reports")
+                .insert({
+                  id: reportId,
+                  stock_tab_id: id,
+                  ...reportRest,
+                });
+              if (reportError) throw reportError;
             }
           }
         } catch (tabError: any) {
@@ -2677,12 +2610,14 @@ export default function Dashboard() {
           `Restoring ${backupData.socratesData.length} Socrates records...`,
         );
         for (const rawSoc of backupData.socratesData) {
-          const soc = processData(rawSoc);
-          const { id: dateKey, ...socData } = soc;
-          await setDoc(
-            doc(db, `users/${user.uid}/socratesData`, dateKey),
-            socData,
-          );
+          const { id: dateKey, ...socData } = rawSoc;
+          const { error: socError } = await supabase
+            .from("socrates_data")
+            .upsert(
+              { user_id: user.uid, date_key: dateKey, data: socData },
+              { onConflict: "user_id,date_key" }
+            );
+          if (socError) throw socError;
         }
       }
 
@@ -2966,9 +2901,8 @@ export default function Dashboard() {
 
     try {
       // Fetch the strategy
-      const strategyDocRef = doc(db, `stockTabs/${tab.id}/strategy`, 'main');
-      const strategySnap = await getDoc(strategyDocRef);
-      const strategyData = strategySnap.exists() ? strategySnap.data() : { entries: [], tpTargets: [], slTargets: [], slConditions: "", resistanceZones: [], supportZones: [] };
+      const { data: strategyData } = await fetchStrategy(tab.id);
+      const strategyDataSafe = strategyData || { entries: [], tpTargets: [], slTargets: [], slConditions: "", resistanceZones: [], supportZones: [] };
 
       const response = await fetch("/api/generate-operation-note", {
         method: "POST",
@@ -2983,7 +2917,7 @@ export default function Dashboard() {
           buyRate: tab.buyRate,
           sellRate: tab.sellRate,
           volatility: tab.volatility,
-          strategyData,
+          strategyData: strategyDataSafe,
         }),
       });
 
@@ -3014,10 +2948,10 @@ export default function Dashboard() {
         return obj;
       }
 
-      const updatedStrategy = { ...strategyData, operationNote: resultText, updatedAt: serverTimestamp() };
+      const updatedStrategy = { ...strategyDataSafe, operationNote: resultText };
       const sanitizedData = stripUndefined(updatedStrategy);
 
-      await setDoc(doc(db, `stockTabs/${tab.id}/strategy`, 'main'), sanitizedData, { merge: true });
+      await upsertStrategy(tab.id, sanitizedData);
 
       toast.success("AI 已產生並更新策略建議", { id: "ai-smart-suggestion" });
       setIsActionDialogOpen(false);
@@ -5634,7 +5568,7 @@ export default function Dashboard() {
                                                     />
                                                   </div>
 
-                                                  {/* Timestamp & Close Button */}
+                                                  {/* Date & Close Button */}
                                                   <div className="flex items-center gap-2">
                                                     {tab.updatedAt && (
                                                       <span 

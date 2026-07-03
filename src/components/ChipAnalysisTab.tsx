@@ -1,54 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { db, auth } from '../lib/firebase';
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { toast } from 'sonner';
+import { supabase } from '../lib/supabase';
+import { upsertStrategy } from '../lib/supabase-helpers';
 
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId?: string | null;
-    email?: string | null;
-    emailVerified?: boolean | null;
-    isAnonymous?: boolean | null;
-    tenantId?: string | null;
-    providerInfo?: {
-      providerId?: string | null;
-      email?: string | null;
-    }[];
-  }
-}
-
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth?.currentUser?.uid || null,
-      email: auth?.currentUser?.email || null,
-      emailVerified: auth?.currentUser?.emailVerified || null,
-      isAnonymous: auth?.currentUser?.isAnonymous || null,
-      tenantId: auth?.currentUser?.tenantId || null,
-      providerInfo: auth?.currentUser?.providerData?.map(provider => ({
-        providerId: provider.providerId,
-        email: provider.email,
-      })) || []
-    },
-    operationType,
-    path
-  };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
-}
 import { 
   Sparkles, 
   Upload, 
@@ -122,22 +76,25 @@ export default function ChipAnalysisTab({ tabId, symbol }: { tabId: string; symb
   const [previewUrl, setPreviewUrl] = useState<string>('');
   const [isDragActive, setIsDragActive] = useState(false);
 
-  // Load existing analysis from Firestore on mount
+  // Load existing analysis from Supabase on mount
   useEffect(() => {
     async function loadAnalysis() {
-      const pathForGet = `stockTabs/${tabId}/chipAnalysis/main`;
       try {
-        const docRef = doc(db, `stockTabs/${tabId}/chipAnalysis`, 'main');
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          setData(docSnap.data() as ChipAnalysisData);
-          if (docSnap.data().previewImage) {
-            setPreviewUrl(docSnap.data().previewImage);
+        const { data: tabData, error: fetchError } = await supabase
+          .from('stock_tabs')
+          .select('chart_annotations')
+          .eq('id', tabId)
+          .single();
+        if (fetchError) throw fetchError;
+        if (tabData?.chart_annotations) {
+          const analysisData = tabData.chart_annotations as ChipAnalysisData;
+          setData(analysisData);
+          if (analysisData.previewImage) {
+            setPreviewUrl(analysisData.previewImage);
           }
         }
       } catch (error) {
         console.error('Error loading card chip analysis:', error);
-        handleFirestoreError(error, OperationType.GET, pathForGet);
       } finally {
         setLoading(false);
       }
@@ -224,25 +181,18 @@ export default function ChipAnalysisTab({ tabId, symbol }: { tabId: string; symb
 
       setData(updatedData);
 
-      // 1. Save to main /chipAnalysis collection in Firestore
-      const pathForWrite = `stockTabs/${tabId}/chipAnalysis/main`;
+      // 1. Save chart_annotations to stock_tabs row in Supabase
       try {
-        await setDoc(doc(db, `stockTabs/${tabId}/chipAnalysis`, 'main'), updatedData);
+        const { error: updateError } = await supabase
+          .from('stock_tabs')
+          .update({ chart_annotations: updatedData })
+          .eq('id', tabId);
+        if (updateError) throw updateError;
       } catch (err) {
-        handleFirestoreError(err, OperationType.WRITE, pathForWrite);
+        console.error('Error saving chip analysis:', err);
       }
 
-      // 2. Synchronize to StrategTab operationNote (交易計畫與策略區塊的執行細節備註)
-      // We write to /stockTabs/${tabId}/strategy/main operationNote
-      const strategyDocRef = doc(db, `stockTabs/${tabId}/strategy`, 'main');
-      const strategyPath = `stockTabs/${tabId}/strategy/main`;
-      let strategyDocSnap;
-      try {
-        strategyDocSnap = await getDoc(strategyDocRef);
-      } catch (err) {
-        handleFirestoreError(err, OperationType.GET, strategyPath);
-      }
-      
+      // 2. Synchronize to strategy operationNote (交易計畫與策略區塊的執行細節備註)
       const syncNote = `【AI 主力與籌碼分析結論】
 [ 交易型態 ]：${result.signalType} 訊號
 [ 主力操作階段 ]：${
@@ -265,17 +215,9 @@ export default function ChipAnalysisTab({ tabId, symbol }: { tabId: string; symb
 [ 買賣警戒狀態 ]：${result.warnings.details}`;
 
       try {
-        if (strategyDocSnap.exists()) {
-          await updateDoc(strategyDocRef, {
-            operationNote: syncNote
-          });
-        } else {
-          await setDoc(strategyDocRef, {
-            operationNote: syncNote
-          });
-        }
+        await upsertStrategy(tabId, { operationNote: syncNote });
       } catch (err) {
-        handleFirestoreError(err, OperationType.WRITE, strategyPath);
+        console.error('Error syncing strategy note:', err);
       }
 
       toast.success("籌碼分析成功！已同步至交易策略之執行細節備註。", { id: "scanning-chips" });
@@ -298,12 +240,14 @@ export default function ChipAnalysisTab({ tabId, symbol }: { tabId: string; symb
       stage: updatedStage
     };
     setData(updatedData);
-    const pathForWrite = `stockTabs/${tabId}/chipAnalysis/main`;
     try {
-      await setDoc(doc(db, `stockTabs/${tabId}/chipAnalysis`, 'main'), updatedData);
+      const { error: updateError } = await supabase
+        .from('stock_tabs')
+        .update({ chart_annotations: updatedData })
+        .eq('id', tabId);
+      if (updateError) throw updateError;
     } catch (e) {
       console.error('Save failed:', e);
-      handleFirestoreError(e, OperationType.WRITE, pathForWrite);
     }
   };
 

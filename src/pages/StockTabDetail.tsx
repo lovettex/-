@@ -14,11 +14,10 @@ import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
 import { format } from 'date-fns';
-import { Timestamp, collection, writeBatch, doc, serverTimestamp } from 'firebase/firestore';
 import { Trash2, BarChart3, ChevronDown, ChevronUp, Gamepad2, ShieldCheck, Upload, Download, ChevronLeft } from 'lucide-react';
 import { toast } from "sonner";
 import { motion, AnimatePresence } from 'motion/react';
-import { db } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/AuthContext';
 import { safeSessionStorage } from '../lib/utils';
 import { ScrollIn, InteractiveButton, Magnetic } from '../components/MotionWrappers';
@@ -306,8 +305,8 @@ export default function StockTabDetail() {
     currentBatchOrderText = "已滿批";
   }
 
-  const isStaleData = tab.updatedAt && typeof tab.updatedAt.toDate === 'function' 
-    ? (new Date().getTime() - tab.updatedAt.toDate().getTime() > 17 * 60 * 60 * 1000)
+  const isStaleData = tab.updatedAt 
+    ? (new Date().getTime() - new Date(tab.updatedAt).getTime() > 17 * 60 * 60 * 1000)
     : false;
 
   const handleJsonUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -435,11 +434,7 @@ export default function StockTabDetail() {
         operator: t.operator || '人',
         price: t.price,
         quantity: t.quantity,
-        tradeDate: t.tradeDate instanceof Timestamp 
-          ? t.tradeDate.toDate().toISOString() 
-          : (t.tradeDate && (t.tradeDate as any).seconds 
-             ? new Date((t.tradeDate as any).seconds * 1000).toISOString() 
-             : new Date().toISOString()),
+        tradeDate: t.tradeDate || new Date().toISOString(),
         fees: t.fees || 0,
         notes: t.notes || ''
       }));
@@ -489,36 +484,31 @@ export default function StockTabDetail() {
           return;
         }
 
-        const batch = writeBatch(db);
-        const tradesColRef = collection(db, `stockTabs/${id}/trades`);
-
-        validTrades.forEach((item: any) => {
-          const newDocRef = doc(tradesColRef);
-          
-          let dateVal: Date;
+        const rows = validTrades.map((item: any) => {
+          let tradeDate: string;
           if (item.tradeDate) {
-            dateVal = new Date(item.tradeDate);
-            if (isNaN(dateVal.getTime())) {
-              dateVal = new Date();
-            }
+            const dateObj = new Date(item.tradeDate);
+            tradeDate = isNaN(dateObj.getTime()) ? new Date().toISOString() : dateObj.toISOString();
           } else {
-            dateVal = new Date();
+            tradeDate = new Date().toISOString();
           }
 
-          batch.set(newDocRef, {
+          return {
+            tab_id: id,
             type: item.type as 'BUY' | 'SELL',
             purpose: (item.purpose || '加碼') as '加碼' | '平倉',
             operator: (item.operator || '人') as '機器' | '人',
             price: Number(item.price) || 0,
             quantity: Number(item.quantity) || 0,
-            tradeDate: Timestamp.fromDate(dateVal),
+            trade_date: tradeDate,
             fees: Number(item.fees) || 0,
             notes: item.notes || '',
-            createdAt: serverTimestamp()
-          });
+            created_at: new Date().toISOString()
+          };
         });
 
-        await batch.commit();
+        const { error } = await supabase.from('stock_tab_trades').insert(rows);
+        if (error) throw error;
         toast.success(`成功匯入 ${validTrades.length} 筆交易紀錄！`);
       } catch (error) {
         console.error(error);
@@ -548,7 +538,7 @@ export default function StockTabDetail() {
       operator: tradeForm.operator as '機器' | '人',
       price: Number(tradeForm.price),
       quantity: Number(tradeForm.quantity),
-      tradeDate: Timestamp.fromDate(new Date(tradeForm.tradeDate)),
+      tradeDate: new Date(tradeForm.tradeDate).toISOString(),
       fees: Number(tradeForm.fees) || 0,
       notes: tradeForm.notes
     });
@@ -1466,7 +1456,7 @@ export default function StockTabDetail() {
                                  exit={{ opacity: 0 }}
                                  className="border-b border-zinc-150 last:border-0 hover:bg-zinc-50/50 transition-colors text-zinc-800 font-semibold bg-white"
                                >
-                                 <td className="px-6 py-4 whitespace-nowrap">{t.tradeDate?.toDate() ? format(t.tradeDate.toDate(), 'yyyy/MM/dd') : ''}</td>
+                                 <td className="px-6 py-4 whitespace-nowrap">{t.tradeDate ? format(new Date(t.tradeDate), 'yyyy/MM/dd') : ''}</td>
                                  <td className="px-6 py-4">
                                    <div className="flex flex-col gap-1.5 items-start">
                                      <div className="flex items-center gap-1.5">
