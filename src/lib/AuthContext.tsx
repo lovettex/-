@@ -1,13 +1,21 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { supabase } from './supabase';
-import type { User } from '@supabase/supabase-js';
+import { 
+  User, 
+  onAuthStateChanged, 
+  signInWithPopup, 
+  GoogleAuthProvider, 
+  signOut,
+  signInWithRedirect,
+  getRedirectResult,
+  browserPopupRedirectResolver
+} from 'firebase/auth';
+import { auth } from './firebase';
 import { toast } from 'sonner';
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  signup: (email: string, password: string) => Promise<void>;
+  login: () => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -15,7 +23,6 @@ const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
   login: async () => {},
-  signup: async () => {},
   logout: async () => {},
 });
 
@@ -24,49 +31,72 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
       setLoading(false);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+    // Handle redirect result if any
+    getRedirectResult(auth, browserPopupRedirectResolver).catch((error) => {
+      if (error.code !== 'auth/no-recent-redirect-operation') {
+        console.error("Redirect result error:", error);
+        toast.error("登入失敗，請稍後再試");
+      }
     });
 
-    return () => subscription.unsubscribe();
+    return () => unsubscribe();
   }, []);
 
-  const login = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) {
-      toast.error(error.message === 'Invalid login credentials'
-        ? '登入失敗：信箱或密碼錯誤'
-        : `登入失敗：${error.message}`);
-      throw error;
-    }
-    toast.success('登入成功');
-  };
+  const login = async () => {
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
 
-  const signup = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signUp({ email, password });
-    if (error) {
-      toast.error(error.message === 'User already registered'
-        ? '此信箱已註冊'
-        : `註冊失敗：${error.message}`);
-      throw error;
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      const isIframe = window.self !== window.top;
+
+      if (isMobile) {
+        // Always try popup first, but if it fails on mobile, fall back to redirect and tell user to configure
+        try {
+          await signInWithPopup(auth, provider, browserPopupRedirectResolver);
+        } catch (error: any) {
+          console.error("Popup failed, trying redirect", error);
+          if (isIframe) {
+            toast.error("手機版於預覽畫面中可能無法登入，建議「以新分頁開啟」或使用桌面版", { duration: 5000 });
+          }
+          await signInWithRedirect(auth, provider, browserPopupRedirectResolver);
+        }
+      } else {
+        // Desktop
+        try {
+          await signInWithPopup(auth, provider, browserPopupRedirectResolver);
+        } catch (error: any) {
+          if (error.code === 'auth/popup-blocked') {
+            toast.error("登入視窗被阻擋，請允許彈出式視窗或手動點擊再次嘗試");
+          } else if (error.code === 'auth/cancelled-popup-request') {
+            // Ignore cancel
+          } else {
+            console.error("Login failed:", error);
+            if (!isIframe) await signInWithRedirect(auth, provider, browserPopupRedirectResolver);
+          }
+        }
+      }
+    } catch (error) {
+      console.error("General Login failed:", error);
+      toast.error("嘗試登入時發生錯誤");
     }
-    toast.success('註冊成功！請檢查信箱確認連結（若未啟用郵件確認可直接登入）');
   };
 
   const logout = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) {
-      console.error('Logout failed:', error);
+    try {
+      await signOut(auth);
+    } catch (error) {
+      console.error("Logout failed:", error);
     }
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, signup, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, logout }}>
       {children}
     </AuthContext.Provider>
   );

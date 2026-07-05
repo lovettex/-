@@ -1,30 +1,32 @@
+import { Timestamp } from 'firebase/firestore';
+
 export interface StockTab {
-  id: string;
+  id: string; // The firestore doc ID
   userId: string;
   symbol: string;
   companyName?: string;
   status: 'ACTIVE' | 'COMPLETED';
   isHidden?: boolean;
-  groupId?: string;
-  sortOrder?: number;
+  groupId?: string; // For grouping multiple tabs
+  sortOrder?: number; // Added sortOrder
   tradeDirection?: '看漲' | '看跌';
   holdingStatus?: '觀察中' | '候選名單' | '買進操作' | '賣出操作' | '平倉操作' | '乖離名單';
   finalPnL?: number;
   currentPrice?: number;
   tags?: string[];
   tradeType: 'simulated' | 'real';
-  buyRate?: number;
-  sellRate?: number;
-  rating?: number;
-  qualityScore?: number;
-  valueScore?: number;
-  crashSimilarity?: number;
+  buyRate?: number; // 1-10
+  sellRate?: number; // 1-10
+  rating?: number; // 1-10
+  qualityScore?: number; // 1-10
+  valueScore?: number; // 1-10
+  crashSimilarity?: number; // 1-10
   isOperationConfirmed?: boolean;
   volatility?: '低' | '中等' | '高';
   shortTermImpact?: '看多' | '觀察' | '看空';
   longTermOutlook?: '看多' | '觀察' | '看空';
-  createdAt: string;
-  updatedAt: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
   isFavoriteHighlight?: boolean;
   isDeviationConfirmed?: boolean;
   isNew?: boolean;
@@ -56,11 +58,11 @@ export interface Trade {
   operator?: '機器' | '人';
   price: number;
   quantity: number;
-  tradeDate: string;
+  tradeDate: Timestamp;
   fees?: number;
   tags?: string[];
   notes?: string;
-  createdAt: string;
+  createdAt: Timestamp;
 }
 
 export interface PlannedOrder {
@@ -73,13 +75,13 @@ export interface PlannedOrder {
   notes?: string;
   status: 'PENDING' | 'CANCELLED' | 'COMPLETED';
   category?: '分批進出場規劃' | '止盈設定' | '止損設定' | '關鍵價格門檻' | '支撐門檻' | '壓力門檻';
-  plannedDate?: string;
-  createdAt: string;
+  plannedDate?: Timestamp;
+  createdAt: Timestamp;
   isManualHighlight?: boolean;
 }
 
 export interface StrategyEntry {
-  priceStr: string;
+  priceStr: string; // can be range so string
   type: 'BUY' | 'SELL';
   quantityStr: string;
   notes: string;
@@ -102,14 +104,14 @@ export interface KeyPriceThreshold {
 }
 
 export interface StrategyConfig {
-  id: string;
+  id: string; // usually 'main'
   entries?: StrategyEntry[];
-  tp1?: number;
-  tp2?: number;
-  tp3?: number;
+  tp1?: number; // legacy
+  tp2?: number; // legacy
+  tp3?: number; // legacy
   tpTargets?: TPTarget[];
-  sl?: number;
-  slPercentage?: number;
+  sl?: number; // legacy
+  slPercentage?: number; // legacy
   slTargets?: SLTarget[];
   slConditions?: string;
   strategyNotes?: string;
@@ -124,18 +126,17 @@ export interface StrategyConfig {
   tags?: string[];
   resistanceZones?: KeyPriceThreshold[];
   supportZones?: KeyPriceThreshold[];
-  updatedAt: string;
+  updatedAt: Timestamp;
 }
 
 export interface DailyReport {
-  id: string;
-  date: string;
-  summary?: string;
-  score?: number;
-  notes?: string;
-  createdAt: string;
+  id: string; // date string yyyy-MM-dd
+  pdfUrl1?: string;
+  pdfUrl2?: string;
+  updatedAt: Timestamp;
 }
 
+// Calculated stats purely in frontend
 export interface StockStats {
   totalQuantity: number;
   averagePrice: number;
