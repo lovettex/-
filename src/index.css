@@ -118,7 +118,7 @@
   }
   
   .glass-card {
-    background-color: rgba(255, 255, 255, 0.6);
+    background-color: rgba(255, 255, 255, 0.98);
     backdrop-filter: blur(24px);
     border: 3.2px solid #59804F !important;
     border-radius: 0.75rem;
@@ -127,7 +127,7 @@
   }
   .glass-card:hover {
     transform: translateY(-4px);
-    background-color: rgba(255, 255, 255, 0.95);
+    background-color: rgba(255, 255, 255, 1);
     border-color: #59804F !important;
     box-shadow: none !important;
   }

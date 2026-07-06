@@ -89,11 +89,14 @@ import {
   FileText,
   LogOut,
   BookOpen,
+  Tv,
+  Maximize2,
 } from "lucide-react";
 import { calculateStats } from "../lib/calculations";
 import { safeLocalStorage, safeSessionStorage } from "../lib/utils";
 import { format } from "date-fns";
 import { StockCardVisualizer, prefetchStockPrice } from "../components/StockCardVisualizer";
+import { CinemaDock } from "../components/CinemaDock";
 
 enum OperationType {
   CREATE = "create",
@@ -293,6 +296,9 @@ export default function Dashboard() {
   
   const [flippedCards, setFlippedCards] = useState<Record<string, boolean>>({});
 
+  const [isCinemaModeActive, setIsCinemaModeActive] = useState<boolean>(false);
+  const [activeCinemaCardId, setActiveCinemaCardId] = useState<string | null>(null);
+
   useEffect(() => {
     const state = location.state as { autoFlipTabId?: string } | null;
     if (state?.autoFlipTabId) {
@@ -307,6 +313,19 @@ export default function Dashboard() {
       window.history.replaceState({}, document.title);
     }
   }, [location.state]);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      if (!document.fullscreenElement) {
+        setIsCinemaModeActive(false);
+      }
+    };
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+
+
+
   const [activeTabTrades, setActiveTabTrades] = useState<Record<string, any[]>>(
     {},
   );
@@ -751,6 +770,7 @@ export default function Dashboard() {
 
   // Carousel State & Refs
   const carouselRef = useRef<HTMLDivElement>(null);
+  const renderCardRef = useRef<((tab: any, idx: number) => React.ReactNode) | null>(null);
 
   const dragRef = useRef({
     isDragging: false,
@@ -1628,6 +1648,7 @@ export default function Dashboard() {
   const [selectedActionTab, setSelectedActionTab] = useState<any>(null);
   const [visualizerFocusTabId, setVisualizerFocusTabId] = useState<string | null>(null);
   const [visualizerFocusText, setVisualizerFocusText] = useState("");
+  const [manualHighlight, setManualHighlight] = useState<Record<string, boolean>>({});
   const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({});
 
   const handleSearchSelect = useCallback(
@@ -2820,6 +2841,49 @@ export default function Dashboard() {
   }, [currentSubTabVisibleTabs, activeCardDefinitionFilter]);
 
   visibleTabsRef.current = filteredSubTabVisibleTabs;
+
+  useEffect(() => {
+    if (!isCinemaModeActive) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" || e.key === "x" || e.key === "X") {
+        setIsCinemaModeActive(false);
+        if (document.fullscreenElement) {
+          document.exitFullscreen().catch(() => {});
+        }
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        const currentIndex = filteredSubTabVisibleTabs.findIndex(t => t.id === activeCinemaCardId);
+        if (currentIndex !== -1 && filteredSubTabVisibleTabs.length > 1) {
+          const nextIndex = (currentIndex + 1) % filteredSubTabVisibleTabs.length;
+          setActiveCinemaCardId(filteredSubTabVisibleTabs[nextIndex].id);
+          playSwipeSound();
+        }
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        const currentIndex = filteredSubTabVisibleTabs.findIndex(t => t.id === activeCinemaCardId);
+        if (currentIndex !== -1 && filteredSubTabVisibleTabs.length > 1) {
+          const prevIndex = (currentIndex - 1 + filteredSubTabVisibleTabs.length) % filteredSubTabVisibleTabs.length;
+          setActiveCinemaCardId(filteredSubTabVisibleTabs[prevIndex].id);
+          playSwipeSound();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [isCinemaModeActive, filteredSubTabVisibleTabs, activeCinemaCardId]);
+
+  // Sync activeCinemaCardId when filteredSubTabVisibleTabs changes in Cinema Focus Mode
+  useEffect(() => {
+    if (!isCinemaModeActive) return;
+    if (filteredSubTabVisibleTabs.length > 0) {
+      const exists = filteredSubTabVisibleTabs.some(t => t.id === activeCinemaCardId);
+      if (!exists) {
+        setActiveCinemaCardId(filteredSubTabVisibleTabs[0].id);
+      }
+    } else {
+      setActiveCinemaCardId(null);
+    }
+  }, [isCinemaModeActive, filteredSubTabVisibleTabs, activeCinemaCardId]);
 
   // Active Card Tab & Sliding Indicator state for desktop carousel
   const [activeCardTabId, setActiveCardTabId] = useState<string | null>(null);
@@ -4089,9 +4153,35 @@ export default function Dashboard() {
                           noGlow
                           as="button"
                           onClick={() => setIsManageHiddenOpen(true)}
+                          title="管理持有中股票"
                           className="p-2 bg-zinc-50 border border-zinc-200 text-zinc-500 hover:text-zinc-850 hover:bg-zinc-100 rounded-md transition-all cursor-pointer"
                         >
                           <Settings2 className="w-4 h-4" />
+                        </InteractiveButton>
+                        <InteractiveButton
+                          noGlow
+                          as="button"
+                          onClick={() => {
+                            if (filteredSubTabVisibleTabs.length > 0) {
+                              const isCurrentActiveVisible = filteredSubTabVisibleTabs.some(t => t.id === activeCardTabId);
+                              const targetId = isCurrentActiveVisible ? (activeCardTabId || filteredSubTabVisibleTabs[0].id) : filteredSubTabVisibleTabs[0].id;
+                              setActiveCinemaCardId(targetId);
+                              setIsCinemaModeActive(true);
+                              
+                              if (document.documentElement.requestFullscreen) {
+                                document.documentElement.requestFullscreen().catch((err) => {
+                                  console.warn("Fullscreen request rejected:", err);
+                                });
+                              }
+                              playClickSound();
+                            } else {
+                              toast.error("目前無可見的股票卡片可供放大");
+                            }
+                          }}
+                          title="放大卡片 (電影觀賞模式)"
+                          className="p-2 bg-zinc-50 border border-zinc-200 text-zinc-500 hover:text-zinc-850 hover:bg-zinc-100 rounded-md transition-all cursor-pointer flex items-center justify-center"
+                        >
+                          <Maximize2 className="w-4 h-4" />
                         </InteractiveButton>
                         <InteractiveButton
                           noGlow
@@ -4760,7 +4850,7 @@ export default function Dashboard() {
                                     }
                                   }
 
-                                  const isCardExpanded = tab.groupId ? (expandedCards[tab.groupId] !== false) : (expandedCards[tab.id] !== false);
+                                  const isCardExpanded = isCinemaModeActive ? true : (tab.groupId ? (expandedCards[tab.groupId] !== false) : (expandedCards[tab.id] !== false));
 
                                   return (
                                     <div
@@ -4818,7 +4908,7 @@ export default function Dashboard() {
                                           }}
                                           key={tab.id}
                                           className={`relative w-full h-full flex-1 flex flex-col cursor-pointer slide-drawer-container transition-all duration-300 ${isCardExpanded ? "min-h-[460px] h-[460px]" : "min-h-[135px] h-[135px]"} ${
-                                            flippedCards[tab.id] && isCardExpanded ? "show-back" : ""
+                                            ((isCinemaModeActive || flippedCards[tab.id]) && isCardExpanded) ? "show-back" : ""
                                           } ${activeTabStrategies[tab.id]?.observeChecked ? "card-breathe-observe" : activeTabStrategies[tab.id]?.closeChecked ? "card-breathe-close" : activeTabStrategies[tab.id]?.slChecked ? "card-breathe-sl" : activeTabStrategies[tab.id]?.addChecked ? "card-breathe-add" : activeTabStrategies[tab.id]?.tpChecked ? "card-breathe-tp" : ""}`}
                                         >
                                           {/* Corner label badges - stacked vertically (render on container level to avoid clip truncation) */}
@@ -4872,13 +4962,13 @@ export default function Dashboard() {
                                             {/* Front Face */}
                                           <div
                                             style={{
-                                              pointerEvents: flippedCards[
-                                                tab.id
-                                              ]
+                                              pointerEvents: (isCinemaModeActive || flippedCards[tab.id])
                                                 ? "none"
                                                 : "auto",
+                                              
+                                              
                                             }}
-                                            className="card-front absolute inset-0 glass-card rounded-2xl flex flex-col group/item w-full h-full transition-all duration-500 overflow-hidden"
+                                            className={`card-front absolute inset-0 glass-card rounded-2xl flex flex-col group/item w-full h-full ${isCinemaModeActive ? "" : "transition-all duration-500"} overflow-hidden`}
                                           >
                                             {/* Removed old redundant child elements since they are now declared on container level */}
 
@@ -4984,880 +5074,483 @@ export default function Dashboard() {
                                                   : undefined
                                               }
                                             >
-                                              <div className="flex items-start gap-4 w-full">
-                                                <div className="flex flex-col w-full min-w-0">
-                                                  {/* Row 1: Symbol & Name & SIM/LIVE Badge */}
-                                                  <div className="flex items-baseline gap-2 mb-1.5">
-                                                    <span
-                                                      className="font-black text-2xl tracking-tighter leading-none text-black"
-                                                    >
+                                              <div className="flex flex-col w-full min-w-0">
+                                                {/* Top row: Symbol, Price, Unrealized Pill, SIM/LIVE, Toggle */}
+                                                <div className="flex items-center justify-between w-full relative z-10 gap-3 mb-2">
+                                                  {/* Left part: Symbol & Price */}
+                                                  <div className="flex items-baseline gap-2.5 min-w-0">
+                                                    <span className="font-black text-2xl tracking-tighter leading-none text-black shrink-0">
                                                       {tab.symbol}
                                                     </span>
-                                                    {tab.currentPrice !== undefined && (
-                                                      <div className="flex items-baseline gap-2">
-                                                        <span className="text-lg font-black tabular-nums text-zinc-900">
+                                                    {typeof tab.currentPrice === "number" && (
+                                                      <div className="flex items-baseline gap-2 shrink-0">
+                                                        <span className="text-xl font-black tabular-nums text-zinc-900 leading-none">
                                                           ${tab.currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                         </span>
                                                         {unrealizedPnL !== 0 && (
-                                                          <span className={`text-sm font-black tabular-nums ${unrealizedPnL > 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                                                          <span className={`text-sm font-black tabular-nums leading-none ${unrealizedPnL > 0 ? "text-emerald-600" : "text-rose-600"}`}>
                                                             {unrealizedPnL > 0 ? "▲" : "▼"}{Math.abs(unrealizedPnL).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                           </span>
                                                         )}
                                                       </div>
                                                     )}
-                                                    
-                                                    {/* Right side alignment stack */}
-                                                    <div className="flex flex-col items-end gap-1 ml-auto self-center shrink-0">
-                                                      <div className="flex items-center gap-1.5">
-                                                        <div
-                                                          className={`flex items-center gap-1 text-[9px] font-black px-1.5 py-0.5 rounded-full border uppercase tracking-widest ${
-                                                            tab.tradeType ===
-                                                            "simulated"
-                                                              ? "bg-amber-50 text-amber-800 border-amber-200"
-                                                              : "bg-emerald-50 text-emerald-800 border-emerald-200"
-                                                          }`}
-                                                        >
-                                                          {tab.tradeType === "simulated" ? (
-                                                            <Gamepad2 className="h-2.5 w-2.5" />
-                                                          ) : (
-                                                            <ShieldCheck className="h-2.5 w-2.5" />
-                                                          )}
-                                                          {tab.tradeType === "simulated" ? "SIM" : "LIVE"}
-                                                        </div>
-                                                        <button
-                                                          onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            setExpandedCards((prev) => ({
-                                                              ...prev,
-                                                              [tab.groupId || tab.id]: !isCardExpanded
-                                                            }));
-                                                          }}
-                                                          className="p-1 text-zinc-500 hover:text-zinc-800 bg-zinc-100/80 hover:bg-zinc-200 rounded-full transition-colors flex items-center justify-center shrink-0"
-                                                          title={isCardExpanded ? "收合個股卡片" : "展開個股卡片"}
-                                                        >
-                                                          <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-300 ${isCardExpanded ? "rotate-180" : ""}`} />
-                                                        </button>
-                                                      </div>
-                                                    </div>
                                                   </div>
 
-                                                  {/* Row 2: Score & Sentiment Groups */}
-                                                  <div className="flex flex-wrap items-center gap-2 mb-1">
-                                                    <div className="flex items-center border border-zinc-200 rounded-md overflow-hidden h-5 bg-zinc-50">
-                                                      <div className="px-1.5 h-full flex items-center border-r border-zinc-200 bg-zinc-100/50">
-                                                        <span className="text-[10px] font-black text-zinc-600">
-                                                          ★ {tab.rating || 8}
+                                                  {/* Right part: Unrealized PnL Pill, SIM/LIVE, Toggle */}
+                                                  <div className="flex items-center gap-2 shrink-0 ml-auto">
+                                                    {/* Unrealized PnL Capsule (Pill) */}
+                                                    {unrealizedPnL !== 0 && (
+                                                      <div className="flex flex-col items-center justify-center border border-zinc-200/60 bg-zinc-50 rounded-xl px-2.5 py-0.5 leading-none h-[38px] select-none">
+                                                        <span className="text-[9px] font-medium text-zinc-500 mb-0.5">
+                                                          未實現:
+                                                        </span>
+                                                        <span className={`text-xs font-black tabular-nums ${unrealizedPnL > 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                                                          {unrealizedPnL > 0 ? "+" : ""}{unrealizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                         </span>
                                                       </div>
-                                                      <div className="px-1.5 h-full flex items-center border-r border-zinc-200 bg-zinc-100/50">
-                                                        <span className="text-[10px] font-black text-zinc-600">
-                                                          Q {tab.qualityScore || 5}
-                                                        </span>
-                                                      </div>
-                                                      <div className="px-1.5 h-full flex items-center border-r border-zinc-200 bg-zinc-100/50">
-                                                        <span className="text-[10px] font-black text-zinc-600">
-                                                          V {tab.valueScore || 5}
-                                                        </span>
-                                                      </div>
-                                                      <div className="px-1.5 h-full flex items-center border-r border-zinc-200 bg-zinc-100/50">
-                                                        <span className="text-[10px] font-black text-zinc-600">
-                                                          B {tab.buyRate || 5}
-                                                        </span>
-                                                      </div>
-                                                      <div className="px-1.5 h-full flex items-center bg-zinc-100/50">
-                                                        <span className="text-[10px] font-black text-zinc-600">
-                                                          S {tab.sellRate || 5}
-                                                        </span>
-                                                      </div>
+                                                    )}
+
+                                                    {/* SIM / LIVE Badge */}
+                                                    <div
+                                                      className={`flex items-center gap-1.5 text-[9px] font-black px-2 py-1.5 rounded-full border uppercase tracking-widest h-7 ${
+                                                        tab.tradeType === "simulated"
+                                                          ? "bg-amber-50 text-amber-800 border-amber-200/80"
+                                                          : "bg-emerald-50 text-emerald-800 border-emerald-200/80"
+                                                      }`}
+                                                    >
+                                                      {tab.tradeType === "simulated" ? (
+                                                        <Gamepad2 className="h-3 w-3 text-amber-600" />
+                                                      ) : (
+                                                        <ShieldCheck className="h-3 w-3 text-emerald-600" />
+                                                      )}
+                                                      {tab.tradeType === "simulated" ? "SIM" : "LIVE"}
                                                     </div>
 
-                                                    <div className="flex items-center border border-zinc-200 rounded-md overflow-hidden h-5 bg-zinc-50">
-                                                      <div className="px-1.5 h-full flex items-center border-r border-zinc-200 bg-zinc-100/50">
-                                                        <span className="text-[10px] font-black text-zinc-600">
-                                                          {tab.volatility || "中"}
-                                                        </span>
-                                                      </div>
-                                                      <div className="px-1.5 h-full flex items-center border-r border-zinc-200 bg-zinc-100/50" title="Positive Value">
-                                                        <span className="text-[10px] font-black text-zinc-600">
-                                                          P+ {calculatePositiveValue(Number(tab.rating||5), Number(tab.qualityScore||5), Number(tab.valueScore||5), Number(tab.buyRate||5))}
-                                                        </span>
-                                                      </div>
-                                                      <div className="px-1.5 h-full flex items-center bg-zinc-100/50" title="Negative Value">
-                                                        <span className="text-[10px] font-black text-zinc-600">
-                                                          N- {calculateNegativeValue(Number(tab.rating||5), Number(tab.qualityScore||5), Number(tab.valueScore||5), Number(tab.sellRate||5))}
-                                                        </span>
-                                                      </div>
-                                                    </div>
-
-                                                    {/* Single-segment Unrealized PnL badge aligned horizontally with scores */}
-                                                    {((activeHoldingSubTab === "觀察中" && activeViewTab === "active" && activeCardDefinitionFilter === "operation") || 
-                                                      (activeViewTab === "real" && activeHoldingSubTab === "買進操作")) && unrealizedPnL !== 0 && (
-                                                      (() => {
-                                                        const isPositive = unrealizedPnL > 0;
-                                                        const formattedPnL = (isPositive ? "+" : "") + unrealizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                                                        
-                                                        const bgClass = isPositive ? "bg-[#E1F5EE]" : "bg-[#FCEBEB]";
-                                                        const textColor = isPositive ? "#085041" : "#791F1F";
-                                                        const borderColor = isPositive ? "#1D9E75" : "#E24B4A";
-                                                        
-                                                        return (
-                                                          <div 
-                                                            className={`inline-flex items-center gap-0.5 px-1.5 rounded-[5px] select-none shrink-0 h-5 border ${bgClass}`}
-                                                            style={{ borderColor, color: textColor }}
-                                                          >
-                                                            {isPositive ? (
-                                                              <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                                                                <line x1="7" y1="17" x2="17" y2="7"></line>
-                                                                <polyline points="7 7 17 7 17 17"></polyline>
-                                                              </svg>
-                                                            ) : (
-                                                              <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                                                                <line x1="7" y1="7" x2="17" y2="17"></line>
-                                                                <polyline points="17 7 17 17 7 17"></polyline>
-                                                              </svg>
-                                                            )}
-                                                            <span className="text-[9px] font-medium tabular-nums tracking-tight">
-                                                              {formattedPnL}
-                                                            </span>
-                                                          </div>
-                                                        );
-                                                      })()
+                                                    {/* Expand / Collapse Button */}
+                                                    {!isCinemaModeActive && (
+                                                      <button
+                                                        onClick={(e) => {
+                                                          e.stopPropagation();
+                                                          setExpandedCards((prev) => ({
+                                                            ...prev,
+                                                            [tab.groupId || tab.id]: !isCardExpanded,
+                                                          }));
+                                                        }}
+                                                        className="p-1 text-zinc-500 hover:text-zinc-800 bg-zinc-100 hover:bg-zinc-200 rounded-full transition-colors flex items-center justify-center shrink-0 w-7 h-7"
+                                                        title={isCardExpanded ? "收合個股卡片" : "展開個股卡片"}
+                                                      >
+                                                        <ChevronDown
+                                                          className={`w-4 h-4 transition-transform duration-300 ${
+                                                            isCardExpanded ? "rotate-180" : ""
+                                                          }`}
+                                                        />
+                                                      </button>
                                                     )}
                                                   </div>
                                                 </div>
-                                              </div>
-                                            </div>
 
+                                                {/* Volatility & Rating indicators under price */}
+                                                <div className="flex items-center gap-2 mb-1 flex-nowrap overflow-x-auto scrollbar-hide shrink-0 select-none">
+                                                  <div className="flex items-center border border-zinc-200 rounded-md overflow-hidden h-5 bg-zinc-50">
+                                                    <div className="px-1.5 h-full flex items-center border-r border-zinc-200 bg-zinc-100/50">
+                                                      <span className="text-[10px] font-black text-zinc-600">
+                                                        ★ {tab.rating || 8}
+                                                      </span>
+                                                    </div>
+                                                    <div className="px-1.5 h-full flex items-center border-r border-zinc-200 bg-zinc-100/50">
+                                                      <span className="text-[10px] font-black text-zinc-600">
+                                                        Q {tab.qualityScore || 5}
+                                                      </span>
+                                                    </div>
+                                                    <div className="px-1.5 h-full flex items-center border-r border-zinc-200 bg-zinc-100/50">
+                                                      <span className="text-[10px] font-black text-zinc-600">
+                                                        V {tab.valueScore || 5}
+                                                      </span>
+                                                    </div>
+                                                    <div className="px-1.5 h-full flex items-center border-r border-zinc-200 bg-zinc-100/50">
+                                                      <span className="text-[10px] font-black text-zinc-600">
+                                                        B {tab.buyRate || 5}
+                                                      </span>
+                                                    </div>
+                                                    <div className="px-1.5 h-full flex items-center border-r border-zinc-200 bg-zinc-100/50">
+                                                      <span className="text-[10px] font-black text-zinc-600">
+                                                        S {tab.sellRate || 5}
+                                                      </span>
+                                                    </div>
+                                                    <div className="px-1.5 h-full flex items-center border-r border-zinc-200 bg-zinc-100/50">
+                                                      <span className="text-[10px] font-black text-zinc-600">
+                                                        {tab.volatility || "中"}
+                                                      </span>
+                                                    </div>
+                                                    <div className="px-1.5 h-full flex items-center border-r border-zinc-200 bg-zinc-100/50" title="Positive Value">
+                                                      <span className="text-[10px] font-black text-zinc-600">
+                                                        P+ {calculatePositiveValue(Number(tab.rating || 5), Number(tab.qualityScore || 5), Number(tab.valueScore || 5), Number(tab.buyRate || 5))}
+                                                      </span>
+                                                    </div>
+                                                    <div className="px-1.5 h-full flex items-center bg-zinc-100/50" title="Negative Value">
+                                                      <span className="text-[10px] font-black text-zinc-600">
+                                                        N- {calculateNegativeValue(Number(tab.rating || 5), Number(tab.qualityScore || 5), Number(tab.valueScore || 5), Number(tab.sellRate || 5))}
+                                                      </span>
+                                                    </div>
+                                                  </div>
+
+                                                    {/* Strategy target price percentage deviation */}
+                                                    {((activeHoldingSubTab === "觀察中" && activeViewTab === "active" && activeCardDefinitionFilter === "operation") || (activeViewTab === "real" && activeHoldingSubTab === "買進操作")) && unrealizedPnL !== 0 && (() => {
+                                                      const isUp = unrealizedPnL > 0;
+                                                      const txt = (isUp ? "+" : "") + unrealizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                                                      const bg = isUp ? "bg-[#E1F5EE]" : "bg-[#FCEBEB]";
+                                                      const fg = isUp ? "#085041" : "#791F1F";
+                                                      const border = isUp ? "#1D9E75" : "#E24B4A";
+                                                      return (
+                                                        <div
+                                                          className={`inline-flex items-center gap-0.5 px-1.5 rounded-[5px] select-none shrink-0 h-5 border ${bg}`}
+                                                          style={{ borderColor: border, color: fg }}
+                                                        >
+                                                          {isUp ? (
+                                                            <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                                              <line x1="7" y1="17" x2="17" y2="7" />
+                                                              <polyline points="7 7 17 7 17 17" />
+                                                            </svg>
+                                                          ) : (
+                                                            <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                                              <line x1="7" y1="7" x2="17" y2="17" />
+                                                              <polyline points="17 7 17 17 7 17" />
+                                                            </svg>
+                                                          )}
+                                                          <span className="text-[9px] font-medium tabular-nums tracking-tight">
+                                                            {txt}
+                                                          </span>
+                                                        </div>
+                                                      );
+                                                    })()}
+                                                  </div>
+                                                </div>
+                                              </div>
+
+                                            {/* Expanded content */}
                                             {isCardExpanded && (
                                               <>
+                                                {/* Active strategies and target prices */}
                                                 {plannedOrders.length > 0 && (
                                                   <div className="mt-2 pt-2 border-t border-zinc-200/55 relative z-10">
-                                                <p className="text-[12px] font-bold text-zinc-550 text-zinc-500 mb-[6px] tracking-wide uppercase">
-                                                  交易計畫與策略目標價 (
-                                                  {plannedOrders.length})
-                                                </p>
-                                                <div className="flex flex-col gap-1">
-                                                  {Object.entries(
-                                                    plannedOrders.reduce(
-                                                      (
-                                                        acc: Record<
-                                                          string,
-                                                          any[]
-                                                        >,
-                                                        order,
-                                                      ) => {
-                                                        const fullText =
-                                                          `${order.notes || ""} ${order.conditions || ""}`.trim();
-                                                        let category =
-                                                          order.category ||
-                                                          "其他";
-
-                                                        if (
-                                                          category === "其他" ||
-                                                          !order.category ||
-                                                          category ===
-                                                            "關鍵價格門檻"
-                                                        ) {
-                                                          if (
-                                                            fullText.includes(
-                                                              "[支撐",
-                                                            ) ||
-                                                            fullText.includes(
-                                                              "支撐門檻",
-                                                            )
-                                                          )
-                                                            category =
-                                                              "支撐門檻";
-                                                          else if (
-                                                            fullText.includes(
-                                                              "[壓力",
-                                                            ) ||
-                                                            fullText.includes(
-                                                              "壓力門檻",
-                                                            )
-                                                          )
-                                                            category =
-                                                              "壓力門檻";
-                                                          else if (
-                                                            fullText.includes(
-                                                              "止損設定",
-                                                            ) ||
-                                                            fullText.includes(
-                                                              "[止損",
-                                                            )
-                                                          )
-                                                            category =
-                                                              "止損設定";
-                                                          else if (
-                                                            fullText.includes(
-                                                              "止盈設定",
-                                                            ) ||
-                                                            fullText.includes(
-                                                              "[止盈",
-                                                            )
-                                                          )
-                                                            category =
-                                                              "止盈設定";
-                                                          else if (
-                                                            fullText.includes(
-                                                              "分批進出場",
-                                                            ) ||
-                                                            fullText.includes(
-                                                              "[分批",
-                                                            )
-                                                          )
-                                                            category =
-                                                              "分批進出場規劃";
-                                                          // Fallbacks
-                                                          else if (
-                                                            fullText.includes(
-                                                              "支撐",
-                                                            )
-                                                          )
-                                                            category =
-                                                              "支撐門檻";
-                                                          else if (
-                                                            fullText.includes(
-                                                              "壓力",
-                                                            )
-                                                          )
-                                                            category =
-                                                              "壓力門檻";
-                                                          else if (
-                                                            fullText.includes(
-                                                              "止損",
-                                                            )
-                                                          )
-                                                            category =
-                                                              "止損設定";
-                                                          else if (
-                                                            fullText.includes(
-                                                              "止盈",
-                                                            )
-                                                          )
-                                                            category =
-                                                              "止盈設定";
-                                                          else if (
-                                                            fullText.includes(
-                                                              "分批",
-                                                            )
-                                                          )
-                                                            category =
-                                                              "分批進出場規劃";
+                                                    <p className="text-[12px] font-bold text-zinc-550 text-zinc-500 mb-[6px] tracking-wide uppercase">
+                                                      交易計畫與策略目標價 ({plannedOrders.length})
+                                                    </p>
+                                                    <div className="flex flex-col gap-1">
+                                                      {Object.entries(plannedOrders.reduce((acc: any, order: any) => {
+                                                        const text = `${order.notes || ""} ${order.conditions || ""}`.trim();
+                                                        let category = order.category || "其他";
+                                                        if (category === "其他" || !order.category || category === "關鍵價格門檻") {
+                                                          if (text.includes("[支撐") || text.includes("支撐門檻")) category = "支撐門檻";
+                                                          else if (text.includes("[壓力") || text.includes("壓力門檻")) category = "壓力門檻";
+                                                          else if (text.includes("止損設定") || text.includes("[止損")) category = "止損設定";
+                                                          else if (text.includes("止盈設定") || text.includes("[止盈")) category = "止盈設定";
+                                                          else if (text.includes("分批進出場") || text.includes("[分批")) category = "分批進出場規劃";
+                                                          else if (category === "分批") category = "分批進出場規劃";
                                                         }
-
-                                                        const displayCategory = `[${category}]`;
-
-                                                        if (
-                                                          !acc[displayCategory]
-                                                        )
-                                                          acc[displayCategory] =
-                                                            [];
-                                                        acc[
-                                                          displayCategory
-                                                        ].push(order);
+                                                        const formattedCat = `[${category}]`;
+                                                        if (!acc[formattedCat]) acc[formattedCat] = [];
+                                                        acc[formattedCat].push(order);
                                                         return acc;
-                                                      },
-                                                      {},
-                                                    ),
-                                                  )
-                                                    .sort(([a], [b]) => {
-                                                      const order = [
-                                                        "[止損設定]",
-                                                        "[止盈設定]",
-                                                        "[分批進出場規劃]",
-                                                        "[支撐門檻]",
-                                                        "[壓力門檻]",
-                                                        "[其他]",
-                                                      ];
-                                                      const idxA =
-                                                        order.indexOf(a);
-                                                      const idxB =
-                                                        order.indexOf(b);
-                                                      if (
-                                                        idxA !== -1 &&
-                                                        idxB !== -1
-                                                      )
-                                                        return idxA - idxB;
-                                                      if (idxA !== -1)
-                                                        return -1;
-                                                      if (idxB !== -1) return 1;
-                                                      return a.localeCompare(b);
-                                                    })
-                                                    .map(
-                                                      ([
-                                                        category,
-                                                        categoryOrders,
-                                                      ]) => {
-                                                        const categoryType =
-                                                          category.replace(
-                                                            /[\[\]]/g,
-                                                            "",
-                                                          );
+                                                      }, {})).sort(([catA], [catB]) => {
+                                                        const orderList = ["[止損設定]", "[止盈設定]", "[分批進出場規劃]", "[支撐門檻]", "[壓力門檻]", "[其他]"];
+                                                        const idxA = orderList.indexOf(catA);
+                                                        const idxB = orderList.indexOf(catB);
+                                                        if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+                                                        if (idxA !== -1) return -1;
+                                                        if (idxB !== -1) return 1;
+                                                        return catA.localeCompare(catB);
+                                                      }).map(([catName, orders]: [string, any]) => {
+                                                        const cleanCat = catName.replace(/[\[\]]/g, "");
                                                         return (
-                                                          <div
-                                                            key={category}
-                                                            className="flex flex-col gap-1"
-                                                          >
+                                                          <div key={catName} className="flex flex-col gap-1">
                                                             <div className="flex items-center gap-1.5 px-1 mb-1 mt-1.5">
-                                                              <div
-                                                                className={`h-1 w-1 rounded-full ${
-                                                                  categoryType ===
-                                                                  "止損設定"
-                                                                    ? "bg-red-500"
-                                                                    : categoryType ===
-                                                                        "止盈設定"
-                                                                      ? "bg-emerald-500"
-                                                                      : categoryType ===
-                                                                            "支撐門檻" ||
-                                                                          categoryType ===
-                                                                            "壓力門檻"
-                                                                        ? "bg-amber-500"
-                                                                        : "bg-blue-500"
-                                                                }`}
-                                                              ></div>
-                                                              <span
-                                                                className={`text-[11px] font-bold tracking-widest uppercase leading-none ${
-                                                                  categoryType ===
-                                                                  "止損設定"
-                                                                    ? "text-red-600"
-                                                                    : categoryType ===
-                                                                        "止盈設定"
-                                                                      ? "text-emerald-600"
-                                                                      : categoryType ===
-                                                                            "支撐門檻" ||
-                                                                          categoryType ===
-                                                                            "壓力門檻"
-                                                                        ? "text-amber-600"
-                                                                        : "text-zinc-500"
-                                                                }`}
-                                                              >
-                                                                {category}
+                                                              <div className={`h-1 w-1 rounded-full ${cleanCat === "止損設定" ? "bg-red-500" : cleanCat === "止盈設定" ? "bg-emerald-500" : cleanCat === "支撐門檻" || cleanCat === "壓力門檻" ? "bg-amber-500" : "bg-blue-500"}`} />
+                                                              <span className={`text-[11px] font-bold tracking-widest uppercase leading-none ${cleanCat === "止損設定" ? "text-red-600" : cleanCat === "止盈設定" ? "text-emerald-600" : cleanCat === "支撐門檻" || cleanCat === "壓力門檻" ? "text-amber-600" : "text-zinc-500"}`}>
+                                                                {catName}
                                                               </span>
                                                             </div>
                                                             <div className="flex flex-wrap gap-1">
-                                                              {(
-                                                                categoryOrders as any[]
-                                                              )
-                                                                .sort(
-                                                                  (a, b) =>
-                                                                    (b.price ||
-                                                                      0) -
-                                                                    (a.price ||
-                                                                      0),
-                                                                )
-                                                                .map(
-                                                                  (order) => {
-                                                                    const isStopLoss =
-                                                                      categoryType ===
-                                                                      "止損設定";
-                                                                    const isKeyPrice =
-                                                                      categoryType ===
-                                                                        "支撐門檻" ||
-                                                                      categoryType ===
-                                                                        "壓力門檻";
-                                                                    const keyLabel =
-                                                                      isKeyPrice
-                                                                        ? categoryType ===
-                                                                          "支撐門檻"
-                                                                          ? "支撐"
-                                                                          : "壓力"
-                                                                        : order.direction ===
-                                                                            "BUY"
-                                                                          ? "買入"
-                                                                          : "賣出";
-
-                                                                    const showLabel =
-                                                                      keyLabel === "支撐" ||
-                                                                      keyLabel === "壓力";
-
-                                                                    const isAlertTriggered =
-                                                                      order.price &&
-                                                                      tab.currentPrice &&
-                                                                      Math.abs(
-                                                                        (tab.currentPrice -
-                                                                          order.price) /
-                                                                          order.price,
-                                                                      ) <= 0.02;
-                                                                    const isHighlighted =
-                                                                      isAlertTriggered ||
-                                                                      order.isManualHighlight;
-
-                                                                    let colorClass =
-                                                                      "";
-                                                                    let borderClass =
-                                                                      "border";
-
-                                                                    if (
-                                                                      isHighlighted
-                                                                    ) {
-                                                                      colorClass =
-                                                                        "bg-amber-500 text-zinc-950 border-amber-600 shadow-sm font-semibold";
-                                                                      borderClass =
-                                                                        "border";
-                                                                    } else if (
-                                                                      isStopLoss
-                                                                    ) {
-                                                                      colorClass =
-                                                                        "border-red-200 text-red-700 bg-red-50";
-                                                                    } else if (
-                                                                      isKeyPrice
-                                                                    ) {
-                                                                      colorClass =
-                                                                        "bg-amber-50/50 border-amber-200 text-amber-800";
-                                                                    } else {
-                                                                      colorClass =
-                                                                        order.direction ===
-                                                                        "BUY"
-                                                                          ? "bg-emerald-50/50 border-emerald-200 text-emerald-800 font-medium"
-                                                                          : "bg-blue-50/50 border-blue-200 text-blue-800 font-medium";
-                                                                    }
-
-                                                                    return (
-                                                                      <div
-                                                                        key={
-                                                                          order.id
-                                                                        }
-                                                                        title={
-                                                                          order.notes ||
-                                                                          order.conditions ||
-                                                                          ""
-                                                                        }
-                                                                        className={`rounded-lg ${borderClass} py-1 px-2.5 flex items-center gap-1.5 backdrop-blur-sm transition-all duration-300 cursor-pointer select-none ${colorClass}`}
-                                                                        onClick={(
-                                                                          e,
-                                                                        ) => {
-                                                                          e.stopPropagation();
-                                                                        }}
-                                                                        onDoubleClick={(
-                                                                          e,
-                                                                        ) => {
-                                                                          e.stopPropagation();
-                                                                          order.id.startsWith("tp-") || order.id.startsWith("sl-") || order.id.startsWith("entry-") || order.id.startsWith("res-") || order.id.startsWith("sup-") ? setStrategyHighlights(prev => ({ ...prev, [`${tab.id}-${order.id}`]: !prev[`${tab.id}-${order.id}`] })) : handleToggleOrderHighlight(
-                                                                            tab.id,
-                                                                            order.id,
-                                                                            order.isManualHighlight,
-                                                                          );
-                                                                        }}
-                                                                      >
-                                                                        {showLabel && (
-                                                                          <span
-                                                                            className={`text-[9px] tracking-wider font-extrabold px-1 py-0.5 rounded leading-none ${
-                                                                              isHighlighted
-                                                                                ? "bg-black/10 text-amber-950"
-                                                                                : "bg-amber-100 text-amber-800"
-                                                                            }`}
-                                                                          >
-                                                                            {keyLabel}
-                                                                          </span>
-                                                                        )}
-                                                                        <span
-                                                                          className={`text-xs leading-none ${
-                                                                            isHighlighted
-                                                                              ? "font-black"
-                                                                              : "font-bold"
-                                                                          }`}
-                                                                        >
-                                                                          {order.price
-                                                                            ? `$${order.price.toLocaleString()}`
-                                                                            : "市價"}
-                                                                        </span>
-                                                                      </div>
-                                                                    );
-                                                                  },
-                                                                )}
+                                                              {orders.sort((a: any, b: any) => (b.price || 0) - (a.price || 0)).map((order: any) => {
+                                                                const isSL = cleanCat === "止損設定";
+                                                                const isBarrier = cleanCat === "支撐門檻" || cleanCat === "壓力門檻";
+                                                                const directionLabel = isBarrier ? (cleanCat === "支撐門檻" ? "支撐" : "壓力") : (order.direction === "BUY" ? "買入" : "賣出");
+                                                                const isSpecial = directionLabel === "支撐" || directionLabel === "壓力";
+                                                                const isHighlighted = (order.price && tab.currentPrice && Math.abs((tab.currentPrice - order.price) / order.price) <= 0.02) || order.isManualHighlight || !!manualHighlight[`${tab.id}-${order.id}`];
+                                                                let styleClass = "";
+                                                                let borderStyle = "border";
+                                                                if (isHighlighted) {
+                                                                  styleClass = "bg-amber-500 text-zinc-950 border-amber-600 shadow-sm font-semibold";
+                                                                  borderStyle = "border";
+                                                                } else if (isSL) {
+                                                                  styleClass = "border-red-200 text-red-700 bg-red-50";
+                                                                } else if (isBarrier) {
+                                                                  styleClass = "bg-amber-50/50 border-amber-200 text-amber-800";
+                                                                } else {
+                                                                  styleClass = order.direction === "BUY" ? "bg-emerald-50/50 border-emerald-200 text-emerald-800 font-medium" : "bg-blue-50/50 border-blue-200 text-blue-800 font-medium";
+                                                                }
+                                                                return (
+                                                                  <div
+                                                                    key={order.id}
+                                                                    title={order.notes || order.conditions || ""}
+                                                                    className={`rounded-lg ${borderStyle} py-1 px-2.5 flex items-center gap-1.5 backdrop-blur-sm transition-all duration-300 cursor-pointer select-none ${styleClass}`}
+                                                                    onClick={(e) => e.stopPropagation()}
+                                                                    onDoubleClick={(e) => {
+                                                                      e.stopPropagation();
+                                                                      if (order.id.startsWith("tp-") || order.id.startsWith("sl-") || order.id.startsWith("entry-") || order.id.startsWith("res-") || order.id.startsWith("sup-")) {
+                                                                        setManualHighlight(prev => ({
+                                                                          ...prev,
+                                                                          [`${tab.id}-${order.id}`]: !prev[`${tab.id}-${order.id}`]
+                                                                        }));
+                                                                      } else {
+                                                                        handleToggleOrderHighlight(tab.id, order.id, order.isManualHighlight);
+                                                                      }
+                                                                    }}
+                                                                  >
+                                                                    {isSpecial && (
+                                                                      <span className={`text-[9px] tracking-wider font-extrabold px-1 py-0.5 rounded leading-none ${isHighlighted ? "bg-black/10 text-amber-950" : "bg-amber-100 text-amber-800"}`}>
+                                                                        {directionLabel}
+                                                                      </span>
+                                                                    )}
+                                                                    <span className={`text-xs leading-none ${isHighlighted ? "font-black" : "font-bold"}`}>
+                                                                      {order.price ? `$${order.price.toLocaleString()}` : "市價"}
+                                                                    </span>
+                                                                  </div>
+                                                                );
+                                                              })}
                                                             </div>
                                                           </div>
                                                         );
-                                                      },
-                                                    )}
-                                                </div>
-                                              </div>
-                                            )}
-
-                                            {trades.length > 0 && (
-                                              <div className="mt-2 pt-2 border-t border-white/10 relative z-10">
-                                                <div className="flex items-center justify-between mb-[4px]">
-                                                  <p className="text-[12px] font-bold text-zinc-500 tracking-wide uppercase">
-                                                    近期操作記錄 (
-                                                    {trades.length})
-                                                  </p>
-                                                  {stats.totalQuantity !==
-                                                    0 && (
-                                                    <div className="flex items-center gap-2 text-[10px] text-white/40">
-                                                      <span>
-                                                        平均成本{" "}
-                                                        <span className="font-bold text-white/80">
-                                                          $
-                                                          {stats.averagePrice.toLocaleString(
-                                                            undefined,
-                                                            {
-                                                              minimumFractionDigits: 2,
-                                                              maximumFractionDigits: 2,
-                                                            },
-                                                          )}
-                                                        </span>
-                                                      </span>
-                                                      <span>
-                                                        持有數量{" "}
-                                                        <span className="font-bold text-white/80">
-                                                          {Math.abs(
-                                                            stats.totalQuantity,
-                                                          )}
-                                                          股
-                                                        </span>
-                                                      </span>
+                                                      })}
                                                     </div>
-                                                  )}
-                                                </div>
-                                                <div className="flex flex-wrap gap-1">
-                                                  {trades
-                                                    .slice(0, 3)
-                                                    .map((trade) => (
-                                                      <div
-                                                        key={trade.id}
-                                                        className={`text-[11px] rounded border px-[8px] py-[2px] flex items-center gap-[4px] backdrop-blur-md ${trade.type === "BUY" ? "bg-emerald-50 border-emerald-200/80 text-emerald-800" : "bg-blue-50 border-blue-200/80 text-blue-800"}`}
-                                                      >
-                                                        <span className="font-bold">
-                                                          {trade.type === "BUY"
-                                                            ? "買，"
-                                                            : "賣，"}
-                                                        </span>
-                                                        <span className="font-medium">
-                                                          {trade.price
-                                                            ? `$${trade.price}`
-                                                            : "市價"}{" "}
-                                                          / {trade.quantity}股
-                                                        </span>
-                                                        {trade.operator === "機器" && (
-                                                          <span className="text-red-500 font-bold ml-0.5">(機器)</span>
-                                                        )}
-                                                        {trade.operator === "人" && (
-                                                          <span className="text-zinc-500 font-bold ml-0.5">(人)</span>
-                                                        )}
-                                                      </div>
-                                                    ))}
-                                                  {trades.length > 3 && (
-                                                    <div className="text-[11px] rounded border border-zinc-200 bg-zinc-100/50 px-[8px] py-[2px] flex items-center gap-[4px] text-zinc-500">
-                                                      +{trades.length - 3} 更多
-                                                    </div>
-                                                  )}
-                                                </div>
-                                              </div>
-                                            )}
+                                                  </div>
+                                                )}
 
-                                            {/* Flip Trigger Area (Bottom section) */}
-                                            <div
-                                              className="absolute bottom-0 left-0 right-0 h-[60px] z-20 cursor-pointer group/flip bg-gradient-to-t from-white/[0.03] to-transparent sm:hover:from-white/[0.08] transition-colors"
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                setFlippedCards((prev) => ({
-                                                  ...prev,
-                                                  [tab.id]: true,
-                                                }));
-                                              }}
-                                            >
-                                              <div className="absolute bottom-2 right-3 opacity-60 sm:opacity-0 sm:group-hover/flip:opacity-60 text-[10px] text-white transition-opacity flex items-center gap-1 font-bold">
-                                                <svg
-                                                  width="12"
-                                                  height="12"
-                                                  viewBox="0 0 24 24"
-                                                  fill="none"
-                                                  stroke="currentColor"
-                                                  strokeWidth="2.5"
-                                                  strokeLinecap="round"
-                                                  strokeLinejoin="round"
-                                                >
-                                                  <path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 0 1 9-9" />
-                                                </svg>
-                                                數據圖視化
-                                              </div>
-                                            </div>
+                                                {/* Recent transaction history */}
+                                                {trades.length > 0 && (
+                                                  <div className="mt-2 pt-2 border-t border-white/10 relative z-10">
+                                                    <div className="flex items-center justify-between mb-[4px]">
+                                                      <p className="text-[12px] font-bold text-zinc-500 tracking-wide uppercase">
+                                                        近期操作記錄 (${trades.length})
+                                                      </p>
+                                                      {stats.totalQuantity !== 0 && (
+                                                        <div className="flex items-center gap-2 text-[10px] text-white/40">
+                                                          <span>
+                                                            平均成本{" "}
+                                                            <span className="font-bold text-white/80">
+                                                              $${stats.averagePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                            </span>
+                                                          </span>
+                                                          <span>
+                                                            持有數量{" "}
+                                                            <span className="font-bold text-white/80">
+                                                              {Math.abs(stats.totalQuantity)}股
+                                                            </span>
+                                                          </span>
+                                                        </div>
+                                                      )}
+                                                    </div>
+                                                    <div className="flex flex-wrap gap-1">
+                                                      {trades.slice(0, 3).map((hist: any) => (
+                                                        <div
+                                                          key={hist.id}
+                                                          className={`text-[11px] rounded border px-[8px] py-[2px] flex items-center gap-[4px] backdrop-blur-md ${hist.type === "BUY" ? "bg-emerald-50 border-emerald-200/80 text-emerald-800" : "bg-blue-50 border-blue-200/80 text-blue-800"}`}
+                                                        >
+                                                          <span className="font-bold">{hist.type === "BUY" ? "買，" : "賣，"}</span>
+                                                          <span className="font-medium">
+                                                            {hist.price ? `$${hist.price}` : "市價"} / {hist.quantity}股
+                                                          </span>
+                                                          {hist.operator === "機器" && <span className="text-red-500 font-bold ml-0.5">(機器)</span>}
+                                                          {hist.operator === "人" && <span className="text-zinc-500 font-bold ml-0.5">(人)</span>}
+                                                        </div>
+                                                      ))}
+                                                      {trades.length > 3 && (
+                                                        <div className="text-[11px] rounded border border-zinc-200 bg-zinc-100/50 px-[8px] py-[2px] flex items-center gap-[4px] text-zinc-500">
+                                                          +{trades.length - 3} 更多
+                                                        </div>
+                                                      )}
+                                                    </div>
+                                                  </div>
+                                                )}
+
+                                                {/* Flip button */}
+                                                {!isCinemaModeActive && (
+                                                  <div
+                                                    className="absolute bottom-0 left-0 right-0 h-[60px] z-20 cursor-pointer group/flip bg-gradient-to-t from-white/[0.03] to-transparent sm:hover:from-white/[0.08] transition-colors"
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      setFlippedCards(prev => ({ ...prev, [tab.id]: true }));
+                                                    }}
+                                                  >
+                                                    <div className="absolute bottom-2 right-3 opacity-60 sm:opacity-0 sm:group-hover/flip:opacity-60 text-[10px] text-white transition-opacity flex items-center gap-1 font-bold">
+                                                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                        <path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 0 1 9-9" />
+                                                      </svg>
+                                                      數據圖視化
+                                                    </div>
+                                                  </div>
+                                                )}
                                               </>
                                             )}
-                                            </div>
                                           </div>
+                                        </div>
 
-                                          {/* Back Face */}
-                                          {isCardExpanded && (
-                                            <div
-                                              style={{
-                                              pointerEvents: flippedCards[tab.id]
-                                                ? "auto"
-                                                : "none",
-                                            }}
-                                            className={`card-back absolute inset-0 glass-card bg-transparent rounded-2xl flex flex-col w-full h-full sm:hover:bg-white/[0.04] transition-all duration-500 overflow-hidden ${
-                                              activeTabStrategies[tab.id]?.observeChecked
-                                                ? "card-breathe-observe"
-                                                : activeTabStrategies[tab.id]?.closeChecked
-                                                ? "card-breathe-close"
-                                                : activeTabStrategies[tab.id]?.slChecked
-                                                ? "card-breathe-sl"
-                                                : activeTabStrategies[tab.id]?.addChecked
-                                                ? "card-breathe-add"
-                                                : activeTabStrategies[tab.id]?.tpChecked
-                                                ? "card-breathe-tp"
-                                                : ""
-                                            }`}
-                                          >
-                                            {/* 左側色條 */}
-                                            {(() => {
-                                              const strat = activeTabStrategies[tab.id] || {};
-                                              let color = "";
-                                              if (strat.observeChecked) color = "#C9C9C9";
-                                              else if (strat.closeChecked) color = "#EBF527";
-                                              else if (strat.slChecked) color = "#E04141";
-                                              else if (strat.addChecked) color = "#426B4A";
-                                              else if (strat.tpChecked) color = "#35428C";
-
-                                              if (!color) return null;
-                                              return (
-                                                <div 
-                                                  style={{ backgroundColor: color }}
-                                                  className="absolute left-0 top-4 bottom-4 w-[3px] z-30 rounded-full"
-                                                />
-                                              );
-                                            })()}
-
-                                            {/* Independent Top Banner Row for visualizer (back face) */}
-                                            {(() => {
-                                              const isBannerActive = tab.isDeviationConfirmed || tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle;
-                                              const bannerBgColor = tab.isDeviationConfirmed
-                                                ? "#F0D1B9"
-                                                : tab.isOperationConfirmed
-                                                  ? "#A3A3A3"
-                                                  : tab.isFavoriteHighlight
-                                                    ? "#B1C28D"
-                                                    : shouldHighlightTitle
-                                                      ? "#F5DAD5"
-                                                      : "transparent";
-
-                                              const bannerTextColor = tab.isDeviationConfirmed
-                                                ? "#7a4a1e"
-                                                : tab.isOperationConfirmed
-                                                  ? "#7a4a1e"
-                                                  : tab.isFavoriteHighlight
-                                                    ? "#7a4a1e"
-                                                    : shouldHighlightTitle
-                                                      ? "#7a4a1e"
-                                                      : "rgba(255, 255, 255, 0.7)";
-
-                                              const statusInfo = getCardStatusInfo(tab);
-                                              const dotColor = isBannerActive ? bannerTextColor : statusInfo.color;
-
-                                              return (
-                                                <div
-                                                  style={{ backgroundColor: bannerBgColor }}
-                                                  className={`w-full h-[18px] flex items-center justify-between px-3 transition-colors duration-500 shrink-0 border-b ${isBannerActive ? "border-transparent" : "border-white/5"} select-none`}
-                                                >
-                                                  {/* Status with dot */}
-                                                  <div className="flex items-center gap-1.5 font-sans">
-                                                    <span 
-                                                      className="w-1.5 h-1.5 rounded-full inline-block transition-colors duration-500" 
-                                                      style={{ backgroundColor: dotColor }}
-                                                    />
-                                                  </div>
-
-                                                  {/* Timestamp & Close Button */}
-                                                  <div className="flex items-center gap-2">
-                                                    {tab.updatedAt && (
-                                                      <span 
-                                                        style={{ color: bannerTextColor }}
-                                                        className="text-[9.5px] font-black tracking-wider opacity-80 transition-colors duration-500 font-bold"
-                                                      >
-                                                        {typeof tab.updatedAt.toDate === 'function' 
-                                                          ? format(tab.updatedAt.toDate(), 'yyyy/MM/dd HH:mm') 
-                                                          : ''}
-                                                      </span>
-                                                    )}
-                                                    <button
-                                                      onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        setFlippedCards((prev) => ({
-                                                          ...prev,
-                                                          [tab.id]: false,
-                                                        }));
-                                                      }}
-                                                      style={{ 
-                                                        color: bannerTextColor, 
-                                                        borderColor: isBannerActive ? 'rgba(122,74,30,0.2)' : 'rgba(255,255,255,0.1)' 
-                                                      }}
-                                                      className="w-3.5 h-3.5 flex items-center justify-center rounded-full border bg-black/10 sm:hover:bg-black/20 text-[7px] font-black transition-all leading-none"
-                                                      title="返回正面"
-                                                    >
-                                                      ✕
-                                                    </button>
-                                                  </div>
+                                      {/* Card Back */}
+                                      {isCardExpanded && (
+                                        <div
+                                          style={{ pointerEvents: (flippedCards[tab.id] || isCinemaModeActive) ? "auto" : "none" }}
+                                          className={`card-back absolute inset-0 glass-card bg-transparent rounded-2xl flex flex-col w-full h-full sm:hover:bg-white/[0.04] transition-all duration-500 overflow-hidden ${
+                                            (activeTabStrategies[tab.id])?.observeChecked ? "card-breathe-observe" : (activeTabStrategies[tab.id])?.closeChecked ? "card-breathe-close" : (activeTabStrategies[tab.id])?.slChecked ? "card-breathe-sl" : (activeTabStrategies[tab.id])?.addChecked ? "card-breathe-add" : (activeTabStrategies[tab.id])?.tpChecked ? "card-breathe-tp" : ""
+                                          }`}
+                                        >
+                                          {(() => {
+                                            const strat = activeTabStrategies[tab.id] || {};
+                                            let indicatorColor = "";
+                                            if (strat.observeChecked) indicatorColor = "#C9C9C9";
+                                            else if (strat.closeChecked) indicatorColor = "#EBF527";
+                                            else if (strat.slChecked) indicatorColor = "#E04141";
+                                            else if (strat.addChecked) indicatorColor = "#426B4A";
+                                            else if (strat.tpChecked) indicatorColor = "#35428C";
+                                            return indicatorColor ? (
+                                              <div style={{ backgroundColor: indicatorColor }} className="absolute left-0 top-4 bottom-4 w-[3px] z-30 rounded-full" />
+                                            ) : null;
+                                          })()}
+                                          {(() => {
+                                            const isSpecialHighlight = tab.isDeviationConfirmed || tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle;
+                                            const bgCol = tab.isDeviationConfirmed ? "#F0D1B9" : tab.isOperationConfirmed ? "#A3A3A3" : tab.isFavoriteHighlight ? "#B1C28D" : shouldHighlightTitle ? "#F5DAD5" : "transparent";
+                                            const labelCol = tab.isDeviationConfirmed || tab.isOperationConfirmed || tab.isFavoriteHighlight || shouldHighlightTitle ? "#7a4a1e" : "rgba(255, 255, 255, 0.7)";
+                                            const statusColor = getCardStatusInfo(tab).color;
+                                            const textIndicatorColor = isSpecialHighlight ? labelCol : statusColor;
+                                            return (
+                                              <div
+                                                style={{ backgroundColor: bgCol }}
+                                                className={`w-full h-[18px] flex items-center justify-between px-3 transition-colors duration-500 shrink-0 border-b ${isSpecialHighlight ? "border-transparent" : "border-white/5"} select-none`}
+                                              >
+                                                <div className="flex items-center gap-1.5 font-sans">
+                                                  <span className="w-1.5 h-1.5 rounded-full inline-block transition-colors duration-500" style={{ backgroundColor: textIndicatorColor }} />
                                                 </div>
-                                              );
-                                            })()}
+                                                <div className="flex items-center gap-2">
+                                                  {tab.updatedAt && (
+                                                    <span style={{ color: labelCol }} className="text-[9.5px] font-black tracking-wider opacity-80 transition-colors duration-500 font-bold">
+                                                      {typeof tab.updatedAt.toDate === "function" ? format(tab.updatedAt.toDate(), "yyyy/MM/dd HH:mm") : ""}
+                                                    </span>
+                                                  )}
+                                                  <button
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      setFlippedCards(prev => ({ ...prev, [tab.id]: false }));
+                                                    }}
+                                                    style={{ color: labelCol, borderColor: isSpecialHighlight ? "rgba(122,74,30,0.2)" : "rgba(255,255,255,0.1)" }}
+                                                    className="w-3.5 h-3.5 flex items-center justify-center rounded-full border bg-black/10 sm:hover:bg-black/20 text-[7px] font-black transition-all leading-none"
+                                                    title="返回正面"
+                                                  >
+                                                    ✕
+                                                  </button>
+                                                </div>
+                                              </div>
+                                            );
+                                          })()}
 
-                                            {/* Padded wrapper for the visualizer content */}
-                                            <div className="flex-1 flex flex-col p-2.5 pt-1.5 w-full min-h-0 relative overflow-hidden">
-                                              {/* 左側色條 */}
-                                              {(() => {
-                                                const strat = activeTabStrategies[tab.id] || {};
-                                                let color = "";
-                                                if (strat.observeChecked) color = "#C9C9C9";
-                                                else if (strat.closeChecked) color = "#EBF527";
-                                                else if (strat.slChecked) color = "#E04141";
-                                                else if (strat.addChecked) color = "#426B4A";
-                                                else if (strat.tpChecked) color = "#35428C";
+                                          <div className="flex-1 flex flex-col p-2.5 pt-1.5 w-full min-h-0 relative overflow-hidden">
+                                            <StockCardVisualizer
+                                              plannedOrders={plannedOrders}
+                                              currentPrice={tab.currentPrice}
+                                              onToggleHighlight={(orderId, isManual) => {
+                                                if (orderId.startsWith("tp-") || orderId.startsWith("sl-") || orderId.startsWith("entry-") || orderId.startsWith("res-") || orderId.startsWith("sup-")) {
+                                                  setManualHighlight(prev => ({
+                                                    ...prev,
+                                                    [`${tab.id}-${orderId}`]: !prev[`${tab.id}-${orderId}`]
+                                                  }));
+                                                } else {
+                                                  handleToggleOrderHighlight(tab.id, orderId, isManual);
+                                                }
+                                              }}
+                                              tabId={tab.id}
+                                              annotations={tab.chartAnnotations || []}
+                                              onUpdateAnnotations={(annots) => updateTab(tab.id, { chartAnnotations: annots })}
+                                              averageCost={stats.totalQuantity !== 0 ? stats.averagePrice : undefined}
+                                              averageCostQuantity={stats.totalQuantity !== 0 ? stats.totalQuantity : undefined}
+                                              stockName={tab.symbol}
+                                              rating={tab.rating}
+                                              qualityScore={tab.qualityScore}
+                                              valueScore={tab.valueScore}
+                                              buyRate={tab.buyRate}
+                                              sellRate={tab.sellRate}
+                                              volatility={tab.volatility}
+                                              crashSimilarity={tab.crashSimilarity}
+                                              onRatingBarDoubleClick={(e) => {
+                                                if (e.stopPropagation) e.stopPropagation();
+                                                setVisualizerFocusTabId(tab.id);
+                                                setVisualizerFocusText((activeTabStrategies[tab.id])?.operationFocus || "");
+                                              }}
+                                              strategy={activeTabStrategies[tab.id]}
+                                              tradeDirection={tab.tradeDirection}
+                                              onUpdateStrategyField={(field, val) => handleUpdateStrategyField(tab.id, field, val)}
+                                              onUpdateTPChecked={(val) => handleUpdateTPChecked(tab.id, val)}
+                                              onUpdateSLChecked={(val) => handleUpdateSLChecked(tab.id, val)}
+                                              onUpdateAddChecked={(val) => handleUpdateAddChecked(tab.id, val)}
+                                              onUpdateCloseChecked={(val) => handleUpdateCloseChecked(tab.id, val)}
+                                              onUpdateObserveChecked={(val) => handleUpdateObserveChecked(tab.id, val)}
+                                              onUpdateNotesHighlighted={(val) => handleUpdateNotesHighlighted(tab.id, val)}
+                                            />
+                                          </div>
+                                        </div>
+                                      )}
 
-                                                if (!color) return null;
-                                                return (
-                                                  <div 
-                                                    style={{ backgroundColor: color }}
-                                                    className="hidden"
-                                                  />
-                                                );
-                                              })()}
-
-                                              <StockCardVisualizer
-                                                plannedOrders={plannedOrders}
-                                                currentPrice={tab.currentPrice}
-                                                onToggleHighlight={(orderId, currentStatus) => { if (orderId.startsWith("tp-") || orderId.startsWith("sl-") || orderId.startsWith("entry-") || orderId.startsWith("res-") || orderId.startsWith("sup-")) { setStrategyHighlights(prev => ({ ...prev, [`${tab.id}-${orderId}`]: !prev[`${tab.id}-${orderId}`] })); } else { handleToggleOrderHighlight(tab.id, orderId, currentStatus); } }}
-                                                tabId={tab.id}
-                                                annotations={tab.chartAnnotations || []}
-                                                onUpdateAnnotations={(newAnn) => updateTab(tab.id, { chartAnnotations: newAnn })}
-                                                averageCost={stats.totalQuantity !== 0 ? stats.averagePrice : undefined}
-                                                averageCostQuantity={stats.totalQuantity !== 0 ? stats.totalQuantity : undefined}
-                                                stockName={tab.symbol}
-                                                rating={tab.rating}
-                                                qualityScore={tab.qualityScore}
-                                                valueScore={tab.valueScore}
-                                                buyRate={tab.buyRate}
-                                                sellRate={tab.sellRate}
-                                                volatility={tab.volatility}
-                                                crashSimilarity={tab.crashSimilarity}
-                                                onRatingBarDoubleClick={(e) => {
-                                                  if (e.stopPropagation) e.stopPropagation();
-                                                  setVisualizerFocusTabId(tab.id);
-                                                  setVisualizerFocusText(activeTabStrategies[tab.id]?.operationFocus || "");
-                                                }}
-                                                strategy={activeTabStrategies[tab.id]}
-                                                tradeDirection={tab.tradeDirection}
-                                                onUpdateStrategyField={(field, checked) => handleUpdateStrategyField(tab.id, field, checked)}
-                                                onUpdateTPChecked={(checked) => handleUpdateTPChecked(tab.id, checked)}
-                                                onUpdateSLChecked={(checked) => handleUpdateSLChecked(tab.id, checked)}
-                                                onUpdateAddChecked={(checked) => handleUpdateAddChecked(tab.id, checked)}
-                                                onUpdateCloseChecked={(checked) => handleUpdateCloseChecked(tab.id, checked)}
-                                                onUpdateObserveChecked={(checked) => handleUpdateObserveChecked(tab.id, checked)}
-                                                onUpdateNotesHighlighted={(checked) => handleUpdateNotesHighlighted(tab.id, checked)}
-                                              />
+                                      {tab.isNew && (
+                                        <div
+                                          className="absolute top-0 right-0 z-[100] flex items-center justify-center select-none whitespace-nowrap pointer-events-none"
+                                          style={{
+                                            background: "linear-gradient(135deg, #ff6b35 0%, #e03030 100%)",
+                                            color: "#ffffff",
+                                            fontSize: "10px",
+                                            fontWeight: "700",
+                                            letterSpacing: "0.12em",
+                                            padding: "5px 13px 5px 10px",
+                                            borderRadius: "0 14px 0 12px",
+                                            fontFamily: "var(--font-sans)",
+                                          }}
+                                        >
+                                          NEW
+                                        </div>
+                                      )}
                                             </div>
-                                          </div>
-                                          )}
+                                          </motion.div>
                                         </div>
-
-
-
-                                        {/* NEW Corner Block Tag - placed at container level */}
-                                        {tab.isNew && (
-                                          <div 
-                                            className="absolute top-0 right-0 z-[100] flex items-center justify-center select-none whitespace-nowrap pointer-events-none"
-                                            style={{ 
-                                              background: "linear-gradient(135deg, #ff6b35 0%, #e03030 100%)",
-                                              color: "#ffffff",
-                                              fontSize: "10px",
-                                              fontWeight: "700",
-                                              letterSpacing: "0.12em",
-                                              padding: "5px 13px 5px 10px",
-                                              borderRadius: "0 14px 0 12px",
-                                              fontFamily: "var(--font-sans)",
-                                            }}
-                                          >
-                                            NEW
-                                          </div>
-                                        )}
-                                      </motion.div>
-                                      </div>
-                                    </div>
-                                  );
-                                  };
-
-                                  if (group.isGroup) {
-                                    return (
-                                      <div 
-                                        key={group.id} 
-                                        className="relative flex p-1.5 sm:p-2 bg-gradient-to-r from-white/[0.04] to-white/[0.01] rounded-[36px] shrink-0 gap-4 group/box transition-all"
-                                        style={{ border: '0.8px solid #D9FF00', boxShadow: 'none' }}
-                                      >
-                                        {/* Optional Label / Indicator indicating this is a paired block could go here */}
-                                        <div className="absolute -top-2 left-1/2 -translate-x-1/2 bg-white/10 px-3 py-0.5 rounded-full text-[10px] font-bold text-white/50 opacity-0 group-hover/box:opacity-100 transition-opacity whitespace-nowrap pointer-events-none border border-white/10">
-                                          連動區塊
-                                        </div>
-                                        {group.tabs.map((t, i) => renderCard(t, i))}
                                       </div>
                                     );
-                                  }
-                                  
-                                  return renderCard(group.tabs[0], groupIdx);
+                                  };
+
+                                  renderCardRef.current = renderCard;
+
+                                  return group.isGroup ? (
+                                    <div
+                                      key={group.id}
+                                      className="relative flex p-1.5 sm:p-2 bg-gradient-to-r from-white/[0.04] to-white/[0.01] rounded-[36px] shrink-0 gap-4 group/box transition-all"
+                                      style={{ border: "0.8px solid #D9FF00", boxShadow: "none" }}
+                                    >
+                                      <div className="absolute -top-2 left-1/2 -translate-x-1/2 bg-white/10 px-3 py-0.5 rounded-full text-[10px] font-bold text-white/50 opacity-0 group-hover/box:opacity-100 transition-opacity whitespace-nowrap pointer-events-none border border-white/10">
+                                        連動區塊
+                                      </div>
+                                      {group.tabs.map((tabItem: any, tabIdx: number) => renderCard(tabItem, tabIdx))}
+                                    </div>
+                                  ) : (
+                                    renderCard(group.tabs[0], groupIdx)
+                                  );
                                 })}
                               </div>
                             </div>
-
-                            {/* 底線滑動指示器導覽列 - Desktop Only */}
-                            {filteredSubTabVisibleTabs.length > 0 && (
-                              <div className="hidden sm:block mt-6 px-4 md:px-8 w-full">
-                                <div className="flex justify-center w-full">
-                                  <div className="relative max-w-4xl pb-2">
-                                    {/* Scrollable Container if there are many tabs */}
-                                    <div className="flex flex-row items-center justify-center gap-6 overflow-x-auto scrollbar-hide relative pb-1.5">
-                                      {filteredSubTabVisibleTabs.map((tab) => {
-                                        const isActive = (activeCardTabId || filteredSubTabVisibleTabs[0]?.id) === tab.id;
-                                        return (
-                                          <button
-                                            key={tab.id}
-                                            ref={(el) => {
-                                              tabRefs.current[tab.id] = el;
-                                            }}
-                                            onClick={() => handleTabIndicatorClick(tab.id)}
-                                            className="px-2 py-1 text-sm font-medium transition-colors duration-200 cursor-pointer outline-none shrink-0"
-                                            style={{
-                                              color: isActive ? "#1a1a1a" : "#999999",
-                                              fontWeight: isActive ? 500 : 400,
-                                            }}
-                                          >
-                                            {tab.symbol}
-                                          </button>
-                                        );
-                                      })}
-                                      
-                                      {/* Track Line */}
-                                      <div 
-                                        className="absolute bottom-0 left-0 right-0" 
-                                        style={{ height: "1.5px", backgroundColor: "#e0e0e0" }}
-                                      />
-                                      
-                                      {/* Sliding Indicator Line */}
-                                      <div
-                                        className="absolute bottom-0"
-                                        style={{
-                                          height: "2px",
-                                          backgroundColor: "#1a1a1a",
-                                          borderRadius: "2px",
-                                          left: `${indicatorStyle.left}px`,
-                                          width: `${indicatorStyle.width}px`,
-                                          transition: "left 0.3s cubic-bezier(0.16, 1, 0.3, 1), width 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
-                                        }}
-                                      />
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-                            </>
-                          )}
+                          </>
+                        )}
                         </AnimatePresence>
                       </div>
                     </div>
                   </div>
-                </div>
-              </ScrollIn>
+                  </div>
+                </ScrollIn>
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
         {activeViewTab === "completed" && (
           <div className="grid grid-cols-1 gap-6">
@@ -6583,6 +6276,240 @@ export default function Dashboard() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {isCinemaModeActive && (
+        <AnimatePresence>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[99999] bg-[#0a0a0a] flex flex-col p-6 text-white select-none overflow-hidden"
+          >
+            {/* Top Bar */}
+            <div className="w-full flex items-center justify-between border-b border-white/5 pb-4 opacity-90">
+              <div className="flex items-center gap-2">
+                <span className="text-[#e5484d] text-base leading-none animate-pulse">●</span>
+                <span className="text-[13px] font-semibold tracking-wider text-zinc-400 font-sans">
+                  電影觀賞專注模式 · CINEMA FOCUS
+                </span>
+              </div>
+              <div className="flex items-center gap-4">
+                <span className="text-xs text-zinc-500 font-sans">
+                  ESC / X 鍵退出電影模式
+                </span>
+                <button
+                  onClick={() => {
+                    setIsCinemaModeActive(false);
+                    if (document.fullscreenElement) {
+                      document.exitFullscreen().catch(() => {});
+                    }
+                  }}
+                  className="w-8 h-8 rounded-full border border-white/10 hover:border-white/20 bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/80 hover:text-white transition-all cursor-pointer text-xs"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Split Screen Container: Left Sidebar & Right Main View */}
+            <div className="flex-1 w-full flex flex-col lg:flex-row min-h-0 relative mt-4 overflow-hidden gap-8">
+              {/* Left Sidebar containing Category Tabs & CinemaDock (placed near center-left vertically) */}
+              <div className="w-full lg:w-64 shrink-0 flex flex-col gap-6 lg:border-r lg:border-white/5 lg:pr-6 justify-center items-start py-4 overflow-y-auto scrollbar-hide">
+                {/* Classification Category Section */}
+                <div className="w-full flex flex-col gap-3">
+                  <div className="text-[10px] font-bold tracking-widest text-zinc-500 font-sans uppercase">
+                    分類選單 CATEGORY
+                  </div>
+
+                  {/* Primary Tabs */}
+                  <div className="flex bg-[#161616] p-1 rounded-full border border-white/5 shadow-inner w-full">
+                    <button
+                      onClick={() => {
+                        setActiveViewTab("active");
+                        playClickSound();
+                      }}
+                      className={`flex-1 py-1 text-[11px] font-semibold rounded-full transition-all duration-200 flex items-center justify-center gap-1 cursor-pointer ${
+                        activeViewTab === "active"
+                          ? "bg-[#e5484d] text-white shadow-md font-bold"
+                          : "text-zinc-400 hover:text-zinc-200"
+                      }`}
+                    >
+                      <Activity className="w-3 h-3" />
+                      <span>持有中</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setActiveViewTab("real");
+                        playClickSound();
+                      }}
+                      className={`flex-1 py-1 text-[11px] font-semibold rounded-full transition-all duration-200 flex items-center justify-center gap-1 cursor-pointer ${
+                        activeViewTab === "real"
+                          ? "bg-[#e5484d] text-white shadow-md font-bold"
+                          : "text-zinc-400 hover:text-zinc-200"
+                      }`}
+                    >
+                      <ShieldCheck className="w-3 h-3" />
+                      <span>真實交易</span>
+                    </button>
+                  </div>
+
+                  {/* Sub Tabs */}
+                  <div className="flex flex-col gap-1 w-full">
+                    {visibleSubTabs.map((tab) => {
+                      const isActive = activeHoldingSubTab === tab;
+                      const tabCount = effectiveVisibleActiveTabs.filter(
+                        (t) => getDisplayHoldingStatus(t.holdingStatus) === tab
+                      ).length;
+                      return (
+                        <button
+                          key={`cinema-sub-${tab}`}
+                          onClick={() => {
+                            setActiveHoldingSubTab(tab as any);
+                            playClickSound();
+                          }}
+                          className={`w-full px-3 py-1.5 text-[11px] font-medium rounded-lg transition-all flex items-center justify-between border cursor-pointer ${
+                            isActive
+                              ? "bg-white/10 text-white border-white/10 shadow-sm font-semibold"
+                              : "text-zinc-400 hover:text-zinc-200 border-transparent hover:bg-white/5"
+                          }`}
+                        >
+                          <span>{tab === "觀察中" && activeViewTab === "active" ? "虛擬交易" : tab}</span>
+                          <span className={`text-[9px] px-2 py-0.5 rounded-full ${
+                            isActive ? "bg-white/20 text-white" : "bg-zinc-800 text-zinc-500"
+                          }`}>
+                            {tabCount}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Aesthetic Divider */}
+                <div className="w-full h-px bg-white/5" />
+
+                {/* Stock List Dock Section */}
+                <div className="w-full flex flex-col gap-3 min-h-[220px] overflow-hidden">
+                  <div className="text-[10px] font-bold tracking-widest text-zinc-500 font-sans uppercase pl-4">
+                    個股導覽 STOCKS
+                  </div>
+                  <div className="flex-1 overflow-y-auto scrollbar-hide w-full max-h-[45vh]">
+                    {filteredSubTabVisibleTabs.length > 0 ? (
+                      <CinemaDock
+                        tabs={filteredSubTabVisibleTabs}
+                        activeId={activeCinemaCardId}
+                        onSelect={(id) => setActiveCinemaCardId(id)}
+                      />
+                    ) : (
+                      <div className="py-4 px-4 text-xs text-[#6b6b6b] font-sans tracking-wide">
+                        此分類目前無股票卡片
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Right/Center Main Focus Area */}
+              <div className="flex-1 flex flex-col items-center justify-center relative min-h-0">
+                <div className="flex-1 w-full flex items-center justify-center relative my-2">
+                  {/* Left Arrow */}
+                  {filteredSubTabVisibleTabs.length > 1 && (
+                    <button
+                      onClick={() => {
+                        const currentIndex = filteredSubTabVisibleTabs.findIndex(t => t.id === activeCinemaCardId);
+                        if (currentIndex > 0) {
+                          setActiveCinemaCardId(filteredSubTabVisibleTabs[currentIndex - 1].id);
+                          playSwipeSound();
+                        } else {
+                          setActiveCinemaCardId(filteredSubTabVisibleTabs[filteredSubTabVisibleTabs.length - 1].id);
+                          playSwipeSound();
+                        }
+                      }}
+                      className="absolute left-2 lg:left-4 z-50 w-12 h-12 rounded-full border border-white/10 bg-[#161616]/80 hover:bg-[#222222]/90 text-white flex items-center justify-center transition-all cursor-pointer backdrop-blur-sm shadow-xl hover:scale-110 active:scale-95"
+                      title="上一張"
+                    >
+                      <ChevronLeft className="w-6 h-6" />
+                    </button>
+                  )}
+
+                  {/* Scaled/Zoomed Card Container */}
+                  <div className="flex items-center justify-center w-full h-full max-h-[82vh] overflow-visible">
+                    {filteredSubTabVisibleTabs.map((tab, idx) => {
+                      const isSelected = tab.id === activeCinemaCardId;
+                      if (!isSelected) return null;
+                      const cinemaScale = isMobile ? 0.96 : (typeof window !== "undefined" && window.innerWidth < 1024 ? 1.25 : 1.45);
+                      return (
+                        <motion.div
+                          key={`cinema-${tab.id}`}
+                          initial={{ opacity: 0, scale: 0.8 }}
+                          animate={{ opacity: 1, scale: cinemaScale }}
+                          exit={{ opacity: 0, scale: 0.8 }}
+                          transition={{ duration: 0.35, type: "spring", stiffness: 220, damping: 24 }}
+                          className="origin-center shadow-[0_30px_80px_rgba(0,0,0,0.85)] rounded-2xl"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {renderCardRef.current && renderCardRef.current(tab, idx)}
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Right Arrow */}
+                  {filteredSubTabVisibleTabs.length > 1 && (
+                    <button
+                      onClick={() => {
+                        const currentIndex = filteredSubTabVisibleTabs.findIndex(t => t.id === activeCinemaCardId);
+                        if (currentIndex < filteredSubTabVisibleTabs.length - 1) {
+                          setActiveCinemaCardId(filteredSubTabVisibleTabs[currentIndex + 1].id);
+                          playSwipeSound();
+                        } else {
+                          setActiveCinemaCardId(filteredSubTabVisibleTabs[0].id);
+                          playSwipeSound();
+                        }
+                      }}
+                      className="absolute right-2 lg:right-4 z-50 w-12 h-12 rounded-full border border-white/10 bg-[#161616]/80 hover:bg-[#222222]/90 text-white flex items-center justify-center transition-all cursor-pointer backdrop-blur-sm shadow-xl hover:scale-110 active:scale-95"
+                      title="下一張"
+                    >
+                      <ChevronRight className="w-6 h-6" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Bottom Pagination Info */}
+                <div className="w-full flex flex-col items-center gap-1.5 pb-2">
+                  {/* Sleek page dots */}
+                  {filteredSubTabVisibleTabs.length > 1 && (
+                    <div className="flex items-center justify-center gap-1.5 mb-1">
+                      {filteredSubTabVisibleTabs.map((tab) => {
+                        const isActive = tab.id === activeCinemaCardId;
+                        return (
+                          <span
+                            key={`dot-${tab.id}`}
+                            onClick={() => {
+                              setActiveCinemaCardId(tab.id);
+                              playSwipeSound();
+                            }}
+                            className={`h-[6px] transition-all duration-300 cursor-pointer ${
+                              isActive ? "w-4 bg-[#e5484d] rounded-sm" : "w-[6px] bg-[#3a3a3a] hover:bg-[#555555] rounded-full"
+                            }`}
+                          />
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {filteredSubTabVisibleTabs.length > 0 && (
+                    <div className="text-xs font-mono text-zinc-600 font-medium -mt-1">
+                      第 {filteredSubTabVisibleTabs.findIndex(t => t.id === activeCinemaCardId) + 1} / {filteredSubTabVisibleTabs.length} 檔:{" "}
+                      <span className="text-zinc-400 font-bold">{filteredSubTabVisibleTabs.find(t => t.id === activeCinemaCardId)?.symbol}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        </AnimatePresence>
+      )}
     </div>
     </div>
   );
