@@ -91,6 +91,7 @@ import {
   BookOpen,
   Tv,
   Maximize2,
+  Loader2,
 } from "lucide-react";
 import { calculateStats } from "../lib/calculations";
 import { safeLocalStorage, safeSessionStorage } from "../lib/utils";
@@ -299,6 +300,117 @@ export default function Dashboard() {
   const [isCinemaModeActive, setIsCinemaModeActive] = useState<boolean>(false);
   const [activeCinemaCardId, setActiveCinemaCardId] = useState<string | null>(null);
 
+  // HTML Upload & Preview States
+  const [isUploadHtmlOpen, setIsUploadHtmlOpen] = useState(false);
+  const [isPreviewHtmlOpen, setIsPreviewHtmlOpen] = useState(false);
+  const [htmlUploadSymbol, setHtmlUploadSymbol] = useState("");
+  const [htmlUploadDate, setHtmlUploadDate] = useState(() => {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  });
+  const [htmlFileToUpload, setHtmlFileToUpload] = useState<File | null>(null);
+  const [htmlFileContent, setHtmlFileContent] = useState<string>("");
+  const [isUploadingHtml, setIsUploadingHtml] = useState(false);
+  const [htmlFilesList, setHtmlFilesList] = useState<any[]>([]);
+  const [selectedPreviewFileId, setSelectedPreviewFileId] = useState<number | null>(null);
+
+  const fetchUploadedHtmlFiles = async () => {
+    if (!user) return;
+    try {
+      const response = await fetch(`/api/html-files?userId=${user.uid}`);
+      if (response.ok) {
+        const data = await response.json();
+        setHtmlFilesList(data);
+      }
+    } catch (error) {
+      console.error("Failed to fetch HTML files:", error);
+    }
+  };
+
+  const handleHtmlFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setHtmlFileToUpload(file);
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (event.target?.result) {
+          setHtmlFileContent(event.target.result as string);
+        }
+      };
+      reader.readAsText(file);
+    }
+  };
+
+  const handleUploadHtmlSubmit = async () => {
+    if (!user) {
+      alert("請先登入");
+      return;
+    }
+    if (!htmlUploadSymbol.trim()) {
+      alert("請輸入或選擇個股名稱");
+      return;
+    }
+    if (!htmlFileContent) {
+      alert("請選擇要上傳的 HTML 檔案");
+      return;
+    }
+
+    setIsUploadingHtml(true);
+    const dateFormatted = htmlUploadDate.replace(/-/g, ""); // e.g. 20260708
+    const cleanSymbol = htmlUploadSymbol.trim().toUpperCase();
+    const finalFilename = `${cleanSymbol}_${dateFormatted}.html`;
+
+    try {
+      const response = await fetch("/api/html-files", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userId: user.uid,
+          symbol: cleanSymbol,
+          filename: finalFilename,
+          htmlContent: htmlFileContent,
+        }),
+      });
+
+      if (response.ok) {
+        setIsUploadHtmlOpen(false);
+        setHtmlFileToUpload(null);
+        setHtmlFileContent("");
+        fetchUploadedHtmlFiles();
+      } else {
+        const errData = await response.json();
+        alert(errData.error || "上傳失敗");
+      }
+    } catch (error) {
+      console.error("Error uploading HTML file:", error);
+      alert("上傳出錯，請稍後再試");
+    } finally {
+      setIsUploadingHtml(false);
+    }
+  };
+
+  const handleDeleteHtmlFile = async (id: number) => {
+    if (!confirm("確定要刪除此檔案嗎？")) return;
+    try {
+      const response = await fetch(`/api/html-files/${id}`, {
+        method: "DELETE",
+      });
+      if (response.ok) {
+        setHtmlFilesList(prev => prev.filter(f => f.id !== id));
+        if (selectedPreviewFileId === id) {
+          setSelectedPreviewFileId(null);
+        }
+      }
+    } catch (error) {
+      console.error("Failed to delete file:", error);
+    }
+  };
+
   useEffect(() => {
     const state = location.state as { autoFlipTabId?: string } | null;
     if (state?.autoFlipTabId) {
@@ -470,7 +582,9 @@ export default function Dashboard() {
       let changed = false;
       const allKeys = new Set([...Object.keys(flippedCards), ...Object.keys(lastFlippedCards.current)]);
       for (const k of allKeys) {
-        if (!!flippedCards[k] !== !!lastFlippedCards.current[k]) {
+        const wasBack = lastFlippedCards.current[k] !== false;
+        const isBack = flippedCards[k] !== false;
+        if (wasBack !== isBack) {
           changed = true;
           break;
         }
@@ -779,6 +893,18 @@ export default function Dashboard() {
     hasDraggedBeyondThreshold: false,
     lastX: 0,
     vx: 0,
+  });
+
+  const cardDragTrackerRef = useRef<{
+    startY: number;
+    startX: number;
+    cardId: string | null;
+    hasTriggeredFlip: boolean;
+  }>({
+    startY: 0,
+    startX: 0,
+    cardId: null,
+    hasTriggeredFlip: false,
   });
 
   const animFrameId = useRef<number | null>(null);
@@ -1801,8 +1927,10 @@ export default function Dashboard() {
       const visibleIds = visibleTabsRef.current.map((t) => t.id);
       if (visibleIds.length === 0) return prev;
 
-      const anyUnflipped = visibleIds.some((id) => !prev[id]);
-      const targetState = anyUnflipped;
+      // If any visible card is showing the front face (value is false), flip all to back (true)
+      // otherwise, flip all to front (false)
+      const anyShowingFront = visibleIds.some((id) => prev[id] === false);
+      const targetState = anyShowingFront ? true : false;
       const nextState = { ...prev };
       visibleIds.forEach((id) => {
         nextState[id] = targetState;
@@ -1811,129 +1939,7 @@ export default function Dashboard() {
     });
   }, []);
 
-  // Keyboard shortcuts handling
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const activeEl = document.activeElement;
-      const isInput =
-        activeEl?.tagName === "INPUT" || activeEl?.tagName === "TEXTAREA";
-        
-      if (isInput) return;
 
-      // Shift + H for Fullscreen
-      if (
-        e.shiftKey &&
-        !e.ctrlKey &&
-        !e.metaKey &&
-        (e.key === "H" || e.key === "h")
-      ) {
-        e.preventDefault();
-        if (!document.fullscreenElement) {
-          document.documentElement.requestFullscreen().catch((err) => {
-            console.error(
-              `Error attempting to enable full-screen mode: ${err.message}`,
-            );
-          });
-        } else {
-          document.exitFullscreen();
-        }
-        return;
-      }
-
-      // Shift + F for Search (Only if not Ctrl/Meta)
-      if (e.shiftKey && !e.ctrlKey && !e.metaKey && e.key.toUpperCase() === "F") {
-        e.preventDefault();
-        setIsSearchOpen(true);
-        return;
-      }
-
-      // Shift + A for Add Stock
-      if (e.shiftKey && !e.ctrlKey && !e.metaKey && e.key.toUpperCase() === "A") {
-        e.preventDefault();
-        setIsAddOpen(true);
-        return;
-      }
-
-      // Shift + I for Import Latest Prices
-      if (e.shiftKey && !e.ctrlKey && !e.metaKey && e.key.toUpperCase() === "I") {
-        e.preventDefault();
-        handleImportLatestPrices();
-        return;
-      }
-
-      // Shift + U for managing holding/active stocks
-      if (e.shiftKey && !e.ctrlKey && !e.metaKey && e.key.toUpperCase() === "U") {
-        e.preventDefault();
-        setIsManageHiddenOpen((prev) => !prev);
-        return;
-      }
-
-      // Alt + 1/2/3/4/5/6 for Holding Sub Tabs
-      if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
-        let selectedTab:
-          | "觀察中"
-          | "候選名單"
-          | "買進操作"
-          | "賣出操作"
-          | "平倉操作"
-          | "乖離名單"
-          | null = null;
-        if (e.code === "Digit1") selectedTab = "觀察中";
-        else if (e.code === "Digit2") selectedTab = "候選名單";
-        else if (e.code === "Digit3") selectedTab = "買進操作";
-        else if (e.code === "Digit4") selectedTab = "賣出操作";
-        else if (e.code === "Digit5") selectedTab = "平倉操作";
-        else if (e.code === "Digit6") selectedTab = "乖離名單";
-
-        if (selectedTab) {
-          e.preventDefault();
-          setActiveViewTab("active");
-          setActiveHoldingSubTab(selectedTab);
-          setTimeout(() => {
-            const el = document.getElementById("active-cards-section");
-            if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-          }, 50);
-          return;
-        }
-      }
-
-      // Alt + Z for flipping visible stock cards
-      if (
-        e.altKey &&
-        !e.ctrlKey &&
-        !e.metaKey &&
-        !e.shiftKey &&
-        (e.key === "Z" || e.key === "z")
-      ) {
-        e.preventDefault();
-        handleFlipAllCards();
-        return;
-      }
-
-      // Shift + 1/2/3/4 for Navigation
-      if (e.shiftKey && !e.ctrlKey && !e.metaKey) {
-        if (e.code === "Digit1") {
-          e.preventDefault();
-          setActiveViewTab("active");
-          const el = document.getElementById("active-cards-section");
-          if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-        } else if (e.code === "Digit2") {
-          e.preventDefault();
-          setActiveViewTab("real");
-          const el = document.getElementById("active-cards-section");
-          if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-        } else if (e.code === "Digit3") {
-          e.preventDefault();
-          setActiveViewTab("completed");
-        } else if (e.code === "Digit4") {
-          e.preventDefault();
-          setActiveViewTab("notes");
-        }
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleImportLatestPrices, handleFlipAllCards]);
 
   const handleExportNotesJson = () => {
     if (!user) {
@@ -2910,6 +2916,151 @@ export default function Dashboard() {
     }
     lastActiveCardTabId.current = activeCardTabId;
   }, [activeCardTabId]);
+
+  // Keyboard shortcuts handling
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const isInput =
+        activeEl?.tagName === "INPUT" || activeEl?.tagName === "TEXTAREA";
+        
+      if (isInput) return;
+
+      // Shift + H for Fullscreen
+      if (
+        e.shiftKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        (e.key === "H" || e.key === "h")
+      ) {
+        e.preventDefault();
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen().catch((err) => {
+            console.error(
+              `Error attempting to enable full-screen mode: ${err.message}`,
+            );
+          });
+        } else {
+          document.exitFullscreen();
+        }
+        return;
+      }
+
+      // Shift + F for Search (Only if not Ctrl/Meta)
+      if (e.shiftKey && !e.ctrlKey && !e.metaKey && e.key.toUpperCase() === "F") {
+        e.preventDefault();
+        setIsSearchOpen(true);
+        return;
+      }
+
+      // Shift + A for Add Stock
+      if (e.shiftKey && !e.ctrlKey && !e.metaKey && e.key.toUpperCase() === "A") {
+        e.preventDefault();
+        setIsAddOpen(true);
+        return;
+      }
+
+      // Shift + I for Import Latest Prices
+      if (e.shiftKey && !e.ctrlKey && !e.metaKey && e.key.toUpperCase() === "I") {
+        e.preventDefault();
+        handleImportLatestPrices();
+        return;
+      }
+
+      // Shift + U for managing holding/active stocks
+      if (e.shiftKey && !e.ctrlKey && !e.metaKey && e.key.toUpperCase() === "U") {
+        e.preventDefault();
+        setIsManageHiddenOpen((prev) => !prev);
+        return;
+      }
+
+      // Shift + J for Cinema Focus Mode
+      if (e.shiftKey && !e.ctrlKey && !e.metaKey && e.key.toUpperCase() === "J") {
+        e.preventDefault();
+        if (filteredSubTabVisibleTabs.length > 0) {
+          const isCurrentActiveVisible = filteredSubTabVisibleTabs.some(t => t.id === activeCardTabId);
+          const targetId = isCurrentActiveVisible ? (activeCardTabId || filteredSubTabVisibleTabs[0].id) : filteredSubTabVisibleTabs[0].id;
+          setActiveCinemaCardId(targetId);
+          setIsCinemaModeActive(true);
+          
+          if (document.documentElement.requestFullscreen) {
+            document.documentElement.requestFullscreen().catch((err) => {
+              console.warn("Fullscreen request rejected:", err);
+            });
+          }
+          playClickSound();
+        } else {
+          toast.error("目前無可見的股票卡片可供放大");
+        }
+        return;
+      }
+
+      // Alt + 1/2/3/4/5/6 for Holding Sub Tabs
+      if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+        let selectedTab:
+          | "觀察中"
+          | "候選名單"
+          | "買進操作"
+          | "賣出操作"
+          | "平倉操作"
+          | "乖離名單"
+          | null = null;
+        if (e.code === "Digit1") selectedTab = "觀察中";
+        else if (e.code === "Digit2") selectedTab = "候選名單";
+        else if (e.code === "Digit3") selectedTab = "買進操作";
+        else if (e.code === "Digit4") selectedTab = "賣出操作";
+        else if (e.code === "Digit5") selectedTab = "平倉操作";
+        else if (e.code === "Digit6") selectedTab = "乖離名單";
+
+        if (selectedTab) {
+          e.preventDefault();
+          setActiveViewTab("active");
+          setActiveHoldingSubTab(selectedTab);
+          setTimeout(() => {
+            const el = document.getElementById("active-cards-section");
+            if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+          }, 50);
+          return;
+        }
+      }
+
+      // Alt + Z for flipping visible stock cards
+      if (
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        (e.key === "Z" || e.key === "z")
+      ) {
+        e.preventDefault();
+        handleFlipAllCards();
+        return;
+      }
+
+      // Shift + 1/2/3/4 for Navigation
+      if (e.shiftKey && !e.ctrlKey && !e.metaKey) {
+        if (e.code === "Digit1") {
+          e.preventDefault();
+          setActiveViewTab("active");
+          const el = document.getElementById("active-cards-section");
+          if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+        } else if (e.code === "Digit2") {
+          e.preventDefault();
+          setActiveViewTab("real");
+          const el = document.getElementById("active-cards-section");
+          if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+        } else if (e.code === "Digit3") {
+          e.preventDefault();
+          setActiveViewTab("completed");
+        } else if (e.code === "Digit4") {
+          e.preventDefault();
+          setActiveViewTab("notes");
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleImportLatestPrices, handleFlipAllCards, filteredSubTabVisibleTabs, activeCardTabId, setActiveCinemaCardId, setIsCinemaModeActive]);
 
   useEffect(() => {
     const updateIndicator = () => {
@@ -4856,7 +5007,75 @@ export default function Dashboard() {
                                     <div
                                       key={tab.id}
                                       id={`stock-card-${tab.id}`}
-                                      className={`card-wrapper w-[calc(100vw-32px)] sm:w-[410px] md:w-[410px] shrink-0 flex flex-col transition-all duration-300 ${isCardExpanded ? "min-h-[460px] h-[460px]" : "min-h-[135px] h-[135px]"}`}
+                                      className={`card-wrapper w-[calc(100vw-32px)] sm:w-[410px] md:w-[410px] shrink-0 flex flex-col transition-all duration-300 ${isCardExpanded ? "min-h-[460px] h-[460px] select-none" : "min-h-[135px] h-[135px]"}`}
+                                      onMouseDown={(e) => {
+                                        if (e.button !== 0) return; // only left click
+                                        cardDragTrackerRef.current = {
+                                          startY: e.pageY,
+                                          startX: e.pageX,
+                                          cardId: tab.id,
+                                          hasTriggeredFlip: false,
+                                        };
+                                      }}
+                                      onTouchStart={(e) => {
+                                        if (e.touches.length > 0) {
+                                          cardDragTrackerRef.current = {
+                                            startY: e.touches[0].pageY,
+                                            startX: e.touches[0].pageX,
+                                            cardId: tab.id,
+                                            hasTriggeredFlip: false,
+                                          };
+                                        }
+                                      }}
+                                      onMouseMove={(e) => {
+                                        const tracker = cardDragTrackerRef.current;
+                                        if (tracker.cardId !== tab.id || tracker.hasTriggeredFlip) return;
+                                        
+                                        const dy = tracker.startY - e.pageY; // dragging upward means final Y is smaller, so dy is positive
+                                        const dx = Math.abs(tracker.startX - e.pageX);
+                                        
+                                        // Drag upward threshold (40px) and vertical direction bias (dy > dx)
+                                        if (dy > 40 && dy > dx && isCardExpanded) {
+                                          tracker.hasTriggeredFlip = true;
+                                          setFlippedCards((prev) => {
+                                            const currentShowBack = prev[tab.id] !== false;
+                                            return {
+                                              ...prev,
+                                              [tab.id]: !currentShowBack,
+                                            };
+                                          });
+                                          playClickSound();
+                                        }
+                                      }}
+                                      onTouchMove={(e) => {
+                                        const tracker = cardDragTrackerRef.current;
+                                        if (tracker.cardId !== tab.id || tracker.hasTriggeredFlip) return;
+                                        if (e.touches.length > 0) {
+                                          const dy = tracker.startY - e.touches[0].pageY;
+                                          const dx = Math.abs(tracker.startX - e.touches[0].pageX);
+                                          
+                                          if (dy > 40 && dy > dx && isCardExpanded) {
+                                            tracker.hasTriggeredFlip = true;
+                                            setFlippedCards((prev) => {
+                                              const currentShowBack = prev[tab.id] !== false;
+                                              return {
+                                                ...prev,
+                                                [tab.id]: !currentShowBack,
+                                              };
+                                            });
+                                            playClickSound();
+                                          }
+                                        }
+                                      }}
+                                      onMouseUp={() => {
+                                        // keep cardId and hasTriggeredFlip intact for onClick to intercept
+                                        cardDragTrackerRef.current.startY = 0;
+                                        cardDragTrackerRef.current.startX = 0;
+                                      }}
+                                      onTouchEnd={() => {
+                                        cardDragTrackerRef.current.startY = 0;
+                                        cardDragTrackerRef.current.startX = 0;
+                                      }}
                                       onClickCapture={(e) => {
                                         if (
                                           dragRef.current
@@ -4867,6 +5086,19 @@ export default function Dashboard() {
                                         }
                                       }}
                                       onClick={(e) => {
+                                        const tracker = cardDragTrackerRef.current;
+                                        const wasFlippedThisGesture = tracker.cardId === tab.id && tracker.hasTriggeredFlip;
+                                        
+                                        // Reset tracker state for subsequent gestures
+                                        tracker.cardId = null;
+                                        tracker.hasTriggeredFlip = false;
+
+                                        if (wasFlippedThisGesture) {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          return;
+                                        }
+
                                         if (
                                           dragRef.current
                                             .hasDraggedBeyondThreshold
@@ -4882,10 +5114,8 @@ export default function Dashboard() {
                                           }));
                                           return;
                                         }
-                                        setFlippedCards((prev) => ({
-                                          ...prev,
-                                          [tab.id]: !prev[tab.id],
-                                        }));
+                                        // If expanded, clicking the border does not flip anymore!
+                                        // Flipping is handled exclusively by dragging upwards.
                                       }}
                                     >
                                       <div
@@ -4908,7 +5138,7 @@ export default function Dashboard() {
                                           }}
                                           key={tab.id}
                                           className={`relative w-full h-full flex-1 flex flex-col cursor-pointer slide-drawer-container transition-all duration-300 ${isCardExpanded ? "min-h-[460px] h-[460px]" : "min-h-[135px] h-[135px]"} ${
-                                            ((isCinemaModeActive || flippedCards[tab.id]) && isCardExpanded) ? "show-back" : ""
+                                            ((isCinemaModeActive || flippedCards[tab.id] !== false) && isCardExpanded) ? "show-back" : ""
                                           } ${activeTabStrategies[tab.id]?.observeChecked ? "card-breathe-observe" : activeTabStrategies[tab.id]?.closeChecked ? "card-breathe-close" : activeTabStrategies[tab.id]?.slChecked ? "card-breathe-sl" : activeTabStrategies[tab.id]?.addChecked ? "card-breathe-add" : activeTabStrategies[tab.id]?.tpChecked ? "card-breathe-tp" : ""}`}
                                         >
                                           {/* Corner label badges - stacked vertically (render on container level to avoid clip truncation) */}
@@ -4962,11 +5192,9 @@ export default function Dashboard() {
                                             {/* Front Face */}
                                           <div
                                             style={{
-                                              pointerEvents: (isCinemaModeActive || flippedCards[tab.id])
+                                              pointerEvents: (isCinemaModeActive || flippedCards[tab.id] !== false)
                                                 ? "none"
                                                 : "auto",
-                                              
-                                              
                                             }}
                                             className={`card-front absolute inset-0 glass-card rounded-2xl flex flex-col group/item w-full h-full ${isCinemaModeActive ? "" : "transition-all duration-500"} overflow-hidden`}
                                           >
@@ -5039,7 +5267,13 @@ export default function Dashboard() {
                                             })()}
 
                                             {/* Main Card Content Body with padding */}
-                                            <div className={`flex-1 flex flex-col p-3 pt-2 ${isCardExpanded ? "pb-16" : "pb-2"} w-full overflow-y-auto scrollbar-hide relative`}>
+                                            <div
+                                              onClick={(e) => {
+                                                // Stop click event from bubbling so that clicking content inside the card does not trigger flipping!
+                                                e.stopPropagation();
+                                              }}
+                                              className={`flex-1 flex flex-col p-3 pt-2 ${isCardExpanded ? "pb-16" : "pb-2"} w-full overflow-y-auto scrollbar-hide relative`}
+                                            >
                                             {/* 左側色條 */}
                                             {(() => {
                                               const strat = activeTabStrategies[tab.id] || {};
@@ -5398,7 +5632,11 @@ export default function Dashboard() {
                                       {/* Card Back */}
                                       {isCardExpanded && (
                                         <div
-                                          style={{ pointerEvents: (flippedCards[tab.id] || isCinemaModeActive) ? "auto" : "none" }}
+                                          onClick={(e) => {
+                                            // Stop click event from bubbling to card-wrapper's onClick, so clicking on the chart side doesn't accidentally flip it back to the front!
+                                            e.stopPropagation();
+                                          }}
+                                          style={{ pointerEvents: (flippedCards[tab.id] !== false || isCinemaModeActive) ? "auto" : "none" }}
                                           className={`card-back absolute inset-0 glass-card bg-transparent rounded-2xl flex flex-col w-full h-full sm:hover:bg-white/[0.04] transition-all duration-500 overflow-hidden ${
                                             (activeTabStrategies[tab.id])?.observeChecked ? "card-breathe-observe" : (activeTabStrategies[tab.id])?.closeChecked ? "card-breathe-close" : (activeTabStrategies[tab.id])?.slChecked ? "card-breathe-sl" : (activeTabStrategies[tab.id])?.addChecked ? "card-breathe-add" : (activeTabStrategies[tab.id])?.tpChecked ? "card-breathe-tp" : ""
                                           }`}
@@ -6277,6 +6515,217 @@ export default function Dashboard() {
         </DialogContent>
       </Dialog>
 
+      {/* Upload HTML Dialog */}
+      <Dialog open={isUploadHtmlOpen} onOpenChange={setIsUploadHtmlOpen}>
+        <DialogContent className="border border-white/10 bg-[#0F0F12]/95 backdrop-blur-2xl text-white max-w-md w-[92vw] !rounded-2xl p-6">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-black tracking-tight flex items-center gap-2">
+              <Upload className="w-5 h-5 text-red-500" />
+              <span>上傳 HTML 分析文件</span>
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="flex flex-col gap-4 py-4 text-sm">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-bold text-zinc-400 font-sans uppercase">個股代號/名稱</label>
+              <input
+                type="text"
+                value={htmlUploadSymbol}
+                onChange={(e) => setHtmlUploadSymbol(e.target.value.toUpperCase())}
+                placeholder="例如: META"
+                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white font-mono text-sm focus:outline-none focus:border-red-500 transition-all"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-bold text-zinc-400 font-sans uppercase">日期與年份</label>
+              <input
+                type="date"
+                value={htmlUploadDate}
+                onChange={(e) => setHtmlUploadDate(e.target.value)}
+                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white font-mono text-sm focus:outline-none focus:border-red-500 transition-all"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-bold text-zinc-400 font-sans uppercase">產生的檔案名稱預覽</label>
+              <div className="w-full px-3 py-2 bg-zinc-900/50 border border-zinc-800 rounded-lg text-zinc-300 font-mono text-xs break-all">
+                {htmlUploadSymbol.trim() ? `${htmlUploadSymbol.trim().toUpperCase()}_${htmlUploadDate.replace(/-/g, "")}.html` : "(請先輸入個股代號)"}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-bold text-zinc-400 font-sans uppercase">選擇 HTML 檔案</label>
+              <div className="relative border border-dashed border-white/20 hover:border-white/40 rounded-xl p-6 flex flex-col items-center justify-center gap-2 transition-all bg-white/[0.02]">
+                <input
+                  type="file"
+                  accept=".html,.htm"
+                  onChange={handleHtmlFileChange}
+                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                />
+                <FileText className="w-8 h-8 text-zinc-500" />
+                <span className="text-xs text-zinc-400 text-center font-medium">
+                  {htmlFileToUpload ? htmlFileToUpload.name : "拖曳或點擊選擇 .html 檔案"}
+                </span>
+                {htmlFileToUpload && (
+                  <span className="text-[10px] text-zinc-500 font-mono">
+                    大小: {(htmlFileToUpload.size / 1024).toFixed(1)} KB
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <button
+              onClick={() => setIsUploadHtmlOpen(false)}
+              className="py-2 px-4 bg-zinc-800 hover:bg-zinc-750 text-white text-xs font-bold rounded-xl transition-all cursor-pointer border border-white/5"
+            >
+              取消
+            </button>
+            <button
+              disabled={isUploadingHtml}
+              onClick={handleUploadHtmlSubmit}
+              className="py-2 px-4 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+            >
+              {isUploadingHtml ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>上傳中...</span>
+                </>
+              ) : (
+                <span>開始上傳</span>
+              )}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Preview HTML Dialog */}
+      <Dialog open={isPreviewHtmlOpen} onOpenChange={(open) => {
+        setIsPreviewHtmlOpen(open);
+        if (!open) {
+          setSelectedPreviewFileId(null);
+        }
+      }}>
+        <DialogContent
+          showCloseButton={selectedPreviewFileId ? false : true}
+          className={`border-none transition-all duration-300 flex flex-col overflow-hidden ${
+            selectedPreviewFileId
+              ? "!p-0 !gap-0 w-[75vw] sm:w-[75vw] md:w-[75vw] max-w-[75vw] sm:max-w-none h-[98vh] max-h-[98vh] !rounded-2xl shadow-2xl bg-white"
+              : "w-[95vw] max-w-md p-6 bg-[#0F0F12]/95 backdrop-blur-2xl text-white border border-white/10"
+          }`}
+        >
+          {!selectedPreviewFileId && (
+            <DialogHeader>
+              <DialogTitle className="text-xl font-black tracking-tight flex items-center justify-between gap-2">
+                <span className="flex items-center gap-2">
+                  <Eye className="w-5 h-5 text-zinc-400" />
+                  <span>選擇 HTML 檔案進行預覽</span>
+                </span>
+              </DialogTitle>
+            </DialogHeader>
+          )}
+
+          {selectedPreviewFileId ? (
+            /* Selected File Sandbox Iframe Preview - Maximized spacing & zero borders */
+            <div className="flex-1 w-full h-full bg-white relative">
+              <iframe
+                src={`/api/html-files/${selectedPreviewFileId}/content`}
+                className="w-full h-full border-0 bg-white"
+                title="HTML Preview"
+                sandbox="allow-same-origin allow-scripts allow-popups"
+                onLoad={(e) => {
+                  try {
+                    const iframe = e.currentTarget;
+                    const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+                    if (iframeDoc) {
+                      // Handle Escape key inside the iframe
+                      iframeDoc.addEventListener("keydown", (event) => {
+                        if (event.key === "Escape") {
+                          setIsPreviewHtmlOpen(false);
+                          setSelectedPreviewFileId(null);
+                        }
+                      });
+
+                      // Inject CSS to hide scrollbars completely inside the iframe
+                      const style = iframeDoc.createElement("style");
+                      style.textContent = `
+                        ::-webkit-scrollbar {
+                          display: none !important;
+                          width: 0 !important;
+                          height: 0 !important;
+                        }
+                        html, body {
+                          scrollbar-width: none !important;
+                          -ms-overflow-style: none !important;
+                        }
+                      `;
+                      iframeDoc.head.appendChild(style);
+                    }
+                  } catch (err) {
+                    console.warn("Iframe keydown/style injection hook skipped:", err);
+                  }
+                }}
+              />
+            </div>
+          ) : (
+            /* Files List */
+            <div className="flex flex-col gap-3 py-4 text-sm max-h-[50vh] overflow-y-auto scrollbar-hide">
+              {htmlFilesList.length === 0 ? (
+                <div className="text-center py-8 text-zinc-500 text-xs font-medium">
+                  目前尚未上傳任何 HTML 檔案
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {htmlFilesList.map((file) => (
+                    <div
+                      key={file.id}
+                      className="flex items-center justify-between p-3 rounded-xl bg-white/[0.03] hover:bg-white/[0.06] border border-white/5 hover:border-white/10 transition-all"
+                    >
+                      <div
+                        onClick={() => {
+                          setSelectedPreviewFileId(file.id);
+                          playClickSound();
+                        }}
+                        className="flex-1 flex flex-col gap-0.5 cursor-pointer"
+                      >
+                        <span className="font-mono text-sm text-zinc-200 hover:text-white font-bold transition-all break-all">
+                          {file.filename}
+                        </span>
+                        <div className="flex items-center gap-2 text-[10px] text-zinc-500 font-mono">
+                          <span>個股: {file.symbol}</span>
+                          <span>•</span>
+                          <span>上傳日: {new Date(file.createdAt).toLocaleString()}</span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleDeleteHtmlFile(file.id)}
+                        className="p-2 text-zinc-500 hover:text-red-400 hover:bg-white/5 rounded-lg transition-all cursor-pointer"
+                        title="刪除檔案"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {!selectedPreviewFileId && (
+            <DialogFooter className="mt-2">
+              <button
+                onClick={() => setIsPreviewHtmlOpen(false)}
+                className="py-2 px-4 bg-zinc-800 hover:bg-zinc-750 text-white text-xs font-bold rounded-xl transition-all cursor-pointer border border-white/5 w-full sm:w-auto"
+              >
+                關閉
+              </button>
+            </DialogFooter>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {isCinemaModeActive && (
         <AnimatePresence>
           <motion.div
@@ -6315,6 +6764,44 @@ export default function Dashboard() {
             <div className="flex-1 w-full flex flex-col lg:flex-row min-h-0 relative mt-4 overflow-hidden gap-8">
               {/* Left Sidebar containing Category Tabs & CinemaDock (placed near center-left vertically) */}
               <div className="w-full lg:w-64 shrink-0 flex flex-col gap-6 lg:border-r lg:border-white/5 lg:pr-6 justify-center items-start py-4 overflow-y-auto scrollbar-hide">
+                {/* HTML Document Upload & Preview Section */}
+                <div className="w-full flex flex-col gap-2 p-3 bg-white/5 border border-white/5 rounded-xl">
+                  <div className="text-[10px] font-bold tracking-widest text-zinc-400 font-sans uppercase">
+                    HTML 檔案管理
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 mt-1">
+                    <button
+                      onClick={() => {
+                        const activeTab = filteredSubTabVisibleTabs.find(t => t.id === activeCinemaCardId);
+                        if (activeTab) {
+                          setHtmlUploadSymbol(activeTab.symbol);
+                        } else {
+                          setHtmlUploadSymbol("");
+                        }
+                        setHtmlFileToUpload(null);
+                        setHtmlFileContent("");
+                        setIsUploadHtmlOpen(true);
+                        playClickSound();
+                      }}
+                      className="flex items-center justify-center gap-1.5 px-2.5 py-2 text-xs font-semibold rounded-lg bg-red-600/90 hover:bg-red-600 text-white transition-all cursor-pointer border border-red-500/10 shadow-lg"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>上傳 HTML</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setIsPreviewHtmlOpen(true);
+                        fetchUploadedHtmlFiles();
+                        playClickSound();
+                      }}
+                      className="flex items-center justify-center gap-1.5 px-2.5 py-2 text-xs font-semibold rounded-lg bg-zinc-800 hover:bg-zinc-750 text-zinc-200 hover:text-white transition-all cursor-pointer border border-white/10"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>預覽 HTML</span>
+                    </button>
+                  </div>
+                </div>
+
                 {/* Classification Category Section */}
                 <div className="w-full flex flex-col gap-3">
                   <div className="text-[10px] font-bold tracking-widest text-zinc-500 font-sans uppercase">

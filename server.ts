@@ -3,6 +3,9 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import { GoogleGenAI, Type } from "@google/genai";
 import "dotenv/config";
+import { db } from "./src/db/index.ts";
+import { uploadedHtmlFiles } from "./src/db/schema.ts";
+import { eq, desc, and } from "drizzle-orm";
 
 async function generateContentWithRetry(ai: GoogleGenAI, params: any, maxRetries = 4, initialDelay = 1000) {
   let attempt = 0;
@@ -50,6 +53,119 @@ async function startServer() {
   // Increase payload limit for base64 images
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
+
+  // HTML Files Upload Endpoint
+  app.post("/api/html-files", async (req, res) => {
+    try {
+      const { userId, symbol, filename, htmlContent } = req.body;
+      if (!userId || !symbol || !filename || !htmlContent) {
+        return res.status(400).json({ error: "缺少必要欄位：userId, symbol, filename, htmlContent" });
+      }
+
+      const [inserted] = await db.insert(uploadedHtmlFiles).values({
+        userId,
+        symbol,
+        filename,
+        htmlContent,
+      }).returning();
+
+      res.json({ success: true, file: inserted });
+    } catch (err: any) {
+      console.error("Error saving HTML file:", err);
+      res.status(500).json({ error: "儲存 HTML 檔案時出錯: " + err.message });
+    }
+  });
+
+  // HTML Files Listing Endpoint
+  app.get("/api/html-files", async (req, res) => {
+    try {
+      const { userId, symbol } = req.query;
+      if (!userId) {
+        return res.status(400).json({ error: "缺少 userId" });
+      }
+
+      let files;
+      if (symbol) {
+        files = await db.select({
+          id: uploadedHtmlFiles.id,
+          userId: uploadedHtmlFiles.userId,
+          symbol: uploadedHtmlFiles.symbol,
+          filename: uploadedHtmlFiles.filename,
+          createdAt: uploadedHtmlFiles.createdAt,
+        })
+        .from(uploadedHtmlFiles)
+        .where(
+          and(
+            eq(uploadedHtmlFiles.userId, userId as string),
+            eq(uploadedHtmlFiles.symbol, symbol as string)
+          )
+        )
+        .orderBy(desc(uploadedHtmlFiles.createdAt));
+      } else {
+        files = await db.select({
+          id: uploadedHtmlFiles.id,
+          userId: uploadedHtmlFiles.userId,
+          symbol: uploadedHtmlFiles.symbol,
+          filename: uploadedHtmlFiles.filename,
+          createdAt: uploadedHtmlFiles.createdAt,
+        })
+        .from(uploadedHtmlFiles)
+        .where(eq(uploadedHtmlFiles.userId, userId as string))
+        .orderBy(desc(uploadedHtmlFiles.createdAt));
+      }
+
+      res.json(files);
+    } catch (err: any) {
+      console.error("Error querying HTML files:", err);
+      res.status(500).json({ error: "查詢 HTML 檔案時出錯: " + err.message });
+    }
+  });
+
+  // Serves HTML File content with proper text/html content-type for Sandbox Iframe Preview
+  app.get("/api/html-files/:id/content", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const fileId = parseInt(id, 10);
+      if (isNaN(fileId)) {
+        return res.status(400).send("無效的檔案 ID");
+      }
+
+      const [file] = await db.select({
+        htmlContent: uploadedHtmlFiles.htmlContent,
+        filename: uploadedHtmlFiles.filename,
+      })
+      .from(uploadedHtmlFiles)
+      .where(eq(uploadedHtmlFiles.id, fileId))
+      .limit(1);
+
+      if (!file) {
+        return res.status(404).send("找不到該 HTML 檔案");
+      }
+
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.send(file.htmlContent);
+    } catch (err: any) {
+      console.error("Error retrieving HTML content:", err);
+      res.status(500).send("讀取 HTML 內容時出錯: " + err.message);
+    }
+  });
+
+  // Delete HTML File Endpoint
+  app.delete("/api/html-files/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const fileId = parseInt(id, 10);
+      if (isNaN(fileId)) {
+        return res.status(400).json({ error: "無效的檔案 ID" });
+      }
+
+      await db.delete(uploadedHtmlFiles).where(eq(uploadedHtmlFiles.id, fileId));
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("Error deleting HTML file:", err);
+      res.status(500).json({ error: "刪除 HTML 檔案時出錯: " + err.message });
+    }
+  });
 
   // Add the chip analysis route
   app.post("/api/analyze-chips", async (req, res) => {
