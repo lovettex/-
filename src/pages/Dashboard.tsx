@@ -92,6 +92,7 @@ import {
   Tv,
   Maximize2,
   Loader2,
+  Printer,
 } from "lucide-react";
 import { calculateStats } from "../lib/calculations";
 import { safeLocalStorage, safeSessionStorage } from "../lib/utils";
@@ -252,6 +253,11 @@ export default function Dashboard() {
     return saved ? parseFloat(saved) : 1000000;
   });
 
+  const [virtualCapital, setVirtualCapital] = useState<number>(() => {
+    const saved = safeLocalStorage.getItem(`virtual-capital-${user?.uid || "guest"}`);
+    return saved ? parseFloat(saved) : 1000000;
+  });
+
   useEffect(() => {
     if (!user) return;
     const fetchSettings = async () => {
@@ -263,6 +269,10 @@ export default function Dashboard() {
           if (typeof data.totalCapital === "number") {
             setTotalCapital(data.totalCapital);
             safeLocalStorage.setItem(`total-capital-${user.uid}`, data.totalCapital.toString());
+          }
+          if (typeof data.virtualCapital === "number") {
+            setVirtualCapital(data.virtualCapital);
+            safeLocalStorage.setItem(`virtual-capital-${user.uid}`, data.virtualCapital.toString());
           }
         }
       } catch (error) {
@@ -286,6 +296,24 @@ export default function Dashboard() {
         );
       } catch (error) {
         console.error("Failed to save userSettings:", error);
+        handleFirestoreError(error, OperationType.WRITE, `userSettings/${user.uid}`, user);
+      }
+    }
+  };
+
+  const handleUpdateVirtualCapital = async (newVal: number) => {
+    setVirtualCapital(newVal);
+    const userKey = user ? user.uid : "guest";
+    safeLocalStorage.setItem(`virtual-capital-${userKey}`, newVal.toString());
+    if (user) {
+      try {
+        await setDoc(
+          doc(db, "userSettings", user.uid),
+          { virtualCapital: newVal, updatedAt: serverTimestamp() },
+          { merge: true }
+        );
+      } catch (error) {
+        console.error("Failed to save virtual userSettings:", error);
         handleFirestoreError(error, OperationType.WRITE, `userSettings/${user.uid}`, user);
       }
     }
@@ -316,100 +344,8 @@ export default function Dashboard() {
   const [isUploadingHtml, setIsUploadingHtml] = useState(false);
   const [htmlFilesList, setHtmlFilesList] = useState<any[]>([]);
   const [selectedPreviewFileId, setSelectedPreviewFileId] = useState<number | null>(null);
-
-  const fetchUploadedHtmlFiles = async () => {
-    if (!user) return;
-    try {
-      const response = await fetch(`/api/html-files?userId=${user.uid}`);
-      if (response.ok) {
-        const data = await response.json();
-        setHtmlFilesList(data);
-      }
-    } catch (error) {
-      console.error("Failed to fetch HTML files:", error);
-    }
-  };
-
-  const handleHtmlFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setHtmlFileToUpload(file);
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          setHtmlFileContent(event.target.result as string);
-        }
-      };
-      reader.readAsText(file);
-    }
-  };
-
-  const handleUploadHtmlSubmit = async () => {
-    if (!user) {
-      alert("請先登入");
-      return;
-    }
-    if (!htmlUploadSymbol.trim()) {
-      alert("請輸入或選擇個股名稱");
-      return;
-    }
-    if (!htmlFileContent) {
-      alert("請選擇要上傳的 HTML 檔案");
-      return;
-    }
-
-    setIsUploadingHtml(true);
-    const dateFormatted = htmlUploadDate.replace(/-/g, ""); // e.g. 20260708
-    const cleanSymbol = htmlUploadSymbol.trim().toUpperCase();
-    const finalFilename = `${cleanSymbol}_${dateFormatted}.html`;
-
-    try {
-      const response = await fetch("/api/html-files", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          userId: user.uid,
-          symbol: cleanSymbol,
-          filename: finalFilename,
-          htmlContent: htmlFileContent,
-        }),
-      });
-
-      if (response.ok) {
-        setIsUploadHtmlOpen(false);
-        setHtmlFileToUpload(null);
-        setHtmlFileContent("");
-        fetchUploadedHtmlFiles();
-      } else {
-        const errData = await response.json();
-        alert(errData.error || "上傳失敗");
-      }
-    } catch (error) {
-      console.error("Error uploading HTML file:", error);
-      alert("上傳出錯，請稍後再試");
-    } finally {
-      setIsUploadingHtml(false);
-    }
-  };
-
-  const handleDeleteHtmlFile = async (id: number) => {
-    if (!confirm("確定要刪除此檔案嗎？")) return;
-    try {
-      const response = await fetch(`/api/html-files/${id}`, {
-        method: "DELETE",
-      });
-      if (response.ok) {
-        setHtmlFilesList(prev => prev.filter(f => f.id !== id));
-        if (selectedPreviewFileId === id) {
-          setSelectedPreviewFileId(null);
-        }
-      }
-    } catch (error) {
-      console.error("Failed to delete file:", error);
-    }
-  };
+  const [deletingFileId, setDeletingFileId] = useState<number | null>(null);
+  const [htmlContext, setHtmlContext] = useState<"dynamic" | "market_filter" | "stock_micro">("dynamic");
 
   useEffect(() => {
     const state = location.state as { autoFlipTabId?: string } | null;
@@ -949,6 +885,25 @@ export default function Dashboard() {
       "touches" in e && e.touches && e.touches.length > 0
         ? e.touches[0].pageX
         : (e as MouseEvent).pageX;
+
+    // Prevent horizontal carousel scroll if user is doing a vertical gesture to flip a card
+    if (cardDragTrackerRef.current.cardId) {
+      const tracker = cardDragTrackerRef.current;
+      const pageY =
+        "touches" in e && e.touches && e.touches.length > 0
+          ? e.touches[0].pageY
+          : (e as MouseEvent).pageY;
+      const dy = Math.abs(tracker.startY - pageY);
+      const dx = Math.abs(tracker.startX - pageX);
+      if (dy > dx && dy > 5) {
+        // Confirmed vertical card flip gesture, cancel carousel dragging immediately
+        dragRef.current.isDragging = false;
+        ele.style.cursor = "grab";
+        document.body.style.userSelect = "";
+        return;
+      }
+    }
+
     const x = pageX - ele.offsetLeft;
     const dx = x - dragRef.current.startX;
 
@@ -1069,6 +1024,8 @@ export default function Dashboard() {
   const [manageTradeType, setManageTradeType] = useState<"simulated" | "real">("simulated");
   const [isEditingCapital, setIsEditingCapital] = useState(false);
   const [editCapitalVal, setEditCapitalVal] = useState("");
+  const [isEditingVirtualCapital, setIsEditingVirtualCapital] = useState(false);
+  const [editVirtualCapitalVal, setEditVirtualCapitalVal] = useState("");
 
   useEffect(() => {
     if (isManageHiddenOpen) {
@@ -2745,6 +2702,16 @@ export default function Dashboard() {
       }, 0);
   }, [activeTabs, activeTabTrades]);
 
+  const totalVirtualHoldingCost = useMemo(() => {
+    return activeTabs
+      .filter((tab) => tab.tradeType === "simulated")
+      .reduce((sum, tab) => {
+        const trades = activeTabTrades[tab.id] || [];
+        const stats = calculateStats(trades, tab.currentPrice);
+        return sum + (stats.totalQuantity * stats.averagePrice);
+      }, 0);
+  }, [activeTabs, activeTabTrades]);
+
   const remainingBalance = totalCapital - totalRealHoldingCost;
 
   const visibleActiveTabs = activeTabs.filter((t) => !t.isHidden);
@@ -2811,6 +2778,70 @@ export default function Dashboard() {
     }
   }, [visibleSubTabs, activeHoldingSubTab]);
 
+  const handleExportMd = useCallback(async () => {
+    toast.info("正在準備持股交易數據...");
+    const tradesMap = { ...activeTabTrades };
+
+    try {
+      const activeTabs = tabs.filter((t) => t.status === "ACTIVE");
+      const missingTabs = activeTabs.filter((tab) => !tradesMap[tab.id]);
+
+      if (missingTabs.length > 0) {
+        await Promise.all(
+          missingTabs.map(async (tab) => {
+            try {
+              const qTrades = query(collection(db, `stockTabs/${tab.id}/trades`));
+              const snapshotTrades = await getDocs(qTrades);
+              const trades = snapshotTrades.docs.map((doc) => ({
+                id: doc.id,
+                ...doc.data(),
+              }));
+              tradesMap[tab.id] = trades;
+            } catch (err) {
+              console.error(`Error fetching trades for ${tab.symbol}:`, err);
+              tradesMap[tab.id] = [];
+            }
+          })
+        );
+      }
+
+      const symbolMap: Record<string, number> = {};
+      
+      // Initialize with 0 for all active cards' symbols (satisfies "若無交易則顯示為0")
+      activeTabs.forEach((tab) => {
+        symbolMap[tab.symbol] = 0;
+      });
+
+      // Sum up holding quantity for each active card
+      activeTabs.forEach((tab) => {
+        const trades = tradesMap[tab.id] || [];
+        const stats = calculateStats(trades, tab.currentPrice);
+        symbolMap[tab.symbol] += stats.totalQuantity || 0;
+      });
+
+      const lines: string[] = ["| 個股名稱 | 持有股數 |", "|------|------|"];
+      const sortedSymbols = Object.keys(symbolMap).sort();
+      sortedSymbols.forEach((sym) => {
+        lines.push(`| ${sym}  | ${symbolMap[sym]}   |`);
+      });
+
+      const mdContent = lines.join("\n");
+      const blob = new Blob([mdContent], { type: "text/markdown;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", `holding_stocks_report_${format(new Date(), "yyyyMMdd_HHmmss")}.md`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      playSuccessSound();
+      toast.success("成功匯出持股資料 md 檔案！");
+    } catch (error) {
+      console.error("Export error:", error);
+      toast.error("匯出持股資料失敗");
+    }
+  }, [tabs, activeTabTrades, playSuccessSound]);
+
   // further categorize visible tabs based on holdingStatus for rendering
   const currentSubTabVisibleTabs = effectiveVisibleActiveTabs.filter(
     (t) => getDisplayHoldingStatus(t.holdingStatus) === activeHoldingSubTab,
@@ -2847,6 +2878,133 @@ export default function Dashboard() {
   }, [currentSubTabVisibleTabs, activeCardDefinitionFilter]);
 
   visibleTabsRef.current = filteredSubTabVisibleTabs;
+
+  const fetchUploadedHtmlFiles = async (symbolFilter?: string) => {
+    if (!user) return;
+    try {
+      let url = `/api/html-files?userId=${user.uid}`;
+      if (symbolFilter) {
+        url += `&symbol=${encodeURIComponent(symbolFilter.trim().toUpperCase())}`;
+      }
+      const response = await fetch(url);
+      if (response.ok) {
+        const data = await response.json();
+        setHtmlFilesList(data);
+      }
+    } catch (error) {
+      console.error("Failed to fetch HTML files:", error);
+    }
+  };
+
+  // Compute active stock symbol as a stable primitive dependency string to prevent resetting preview state on unstable array rerenders
+  const activeCinemaSymbol = useMemo(() => {
+    const activeTab = filteredSubTabVisibleTabs.find(t => t.id === activeCinemaCardId);
+    return activeTab?.symbol || "";
+  }, [filteredSubTabVisibleTabs, activeCinemaCardId]);
+
+  // Automatically update and filter HTML files when the active stock card changes in Cinema Focus mode
+  useEffect(() => {
+    if (isPreviewHtmlOpen && htmlContext === "dynamic" && activeCinemaSymbol) {
+      fetchUploadedHtmlFiles(activeCinemaSymbol);
+      // Reset selected file to avoid showing the preview of the previous card's HTML file
+      setSelectedPreviewFileId(null);
+    }
+  }, [isPreviewHtmlOpen, activeCinemaSymbol, htmlContext]);
+
+  const handleHtmlFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setHtmlFileToUpload(file);
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (event.target?.result) {
+          setHtmlFileContent(event.target.result as string);
+        }
+      };
+      reader.readAsText(file);
+    }
+  };
+
+  const handleUploadHtmlSubmit = async () => {
+    if (!user) {
+      toast.error("請先登入");
+      return;
+    }
+    if (!htmlUploadSymbol.trim()) {
+      toast.error("請輸入或選擇個股名稱");
+      return;
+    }
+    if (!htmlFileContent) {
+      toast.error("請選擇要上傳的 HTML 檔案");
+      return;
+    }
+
+    setIsUploadingHtml(true);
+    const dateFormatted = htmlUploadDate.replace(/-/g, ""); // e.g. 20260708
+    const cleanSymbol = htmlUploadSymbol.trim().toUpperCase();
+    const finalFilename = `${cleanSymbol}_${dateFormatted}.html`;
+
+    try {
+      const response = await fetch("/api/html-files", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userId: user.uid,
+          symbol: cleanSymbol,
+          filename: finalFilename,
+          htmlContent: htmlFileContent,
+        }),
+      });
+
+      if (response.ok) {
+        setIsUploadHtmlOpen(false);
+        setHtmlFileToUpload(null);
+        setHtmlFileContent("");
+        if (htmlContext === "dynamic") {
+          const activeTab = filteredSubTabVisibleTabs.find(t => t.id === activeCinemaCardId);
+          fetchUploadedHtmlFiles(activeTab?.symbol);
+        } else if (htmlContext === "market_filter") {
+          fetchUploadedHtmlFiles("MARKET_FILTER");
+        } else if (htmlContext === "stock_micro") {
+          fetchUploadedHtmlFiles("STOCK_MICRO");
+        }
+        toast.success("HTML 檔案上傳成功");
+      } else {
+        const errData = await response.json();
+        toast.error(errData.error || "上傳失敗");
+      }
+    } catch (error) {
+      console.error("Error uploading HTML file:", error);
+      toast.error("上傳出錯，請稍後再試");
+    } finally {
+      setIsUploadingHtml(false);
+    }
+  };
+
+  const handleDeleteHtmlFile = async (id: number) => {
+    try {
+      const response = await fetch(`/api/html-files/${id}`, {
+        method: "DELETE",
+      });
+      if (response.ok) {
+        setHtmlFilesList(prev => prev.filter(f => f.id !== id));
+        if (selectedPreviewFileId === id) {
+          setSelectedPreviewFileId(null);
+        }
+        if (deletingFileId === id) {
+          setDeletingFileId(null);
+        }
+        toast.success("檔案已成功刪除");
+      } else {
+        toast.error("刪除失敗");
+      }
+    } catch (error) {
+      console.error("Failed to delete file:", error);
+      toast.error("刪除失敗，發生錯誤");
+    }
+  };
 
   useEffect(() => {
     if (!isCinemaModeActive) return;
@@ -3405,70 +3563,128 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* Middle section: 3 Indicators */}
-            <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6 md:gap-8 bg-black/10 backdrop-blur-md px-5 py-3 rounded-2xl border border-white/5 w-full lg:w-auto">
-              {/* Metric 1: Total Capital */}
-              <div className="flex flex-col text-left">
-                <span className="text-[11px] text-[#9FE1CB] font-medium opacity-80">目前的總資金</span>
-                {isEditingCapital ? (
-                  <div className="flex items-center gap-0.5 mt-1">
-                    <span className="text-[15px] sm:text-[16px] font-semibold text-white">$</span>
-                    <input
-                      type="number"
-                      autoFocus
-                      value={editCapitalVal}
-                      onBlur={() => {
-                        const val = editCapitalVal === "" ? 0 : parseFloat(editCapitalVal);
-                        handleUpdateTotalCapital(val);
-                        setIsEditingCapital(false);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
+            {/* Middle section: Indicators */}
+            <div className="flex flex-col lg:flex-row lg:items-center gap-4 lg:gap-6 bg-black/10 backdrop-blur-md px-5 py-3 rounded-2xl w-full lg:w-auto">
+              <div className="grid grid-cols-2 md:flex md:items-center gap-4 sm:gap-6 md:gap-8">
+                {/* Metric 1: Total Capital */}
+                <div className="flex flex-col text-left">
+                  <span className="text-[11px] text-[#9FE1CB] font-medium opacity-80">目前的總資金</span>
+                  {isEditingCapital ? (
+                    <div className="flex items-center gap-0.5 mt-1">
+                      <span className="text-[15px] sm:text-[16px] font-semibold text-white">$</span>
+                      <input
+                        type="number"
+                        autoFocus
+                        value={editCapitalVal}
+                        onBlur={() => {
                           const val = editCapitalVal === "" ? 0 : parseFloat(editCapitalVal);
                           handleUpdateTotalCapital(val);
                           setIsEditingCapital(false);
-                        }
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            const val = editCapitalVal === "" ? 0 : parseFloat(editCapitalVal);
+                            handleUpdateTotalCapital(val);
+                            setIsEditingCapital(false);
+                          }
+                        }}
+                        onChange={(e) => setEditCapitalVal(e.target.value)}
+                        className="bg-transparent text-white font-semibold text-[15px] sm:text-[16px] focus:outline-none w-20 border-none p-0 focus:ring-0 leading-none h-5"
+                        style={{ caretColor: 'white' }}
+                      />
+                    </div>
+                  ) : (
+                    <div 
+                      onClick={() => {
+                        setEditCapitalVal(totalCapital.toString());
+                        setIsEditingCapital(true);
                       }}
-                      onChange={(e) => setEditCapitalVal(e.target.value)}
-                      className="bg-transparent text-white font-semibold text-[15px] sm:text-[16px] focus:outline-none w-20 border-none p-0 focus:ring-0 leading-none h-5"
-                      style={{ caretColor: 'white' }}
-                    />
-                  </div>
-                ) : (
-                  <div 
-                    onClick={() => {
-                      setEditCapitalVal(totalCapital.toString());
-                      setIsEditingCapital(true);
-                    }}
-                    className="text-[15px] sm:text-[16px] font-semibold text-white cursor-pointer select-none leading-none mt-1 flex items-center gap-1 group/cap"
-                    title="點擊修改總資金"
-                  >
-                    <span>${totalCapital.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                    <span className="text-[9px] text-white/30 group-hover/cap:text-white/60 transition-colors">(修改)</span>
-                  </div>
-                )}
-              </div>
+                      className="text-[15px] sm:text-[16px] font-semibold text-white cursor-pointer select-none leading-none mt-1 flex items-center gap-1 group/cap"
+                      title="點擊修改總資金"
+                    >
+                      <span>${totalCapital.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      <span className="text-[9px] text-white/30 group-hover/cap:text-white/60 transition-colors">(修改)</span>
+                    </div>
+                  )}
+                </div>
 
-              {/* Vertical divider */}
-              <div className="hidden sm:block h-6 w-[0.5px] bg-white/20" />
+                {/* Vertical divider */}
+                <div className="hidden md:block h-6 w-[0.5px] bg-white/20" />
 
-              {/* Metric 2: Remaining Balance */}
-              <div className="flex flex-col text-left">
-                <span className="text-[11px] text-[#9FE1CB] font-medium opacity-80">剩餘額度</span>
-                <span className="text-[15px] sm:text-[16px] font-semibold font-mono text-white mt-1 leading-none">
-                  ${remainingBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </span>
-              </div>
+                {/* Metric 1.5: Virtual Total Capital */}
+                <div className="flex flex-col text-left">
+                  <span className="text-[11px] text-[#9FE1CB] font-medium opacity-80">模擬交易總資金</span>
+                  {isEditingVirtualCapital ? (
+                    <div className="flex items-center gap-0.5 mt-1">
+                      <span className="text-[15px] sm:text-[16px] font-semibold text-white">$</span>
+                      <input
+                        type="number"
+                        autoFocus
+                        value={editVirtualCapitalVal}
+                        onBlur={() => {
+                          const val = editVirtualCapitalVal === "" ? 0 : parseFloat(editVirtualCapitalVal);
+                          handleUpdateVirtualCapital(val);
+                          setIsEditingVirtualCapital(false);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            const val = editVirtualCapitalVal === "" ? 0 : parseFloat(editVirtualCapitalVal);
+                            handleUpdateVirtualCapital(val);
+                            setIsEditingVirtualCapital(false);
+                          }
+                        }}
+                        onChange={(e) => setEditVirtualCapitalVal(e.target.value)}
+                        className="bg-transparent text-white font-semibold text-[15px] sm:text-[16px] focus:outline-none w-20 border-none p-0 focus:ring-0 leading-none h-5"
+                        style={{ caretColor: 'white' }}
+                      />
+                    </div>
+                  ) : (
+                    <div 
+                      onClick={() => {
+                        setEditVirtualCapitalVal(virtualCapital.toString());
+                        setIsEditingVirtualCapital(true);
+                      }}
+                      className="text-[15px] sm:text-[16px] font-semibold text-white cursor-pointer select-none leading-none mt-1 flex items-center gap-1 group/vcap"
+                      title="點擊修改模擬總資金"
+                    >
+                      <span>${virtualCapital.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      <span className="text-[9px] text-white/30 group-hover/vcap:text-white/60 transition-colors">(修改)</span>
+                    </div>
+                  )}
+                </div>
 
-              {/* Vertical divider */}
-              <div className="hidden sm:block h-6 w-[0.5px] bg-white/20" />
+                {/* Vertical divider */}
+                <div className="hidden md:block h-6 w-[0.5px] bg-white/20" />
 
-              {/* Metric 3: Real Cost */}
-              <div className="flex flex-col text-left">
-                <span className="text-[11px] text-[#9FE1CB] font-medium opacity-80">真實交易總持有成本</span>
-                <span className="text-[15px] sm:text-[16px] font-semibold font-mono text-white mt-1 leading-none">
-                  ${totalRealHoldingCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </span>
+                {/* Metric 2: Remaining Balance */}
+                <div className="flex flex-col text-left">
+                  <span className="text-[11px] text-[#9FE1CB] font-medium opacity-80">剩餘額度</span>
+                  <span className="text-[15px] sm:text-[16px] font-semibold font-mono text-white mt-1 leading-none">
+                    ${remainingBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+
+                {/* Vertical divider */}
+                <div className="hidden md:block h-6 w-[0.5px] bg-white/20" />
+
+                {/* Metric 3: Real Cost */}
+                <div className="flex flex-col text-left">
+                  <span className="text-[11px] text-[#9FE1CB] font-medium opacity-80">真實交易總持有成本</span>
+                  <span className="text-[15px] sm:text-[16px] font-semibold font-mono text-white mt-1 leading-none">
+                    ${totalRealHoldingCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+
+                {/* Vertical divider */}
+                <div className="hidden md:block h-6 w-[0.5px] bg-white/20" />
+
+                {/* Metric 3.5: Virtual Cost */}
+                <div className="flex flex-col text-left">
+                  <span className="text-[11px] text-[#9FE1CB] font-medium opacity-80">模擬交易總持有成本</span>
+                  <span className="text-[15px] sm:text-[16px] font-semibold font-mono text-white mt-1 leading-none">
+                    ${totalVirtualHoldingCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -3535,44 +3751,91 @@ export default function Dashboard() {
             </div>
 
             {/* Below title: hero number (totalCapital) */}
-            <div className="text-[32px] font-semibold text-white tracking-tight leading-none font-sans mt-1">
-              {isEditingCapital ? (
-                <div className="flex items-center gap-0.5">
-                  <span className="text-[26px] font-medium text-white">$</span>
-                  <input
-                    type="number"
-                    autoFocus
-                    value={editCapitalVal}
-                    onBlur={() => {
-                      const val = editCapitalVal === "" ? 0 : parseFloat(editCapitalVal);
-                      handleUpdateTotalCapital(val);
-                      setIsEditingCapital(false);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[10px] text-[#9FE1CB] font-bold tracking-wider uppercase opacity-80">目前的總資金</span>
+              <div className="text-[28px] font-semibold text-white tracking-tight leading-none font-sans">
+                {isEditingCapital ? (
+                  <div className="flex items-center gap-0.5">
+                    <span className="text-[22px] font-medium text-white">$</span>
+                    <input
+                      type="number"
+                      autoFocus
+                      value={editCapitalVal}
+                      onBlur={() => {
                         const val = editCapitalVal === "" ? 0 : parseFloat(editCapitalVal);
                         handleUpdateTotalCapital(val);
                         setIsEditingCapital(false);
-                      }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          const val = editCapitalVal === "" ? 0 : parseFloat(editCapitalVal);
+                          handleUpdateTotalCapital(val);
+                          setIsEditingCapital(false);
+                        }
+                      }}
+                      onChange={(e) => setEditCapitalVal(e.target.value)}
+                      className="bg-transparent text-white font-semibold text-[28px] focus:outline-none w-full border-none p-0 focus:ring-0 leading-none h-8"
+                      style={{ caretColor: 'white' }}
+                    />
+                  </div>
+                ) : (
+                  <div 
+                    onClick={() => {
+                      setEditCapitalVal(totalCapital.toString());
+                      setIsEditingCapital(true);
                     }}
-                    onChange={(e) => setEditCapitalVal(e.target.value)}
-                    className="bg-transparent text-white font-semibold text-[32px] focus:outline-none w-full border-none p-0 focus:ring-0 leading-none h-10"
-                    style={{ caretColor: 'white' }}
-                  />
-                </div>
-              ) : (
-                <div 
-                  onClick={() => {
-                    setEditCapitalVal(totalCapital.toString());
-                    setIsEditingCapital(true);
-                  }}
-                  className="cursor-pointer flex items-baseline gap-1.5 group/cap"
-                  title="點擊修改總資金"
-                >
-                  <span>${totalCapital.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                  <span className="text-[12px] text-white/50 group-hover/cap:text-white/80 transition-colors font-normal">(修改)</span>
-                </div>
-              )}
+                    className="cursor-pointer flex items-baseline gap-1.5 group/cap"
+                    title="點擊修改總資金"
+                  >
+                    <span>${totalCapital.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    <span className="text-[11px] text-white/50 group-hover/cap:text-white/80 transition-colors font-normal">(修改)</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Simulated Capital */}
+            <div className="flex flex-col gap-0.5 border-t border-white/15 pt-2">
+              <span className="text-[10px] text-[#9FE1CB] font-bold tracking-wider uppercase opacity-80">模擬交易總資金</span>
+              <div className="text-[22px] font-semibold text-white tracking-tight leading-none font-sans">
+                {isEditingVirtualCapital ? (
+                  <div className="flex items-center gap-0.5">
+                    <span className="text-[18px] font-medium text-white">$</span>
+                    <input
+                      type="number"
+                      autoFocus
+                      value={editVirtualCapitalVal}
+                      onBlur={() => {
+                        const val = editVirtualCapitalVal === "" ? 0 : parseFloat(editVirtualCapitalVal);
+                        handleUpdateVirtualCapital(val);
+                        setIsEditingVirtualCapital(false);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          const val = editVirtualCapitalVal === "" ? 0 : parseFloat(editVirtualCapitalVal);
+                          handleUpdateVirtualCapital(val);
+                          setIsEditingVirtualCapital(false);
+                        }
+                      }}
+                      onChange={(e) => setEditVirtualCapitalVal(e.target.value)}
+                      className="bg-transparent text-white font-semibold text-[22px] focus:outline-none w-full border-none p-0 focus:ring-0 leading-none h-7"
+                      style={{ caretColor: 'white' }}
+                    />
+                  </div>
+                ) : (
+                  <div 
+                    onClick={() => {
+                      setEditVirtualCapitalVal(virtualCapital.toString());
+                      setIsEditingVirtualCapital(true);
+                    }}
+                    className="cursor-pointer flex items-baseline gap-1.5 group/vcap"
+                    title="點擊修改模擬總資金"
+                  >
+                    <span>${virtualCapital.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    <span className="text-[10px] text-white/50 group-hover/vcap:text-white/80 transition-colors font-normal">(修改)</span>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -3598,6 +3861,19 @@ export default function Dashboard() {
               </span>
               <span className="text-[15px] font-bold text-[#084D38] font-sans">
                 ${totalRealHoldingCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+            </div>
+
+            {/* Thin divider line */}
+            <div className="h-[0.5px] bg-zinc-100" />
+
+            {/* Row 2.5: label "模擬交易總持有成本" + value */}
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-zinc-500 font-normal">
+                模擬交易總持有成本
+              </span>
+              <span className="text-[15px] font-bold text-[#084D38] font-sans">
+                ${totalVirtualHoldingCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
             </div>
 
@@ -4343,13 +4619,15 @@ export default function Dashboard() {
                         >
                           <BookOpen className="w-4 h-4" />
                         </InteractiveButton>
-                        <Magnetic>
-                          {activeViewTab === "real" ? (
-                            <ShieldCheck className="h-6 w-6 text-teal-400 opacity-80" />
-                          ) : (
-                            <Activity className="h-6 w-6 text-emerald-500 opacity-80" />
-                          )}
-                        </Magnetic>
+                        <InteractiveButton
+                          noGlow
+                          as="button"
+                          onClick={handleExportMd}
+                          title="匯出持有股數交易數據 (.md)"
+                          className="p-2 bg-zinc-50 border border-zinc-200 text-zinc-500 hover:text-zinc-850 hover:bg-zinc-100 rounded-md transition-all cursor-pointer flex items-center justify-center"
+                        >
+                          <Printer className="w-4 h-4" />
+                        </InteractiveButton>
                       </div>
                     </div>
 
@@ -4383,11 +4661,16 @@ export default function Dashboard() {
                             <BookOpen className="w-3 h-3" />
                             翻面
                           </InteractiveButton>
-                          {activeViewTab === "real" ? (
-                            <ShieldCheck className="h-4 w-4 text-teal-605 opacity-80" />
-                          ) : (
-                            <Activity className="h-4 w-4 text-emerald-600 opacity-80" />
-                          )}
+                          <InteractiveButton
+                            noGlow
+                            as="button"
+                            onClick={handleExportMd}
+                            className="px-2.5 py-1 bg-zinc-50 border border-zinc-200 text-zinc-650 hover:text-zinc-850 hover:bg-zinc-100 rounded-lg transition-all text-[11px] flex items-center gap-1 font-extrabold cursor-pointer"
+                            title="匯出持股資料"
+                          >
+                            <Printer className="w-3 h-3" />
+                            匯出
+                          </InteractiveButton>
                         </div>
                       </div>
 
@@ -5008,6 +5291,7 @@ export default function Dashboard() {
                                       key={tab.id}
                                       id={`stock-card-${tab.id}`}
                                       className={`card-wrapper w-[calc(100vw-32px)] sm:w-[410px] md:w-[410px] shrink-0 flex flex-col transition-all duration-300 ${isCardExpanded ? "min-h-[460px] h-[460px] select-none" : "min-h-[135px] h-[135px]"}`}
+                                      style={{ touchAction: isCardExpanded ? "none" : "auto" }}
                                       onMouseDown={(e) => {
                                         if (e.button !== 0) return; // only left click
                                         cardDragTrackerRef.current = {
@@ -5033,18 +5317,21 @@ export default function Dashboard() {
                                         
                                         const dy = tracker.startY - e.pageY; // dragging upward means final Y is smaller, so dy is positive
                                         const dx = Math.abs(tracker.startX - e.pageX);
+                                        const absDy = Math.abs(dy);
+                                        const currentShowBack = flippedCards[tab.id] !== false;
                                         
-                                        // Drag upward threshold (40px) and vertical direction bias (dy > dx)
-                                        if (dy > 40 && dy > dx && isCardExpanded) {
-                                          tracker.hasTriggeredFlip = true;
-                                          setFlippedCards((prev) => {
-                                            const currentShowBack = prev[tab.id] !== false;
-                                            return {
+                                        if (absDy > 40 && absDy > dx && isCardExpanded) {
+                                          const isDraggingUp = dy > 0;
+                                          const isDraggingDown = dy < 0;
+                                          
+                                          if ((currentShowBack && isDraggingUp) || (!currentShowBack && isDraggingDown)) {
+                                            tracker.hasTriggeredFlip = true;
+                                            setFlippedCards((prev) => ({
                                               ...prev,
                                               [tab.id]: !currentShowBack,
-                                            };
-                                          });
-                                          playClickSound();
+                                            }));
+                                            playClickSound();
+                                          }
                                         }
                                       }}
                                       onTouchMove={(e) => {
@@ -5053,17 +5340,21 @@ export default function Dashboard() {
                                         if (e.touches.length > 0) {
                                           const dy = tracker.startY - e.touches[0].pageY;
                                           const dx = Math.abs(tracker.startX - e.touches[0].pageX);
+                                          const absDy = Math.abs(dy);
+                                          const currentShowBack = flippedCards[tab.id] !== false;
                                           
-                                          if (dy > 40 && dy > dx && isCardExpanded) {
-                                            tracker.hasTriggeredFlip = true;
-                                            setFlippedCards((prev) => {
-                                              const currentShowBack = prev[tab.id] !== false;
-                                              return {
+                                          if (absDy > 40 && absDy > dx && isCardExpanded) {
+                                            const isDraggingUp = dy > 0;
+                                            const isDraggingDown = dy < 0;
+                                            
+                                            if ((currentShowBack && isDraggingUp) || (!currentShowBack && isDraggingDown)) {
+                                              tracker.hasTriggeredFlip = true;
+                                              setFlippedCards((prev) => ({
                                                 ...prev,
                                                 [tab.id]: !currentShowBack,
-                                              };
-                                            });
-                                            playClickSound();
+                                              }));
+                                              playClickSound();
+                                            }
                                           }
                                         }
                                       }}
@@ -5321,11 +5612,6 @@ export default function Dashboard() {
                                                         <span className="text-xl font-black tabular-nums text-zinc-900 leading-none">
                                                           ${tab.currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                         </span>
-                                                        {unrealizedPnL !== 0 && (
-                                                          <span className={`text-sm font-black tabular-nums leading-none ${unrealizedPnL > 0 ? "text-emerald-600" : "text-rose-600"}`}>
-                                                            {unrealizedPnL > 0 ? "▲" : "▼"}{Math.abs(unrealizedPnL).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                                          </span>
-                                                        )}
                                                       </div>
                                                     )}
                                                   </div>
@@ -6521,19 +6807,32 @@ export default function Dashboard() {
           <DialogHeader>
             <DialogTitle className="text-xl font-black tracking-tight flex items-center gap-2">
               <Upload className="w-5 h-5 text-red-500" />
-              <span>上傳 HTML 分析文件</span>
+              <span>
+                上傳 {
+                  htmlContext === "market_filter" ? "大盤濾網" :
+                  htmlContext === "stock_micro" ? "個股微觀" :
+                  "個股分析"
+                } HTML 文件
+              </span>
             </DialogTitle>
           </DialogHeader>
 
           <div className="flex flex-col gap-4 py-4 text-sm">
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-bold text-zinc-400 font-sans uppercase">個股代號/名稱</label>
+              <label className="text-xs font-bold text-zinc-400 font-sans uppercase">
+                {htmlContext === "market_filter" ? "類別 (大盤濾網)" : htmlContext === "stock_micro" ? "類別 (個股微觀)" : "個股代號/名稱"}
+              </label>
               <input
                 type="text"
                 value={htmlUploadSymbol}
-                onChange={(e) => setHtmlUploadSymbol(e.target.value.toUpperCase())}
+                onChange={(e) => {
+                  if (htmlContext === "dynamic") {
+                    setHtmlUploadSymbol(e.target.value.toUpperCase());
+                  }
+                }}
+                disabled={htmlContext !== "dynamic"}
                 placeholder="例如: META"
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white font-mono text-sm focus:outline-none focus:border-red-500 transition-all"
+                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white font-mono text-sm focus:outline-none focus:border-red-500 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
               />
             </div>
 
@@ -6621,7 +6920,13 @@ export default function Dashboard() {
               <DialogTitle className="text-xl font-black tracking-tight flex items-center justify-between gap-2">
                 <span className="flex items-center gap-2">
                   <Eye className="w-5 h-5 text-zinc-400" />
-                  <span>選擇 HTML 檔案進行預覽</span>
+                  <span>
+                    選擇 {
+                      htmlContext === "market_filter" ? "大盤濾網" :
+                      htmlContext === "stock_micro" ? "個股微觀" :
+                      "個股分析"
+                    } HTML 檔案進行預覽
+                  </span>
                 </span>
               </DialogTitle>
             </DialogHeader>
@@ -6694,18 +6999,41 @@ export default function Dashboard() {
                           {file.filename}
                         </span>
                         <div className="flex items-center gap-2 text-[10px] text-zinc-500 font-mono">
-                          <span>個股: {file.symbol}</span>
+                          <span>
+                            類別: {
+                              file.symbol === "MARKET_FILTER" ? "大盤濾網" :
+                              file.symbol === "STOCK_MICRO" ? "個股微觀" :
+                              `個股 (${file.symbol})`
+                            }
+                          </span>
                           <span>•</span>
                           <span>上傳日: {new Date(file.createdAt).toLocaleString()}</span>
                         </div>
                       </div>
-                      <button
-                        onClick={() => handleDeleteHtmlFile(file.id)}
-                        className="p-2 text-zinc-500 hover:text-red-400 hover:bg-white/5 rounded-lg transition-all cursor-pointer"
-                        title="刪除檔案"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {deletingFileId === file.id ? (
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            onClick={() => handleDeleteHtmlFile(file.id)}
+                            className="px-2 py-1 text-xs font-bold text-red-400 bg-red-500/10 hover:bg-red-500/20 rounded-md border border-red-500/20 transition-all cursor-pointer"
+                          >
+                            確認
+                          </button>
+                          <button
+                            onClick={() => setDeletingFileId(null)}
+                            className="px-2 py-1 text-xs font-semibold text-zinc-400 hover:text-zinc-200 transition-all cursor-pointer"
+                          >
+                            取消
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setDeletingFileId(file.id)}
+                          className="p-2 text-zinc-500 hover:text-red-400 hover:bg-white/5 rounded-lg transition-all cursor-pointer"
+                          title="刪除檔案"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -6762,42 +7090,103 @@ export default function Dashboard() {
 
             {/* Split Screen Container: Left Sidebar & Right Main View */}
             <div className="flex-1 w-full flex flex-col lg:flex-row min-h-0 relative mt-4 overflow-hidden gap-8">
-              {/* Left Sidebar containing Category Tabs & CinemaDock (placed near center-left vertically) */}
-              <div className="w-full lg:w-64 shrink-0 flex flex-col gap-6 lg:border-r lg:border-white/5 lg:pr-6 justify-center items-start py-4 overflow-y-auto scrollbar-hide">
-                {/* HTML Document Upload & Preview Section */}
-                <div className="w-full flex flex-col gap-2 p-3 bg-white/5 border border-white/5 rounded-xl">
-                  <div className="text-[10px] font-bold tracking-widest text-zinc-400 font-sans uppercase">
-                    HTML 檔案管理
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 mt-1">
+              {/* Left Sidebar containing Category Tabs & CinemaDock (aligned start for compact layout) */}
+              <div className="w-full lg:w-64 shrink-0 flex flex-col gap-4 lg:border-r lg:border-white/5 lg:pr-6 justify-start items-start py-2 overflow-y-auto scrollbar-hide">
+                {/* HTML Document Management Consolidated Panel (Tabbed Compact Layout) */}
+                <div className="w-full flex flex-col gap-1.5 p-1.5 bg-white/5 border border-white/[0.04] rounded-xl">
+                  {/* Tab bar header */}
+                  <div className="grid grid-cols-3 gap-0.5 bg-black/40 p-0.5 rounded-lg border border-white/[0.03]">
                     <button
                       onClick={() => {
-                        const activeTab = filteredSubTabVisibleTabs.find(t => t.id === activeCinemaCardId);
-                        if (activeTab) {
-                          setHtmlUploadSymbol(activeTab.symbol);
+                        setHtmlContext("dynamic");
+                        playClickSound();
+                      }}
+                      className={`py-1 text-center text-[10px] font-bold rounded transition-all cursor-pointer ${
+                        htmlContext === "dynamic"
+                          ? "bg-zinc-800 text-white border border-white/[0.05]"
+                          : "text-zinc-400 hover:text-zinc-200"
+                      }`}
+                    >
+                      <span className="flex items-center justify-center gap-0.5">
+                        <span>個股</span>
+                        {activeCinemaSymbol && (
+                          <span className="text-[7px] font-bold px-1 rounded bg-red-500/20 text-red-400 font-mono scale-[0.85] origin-center">
+                            {activeCinemaSymbol}
+                          </span>
+                        )}
+                      </span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setHtmlContext("market_filter");
+                        playClickSound();
+                      }}
+                      className={`py-1 text-center text-[10px] font-bold rounded transition-all cursor-pointer ${
+                        htmlContext === "market_filter"
+                          ? "bg-zinc-800 text-white border border-white/[0.05]"
+                          : "text-zinc-400 hover:text-zinc-200"
+                      }`}
+                    >
+                      大盤
+                    </button>
+                    <button
+                      onClick={() => {
+                        setHtmlContext("stock_micro");
+                        playClickSound();
+                      }}
+                      className={`py-1 text-center text-[10px] font-bold rounded transition-all cursor-pointer ${
+                        htmlContext === "stock_micro"
+                          ? "bg-zinc-800 text-white border border-white/[0.05]"
+                          : "text-zinc-400 hover:text-zinc-200"
+                      }`}
+                    >
+                      微觀
+                    </button>
+                  </div>
+
+                  {/* Active context controls */}
+                  <div className="grid grid-cols-2 gap-1.5 mt-0.5">
+                    <button
+                      onClick={() => {
+                        if (htmlContext === "dynamic") {
+                          const activeTab = filteredSubTabVisibleTabs.find(t => t.id === activeCinemaCardId);
+                          if (activeTab) {
+                            setHtmlUploadSymbol(activeTab.symbol);
+                          } else {
+                            setHtmlUploadSymbol("");
+                          }
+                        } else if (htmlContext === "market_filter") {
+                          setHtmlUploadSymbol("MARKET_FILTER");
                         } else {
-                          setHtmlUploadSymbol("");
+                          setHtmlUploadSymbol("STOCK_MICRO");
                         }
                         setHtmlFileToUpload(null);
                         setHtmlFileContent("");
                         setIsUploadHtmlOpen(true);
                         playClickSound();
                       }}
-                      className="flex items-center justify-center gap-1.5 px-2.5 py-2 text-xs font-semibold rounded-lg bg-red-600/90 hover:bg-red-600 text-white transition-all cursor-pointer border border-red-500/10 shadow-lg"
+                      className="flex items-center justify-center gap-1.5 py-1 px-1.5 text-[10px] font-semibold rounded-md bg-red-600/90 hover:bg-red-600 text-white transition-all cursor-pointer border border-red-500/10 shadow-sm"
                     >
-                      <Upload className="w-3.5 h-3.5" />
-                      <span>上傳 HTML</span>
+                      <Upload className="w-2.5 h-2.5" />
+                      <span>上傳</span>
                     </button>
                     <button
                       onClick={() => {
                         setIsPreviewHtmlOpen(true);
-                        fetchUploadedHtmlFiles();
+                        if (htmlContext === "dynamic") {
+                          const activeTab = filteredSubTabVisibleTabs.find(t => t.id === activeCinemaCardId);
+                          fetchUploadedHtmlFiles(activeTab?.symbol);
+                        } else if (htmlContext === "market_filter") {
+                          fetchUploadedHtmlFiles("MARKET_FILTER");
+                        } else {
+                          fetchUploadedHtmlFiles("STOCK_MICRO");
+                        }
                         playClickSound();
                       }}
-                      className="flex items-center justify-center gap-1.5 px-2.5 py-2 text-xs font-semibold rounded-lg bg-zinc-800 hover:bg-zinc-750 text-zinc-200 hover:text-white transition-all cursor-pointer border border-white/10"
+                      className="flex items-center justify-center gap-1.5 py-1 px-1.5 text-[10px] font-semibold rounded-md bg-zinc-800 hover:bg-zinc-750 text-zinc-200 hover:text-white transition-all cursor-pointer border border-white/5"
                     >
-                      <Eye className="w-3.5 h-3.5" />
-                      <span>預覽 HTML</span>
+                      <Eye className="w-2.5 h-2.5" />
+                      <span>預覽</span>
                     </button>
                   </div>
                 </div>
