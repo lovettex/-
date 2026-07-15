@@ -829,6 +829,7 @@ export default function Dashboard() {
     hasDraggedBeyondThreshold: false,
     lastX: 0,
     vx: 0,
+    startIdx: 0,
   });
 
   const cardDragTrackerRef = useRef<{
@@ -869,6 +870,27 @@ export default function Dashboard() {
     dragRef.current.lastX = pageX;
     dragRef.current.vx = 0;
 
+    // Record index of current item in view at drag start
+    const containerInner = ele.children[0] as HTMLElement;
+    if (containerInner && containerInner.children.length > 0) {
+      const items = Array.from(containerInner.children) as HTMLElement[];
+      const offsets = items.map((item) => item.offsetLeft);
+      const currentScroll = ele.scrollLeft;
+      
+      let closestIdx = 0;
+      let minDiff = Infinity;
+      for (let i = 0; i < offsets.length; i++) {
+        const diff = Math.abs(offsets[i] - currentScroll);
+        if (diff < minDiff) {
+          minDiff = diff;
+          closestIdx = i;
+        }
+      }
+      dragRef.current.startIdx = closestIdx;
+    } else {
+      dragRef.current.startIdx = 0;
+    }
+
     // Disable snap behavior during drag for smooth swiping
     ele.style.scrollSnapType = "none";
     ele.style.cursor = "grabbing";
@@ -895,11 +917,13 @@ export default function Dashboard() {
           : (e as MouseEvent).pageY;
       const dy = Math.abs(tracker.startY - pageY);
       const dx = Math.abs(tracker.startX - pageX);
-      if (dy > dx && dy > 5) {
-        // Confirmed vertical card flip gesture, cancel carousel dragging immediately
-        dragRef.current.isDragging = false;
-        ele.style.cursor = "grab";
-        document.body.style.userSelect = "";
+      if (dy > dx) {
+        if (dy > 2) {
+          // Confirmed vertical card flip gesture, cancel carousel dragging immediately
+          dragRef.current.isDragging = false;
+          ele.style.cursor = "grab";
+          document.body.style.userSelect = "";
+        }
         return;
       }
     }
@@ -914,7 +938,42 @@ export default function Dashboard() {
       dragRef.current.hasDraggedBeyondThreshold = true;
     }
 
-    ele.scrollLeft = dragRef.current.scrollLeft - dx;
+    let targetScroll = dragRef.current.scrollLeft - dx;
+
+    // Constrain active dragging scroll distance to adjacent card boundary to prevent sliding too far
+    const containerInner = ele.children[0] as HTMLElement;
+    if (containerInner && containerInner.children.length > 0) {
+      const items = Array.from(containerInner.children) as HTMLElement[];
+      const offsets = items.map((item) => item.offsetLeft);
+      const startIdx = dragRef.current.startIdx;
+      
+      const minIdx = Math.max(0, startIdx - 1);
+      const maxIdx = Math.min(items.length - 1, startIdx + 1);
+      
+      const minScroll = offsets[minIdx];
+      const maxScroll = offsets[maxIdx];
+      
+      // Apply smooth resistance damping beyond boundaries
+      if (targetScroll < minScroll) {
+        const overscroll = minScroll - targetScroll;
+        targetScroll = minScroll - overscroll * 0.22;
+      } else if (targetScroll > maxScroll) {
+        const overscroll = targetScroll - maxScroll;
+        targetScroll = maxScroll + overscroll * 0.22;
+      }
+
+      // Limit the drag movement to at most half of the current card's width relative to drag start scroll position
+      const cardWidth = items[startIdx]?.offsetWidth || 300;
+      const maxDragDistance = cardWidth / 2;
+      const dragStartScroll = dragRef.current.scrollLeft;
+      if (targetScroll < dragStartScroll - maxDragDistance) {
+        targetScroll = dragStartScroll - maxDragDistance;
+      } else if (targetScroll > dragStartScroll + maxDragDistance) {
+        targetScroll = dragStartScroll + maxDragDistance;
+      }
+    }
+
+    ele.scrollLeft = targetScroll;
   }, []);
 
   const onDragEnd = useCallback(() => {
@@ -930,33 +989,22 @@ export default function Dashboard() {
       if (containerInner && containerInner.children.length > 0) {
         const items = Array.from(containerInner.children) as HTMLElement[];
         const offsets = items.map((item) => item.offsetLeft);
-        const currentScroll = ele.scrollLeft;
         
-        // Find the index of the item closest to current scroll position
-        let closestIdx = 0;
-        let minDiff = Infinity;
-        for (let i = 0; i < offsets.length; i++) {
-          const diff = Math.abs(offsets[i] - currentScroll);
-          if (diff < minDiff) {
-            minDiff = diff;
-            closestIdx = i;
-          }
-        }
-
-        // Determine step size based on viewport width (Desktop: 2 units, Mobile: 1 unit)
-        const isMobile = window.innerWidth < 640;
-        const step = isMobile ? 1 : 2;
-
-        let targetIdx = closestIdx;
+        const startIdx = dragRef.current.startIdx;
+        let targetIdx = startIdx;
         const vx = dragRef.current.vx;
+        const dx = dragRef.current.lastX - (dragRef.current.startX + ele.offsetLeft); // cumulative horizontal offset
+        
+        // Custom threshold for a responsive swipe action
+        const velocityThreshold = 1.2;
+        const distanceThreshold = 40;
 
-        // Decisive drag direction check (negative velocity scrolls right, positive scrolls left)
-        if (vx < -2.0) {
-          // Swiped left (user wants to scroll right)
-          targetIdx = Math.min(items.length - 1, closestIdx + step);
-        } else if (vx > 2.0) {
-          // Swiped right (user wants to scroll left)
-          targetIdx = Math.max(0, closestIdx - step);
+        if (vx < -velocityThreshold || dx < -distanceThreshold) {
+          // Swiped/dragged left -> next card
+          targetIdx = Math.min(items.length - 1, startIdx + 1);
+        } else if (vx > velocityThreshold || dx > distanceThreshold) {
+          // Swiped/dragged right -> previous card
+          targetIdx = Math.max(0, startIdx - 1);
         }
 
         const targetScrollLeft = Math.max(0, Math.min(ele.scrollWidth - ele.clientWidth, offsets[targetIdx]));
@@ -964,14 +1012,15 @@ export default function Dashboard() {
         // Smooth animations with ease-out cubic feel
         let startScroll = ele.scrollLeft;
         const distance = targetScrollLeft - startScroll;
-        const duration = 280; // ms transition phase
+        const duration = 240; // ms transition phase
         let startTime: number | null = null;
 
         const animateScroll = (time: number) => {
           if (!startTime) startTime = time;
           const progress = time - startTime;
           const t = Math.min(progress / duration, 1);
-          const ease = t * (2 - t); // Quadratic ease out
+          // High-fidelity ease out cubic
+          const ease = 1 - Math.pow(1 - t, 3);
           
           ele.scrollLeft = startScroll + distance * ease;
 
@@ -1729,6 +1778,7 @@ export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [isActionDialogOpen, setIsActionDialogOpen] = useState(false);
   const [selectedActionTab, setSelectedActionTab] = useState<any>(null);
+  const [actionActiveTab, setActionActiveTab] = useState<"general" | "status">("general");
   const [visualizerFocusTabId, setVisualizerFocusTabId] = useState<string | null>(null);
   const [visualizerFocusText, setVisualizerFocusText] = useState("");
   const [manualHighlight, setManualHighlight] = useState<Record<string, boolean>>({});
@@ -2805,24 +2855,34 @@ export default function Dashboard() {
         );
       }
 
-      const symbolMap: Record<string, number> = {};
+      const symbolMap: Record<string, { totalQuantity: number; totalCost: number }> = {};
       
       // Initialize with 0 for all active cards' symbols (satisfies "若無交易則顯示為0")
       activeTabs.forEach((tab) => {
-        symbolMap[tab.symbol] = 0;
+        symbolMap[tab.symbol] = { totalQuantity: 0, totalCost: 0 };
       });
 
-      // Sum up holding quantity for each active card
+      // Sum up holding quantity and calculate weighted cost for each active card
       activeTabs.forEach((tab) => {
         const trades = tradesMap[tab.id] || [];
         const stats = calculateStats(trades, tab.currentPrice);
-        symbolMap[tab.symbol] += stats.totalQuantity || 0;
+        const qty = stats.totalQuantity || 0;
+        const avgPrice = stats.averagePrice || 0;
+        
+        symbolMap[tab.symbol].totalQuantity += qty;
+        symbolMap[tab.symbol].totalCost += qty * avgPrice;
       });
 
-      const lines: string[] = ["| 個股名稱 | 持有股數 |", "|------|------|"];
+      const lines: string[] = [
+        "| 個股名稱 | 持有股數 | 平均成本 |",
+        "|------|------|------|"
+      ];
       const sortedSymbols = Object.keys(symbolMap).sort();
       sortedSymbols.forEach((sym) => {
-        lines.push(`| ${sym}  | ${symbolMap[sym]}   |`);
+        const item = symbolMap[sym];
+        const avgCost = item.totalQuantity > 0 ? (item.totalCost / item.totalQuantity) : 0;
+        const formattedAvgCost = avgCost % 1 === 0 ? avgCost : Number(avgCost.toFixed(2));
+        lines.push(`| ${sym}  | ${item.totalQuantity}   | ${formattedAvgCost}   |`);
       });
 
       const mdContent = lines.join("\n");
@@ -2879,6 +2939,37 @@ export default function Dashboard() {
 
   visibleTabsRef.current = filteredSubTabVisibleTabs;
 
+  const renderGroups = useMemo(() => {
+    const groups: { isGroup: boolean; id: string; tabs: any[] }[] = [];
+    const processedGroupIds = new Set<string>();
+    
+    filteredSubTabVisibleTabs.forEach((tab) => {
+      const shouldGroup = tab.groupId && !isMobile;
+      if (shouldGroup) {
+        if (!processedGroupIds.has(tab.groupId!)) {
+          processedGroupIds.add(tab.groupId!);
+          const allGroupTabs = effectiveVisibleActiveTabs.filter(t => t.groupId === tab.groupId);
+          groups.push({
+            isGroup: true,
+            id: tab.groupId!,
+            tabs: allGroupTabs
+          });
+        }
+      } else {
+        groups.push({
+          isGroup: false,
+          id: tab.id,
+          tabs: [tab]
+        });
+      }
+    });
+    return groups;
+  }, [filteredSubTabVisibleTabs, effectiveVisibleActiveTabs, isMobile]);
+
+  const orderedFilteredSubTabVisibleTabs = useMemo(() => {
+    return renderGroups.flatMap((g) => g.tabs);
+  }, [renderGroups]);
+
   const fetchUploadedHtmlFiles = async (symbolFilter?: string) => {
     if (!user) return;
     try {
@@ -2898,9 +2989,9 @@ export default function Dashboard() {
 
   // Compute active stock symbol as a stable primitive dependency string to prevent resetting preview state on unstable array rerenders
   const activeCinemaSymbol = useMemo(() => {
-    const activeTab = filteredSubTabVisibleTabs.find(t => t.id === activeCinemaCardId);
+    const activeTab = orderedFilteredSubTabVisibleTabs.find(t => t.id === activeCinemaCardId);
     return activeTab?.symbol || "";
-  }, [filteredSubTabVisibleTabs, activeCinemaCardId]);
+  }, [orderedFilteredSubTabVisibleTabs, activeCinemaCardId]);
 
   // Automatically update and filter HTML files when the active stock card changes in Cinema Focus mode
   useEffect(() => {
@@ -3016,38 +3107,38 @@ export default function Dashboard() {
         }
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
-        const currentIndex = filteredSubTabVisibleTabs.findIndex(t => t.id === activeCinemaCardId);
-        if (currentIndex !== -1 && filteredSubTabVisibleTabs.length > 1) {
-          const nextIndex = (currentIndex + 1) % filteredSubTabVisibleTabs.length;
-          setActiveCinemaCardId(filteredSubTabVisibleTabs[nextIndex].id);
+        const currentIndex = orderedFilteredSubTabVisibleTabs.findIndex(t => t.id === activeCinemaCardId);
+        if (currentIndex !== -1 && orderedFilteredSubTabVisibleTabs.length > 1) {
+          const nextIndex = (currentIndex + 1) % orderedFilteredSubTabVisibleTabs.length;
+          setActiveCinemaCardId(orderedFilteredSubTabVisibleTabs[nextIndex].id);
           playSwipeSound();
         }
       } else if (e.key === "ArrowLeft") {
         e.preventDefault();
-        const currentIndex = filteredSubTabVisibleTabs.findIndex(t => t.id === activeCinemaCardId);
-        if (currentIndex !== -1 && filteredSubTabVisibleTabs.length > 1) {
-          const prevIndex = (currentIndex - 1 + filteredSubTabVisibleTabs.length) % filteredSubTabVisibleTabs.length;
-          setActiveCinemaCardId(filteredSubTabVisibleTabs[prevIndex].id);
+        const currentIndex = orderedFilteredSubTabVisibleTabs.findIndex(t => t.id === activeCinemaCardId);
+        if (currentIndex !== -1 && orderedFilteredSubTabVisibleTabs.length > 1) {
+          const prevIndex = (currentIndex - 1 + orderedFilteredSubTabVisibleTabs.length) % orderedFilteredSubTabVisibleTabs.length;
+          setActiveCinemaCardId(orderedFilteredSubTabVisibleTabs[prevIndex].id);
           playSwipeSound();
         }
       }
     };
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [isCinemaModeActive, filteredSubTabVisibleTabs, activeCinemaCardId]);
+  }, [isCinemaModeActive, orderedFilteredSubTabVisibleTabs, activeCinemaCardId]);
 
-  // Sync activeCinemaCardId when filteredSubTabVisibleTabs changes in Cinema Focus Mode
+  // Sync activeCinemaCardId when orderedFilteredSubTabVisibleTabs changes in Cinema Focus Mode
   useEffect(() => {
     if (!isCinemaModeActive) return;
-    if (filteredSubTabVisibleTabs.length > 0) {
-      const exists = filteredSubTabVisibleTabs.some(t => t.id === activeCinemaCardId);
+    if (orderedFilteredSubTabVisibleTabs.length > 0) {
+      const exists = orderedFilteredSubTabVisibleTabs.some(t => t.id === activeCinemaCardId);
       if (!exists) {
-        setActiveCinemaCardId(filteredSubTabVisibleTabs[0].id);
+        setActiveCinemaCardId(orderedFilteredSubTabVisibleTabs[0].id);
       }
     } else {
       setActiveCinemaCardId(null);
     }
-  }, [isCinemaModeActive, filteredSubTabVisibleTabs, activeCinemaCardId]);
+  }, [isCinemaModeActive, orderedFilteredSubTabVisibleTabs, activeCinemaCardId]);
 
   // Active Card Tab & Sliding Indicator state for desktop carousel
   const [activeCardTabId, setActiveCardTabId] = useState<string | null>(null);
@@ -3057,15 +3148,15 @@ export default function Dashboard() {
   const programmaticScrollTimeoutRef = useRef<any>(null);
 
   useEffect(() => {
-    if (filteredSubTabVisibleTabs.length > 0) {
-      const exists = filteredSubTabVisibleTabs.some(t => t.id === activeCardTabId);
+    if (orderedFilteredSubTabVisibleTabs.length > 0) {
+      const exists = orderedFilteredSubTabVisibleTabs.some(t => t.id === activeCardTabId);
       if (!exists) {
-        setActiveCardTabId(filteredSubTabVisibleTabs[0].id);
+        setActiveCardTabId(orderedFilteredSubTabVisibleTabs[0].id);
       }
     } else {
       setActiveCardTabId(null);
     }
-  }, [filteredSubTabVisibleTabs, activeCardTabId]);
+  }, [orderedFilteredSubTabVisibleTabs, activeCardTabId]);
 
   const lastActiveCardTabId = useRef<string | null>(null);
   useEffect(() => {
@@ -3135,9 +3226,9 @@ export default function Dashboard() {
       // Shift + J for Cinema Focus Mode
       if (e.shiftKey && !e.ctrlKey && !e.metaKey && e.key.toUpperCase() === "J") {
         e.preventDefault();
-        if (filteredSubTabVisibleTabs.length > 0) {
-          const isCurrentActiveVisible = filteredSubTabVisibleTabs.some(t => t.id === activeCardTabId);
-          const targetId = isCurrentActiveVisible ? (activeCardTabId || filteredSubTabVisibleTabs[0].id) : filteredSubTabVisibleTabs[0].id;
+        if (orderedFilteredSubTabVisibleTabs.length > 0) {
+          const isCurrentActiveVisible = orderedFilteredSubTabVisibleTabs.some(t => t.id === activeCardTabId);
+          const targetId = isCurrentActiveVisible ? (activeCardTabId || orderedFilteredSubTabVisibleTabs[0].id) : orderedFilteredSubTabVisibleTabs[0].id;
           setActiveCinemaCardId(targetId);
           setIsCinemaModeActive(true);
           
@@ -3218,11 +3309,11 @@ export default function Dashboard() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleImportLatestPrices, handleFlipAllCards, filteredSubTabVisibleTabs, activeCardTabId, setActiveCinemaCardId, setIsCinemaModeActive]);
+  }, [handleImportLatestPrices, handleFlipAllCards, orderedFilteredSubTabVisibleTabs, activeCardTabId, setActiveCinemaCardId, setIsCinemaModeActive]);
 
   useEffect(() => {
     const updateIndicator = () => {
-      const activeId = activeCardTabId || (filteredSubTabVisibleTabs.length > 0 ? filteredSubTabVisibleTabs[0].id : null);
+      const activeId = activeCardTabId || (orderedFilteredSubTabVisibleTabs.length > 0 ? orderedFilteredSubTabVisibleTabs[0].id : null);
       if (activeId) {
         const el = tabRefs.current[activeId];
         if (el) {
@@ -3255,12 +3346,12 @@ export default function Dashboard() {
       cancelAnimationFrame(animId);
       window.removeEventListener("resize", updateIndicator);
     };
-  }, [activeCardTabId, filteredSubTabVisibleTabs]);
+  }, [activeCardTabId, orderedFilteredSubTabVisibleTabs]);
 
   const handleCarouselScroll = () => {
     if (isProgrammaticScrollRef.current) return;
     const carousel = carouselRef.current;
-    if (!carousel || filteredSubTabVisibleTabs.length === 0) return;
+    if (!carousel || orderedFilteredSubTabVisibleTabs.length === 0) return;
     
     const containerRect = carousel.getBoundingClientRect();
     const containerCenter = containerRect.left + containerRect.width / 2;
@@ -3268,7 +3359,7 @@ export default function Dashboard() {
     let closestTabId = null;
     let minDistance = Infinity;
     
-    filteredSubTabVisibleTabs.forEach((tab) => {
+    orderedFilteredSubTabVisibleTabs.forEach((tab) => {
       const el = document.getElementById(`stock-card-${tab.id}`);
       if (el) {
         const rect = el.getBoundingClientRect();
@@ -3305,33 +3396,6 @@ export default function Dashboard() {
       });
     }
   };
-
-  const renderGroups = useMemo(() => {
-    const groups: { isGroup: boolean; id: string; tabs: any[] }[] = [];
-    const processedGroupIds = new Set<string>();
-    
-    filteredSubTabVisibleTabs.forEach((tab) => {
-      const shouldGroup = tab.groupId && !isMobile;
-      if (shouldGroup) {
-        if (!processedGroupIds.has(tab.groupId!)) {
-          processedGroupIds.add(tab.groupId!);
-          const allGroupTabs = effectiveVisibleActiveTabs.filter(t => t.groupId === tab.groupId);
-          groups.push({
-            isGroup: true,
-            id: tab.groupId!,
-            tabs: allGroupTabs
-          });
-        }
-      } else {
-        groups.push({
-          isGroup: false,
-          id: tab.id,
-          tabs: [tab]
-        });
-      }
-    });
-    return groups;
-  }, [filteredSubTabVisibleTabs, effectiveVisibleActiveTabs, isMobile]);
 
   const completedTabs = tabs.filter((t) => t.status === "COMPLETED");
 
@@ -4266,203 +4330,256 @@ export default function Dashboard() {
         </Dialog>
 
         {/* Card Action Choice Dialog */}
-        <Dialog open={isActionDialogOpen} onOpenChange={setIsActionDialogOpen}>
-          <DialogContent className="border border-zinc-200 shadow-2xl bg-white text-zinc-800 max-w-[320px] p-6 rounded-2xl">
+        <Dialog open={isActionDialogOpen} onOpenChange={(open) => {
+          setIsActionDialogOpen(open);
+          if (open) {
+            setActionActiveTab("general");
+          }
+        }}>
+          <DialogContent className="border border-zinc-200 shadow-2xl bg-white text-zinc-800 max-w-[350px] p-6 rounded-2xl">
             <DialogHeader className="mb-4">
               <DialogTitle className="font-black text-xl text-zinc-900 flex items-center justify-center gap-2">
                 <span className="bg-zinc-105 text-zinc-800 px-2 py-0.5 rounded text-sm font-black border border-zinc-200">{selectedActionTab?.symbol}</span> 操作
               </DialogTitle>
             </DialogHeader>
-            <div className="grid grid-cols-1 gap-3">
-              <button
-                onClick={() => {
-                  if (selectedActionTab) {
-                    navigate(`/stock/${selectedActionTab.id}`);
-                    setIsActionDialogOpen(false);
-                  }
-                }}
-                onMouseEnter={() => selectedActionTab && prefetchStockPrice(selectedActionTab.symbol)}
-                className="w-full py-4 px-4 bg-zinc-50 hover:bg-zinc-100/70 border border-zinc-200 rounded-xl flex items-center justify-between transition-all group shadow-sm cursor-pointer"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center group-hover:scale-110 transition-transform">
-                    <ExternalLink className="w-5 h-5 text-blue-600" />
-                  </div>
-                  <div className="text-left">
-                    <p className="font-black text-sm text-zinc-800">檢視細節</p>
-                    <p className="text-[10px] font-bold text-zinc-500">
-                      進入個股詳情頁面
-                    </p>
-                  </div>
-                </div>
-                <ChevronRight className="w-4 h-4 text-zinc-400 group-hover:text-blue-600 group-hover:translate-x-1 transition-all" />
-              </button>
 
+            {/* Tab Switched Header buttons */}
+            <div className="flex bg-zinc-100 p-1 rounded-xl border border-zinc-200/80 mb-4 shadow-inner">
               <button
-                onClick={() => {
-                  if (selectedActionTab) {
-                    handleToggleTabHighlight(
-                      selectedActionTab.id,
-                      selectedActionTab.isFavoriteHighlight,
-                    );
-                  }
-                }}
-                className={`w-full py-4 px-4 border rounded-xl flex items-center justify-between transition-all group cursor-pointer ${
-                  selectedActionTab?.isFavoriteHighlight
-                    ? "bg-[#B1C28D]/20 border-[#B1C28D]/50 hover:bg-[#B1C28D]/30"
-                    : "bg-zinc-50 border-zinc-200 hover:bg-zinc-100/70 shadow-sm"
+                type="button"
+                onClick={() => setActionActiveTab("general")}
+                className={`flex-1 py-2 text-xs font-black rounded-lg transition-all cursor-pointer text-center ${
+                  actionActiveTab === "general"
+                    ? "bg-white text-zinc-900 shadow-sm border border-zinc-200/30 font-black"
+                    : "text-zinc-500 hover:text-zinc-800"
                 }`}
               >
-                <div className="flex items-center gap-3">
-                  <div
-                    className={`w-10 h-10 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform ${
-                      selectedActionTab?.isFavoriteHighlight
-                        ? "bg-[#B1C28D]/30"
-                        : "bg-amber-100"
-                    }`}
-                  >
-                    <Star
-                      className={`w-5 h-5 ${selectedActionTab?.isFavoriteHighlight ? "text-[#58633F] fill-[#58633F]/50" : "text-amber-600"}`}
-                    />
-                  </div>
-                  <div className="text-left">
-                    <p className="font-black text-sm text-zinc-800">
-                      {selectedActionTab?.isFavoriteHighlight
-                        ? "取消重點"
-                        : "重點關注"}
-                    </p>
-                    <p className="text-[10px] font-bold text-zinc-505">
-                      切換首頁卡片高亮狀態
-                    </p>
-                  </div>
-                </div>
-                <ChevronRight
-                  className={`w-4 h-4 transition-all group-hover:translate-x-1 ${
-                    selectedActionTab?.isFavoriteHighlight
-                      ? "text-[#58633F]"
-                      : "text-zinc-400 group-hover:text-amber-500"
-                  }`}
-                />
+                基本檢視
               </button>
-
               <button
-                onClick={() => {
-                  if (selectedActionTab) {
-                    updateTab(selectedActionTab.id, {
-                      isOperationConfirmed:
-                        !selectedActionTab.isOperationConfirmed,
-                    });
-                    setIsActionDialogOpen(false);
-                  }
-                }}
-                className={`w-full py-4 px-4 border rounded-xl flex items-center justify-between transition-all group cursor-pointer ${
-                  selectedActionTab?.isOperationConfirmed
-                    ? "bg-emerald-50 border-emerald-250 hover:bg-emerald-100/50"
-                    : "bg-zinc-50 border-zinc-200 hover:bg-zinc-100/70 shadow-sm"
+                type="button"
+                onClick={() => setActionActiveTab("status")}
+                className={`flex-1 py-2 text-xs font-black rounded-lg transition-all cursor-pointer text-center relative ${
+                  actionActiveTab === "status"
+                    ? "bg-white text-zinc-900 shadow-sm border border-zinc-200/30 font-black"
+                    : "text-zinc-500 hover:text-zinc-800"
                 }`}
               >
-                <div className="flex items-center gap-3">
-                  <div
-                    className={`w-10 h-10 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform ${
-                      selectedActionTab?.isOperationConfirmed
-                        ? "bg-[#5cb884]/20"
-                        : "bg-emerald-500/10"
-                    }`}
-                  >
-                    <CheckCircle2
-                      className={`w-5 h-5 ${selectedActionTab?.isOperationConfirmed ? "text-emerald-700 font-bold" : "text-emerald-600"}`}
-                    />
-                  </div>
-                  <div className="text-left">
-                    <p className="font-black text-sm text-zinc-800">操作確認</p>
-                    <p className="text-[10px] font-bold text-zinc-500">
-                      切換首頁卡片顏色
-                    </p>
-                  </div>
-                </div>
-                <ChevronRight
-                  className={`w-4 h-4 transition-all group-hover:translate-x-1 ${
-                    selectedActionTab?.isOperationConfirmed
-                      ? "text-emerald-700"
-                      : "text-zinc-400 group-hover:text-emerald-600"
-                  }`}
-                />
+                狀態設定
+                {(selectedActionTab?.isFavoriteHighlight || selectedActionTab?.isOperationConfirmed || selectedActionTab?.isDeviationConfirmed) && (
+                  <span className="absolute top-2 right-4 w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
+                )}
               </button>
+            </div>
 
-              <button
-                onClick={() => {
-                  if (selectedActionTab) {
-                    updateTab(selectedActionTab.id, {
-                      isDeviationConfirmed:
-                        !selectedActionTab.isDeviationConfirmed,
-                    });
-                    setIsActionDialogOpen(false);
-                  }
-                }}
-                className={`w-full py-4 px-4 border rounded-xl flex items-center justify-between transition-all group cursor-pointer ${
-                  selectedActionTab?.isDeviationConfirmed
-                    ? "bg-[#F5E6DB]/90 border-[#A55F2A]/35 hover:bg-[#F5E6DB]"
-                    : "bg-zinc-50 border-zinc-200 hover:bg-zinc-100/70 shadow-sm"
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <div
-                    className={`w-10 h-10 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform ${
-                      selectedActionTab?.isDeviationConfirmed
-                        ? "bg-[#F0D1B9]/60"
-                        : "bg-[#F0D1B9]/30"
-                    }`}
-                  >
-                    <Star
-                      className={`w-5 h-5 ${selectedActionTab?.isDeviationConfirmed ? "text-[#854D20]" : "text-[#b06a34]"}`}
-                    />
-                  </div>
-                  <div className="text-left">
-                    <p className="font-black text-sm text-zinc-800">乖離確認</p>
-                    <p className="text-[10px] font-bold text-zinc-505">
-                      更改卡片標題背景顏色
-                    </p>
-                  </div>
-                </div>
-                <ChevronRight
-                  className={`w-4 h-4 transition-all group-hover:translate-x-1 ${
-                    selectedActionTab?.isDeviationConfirmed
-                      ? "text-[#854D20]"
-                      : "text-zinc-400 group-hover:text-[#b06a34]"
-                  }`}
-                />
-              </button>
+            {/* Tab content with transition */}
+            <div className="min-h-[220px]">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={actionActiveTab}
+                  initial={{ opacity: 0, x: actionActiveTab === "general" ? -8 : 8 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: actionActiveTab === "general" ? 8 : -8 }}
+                  transition={{ duration: 0.15 }}
+                  className="grid grid-cols-1 gap-3"
+                >
+                  {actionActiveTab === "general" ? (
+                    <>
+                      <button
+                        onClick={() => {
+                          if (selectedActionTab) {
+                            navigate(`/stock/${selectedActionTab.id}`);
+                            setIsActionDialogOpen(false);
+                          }
+                        }}
+                        onMouseEnter={() => selectedActionTab && prefetchStockPrice(selectedActionTab.symbol)}
+                        className="w-full py-4 px-4 bg-zinc-50 hover:bg-zinc-100/70 border border-zinc-200 rounded-xl flex items-center justify-between transition-all group shadow-sm cursor-pointer"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center group-hover:scale-110 transition-transform">
+                            <ExternalLink className="w-5 h-5 text-blue-600" />
+                          </div>
+                          <div className="text-left">
+                            <p className="font-black text-sm text-zinc-800">檢視細節</p>
+                            <p className="text-[10px] font-bold text-zinc-500">
+                              進入個股詳情頁面
+                            </p>
+                          </div>
+                        </div>
+                        <ChevronRight className="w-4 h-4 text-zinc-400 group-hover:text-blue-600 group-hover:translate-x-1 transition-all" />
+                      </button>
 
-              <button
-                onClick={() => {
-                  if (selectedActionTab) {
-                    updateTab(selectedActionTab.id, {
-                      isNew: !selectedActionTab.isNew,
-                    });
-                    setIsActionDialogOpen(false);
-                  }
-                }}
-                className={`w-full py-4 px-4 border rounded-xl flex items-center justify-between transition-all group cursor-pointer ${
-                  selectedActionTab?.isNew
-                    ? "bg-emerald-50 border-emerald-250 hover:bg-[#D8F3E5]"
-                    : "bg-zinc-50 border-zinc-200 hover:bg-zinc-100/70 shadow-sm"
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform ${selectedActionTab?.isNew ? 'bg-emerald-500/20' : 'bg-zinc-200/80'}`}>
-                    <Sparkles className={`w-5 h-5 ${selectedActionTab?.isNew ? 'text-emerald-600' : 'text-zinc-550'}`} />
-                  </div>
-                  <div className="text-left">
-                    <p className={`font-black text-sm ${selectedActionTab?.isNew ? 'text-emerald-700' : 'text-zinc-800'}`}>
-                      更新版本
-                    </p>
-                    <p className={`text-[10px] font-bold ${selectedActionTab?.isNew ? 'text-emerald-700/80' : 'text-zinc-500'}`}>
-                      新增或移除卡片頂部的 NEW 標籤與彩色漸層細線
-                    </p>
-                  </div>
-                </div>
-                <ChevronRight className={`w-4 h-4 transition-all group-hover:translate-x-1 ${selectedActionTab?.isNew ? 'text-emerald-600' : 'text-zinc-400 group-hover:text-emerald-500'}`} />
-              </button>
+                      <button
+                        onClick={() => {
+                          if (selectedActionTab) {
+                            updateTab(selectedActionTab.id, {
+                              isNew: !selectedActionTab.isNew,
+                            });
+                            setIsActionDialogOpen(false);
+                          }
+                        }}
+                        className={`w-full py-4 px-4 border rounded-xl flex items-center justify-between transition-all group cursor-pointer ${
+                          selectedActionTab?.isNew
+                            ? "bg-emerald-50 border-emerald-250 hover:bg-[#D8F3E5]"
+                            : "bg-zinc-50 border-zinc-200 hover:bg-zinc-100/70 shadow-sm"
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className={`w-10 h-10 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform ${selectedActionTab?.isNew ? 'bg-emerald-500/20' : 'bg-zinc-200/80'}`}>
+                            <Sparkles className={`w-5 h-5 ${selectedActionTab?.isNew ? 'text-emerald-600' : 'text-zinc-550'}`} />
+                          </div>
+                          <div className="text-left">
+                            <p className={`font-black text-sm ${selectedActionTab?.isNew ? 'text-emerald-700' : 'text-zinc-800'}`}>
+                              更新版本
+                            </p>
+                            <p className={`text-[10px] font-bold ${selectedActionTab?.isNew ? 'text-emerald-700/80' : 'text-zinc-500'}`}>
+                              新增或移除卡片頂部的 NEW 標籤與彩色漸層細線
+                            </p>
+                          </div>
+                        </div>
+                        <ChevronRight className={`w-4 h-4 transition-all group-hover:translate-x-1 ${selectedActionTab?.isNew ? 'text-emerald-600' : 'text-zinc-400 group-hover:text-emerald-500'}`} />
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => {
+                          if (selectedActionTab) {
+                            handleToggleTabHighlight(
+                              selectedActionTab.id,
+                              selectedActionTab.isFavoriteHighlight,
+                            );
+                          }
+                        }}
+                        className={`w-full py-4 px-4 border rounded-xl flex items-center justify-between transition-all group cursor-pointer ${
+                          selectedActionTab?.isFavoriteHighlight
+                            ? "bg-[#B1C28D]/20 border-[#B1C28D]/50 hover:bg-[#B1C28D]/30"
+                            : "bg-zinc-50 border-zinc-200 hover:bg-zinc-100/70 shadow-sm"
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div
+                            className={`w-10 h-10 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform ${
+                              selectedActionTab?.isFavoriteHighlight
+                                ? "bg-[#B1C28D]/30"
+                                : "bg-amber-100"
+                            }`}
+                          >
+                            <Star
+                              className={`w-5 h-5 ${selectedActionTab?.isFavoriteHighlight ? "text-[#58633F] fill-[#58633F]/50" : "text-amber-600"}`}
+                            />
+                          </div>
+                          <div className="text-left">
+                            <p className="font-black text-sm text-zinc-800">
+                              {selectedActionTab?.isFavoriteHighlight
+                                ? "取消重點"
+                                : "重點關注"}
+                            </p>
+                            <p className="text-[10px] font-bold text-zinc-505">
+                              切換首頁卡片高亮狀態
+                            </p>
+                          </div>
+                        </div>
+                        <ChevronRight
+                          className={`w-4 h-4 transition-all group-hover:translate-x-1 ${
+                            selectedActionTab?.isFavoriteHighlight
+                              ? "text-[#58633F]"
+                              : "text-zinc-400 group-hover:text-amber-500"
+                          }`}
+                        />
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          if (selectedActionTab) {
+                            updateTab(selectedActionTab.id, {
+                              isOperationConfirmed:
+                                !selectedActionTab.isOperationConfirmed,
+                            });
+                            setIsActionDialogOpen(false);
+                          }
+                        }}
+                        className={`w-full py-4 px-4 border rounded-xl flex items-center justify-between transition-all group cursor-pointer ${
+                          selectedActionTab?.isOperationConfirmed
+                            ? "bg-emerald-50 border-emerald-250 hover:bg-emerald-100/50"
+                            : "bg-zinc-50 border-zinc-200 hover:bg-zinc-100/70 shadow-sm"
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div
+                            className={`w-10 h-10 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform ${
+                              selectedActionTab?.isOperationConfirmed
+                                ? "bg-[#5cb884]/20"
+                                : "bg-emerald-500/10"
+                            }`}
+                          >
+                            <CheckCircle2
+                              className={`w-5 h-5 ${selectedActionTab?.isOperationConfirmed ? "text-emerald-700 font-bold" : "text-emerald-600"}`}
+                            />
+                          </div>
+                          <div className="text-left">
+                            <p className="font-black text-sm text-zinc-800">操作確認</p>
+                            <p className="text-[10px] font-bold text-zinc-500">
+                              切換首頁卡片顏色
+                            </p>
+                          </div>
+                        </div>
+                        <ChevronRight
+                          className={`w-4 h-4 transition-all group-hover:translate-x-1 ${
+                            selectedActionTab?.isOperationConfirmed
+                              ? "text-emerald-700"
+                              : "text-zinc-400 group-hover:text-emerald-600"
+                          }`}
+                        />
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          if (selectedActionTab) {
+                            updateTab(selectedActionTab.id, {
+                              isDeviationConfirmed:
+                                !selectedActionTab.isDeviationConfirmed,
+                            });
+                            setIsActionDialogOpen(false);
+                          }
+                        }}
+                        className={`w-full py-4 px-4 border rounded-xl flex items-center justify-between transition-all group cursor-pointer ${
+                          selectedActionTab?.isDeviationConfirmed
+                            ? "bg-[#F5E6DB]/90 border-[#A55F2A]/35 hover:bg-[#F5E6DB]"
+                            : "bg-zinc-50 border-zinc-200 hover:bg-zinc-100/70 shadow-sm"
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div
+                            className={`w-10 h-10 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform ${
+                              selectedActionTab?.isDeviationConfirmed
+                                ? "bg-[#F0D1B9]/60"
+                                : "bg-[#F0D1B9]/30"
+                            }`}
+                          >
+                            <Star
+                              className={`w-5 h-5 ${selectedActionTab?.isDeviationConfirmed ? "text-[#854D20]" : "text-[#b06a34]"}`}
+                            />
+                          </div>
+                          <div className="text-left">
+                            <p className="font-black text-sm text-zinc-800">乖離確認</p>
+                            <p className="text-[10px] font-bold text-zinc-505">
+                              更改卡片標題背景顏色
+                            </p>
+                          </div>
+                        </div>
+                        <ChevronRight
+                          className={`w-4 h-4 transition-all group-hover:translate-x-1 ${
+                            selectedActionTab?.isDeviationConfirmed
+                              ? "text-[#854D20]"
+                              : "text-zinc-400 group-hover:text-[#b06a34]"
+                          }`}
+                        />
+                      </button>
+                    </>
+                  )}
+                </motion.div>
+              </AnimatePresence>
             </div>
           </DialogContent>
         </Dialog>
@@ -4739,9 +4856,9 @@ export default function Dashboard() {
                         if (!open) setConfirmDeleteId(null);
                       }}
                     >
-                      <DialogContent className="border border-zinc-250 shadow-2xl bg-white text-zinc-800 outline-none sm:max-w-3xl max-h-[81vh] overflow-y-auto overflow-x-hidden scrollbar-hide w-11/12 max-w-lg fixed top-[50%] left-[50%] translate-x-[-50%] translate-y-[-50%] !rounded-2xl z-50">
+                      <DialogContent className="border border-zinc-200 shadow-2xl bg-white text-zinc-800 outline-none w-11/12 sm:max-w-3xl max-h-[85vh] overflow-y-auto overflow-x-hidden scrollbar-hide !rounded-2xl p-6">
                         <DialogHeader>
-                          <DialogTitle className="font-black text-xl text-zinc-900 border-b border-zinc-150 pb-3">
+                          <DialogTitle className="font-black text-xl text-zinc-900 border-b border-zinc-200 pb-3">
                             管理持有中股票
                           </DialogTitle>
                         </DialogHeader>
@@ -4775,7 +4892,7 @@ export default function Dashboard() {
                           </div>
 
                           {/* 子分頁列 (觀察中 | 候選名單 | 買進操作 | 賣出操作 | 平倉操作 | 乖離名單 | 持股監控) */}
-                          <div className="flex bg-zinc-50 p-1 rounded-xl w-full overflow-x-auto scrollbar-hide border border-zinc-200/60">
+                          <div className="flex bg-zinc-50 p-1 rounded-xl w-full overflow-x-auto scrollbar-hide border border-zinc-200">
                             {(
                               [
                                 "觀察中",
@@ -4836,7 +4953,7 @@ export default function Dashboard() {
 
                               if (categoryTabs.length === 0) {
                                 return (
-                                  <div className="text-center text-zinc-450 py-12 text-sm font-black bg-zinc-50 border border-zinc-150 border-dashed rounded-xl">
+                                  <div className="text-center text-zinc-400 py-12 text-sm font-black bg-zinc-50 border border-zinc-200 border-dashed rounded-xl">
                                     {activeManageTab === "持股監控"
                                       ? "目前無隱藏的個股名單"
                                       : `此分類下沒有${manageTradeType === "real" ? "真實交易" : "持有中"}股票`}
@@ -4850,19 +4967,19 @@ export default function Dashboard() {
                                     className="flex flex-col gap-3.5 p-4 rounded-xl border border-zinc-200 bg-zinc-50/55 hover:bg-zinc-50 transition-colors relative overflow-hidden shadow-xs"
                                     key={tab.id}
                                   >
-                                    <div className="flex items-center justify-between z-10 w-full relative border-b border-zinc-150 pb-2">
+                                    <div className="flex items-center justify-between z-10 w-full relative border-b border-zinc-200 pb-2">
                                       <div className="flex items-center gap-3">
                                         <span
-                                          className={`font-black text-base ${tab.isHidden ? "text-zinc-400 line-through decoration-zinc-350" : "text-zinc-800"}`}
+                                          className={`font-black text-base ${tab.isHidden ? "text-zinc-400 line-through decoration-zinc-300" : "text-zinc-800"}`}
                                         >
                                           {tab.symbol}
                                         </span>
                                         {tab.tradeType === "simulated" ? (
-                                          <Badge className="bg-amber-50 border border-amber-250 text-amber-700 font-extrabold rounded-md shadow-xs">
+                                          <Badge className="bg-amber-50 border border-amber-200 text-amber-700 font-extrabold rounded-md shadow-xs">
                                             模擬
                                           </Badge>
                                         ) : (
-                                          <Badge className="bg-emerald-50 border border-emerald-250 text-emerald-700 font-extrabold rounded-md shadow-xs">
+                                          <Badge className="bg-emerald-50 border border-emerald-200 text-emerald-700 font-extrabold rounded-md shadow-xs">
                                             真實
                                           </Badge>
                                         )}
@@ -4923,10 +5040,10 @@ export default function Dashboard() {
                                         onClick={() =>
                                           updateTabHidden(tab.id, !tab.isHidden)
                                         }
-                                        className={`flex-1 h-[48px] sm:h-[44px] rounded-lg sm:rounded-md border transition-all flex flex-row items-center justify-center gap-2 font-black text-base sm:text-xs cursor-pointer ${tab.isHidden ? "bg-zinc-250 border-zinc-350 text-zinc-700 hover:bg-zinc-300 shadow-xs" : "bg-amber-50 border-amber-250 text-amber-700 hover:bg-amber-100 shadow-sm"}`}
+                                        className={`flex-1 h-[48px] sm:h-[44px] rounded-lg sm:rounded-md border transition-all flex flex-row items-center justify-center gap-2 font-black text-base sm:text-xs cursor-pointer ${tab.isHidden ? "bg-zinc-200 border-zinc-300 text-zinc-600 hover:bg-zinc-300 shadow-xs" : "bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100 shadow-sm"}`}
                                       >
                                         {tab.isHidden ? (
-                                          <EyeOff className="w-5 h-5 sm:w-3.5 sm:h-3.5 text-zinc-505" />
+                                          <EyeOff className="w-5 h-5 sm:w-3.5 sm:h-3.5 text-zinc-500" />
                                         ) : (
                                           <Eye className="w-5 h-5 sm:w-3.5 sm:h-3.5 text-amber-600 font-extrabold" />
                                         )}
@@ -4935,9 +5052,9 @@ export default function Dashboard() {
 
                                       <button
                                         onClick={() => toggleTabGroup(tab)}
-                                        className={`flex-1 h-[48px] sm:h-[44px] rounded-lg sm:rounded-md border transition-all flex flex-row items-center justify-center gap-2 font-black text-base sm:text-xs cursor-pointer ${tab.groupId ? "bg-purple-100 border-purple-250 text-purple-700 hover:bg-purple-150 shadow-sm" : "bg-zinc-50 border-zinc-200 text-zinc-700 hover:bg-zinc-100 shadow-xs"}`}
+                                        className={`flex-1 h-[48px] sm:h-[44px] rounded-lg sm:rounded-md border transition-all flex flex-row items-center justify-center gap-2 font-black text-base sm:text-xs cursor-pointer ${tab.groupId ? "bg-purple-100 border-purple-200 text-purple-700 hover:bg-purple-150 shadow-sm" : "bg-zinc-50 border-zinc-200 text-zinc-700 hover:bg-zinc-100 shadow-xs"}`}
                                       >
-                                        <Link className={`w-5 h-5 sm:w-3.5 sm:h-3.5 ${tab.groupId ? 'text-purple-650 font-black' : 'text-zinc-550'}`} />
+                                        <Link className={`w-5 h-5 sm:w-3.5 sm:h-3.5 ${tab.groupId ? 'text-purple-600 font-black' : 'text-zinc-500'}`} />
                                         {tab.groupId ? "解除區塊" : "區塊"}
                                       </button>
 
@@ -4951,7 +5068,7 @@ export default function Dashboard() {
                                               onClick={() =>
                                                 setConfirmDeleteId(null)
                                               }
-                                              className="flex-1 sm:flex-none p-1.5 px-3 h-full sm:h-[32px] rounded-lg bg-zinc-100 border border-zinc-250 text-zinc-700 hover:bg-zinc-200 text-base sm:text-xs font-black cursor-pointer"
+                                              className="flex-1 sm:flex-none p-1.5 px-3 h-full sm:h-[32px] rounded-lg bg-zinc-100 border border-zinc-200 text-zinc-600 hover:bg-zinc-200 text-base sm:text-xs font-black cursor-pointer"
                                             >
                                               取消
                                             </button>
@@ -4967,17 +5084,17 @@ export default function Dashboard() {
                                           </div>
                                         </div>
                                       ) : groupingTabId === tab.id ? (
-                                        <div className="absolute right-0 top-0 bottom-0 bg-white border border-purple-250 shadow-xl flex flex-col items-center justify-center w-full rounded-lg px-2 py-2 z-10 gap-2 backdrop-blur-xl">
+                                        <div className="absolute right-0 top-0 bottom-0 bg-white border border-purple-200 shadow-xl flex flex-col items-center justify-center w-full rounded-lg px-2 py-2 z-10 gap-2 backdrop-blur-xl">
                                           <div className="text-zinc-800 text-xs font-black w-full text-center">選擇要連動的股票 (同一代號)</div>
                                           <div className="flex flex-wrap gap-2 w-full items-center justify-center">
                                              {activeTabs.filter(t => t.symbol === tab.symbol && t.id !== tab.id).length === 0 ? (
-                                                <span className="text-rose-650 text-xs font-black">無其他相同代號的持有中股票</span>
+                                                <span className="text-rose-600 text-xs font-black">無其他相同代號的持有中股票</span>
                                              ) : (
                                                 activeTabs.filter(t => t.symbol === tab.symbol && t.id !== tab.id).map(target => (
                                                    <button 
                                                       key={target.id}
                                                       onClick={(e) => { e.stopPropagation(); handleGroupWith(tab.id, target); }}
-                                                      className={`px-3 py-1 bg-white hover:bg-zinc-50 border border-zinc-250 rounded-lg text-xs font-black transition-colors cursor-pointer ${target.groupId ? "bg-purple-10s text-purple-705 border-purple-200" : "text-zinc-700 hover:text-black hover:border-zinc-300"}`}
+                                                      className={`px-3 py-1 bg-white hover:bg-zinc-50 border border-zinc-200 rounded-lg text-xs font-black transition-colors cursor-pointer ${target.groupId ? "bg-purple-100 text-purple-700 border-purple-200" : "text-zinc-700 hover:text-black hover:border-zinc-300"}`}
                                                    >
                                                       {target.holdingStatus || '未分類'}
                                                    </button>
@@ -4986,7 +5103,7 @@ export default function Dashboard() {
                                           </div>
                                           <button 
                                             onClick={() => setGroupingTabId(null)}
-                                            className="absolute right-2 top-2 p-1 text-zinc-450 hover:text-zinc-800 bg-zinc-150 hover:bg-zinc-200 border border-zinc-250 rounded cursor-pointer"
+                                            className="absolute right-2 top-2 p-1 text-zinc-400 hover:text-zinc-800 bg-zinc-100 hover:bg-zinc-200 border border-zinc-200 rounded cursor-pointer"
                                           >
                                             取消
                                           </button>
@@ -4998,7 +5115,7 @@ export default function Dashboard() {
                                           }
                                           className="flex-1 h-[48px] sm:h-[44px] rounded-lg sm:rounded-md border transition-all bg-rose-50 border-rose-200 text-rose-600 hover:bg-rose-100 flex flex-row items-center justify-center gap-2 font-black text-base sm:text-xs cursor-pointer"
                                         >
-                                          <Trash2 className="w-5 h-5 sm:w-3.5 sm:h-3.5 text-rose-605 font-bold" />
+                                          <Trash2 className="w-5 h-5 sm:w-3.5 sm:h-3.5 text-rose-600 font-bold" />
                                           刪除
                                         </button>
                                       )}
@@ -5009,7 +5126,7 @@ export default function Dashboard() {
                             })()}
                           </div>
                           {activeTabs.length === 0 && (
-                            <div className="text-zinc-400 text-center py-8 font-black bg-zinc-50 rounded-2xl border border-dashed border-zinc-150">
+                            <div className="text-zinc-400 text-center py-8 font-black bg-zinc-50 rounded-2xl border border-dashed border-zinc-200">
                               目前無持有中股票
                             </div>
                           )}
@@ -5324,7 +5441,7 @@ export default function Dashboard() {
                                           const isDraggingUp = dy > 0;
                                           const isDraggingDown = dy < 0;
                                           
-                                          if ((currentShowBack && isDraggingUp) || (!currentShowBack && isDraggingDown)) {
+                                          if (true) {
                                             tracker.hasTriggeredFlip = true;
                                             setFlippedCards((prev) => ({
                                               ...prev,
@@ -5347,7 +5464,7 @@ export default function Dashboard() {
                                             const isDraggingUp = dy > 0;
                                             const isDraggingDown = dy < 0;
                                             
-                                            if ((currentShowBack && isDraggingUp) || (!currentShowBack && isDraggingDown)) {
+                                            if (true) {
                                               tracker.hasTriggeredFlip = true;
                                               setFlippedCards((prev) => ({
                                                 ...prev,
@@ -6064,6 +6181,52 @@ export default function Dashboard() {
                                 })}
                               </div>
                             </div>
+
+                            {/* Sliding tab indicator navigation bar underneath stock cards */}
+                            {orderedFilteredSubTabVisibleTabs.length > 0 && (
+                              <div className="hidden sm:block mt-6 px-4 md:px-8 w-full">
+                                <div className="flex justify-center w-full">
+                                  <div className="relative max-w-4xl pb-2">
+                                    <div className="flex flex-row items-center justify-center gap-6 overflow-x-auto scrollbar-hide relative pb-1.5">
+                                      {orderedFilteredSubTabVisibleTabs.map((tab) => {
+                                        const isSelected = (activeCardTabId || orderedFilteredSubTabVisibleTabs[0].id) === tab.id;
+                                        return (
+                                          <button
+                                            key={tab.id}
+                                            ref={(el) => {
+                                              tabRefs.current[tab.id] = el;
+                                            }}
+                                            onClick={() => handleTabIndicatorClick(tab.id)}
+                                            className="px-2 py-1 text-sm font-medium transition-colors duration-200 cursor-pointer outline-none shrink-0"
+                                            style={{
+                                              color: isSelected ? "#1a1a1a" : "#999999",
+                                              fontWeight: isSelected ? 500 : 400,
+                                            }}
+                                          >
+                                            {tab.symbol}
+                                          </button>
+                                        );
+                                      })}
+                                      <div
+                                        className="absolute bottom-0 left-0 right-0"
+                                        style={{ height: "1.5px", backgroundColor: "#e0e0e0" }}
+                                      />
+                                      <div
+                                        className="absolute bottom-0"
+                                        style={{
+                                          height: "2px",
+                                          backgroundColor: "#1a1a1a",
+                                          borderRadius: "2px",
+                                          left: `${indicatorStyle.left}px`,
+                                          width: `${indicatorStyle.width}px`,
+                                          transition: "left 0.3s cubic-bezier(0.16, 1, 0.3, 1), width 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
+                                        }}
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
                           </>
                         )}
                         </AnimatePresence>
@@ -7149,7 +7312,7 @@ export default function Dashboard() {
                     <button
                       onClick={() => {
                         if (htmlContext === "dynamic") {
-                          const activeTab = filteredSubTabVisibleTabs.find(t => t.id === activeCinemaCardId);
+                          const activeTab = orderedFilteredSubTabVisibleTabs.find(t => t.id === activeCinemaCardId);
                           if (activeTab) {
                             setHtmlUploadSymbol(activeTab.symbol);
                           } else {
@@ -7174,7 +7337,7 @@ export default function Dashboard() {
                       onClick={() => {
                         setIsPreviewHtmlOpen(true);
                         if (htmlContext === "dynamic") {
-                          const activeTab = filteredSubTabVisibleTabs.find(t => t.id === activeCinemaCardId);
+                          const activeTab = orderedFilteredSubTabVisibleTabs.find(t => t.id === activeCinemaCardId);
                           fetchUploadedHtmlFiles(activeTab?.symbol);
                         } else if (htmlContext === "market_filter") {
                           fetchUploadedHtmlFiles("MARKET_FILTER");
@@ -7270,9 +7433,9 @@ export default function Dashboard() {
                     個股導覽 STOCKS
                   </div>
                   <div className="flex-1 overflow-y-auto scrollbar-hide w-full max-h-[45vh]">
-                    {filteredSubTabVisibleTabs.length > 0 ? (
+                    {orderedFilteredSubTabVisibleTabs.length > 0 ? (
                       <CinemaDock
-                        tabs={filteredSubTabVisibleTabs}
+                        tabs={orderedFilteredSubTabVisibleTabs}
                         activeId={activeCinemaCardId}
                         onSelect={(id) => setActiveCinemaCardId(id)}
                       />
@@ -7289,15 +7452,15 @@ export default function Dashboard() {
               <div className="flex-1 flex flex-col items-center justify-center relative min-h-0">
                 <div className="flex-1 w-full flex items-center justify-center relative my-2">
                   {/* Left Arrow */}
-                  {filteredSubTabVisibleTabs.length > 1 && (
+                  {orderedFilteredSubTabVisibleTabs.length > 1 && (
                     <button
                       onClick={() => {
-                        const currentIndex = filteredSubTabVisibleTabs.findIndex(t => t.id === activeCinemaCardId);
+                        const currentIndex = orderedFilteredSubTabVisibleTabs.findIndex(t => t.id === activeCinemaCardId);
                         if (currentIndex > 0) {
-                          setActiveCinemaCardId(filteredSubTabVisibleTabs[currentIndex - 1].id);
+                          setActiveCinemaCardId(orderedFilteredSubTabVisibleTabs[currentIndex - 1].id);
                           playSwipeSound();
                         } else {
-                          setActiveCinemaCardId(filteredSubTabVisibleTabs[filteredSubTabVisibleTabs.length - 1].id);
+                          setActiveCinemaCardId(orderedFilteredSubTabVisibleTabs[orderedFilteredSubTabVisibleTabs.length - 1].id);
                           playSwipeSound();
                         }
                       }}
@@ -7310,7 +7473,7 @@ export default function Dashboard() {
 
                   {/* Scaled/Zoomed Card Container */}
                   <div className="flex items-center justify-center w-full h-full max-h-[82vh] overflow-visible">
-                    {filteredSubTabVisibleTabs.map((tab, idx) => {
+                    {orderedFilteredSubTabVisibleTabs.map((tab, idx) => {
                       const isSelected = tab.id === activeCinemaCardId;
                       if (!isSelected) return null;
                       const cinemaScale = isMobile ? 0.96 : (typeof window !== "undefined" && window.innerWidth < 1024 ? 1.25 : 1.45);
@@ -7331,15 +7494,15 @@ export default function Dashboard() {
                   </div>
 
                   {/* Right Arrow */}
-                  {filteredSubTabVisibleTabs.length > 1 && (
+                  {orderedFilteredSubTabVisibleTabs.length > 1 && (
                     <button
                       onClick={() => {
-                        const currentIndex = filteredSubTabVisibleTabs.findIndex(t => t.id === activeCinemaCardId);
-                        if (currentIndex < filteredSubTabVisibleTabs.length - 1) {
-                          setActiveCinemaCardId(filteredSubTabVisibleTabs[currentIndex + 1].id);
+                        const currentIndex = orderedFilteredSubTabVisibleTabs.findIndex(t => t.id === activeCinemaCardId);
+                        if (currentIndex < orderedFilteredSubTabVisibleTabs.length - 1) {
+                          setActiveCinemaCardId(orderedFilteredSubTabVisibleTabs[currentIndex + 1].id);
                           playSwipeSound();
                         } else {
-                          setActiveCinemaCardId(filteredSubTabVisibleTabs[0].id);
+                          setActiveCinemaCardId(orderedFilteredSubTabVisibleTabs[0].id);
                           playSwipeSound();
                         }
                       }}
@@ -7354,9 +7517,9 @@ export default function Dashboard() {
                 {/* Bottom Pagination Info */}
                 <div className="w-full flex flex-col items-center gap-1.5 pb-2">
                   {/* Sleek page dots */}
-                  {filteredSubTabVisibleTabs.length > 1 && (
+                  {orderedFilteredSubTabVisibleTabs.length > 1 && (
                     <div className="flex items-center justify-center gap-1.5 mb-1">
-                      {filteredSubTabVisibleTabs.map((tab) => {
+                      {orderedFilteredSubTabVisibleTabs.map((tab) => {
                         const isActive = tab.id === activeCinemaCardId;
                         return (
                           <span
@@ -7374,10 +7537,10 @@ export default function Dashboard() {
                     </div>
                   )}
 
-                  {filteredSubTabVisibleTabs.length > 0 && (
+                  {orderedFilteredSubTabVisibleTabs.length > 0 && (
                     <div className="text-xs font-mono text-zinc-600 font-medium -mt-1">
-                      第 {filteredSubTabVisibleTabs.findIndex(t => t.id === activeCinemaCardId) + 1} / {filteredSubTabVisibleTabs.length} 檔:{" "}
-                      <span className="text-zinc-400 font-bold">{filteredSubTabVisibleTabs.find(t => t.id === activeCinemaCardId)?.symbol}</span>
+                      第 {orderedFilteredSubTabVisibleTabs.findIndex(t => t.id === activeCinemaCardId) + 1} / {orderedFilteredSubTabVisibleTabs.length} 檔:{" "}
+                      <span className="text-zinc-400 font-bold">{orderedFilteredSubTabVisibleTabs.find(t => t.id === activeCinemaCardId)?.symbol}</span>
                     </div>
                   )}
                 </div>
