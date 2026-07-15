@@ -341,6 +341,8 @@ export default function Dashboard() {
   });
   const [htmlFileToUpload, setHtmlFileToUpload] = useState<File | null>(null);
   const [htmlFileContent, setHtmlFileContent] = useState<string>("");
+  const [htmlFileToUpload2, setHtmlFileToUpload2] = useState<File | null>(null);
+  const [htmlFileContent2, setHtmlFileContent2] = useState<string>("");
   const [isUploadingHtml, setIsUploadingHtml] = useState(false);
   const [htmlFilesList, setHtmlFilesList] = useState<any[]>([]);
   const [selectedPreviewFileId, setSelectedPreviewFileId] = useState<number | null>(null);
@@ -3002,17 +3004,28 @@ export default function Dashboard() {
     }
   }, [isPreviewHtmlOpen, activeCinemaSymbol, htmlContext]);
 
-  const handleHtmlFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleHtmlFileChange = (e: React.ChangeEvent<HTMLInputElement>, fieldIndex: 1 | 2) => {
     const file = e.target.files?.[0];
     if (file) {
-      setHtmlFileToUpload(file);
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          setHtmlFileContent(event.target.result as string);
-        }
-      };
-      reader.readAsText(file);
+      if (fieldIndex === 1) {
+        setHtmlFileToUpload(file);
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          if (event.target?.result) {
+            setHtmlFileContent(event.target.result as string);
+          }
+        };
+        reader.readAsText(file);
+      } else {
+        setHtmlFileToUpload2(file);
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          if (event.target?.result) {
+            setHtmlFileContent2(event.target.result as string);
+          }
+        };
+        reader.readAsText(file);
+      }
     }
   };
 
@@ -3025,7 +3038,7 @@ export default function Dashboard() {
       toast.error("請輸入或選擇個股名稱");
       return;
     }
-    if (!htmlFileContent) {
+    if (!htmlFileContent && !htmlFileContent2) {
       toast.error("請選擇要上傳的 HTML 檔案");
       return;
     }
@@ -3033,28 +3046,66 @@ export default function Dashboard() {
     setIsUploadingHtml(true);
     const dateFormatted = htmlUploadDate.replace(/-/g, ""); // e.g. 20260708
     const cleanSymbol = htmlUploadSymbol.trim().toUpperCase();
-    const finalFilename = `${cleanSymbol}_${dateFormatted}.html`;
 
     try {
-      const response = await fetch("/api/html-files", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          userId: user.uid,
-          symbol: cleanSymbol,
-          filename: finalFilename,
-          htmlContent: htmlFileContent,
-        }),
-      });
+      const uploadPromises = [];
 
-      if (response.ok) {
+      if (htmlFileContent) {
+        const finalFilename1 = htmlFileContent2
+          ? `${cleanSymbol}_${dateFormatted}_1.html`
+          : `${cleanSymbol}_${dateFormatted}.html`;
+
+        uploadPromises.push(
+          fetch("/api/html-files", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              userId: user.uid,
+              symbol: cleanSymbol,
+              filename: finalFilename1,
+              htmlContent: htmlFileContent,
+            }),
+          })
+        );
+      }
+
+      if (htmlFileContent2) {
+        const finalFilename2 = `${cleanSymbol}_${dateFormatted}_2.html`;
+
+        uploadPromises.push(
+          fetch("/api/html-files", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              userId: user.uid,
+              symbol: cleanSymbol,
+              filename: finalFilename2,
+              htmlContent: htmlFileContent2,
+            }),
+          })
+        );
+      }
+
+      const responses = await Promise.all(uploadPromises);
+      let allOk = true;
+      for (const res of responses) {
+        if (!res.ok) {
+          allOk = false;
+        }
+      }
+
+      if (allOk) {
         setIsUploadHtmlOpen(false);
         setHtmlFileToUpload(null);
         setHtmlFileContent("");
+        setHtmlFileToUpload2(null);
+        setHtmlFileContent2("");
         if (htmlContext === "dynamic") {
-          const activeTab = filteredSubTabVisibleTabs.find(t => t.id === activeCinemaCardId);
+          const activeTab = orderedFilteredSubTabVisibleTabs.find(t => t.id === activeCinemaCardId);
           fetchUploadedHtmlFiles(activeTab?.symbol);
         } else if (htmlContext === "market_filter") {
           fetchUploadedHtmlFiles("MARKET_FILTER");
@@ -3063,8 +3114,7 @@ export default function Dashboard() {
         }
         toast.success("HTML 檔案上傳成功");
       } else {
-        const errData = await response.json();
-        toast.error(errData.error || "上傳失敗");
+        toast.error("檔案上傳失敗");
       }
     } catch (error) {
       console.error("Error uploading HTML file:", error);
@@ -7011,27 +7061,68 @@ export default function Dashboard() {
 
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-bold text-zinc-400 font-sans uppercase">產生的檔案名稱預覽</label>
-              <div className="w-full px-3 py-2 bg-zinc-900/50 border border-zinc-800 rounded-lg text-zinc-300 font-mono text-xs break-all">
-                {htmlUploadSymbol.trim() ? `${htmlUploadSymbol.trim().toUpperCase()}_${htmlUploadDate.replace(/-/g, "")}.html` : "(請先輸入個股代號)"}
+              <div className="w-full px-3 py-2 bg-zinc-900/50 border border-zinc-800 rounded-lg text-zinc-300 font-mono text-xs flex flex-col gap-1.5 break-all">
+                {!htmlUploadSymbol.trim() ? (
+                  <span>(請先輸入個股代號)</span>
+                ) : (
+                  <>
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[10px] text-zinc-500 font-sans">檔案一預覽：</span>
+                      <span className="text-zinc-300">
+                        {htmlUploadSymbol.trim().toUpperCase()}_{htmlUploadDate.replace(/-/g, "")}
+                        {htmlFileContent2 ? "_1" : ""}.html
+                      </span>
+                    </div>
+                    {htmlFileContent2 && (
+                      <div className="flex flex-col gap-1 border-t border-white/5 pt-1.5">
+                        <span className="text-[10px] text-zinc-500 font-sans">檔案二預覽：</span>
+                        <span className="text-zinc-300">
+                          {htmlUploadSymbol.trim().toUpperCase()}_{htmlUploadDate.replace(/-/g, "")}_2.html
+                        </span>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-bold text-zinc-400 font-sans uppercase">選擇 HTML 檔案</label>
-              <div className="relative border border-dashed border-white/20 hover:border-white/40 rounded-xl p-6 flex flex-col items-center justify-center gap-2 transition-all bg-white/[0.02]">
+              <label className="text-xs font-bold text-zinc-400 font-sans uppercase">第一份 HTML 檔案</label>
+              <div className="relative border border-dashed border-white/20 hover:border-white/40 rounded-xl p-4 flex flex-col items-center justify-center gap-1.5 transition-all bg-white/[0.02]">
                 <input
                   type="file"
                   accept=".html,.htm"
-                  onChange={handleHtmlFileChange}
+                  onChange={(e) => handleHtmlFileChange(e, 1)}
                   className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
                 />
-                <FileText className="w-8 h-8 text-zinc-500" />
+                <FileText className="w-6 h-6 text-zinc-500" />
                 <span className="text-xs text-zinc-400 text-center font-medium">
                   {htmlFileToUpload ? htmlFileToUpload.name : "拖曳或點擊選擇 .html 檔案"}
                 </span>
                 {htmlFileToUpload && (
                   <span className="text-[10px] text-zinc-500 font-mono">
                     大小: {(htmlFileToUpload.size / 1024).toFixed(1)} KB
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-bold text-zinc-400 font-sans uppercase">第二份 HTML 檔案（選填）</label>
+              <div className="relative border border-dashed border-white/20 hover:border-white/40 rounded-xl p-4 flex flex-col items-center justify-center gap-1.5 transition-all bg-white/[0.02]">
+                <input
+                  type="file"
+                  accept=".html,.htm"
+                  onChange={(e) => handleHtmlFileChange(e, 2)}
+                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                />
+                <FileText className="w-6 h-6 text-zinc-500" />
+                <span className="text-xs text-zinc-400 text-center font-medium">
+                  {htmlFileToUpload2 ? htmlFileToUpload2.name : "拖曳或點擊選擇 .html 檔案"}
+                </span>
+                {htmlFileToUpload2 && (
+                  <span className="text-[10px] text-zinc-500 font-mono">
+                    大小: {(htmlFileToUpload2.size / 1024).toFixed(1)} KB
                   </span>
                 )}
               </div>
@@ -7325,6 +7416,8 @@ export default function Dashboard() {
                         }
                         setHtmlFileToUpload(null);
                         setHtmlFileContent("");
+                        setHtmlFileToUpload2(null);
+                        setHtmlFileContent2("");
                         setIsUploadHtmlOpen(true);
                         playClickSound();
                       }}
