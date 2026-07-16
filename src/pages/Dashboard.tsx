@@ -73,6 +73,8 @@ import {
   Calendar,
   FileJson,
   Upload,
+  Trash,
+  Check,
   Download,
   ChevronLeft,
   ChevronRight,
@@ -93,6 +95,9 @@ import {
   Maximize2,
   Loader2,
   Printer,
+  Save,
+  Edit3,
+  Settings,
 } from "lucide-react";
 import { calculateStats } from "../lib/calculations";
 import { safeLocalStorage, safeSessionStorage } from "../lib/utils";
@@ -233,6 +238,44 @@ const calculateNegativeValue = (
   );
 };
 
+const promptTemplates = [
+  {
+    id: "fundamental",
+    name: "個股基本面分析",
+    template: "請針對個股 {symbol} ({companyName}) 進行詳細的基本面分析，包含營收、毛利率、本益比（P/E Ratio）、負債比以及近期的財報表現，並給出未來的投資建議與風險評估。"
+  },
+  {
+    id: "technical",
+    name: "個股技術面分析",
+    template: "請分析個股 {symbol} ({companyName}) 的技術面走勢。包含近期的 K 線型態、主要均線支撐與壓力位、RSI、MACD、以及量價關係，並預測短期的股價趨勢。"
+  },
+  {
+    id: "chips",
+    name: "籌碼面與主力動向",
+    template: "請深入研究個股 {symbol} ({companyName}) 的籌碼面。分析主力資金流向、大戶持股比例變化、外資與投信的買賣超狀況，以及融資融券的餘額變化，評估市場主力的意圖。"
+  },
+  {
+    id: "industry",
+    name: "產業地位與競爭優勢",
+    template: "請評估個股 {symbol} ({companyName}) 在其所屬產業中的市場地位與核心競爭力。分析其面臨的競爭對手、產業護城河、未來成長動能以及長期發展潛力。"
+  },
+  {
+    id: "news",
+    name: "最新新聞與事件分析",
+    template: "請檢索並分析關於個股 {symbol} ({companyName}) 的最新重大新聞、產品發佈、財報公布或高層變動事件，說明 these events 對股價的中長期影響。"
+  },
+  {
+    id: "fed",
+    name: "FED 政策對該股影響",
+    template: "請結合最新 FED 利率決策（如降息/升息預期、縮表政策），分析對個股 {symbol} ({companyName}) 的估值、資金成本及股價可能帶來的影響。"
+  },
+  {
+    id: "custom",
+    name: "自訂分析指令",
+    template: "請針對個股 {symbol} ({companyName}) 進行深度多維度交叉分析。"
+  }
+];
+
 export default function Dashboard() {
   const {
     tabs,
@@ -347,7 +390,235 @@ export default function Dashboard() {
   const [htmlFilesList, setHtmlFilesList] = useState<any[]>([]);
   const [selectedPreviewFileId, setSelectedPreviewFileId] = useState<number | null>(null);
   const [deletingFileId, setDeletingFileId] = useState<number | null>(null);
-  const [htmlContext, setHtmlContext] = useState<"dynamic" | "market_filter" | "stock_micro">("dynamic");
+  const [htmlContext, setHtmlContext] = useState<"dynamic" | "market_filter" | "stock_micro" | "fed" | "plus_70">("dynamic");
+
+  // AI Analysis Panel States & Helpers
+  const [isAiAnalysisOpen, setIsAiAnalysisOpen] = useState(false);
+  const [aiSelectedSymbol, setAiSelectedSymbol] = useState("");
+  const [aiSelectedPromptId, setAiSelectedPromptId] = useState("fundamental");
+  const [aiPromptText, setAiPromptText] = useState("");
+  const [aiHtmlFiles, setAiHtmlFiles] = useState<any[]>([]);
+  const [selectedPreviewUrl, setSelectedPreviewUrl] = useState<string | null>(null);
+  const [selectedPreviewLinkTitle, setSelectedPreviewLinkTitle] = useState<string | null>(null);
+  const [aiLeftTab, setAiLeftTab] = useState<"upload" | "preview">("upload");
+  const [aiUploadFile, setAiUploadFile] = useState<File | null>(null);
+  const [aiUploadContent, setAiUploadContent] = useState<string>("");
+  const [isAiUploading, setIsAiUploading] = useState(false);
+
+  // Dynamic Prompt templates loaded from local storage or defaulting to default templates
+  const [dynamicPrompts, setDynamicPrompts] = useState<{ id: string; name: string; template: string; note?: string }[]>(() => {
+    const saved = safeLocalStorage.getItem("custom_prompt_templates");
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error("Error loading prompt templates from localStorage:", e);
+      }
+    }
+    return promptTemplates;
+  });
+
+  const [isPromptManagerOpen, setIsPromptManagerOpen] = useState(false);
+  const [newPromptName, setNewPromptName] = useState("");
+  const [newPromptTemplate, setNewPromptTemplate] = useState("");
+  const [newPromptNote, setNewPromptNote] = useState("");
+  const [editingPromptId, setEditingPromptId] = useState<string | null>(null);
+  const [editingPromptName, setEditingPromptName] = useState("");
+  const [editingPromptTemplate, setEditingPromptTemplate] = useState("");
+  const [editingPromptNote, setEditingPromptNote] = useState("");
+  const [confirmDeletePromptId, setConfirmDeletePromptId] = useState<string | null>(null);
+  const [confirmDeleteFileId, setConfirmDeleteFileId] = useState<number | null>(null);
+
+  const handleSavePrompts = (updated: typeof dynamicPrompts) => {
+    setDynamicPrompts(updated);
+    safeLocalStorage.setItem("custom_prompt_templates", JSON.stringify(updated));
+  };
+
+  const uniqueActiveStocks = useMemo(() => {
+    const seen = new Set<string>();
+    const list: { symbol: string; companyName?: string }[] = [];
+    tabs
+      .filter((t: any) => t.status === "ACTIVE")
+      .forEach((tab) => {
+        if (tab.symbol && !seen.has(tab.symbol)) {
+          seen.add(tab.symbol);
+          list.push({ symbol: tab.symbol, companyName: tab.companyName });
+        }
+      });
+    return list;
+  }, [tabs]);
+
+  const aiActiveTab = useMemo(() => {
+    if (!aiSelectedSymbol || !tabs) return null;
+    return tabs.find((t: any) => t.symbol === aiSelectedSymbol && t.status === "ACTIVE");
+  }, [aiSelectedSymbol, tabs]);
+
+  useEffect(() => {
+    if (isAiAnalysisOpen && !aiSelectedSymbol && uniqueActiveStocks.length > 0) {
+      setAiSelectedSymbol(uniqueActiveStocks[0].symbol);
+    }
+  }, [isAiAnalysisOpen, uniqueActiveStocks, aiSelectedSymbol]);
+
+  useEffect(() => {
+    if (aiSelectedSymbol) {
+      const fetchAiHtmlFiles = async (symbol: string) => {
+        if (!user || !symbol) return;
+        try {
+          const url = `/api/html-files?userId=${user.uid}&symbol=${encodeURIComponent(symbol.trim().toUpperCase())}`;
+          const response = await fetch(url);
+          if (response.ok) {
+            const data = await response.json();
+            setAiHtmlFiles(data);
+          }
+        } catch (error) {
+          console.error("Failed to fetch AI HTML files:", error);
+        }
+      };
+      
+      fetchAiHtmlFiles(aiSelectedSymbol);
+      
+      const templateObj = dynamicPrompts.find(t => t.id === aiSelectedPromptId);
+      if (templateObj) {
+        const stockObj = uniqueActiveStocks.find(s => s.symbol === aiSelectedSymbol);
+        const companyName = stockObj?.companyName || "";
+        const interpolated = templateObj.template
+          .replace(/{symbol}/g, aiSelectedSymbol)
+          .replace(/{companyName}/g, companyName);
+        setAiPromptText(interpolated);
+      }
+    }
+  }, [aiSelectedSymbol, aiSelectedPromptId, uniqueActiveStocks, user, dynamicPrompts]);
+
+  useEffect(() => {
+    if (!isAiAnalysisOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setIsAiAnalysisOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isAiAnalysisOpen]);
+
+  const handleAiFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setAiUploadFile(file);
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (event.target?.result) {
+          setAiUploadContent(event.target.result as string);
+        }
+      };
+      reader.readAsText(file);
+    }
+  };
+
+  const handleAiUploadSubmit = async () => {
+    if (!user) {
+      toast.error("請先登入");
+      return;
+    }
+    if (!aiSelectedSymbol) {
+      toast.error("請先選擇分析個股");
+      return;
+    }
+    if (!aiUploadContent) {
+      toast.error("請選擇要上傳的 HTML 檔案");
+      return;
+    }
+
+    setIsAiUploading(true);
+    const dateFormatted = new Date().toISOString().slice(0, 10).replace(/-/g, ""); // e.g. 20260716
+    const cleanSymbol = aiSelectedSymbol.trim().toUpperCase();
+    const filename = aiUploadFile ? aiUploadFile.name : `${cleanSymbol}_${dateFormatted}.html`;
+
+    try {
+      const response = await fetch("/api/html-files", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userId: user.uid,
+          symbol: cleanSymbol,
+          filename: filename,
+          htmlContent: aiUploadContent,
+        }),
+      });
+
+      if (response.ok) {
+        toast.success("HTML 檔案上傳成功！");
+        setAiUploadFile(null);
+        setAiUploadContent("");
+        
+        // Refresh the file list
+        const url = `/api/html-files?userId=${user.uid}&symbol=${encodeURIComponent(cleanSymbol)}`;
+        const listRes = await fetch(url);
+        if (listRes.ok) {
+          const data = await listRes.json();
+          setAiHtmlFiles(data);
+          if (data.length > 0) {
+            const latestFile = data[0];
+            setSelectedPreviewUrl(`/api/html-files/${latestFile.id}/content`);
+            setSelectedPreviewLinkTitle(latestFile.fileName);
+          }
+        }
+        setAiLeftTab("preview");
+        playClickSound();
+      } else {
+        const err = await response.json();
+        throw new Error(err.error || "上傳失敗");
+      }
+    } catch (error: any) {
+      console.error("Failed to upload HTML file:", error);
+      toast.error(error.message || "上傳失敗，請稍後再試");
+    } finally {
+      setIsAiUploading(false);
+    }
+  };
+
+  const handleAiDeleteHtmlFile = async (e: React.MouseEvent, id: number) => {
+    e.stopPropagation();
+    try {
+      const response = await fetch(`/api/html-files/${id}`, {
+        method: "DELETE",
+      });
+      if (response.ok) {
+        toast.success("檔案已成功刪除");
+        setAiHtmlFiles(prev => prev.filter(f => f.id !== id));
+        if (selectedPreviewUrl === `/api/html-files/${id}/content`) {
+          setSelectedPreviewUrl(null);
+          setSelectedPreviewLinkTitle(null);
+        }
+        setConfirmDeleteFileId(null);
+      } else {
+        toast.error("刪除失敗");
+      }
+    } catch (error) {
+      console.error("Failed to delete AI html file:", error);
+      toast.error("刪除失敗，發生錯誤");
+    }
+  };
+
+  const handlePasteOnDeepseek = async () => {
+    if (!aiPromptText.trim()) {
+      toast.error("請輸入或選擇 Prompt 指令內容");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(aiPromptText);
+      toast.success("已複製指令，即將開啓 Deepseek！");
+      try {
+        window.open("https://chat.deepseek.com", "_blank");
+      } catch (err) {
+        console.warn("Failed to open Deepseek window automatically", err);
+      }
+    } catch (error: any) {
+      console.error("Deepseek copy error:", error);
+      toast.error("複製失敗，請手動複製。");
+    }
+  };
 
   useEffect(() => {
     const state = location.state as { autoFlipTabId?: string } | null;
@@ -3111,6 +3382,10 @@ export default function Dashboard() {
           fetchUploadedHtmlFiles("MARKET_FILTER");
         } else if (htmlContext === "stock_micro") {
           fetchUploadedHtmlFiles("STOCK_MICRO");
+        } else if (htmlContext === "fed") {
+          fetchUploadedHtmlFiles("FED");
+        } else if (htmlContext === "plus_70") {
+          fetchUploadedHtmlFiles("+70");
         }
         toast.success("HTML 檔案上傳成功");
       } else {
@@ -4746,6 +5021,18 @@ export default function Dashboard() {
                         <InteractiveButton
                           noGlow
                           as="button"
+                          onClick={() => {
+                            setIsAiAnalysisOpen(true);
+                            playClickSound();
+                          }}
+                          title="Ai分析回傳"
+                          className="p-2 bg-zinc-50 border border-zinc-200 text-zinc-500 hover:text-zinc-850 hover:bg-zinc-100 rounded-md transition-all cursor-pointer flex items-center justify-center"
+                        >
+                          <Sparkles className="w-4 h-4 text-amber-600 animate-pulse" />
+                        </InteractiveButton>
+                        <InteractiveButton
+                          noGlow
+                          as="button"
                           onClick={() => setIsManageHiddenOpen(true)}
                           title="管理持有中股票"
                           className="p-2 bg-zinc-50 border border-zinc-200 text-zinc-500 hover:text-zinc-850 hover:bg-zinc-100 rounded-md transition-all cursor-pointer"
@@ -4810,6 +5097,18 @@ export default function Dashboard() {
                           )}
                         </div>
                         <div className="flex items-center gap-2">
+                          <InteractiveButton
+                            noGlow
+                            as="button"
+                            onClick={() => {
+                              setIsAiAnalysisOpen(true);
+                              playClickSound();
+                            }}
+                            className="px-2.5 py-1 bg-zinc-50 border border-zinc-200 text-zinc-650 hover:text-zinc-850 hover:bg-zinc-100 rounded-lg transition-all text-[11px] flex items-center gap-1 font-extrabold cursor-pointer"
+                          >
+                            <Sparkles className="w-3 h-3 text-amber-600 animate-pulse" />
+                            Ai分析
+                          </InteractiveButton>
                           <InteractiveButton
                             noGlow
                             as="button"
@@ -7024,6 +7323,8 @@ export default function Dashboard() {
                 上傳 {
                   htmlContext === "market_filter" ? "大盤濾網" :
                   htmlContext === "stock_micro" ? "個股微觀" :
+                  htmlContext === "fed" ? "FED" :
+                  htmlContext === "plus_70" ? "+70" :
                   "個股分析"
                 } HTML 文件
               </span>
@@ -7033,7 +7334,11 @@ export default function Dashboard() {
           <div className="flex flex-col gap-4 py-4 text-sm">
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-bold text-zinc-400 font-sans uppercase">
-                {htmlContext === "market_filter" ? "類別 (大盤濾網)" : htmlContext === "stock_micro" ? "類別 (個股微觀)" : "個股代號/名稱"}
+                {htmlContext === "market_filter" ? "類別 (大盤濾網)" :
+                 htmlContext === "stock_micro" ? "類別 (個股微觀)" :
+                 htmlContext === "fed" ? "類別 (FED)" :
+                 htmlContext === "plus_70" ? "類別 (+70)" :
+                 "個股代號/名稱"}
               </label>
               <input
                 type="text"
@@ -7178,6 +7483,8 @@ export default function Dashboard() {
                     選擇 {
                       htmlContext === "market_filter" ? "大盤濾網" :
                       htmlContext === "stock_micro" ? "個股微觀" :
+                      htmlContext === "fed" ? "FED" :
+                      htmlContext === "plus_70" ? "+70" :
                       "個股分析"
                     } HTML 檔案進行預覽
                   </span>
@@ -7257,6 +7564,8 @@ export default function Dashboard() {
                             類別: {
                               file.symbol === "MARKET_FILTER" ? "大盤濾網" :
                               file.symbol === "STOCK_MICRO" ? "個股微觀" :
+                              file.symbol === "FED" ? "FED" :
+                              file.symbol === "+70" ? "+70" :
                               `個股 (${file.symbol})`
                             }
                           </span>
@@ -7349,7 +7658,7 @@ export default function Dashboard() {
                 {/* HTML Document Management Consolidated Panel (Tabbed Compact Layout) */}
                 <div className="w-full flex flex-col gap-1.5 p-1.5 bg-white/5 border border-white/[0.04] rounded-xl">
                   {/* Tab bar header */}
-                  <div className="grid grid-cols-3 gap-0.5 bg-black/40 p-0.5 rounded-lg border border-white/[0.03]">
+                  <div className="grid grid-cols-5 gap-0.5 bg-black/40 p-0.5 rounded-lg border border-white/[0.03]">
                     <button
                       onClick={() => {
                         setHtmlContext("dynamic");
@@ -7396,6 +7705,32 @@ export default function Dashboard() {
                     >
                       微觀
                     </button>
+                    <button
+                      onClick={() => {
+                        setHtmlContext("fed");
+                        playClickSound();
+                      }}
+                      className={`py-1 text-center text-[10px] font-bold rounded transition-all cursor-pointer ${
+                        htmlContext === "fed"
+                          ? "bg-zinc-800 text-white border border-white/[0.05]"
+                          : "text-zinc-400 hover:text-zinc-200"
+                      }`}
+                    >
+                      FED
+                    </button>
+                    <button
+                      onClick={() => {
+                        setHtmlContext("plus_70");
+                        playClickSound();
+                      }}
+                      className={`py-1 text-center text-[10px] font-bold rounded transition-all cursor-pointer ${
+                        htmlContext === "plus_70"
+                          ? "bg-zinc-800 text-white border border-white/[0.05]"
+                          : "text-zinc-400 hover:text-zinc-200"
+                      }`}
+                    >
+                      +70
+                    </button>
                   </div>
 
                   {/* Active context controls */}
@@ -7411,8 +7746,12 @@ export default function Dashboard() {
                           }
                         } else if (htmlContext === "market_filter") {
                           setHtmlUploadSymbol("MARKET_FILTER");
-                        } else {
+                        } else if (htmlContext === "stock_micro") {
                           setHtmlUploadSymbol("STOCK_MICRO");
+                        } else if (htmlContext === "fed") {
+                          setHtmlUploadSymbol("FED");
+                        } else if (htmlContext === "plus_70") {
+                          setHtmlUploadSymbol("+70");
                         }
                         setHtmlFileToUpload(null);
                         setHtmlFileContent("");
@@ -7434,8 +7773,12 @@ export default function Dashboard() {
                           fetchUploadedHtmlFiles(activeTab?.symbol);
                         } else if (htmlContext === "market_filter") {
                           fetchUploadedHtmlFiles("MARKET_FILTER");
-                        } else {
+                        } else if (htmlContext === "stock_micro") {
                           fetchUploadedHtmlFiles("STOCK_MICRO");
+                        } else if (htmlContext === "fed") {
+                          fetchUploadedHtmlFiles("FED");
+                        } else if (htmlContext === "plus_70") {
+                          fetchUploadedHtmlFiles("+70");
                         }
                         playClickSound();
                       }}
@@ -7638,6 +7981,614 @@ export default function Dashboard() {
                   )}
                 </div>
               </div>
+            </div>
+          </motion.div>
+        </AnimatePresence>
+      )}
+
+      {isAiAnalysisOpen && (
+        <AnimatePresence>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[99999] bg-[#0a0a0a] flex flex-col p-6 text-white select-none overflow-hidden"
+          >
+            {/* Top Bar */}
+            <div className="w-full flex items-center justify-between border-b border-white/5 pb-4 opacity-90">
+              <div className="flex items-center gap-2">
+                <span className="text-[#e5484d] text-base leading-none animate-pulse">●</span>
+                <span className="text-[13px] font-semibold tracking-wider text-zinc-400 font-sans">
+                  AI 搜尋分析與 Airtap 回傳 · AI FOCUS ANALYTICS
+                </span>
+              </div>
+              <div className="flex items-center gap-4">
+                <span className="text-xs text-zinc-500 font-sans">
+                  ESC 鍵可退出 AI 分析模式
+                </span>
+                <button
+                  onClick={() => setIsAiAnalysisOpen(false)}
+                  className="w-8 h-8 rounded-full border border-white/10 hover:border-white/20 bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/80 hover:text-white transition-all cursor-pointer text-xs"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Main Section */}
+            <div className="flex-1 w-full flex flex-col lg:flex-row min-h-0 relative mt-4 overflow-hidden gap-6">
+              {/* Left Column (Dropdowns, Prompt Text Box, Execute button) */}
+              <div className="w-full lg:w-[420px] shrink-0 flex flex-col gap-4 lg:border-r lg:border-white/5 lg:pr-6 justify-start py-2 overflow-y-auto scrollbar-hide">
+                
+                {isPromptManagerOpen ? (
+                  <div className="flex flex-col gap-4 animate-fadeIn">
+                    {/* Header */}
+                    <div className="flex items-center justify-between border-b border-white/5 pb-2">
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-amber-500 tracking-wider">
+                        <Settings className="w-3.5 h-3.5 text-amber-500 animate-spin" />
+                        <span>管理指令模版 PROMPT MANAGE</span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setIsPromptManagerOpen(false);
+                          setEditingPromptId(null);
+                          setNewPromptName("");
+                          setNewPromptTemplate("");
+                          setNewPromptNote("");
+                          setEditingPromptNote("");
+                          playClickSound();
+                        }}
+                        className="text-[10px] text-zinc-400 hover:text-white bg-white/5 px-2.5 py-1 rounded transition-all border border-white/5 cursor-pointer"
+                      >
+                        返回分析
+                      </button>
+                    </div>
+
+                    {/* Editor list */}
+                    <div className="flex flex-col gap-3">
+                      {/* Active Edit Area if editing */}
+                      {editingPromptId ? (
+                        <div className="p-3 bg-white/5 rounded-lg border border-amber-500/20 flex flex-col gap-2.5">
+                          <div className="text-[10px] font-bold text-amber-400 flex items-center gap-1">
+                            <Edit3 className="w-3 h-3 text-amber-400" />
+                            <span>正在編輯指令</span>
+                          </div>
+                          
+                          <div className="flex flex-col gap-1">
+                            <label className="text-[9px] text-zinc-400 font-bold">模版名稱</label>
+                            <input
+                              type="text"
+                              value={editingPromptName}
+                              onChange={(e) => setEditingPromptName(e.target.value)}
+                              className="w-full bg-[#161616] border border-white/10 text-white rounded px-2.5 py-1.5 text-xs focus:outline-none focus:border-red-500"
+                            />
+                          </div>
+
+                          <div className="flex flex-col gap-1">
+                            <label className="text-[9px] text-zinc-400 font-bold">模版備註 (選填)</label>
+                            <input
+                              type="text"
+                              placeholder="輸入模版備註 (選填)"
+                              value={editingPromptNote}
+                              onChange={(e) => setEditingPromptNote(e.target.value)}
+                              className="w-full bg-[#161616] border border-white/10 text-white rounded px-2.5 py-1.5 text-xs focus:outline-none focus:border-red-500"
+                            />
+                          </div>
+
+                          <div className="flex flex-col gap-1">
+                            <label className="text-[9px] text-zinc-400 font-bold">
+                              模版內容 (支援 &#123;symbol&#125;, &#123;companyName&#125;)
+                            </label>
+                            <textarea
+                              value={editingPromptTemplate}
+                              onChange={(e) => setEditingPromptTemplate(e.target.value)}
+                              rows={5}
+                              className="w-full bg-[#161616] border border-white/10 text-white rounded p-2 text-xs focus:outline-none focus:border-red-500 resize-none leading-relaxed"
+                            />
+                          </div>
+
+                          <div className="flex items-center gap-2 mt-1">
+                            <button
+                              onClick={() => {
+                                if (!editingPromptName.trim() || !editingPromptTemplate.trim()) {
+                                  toast.error("請填寫完整的名稱與內容");
+                                  return;
+                                }
+                                const updated = dynamicPrompts.map(p => 
+                                  p.id === editingPromptId 
+                                    ? { ...p, name: editingPromptName, template: editingPromptTemplate, note: editingPromptNote } 
+                                    : p
+                                );
+                                handleSavePrompts(updated);
+                                setEditingPromptId(null);
+                                setEditingPromptNote("");
+                                toast.success("模版修改成功！");
+                                playClickSound();
+                              }}
+                              className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded text-[10px] flex items-center justify-center gap-1 transition-all cursor-pointer border border-emerald-500/20"
+                            >
+                              <Save className="w-3 h-3" />
+                              儲存修改
+                            </button>
+                            <button
+                              onClick={() => {
+                                setEditingPromptId(null);
+                                playClickSound();
+                              }}
+                              className="px-3 py-1.5 bg-zinc-850 hover:bg-zinc-750 text-zinc-300 font-bold rounded text-[10px] transition-all cursor-pointer border border-white/5"
+                            >
+                              取消
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        /* Create New Area */
+                        <div className="p-3 bg-white/[0.02] rounded-lg border border-white/5 flex flex-col gap-2">
+                          <div className="text-[10px] font-bold text-zinc-300 flex items-center gap-1">
+                            <Plus className="w-3.5 h-3.5 text-emerald-500" />
+                            新增自訂模版
+                          </div>
+
+                          <div className="flex flex-col gap-1">
+                            <input
+                              type="text"
+                              placeholder="輸入模版名稱 (例如: 個股籌碼透視)"
+                              value={newPromptName}
+                              onChange={(e) => setNewPromptName(e.target.value)}
+                              className="w-full bg-[#161616] border border-white/10 text-white rounded px-2.5 py-1.5 text-xs focus:outline-none focus:border-emerald-500/50"
+                            />
+                          </div>
+
+                          <div className="flex flex-col gap-1">
+                            <input
+                              type="text"
+                              placeholder="輸入模版備註 (例如: 主要分析籌碼主力, 選填)"
+                              value={newPromptNote}
+                              onChange={(e) => setNewPromptNote(e.target.value)}
+                              className="w-full bg-[#161616] border border-white/10 text-white rounded px-2.5 py-1.5 text-xs focus:outline-none focus:border-emerald-500/50"
+                            />
+                          </div>
+
+                          <div className="flex flex-col gap-1">
+                            <textarea
+                              placeholder="輸入模版內容。支援 {symbol} 與 {companyName} 自動代入"
+                              value={newPromptTemplate}
+                              onChange={(e) => setNewPromptTemplate(e.target.value)}
+                              rows={3}
+                              className="w-full bg-[#161616] border border-white/10 text-white rounded p-2 text-xs focus:outline-none focus:border-emerald-500/50 resize-none leading-relaxed"
+                            />
+                          </div>
+
+                          <button
+                            onClick={() => {
+                              if (!newPromptName.trim() || !newPromptTemplate.trim()) {
+                                toast.error("請輸入標題與模版內容");
+                                return;
+                              }
+                              const newId = `custom_${Date.now()}`;
+                              const updated = [
+                                ...dynamicPrompts,
+                                { id: newId, name: newPromptName, template: newPromptTemplate, note: newPromptNote }
+                              ];
+                              handleSavePrompts(updated);
+                              setAiSelectedPromptId(newId);
+                              setNewPromptName("");
+                              setNewPromptTemplate("");
+                              setNewPromptNote("");
+                              toast.success("自訂模版新增成功！");
+                              playClickSound();
+                            }}
+                            className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded text-[10px] flex items-center justify-center gap-1 transition-all cursor-pointer border border-emerald-500/20"
+                          >
+                            <Plus className="w-3 h-3" />
+                            新增並儲存
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Templates list with edit/delete buttons */}
+                      <div className="flex flex-col gap-2 mt-2">
+                        <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                          現有模版列表 ({dynamicPrompts.length})
+                        </div>
+                        <div className="flex flex-col gap-1.5 max-h-[220px] overflow-y-auto pr-1">
+                          {dynamicPrompts.map((tmpl) => (
+                            <div
+                              key={`tmpl-item-${tmpl.id}`}
+                              className="p-2.5 bg-[#141414] rounded border border-white/5 flex items-center justify-between gap-3 text-xs hover:border-white/10 transition-all"
+                            >
+                              <div className="flex-1 min-w-0">
+                                <div className="font-bold text-zinc-200 truncate">{tmpl.name}</div>
+                                <div className="text-[10px] text-zinc-500 truncate mt-0.5">{tmpl.template}</div>
+                                {tmpl.note && (
+                                  <div className="text-[9px] text-amber-500/80 truncate mt-0.5 font-sans">
+                                    備註: {tmpl.note}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <button
+                                  onClick={() => {
+                                    setEditingPromptId(tmpl.id);
+                                    setEditingPromptName(tmpl.name);
+                                    setEditingPromptTemplate(tmpl.template);
+                                    setEditingPromptNote(tmpl.note || "");
+                                    playClickSound();
+                                  }}
+                                  className="p-1 hover:bg-white/10 rounded text-zinc-400 hover:text-white transition-all cursor-pointer"
+                                  title="編輯標題與內容"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" />
+                                </button>
+                                {confirmDeletePromptId === tmpl.id ? (
+                                  <div className="flex items-center gap-1 bg-[#1a1a1a] p-1 rounded border border-red-500/20">
+                                    <button
+                                      onClick={() => {
+                                        const updated = dynamicPrompts.filter(p => p.id !== tmpl.id);
+                                        handleSavePrompts(updated);
+                                        if (aiSelectedPromptId === tmpl.id) {
+                                          setAiSelectedPromptId(updated[0].id);
+                                        }
+                                        toast.success("模版已刪除");
+                                        playClickSound();
+                                        setConfirmDeletePromptId(null);
+                                      }}
+                                      className="px-1.5 py-0.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded text-[9px] transition-all cursor-pointer"
+                                      title="確認刪除"
+                                    >
+                                      確認
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        setConfirmDeletePromptId(null);
+                                        playClickSound();
+                                      }}
+                                      className="px-1.5 py-0.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded text-[9px] transition-all cursor-pointer"
+                                      title="取消"
+                                    >
+                                      取消
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    onClick={() => {
+                                      if (dynamicPrompts.length <= 1) {
+                                        toast.error("至少需要保留一個指令模版");
+                                        return;
+                                      }
+                                      setConfirmDeletePromptId(tmpl.id);
+                                      playClickSound();
+                                    }}
+                                    className="p-1 hover:bg-red-500/10 rounded text-zinc-500 hover:text-red-400 transition-all cursor-pointer"
+                                    title="刪除"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {/* Stock selector */}
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-bold tracking-wider text-zinc-500 font-sans uppercase">
+                        選擇分析個股 SELECT STOCK
+                      </label>
+                      <select
+                        value={aiSelectedSymbol}
+                        onChange={(e) => {
+                          setAiSelectedSymbol(e.target.value);
+                          playClickSound();
+                        }}
+                        className="w-full bg-[#161616] border border-white/10 text-white rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-red-500/50 cursor-pointer"
+                      >
+                        {uniqueActiveStocks.length === 0 ? (
+                          <option value="">(無持有或真實交易個股)</option>
+                        ) : (
+                          uniqueActiveStocks.map((stock) => (
+                            <option key={`ai-stock-${stock.symbol}`} value={stock.symbol}>
+                              {stock.symbol} {stock.companyName ? `(${stock.companyName})` : ""}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                    </div>
+
+                    {/* Prompt Template selector */}
+                    <div className="flex flex-col gap-1.5">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-bold tracking-wider text-zinc-500 font-sans uppercase">
+                          選擇指令模版 SELECT PROMPT
+                        </label>
+                        <button
+                          onClick={() => {
+                            setIsPromptManagerOpen(true);
+                            playClickSound();
+                          }}
+                          className="text-[10px] text-amber-500 hover:text-amber-400 flex items-center gap-1 bg-amber-500/5 hover:bg-amber-500/10 px-2.5 py-0.5 rounded border border-amber-500/20 transition-all cursor-pointer font-bold"
+                          title="管理/新增/修改 Prompt 範本"
+                        >
+                          <Settings className="w-3 h-3 text-amber-500" />
+                          <span>管理模版</span>
+                        </button>
+                      </div>
+                      <select
+                        value={aiSelectedPromptId}
+                        onChange={(e) => {
+                          setAiSelectedPromptId(e.target.value);
+                          playClickSound();
+                        }}
+                        className="w-full bg-[#161616] border border-white/10 text-white rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-red-500/50 cursor-pointer"
+                      >
+                        {dynamicPrompts.map((tmpl) => (
+                          <option key={`ai-tmpl-${tmpl.id}`} value={tmpl.id}>
+                            {tmpl.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Prompt Template Memo Field */}
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-bold tracking-wider text-zinc-500 font-sans uppercase">
+                        指令模版備註 PROMPT TEMPLATE NOTE
+                      </label>
+                      <textarea
+                        value={(() => {
+                          const selectedTmpl = dynamicPrompts.find(t => t.id === aiSelectedPromptId);
+                          return selectedTmpl?.note || "";
+                        })()}
+                        onChange={(e) => {
+                          const updated = dynamicPrompts.map(p => 
+                            p.id === aiSelectedPromptId 
+                              ? { ...p, note: e.target.value } 
+                              : p
+                          );
+                          handleSavePrompts(updated);
+                        }}
+                        placeholder="在此輸入此指令模版的備註說明，修改後會自動存檔..."
+                        className="w-full h-20 bg-[#161616] border border-white/10 text-white rounded-lg p-2.5 text-xs focus:outline-none focus:border-red-500/50 resize-none font-sans leading-relaxed"
+                      />
+                    </div>
+                                {/* Prompt Text Box */}
+                    <div className="flex-1 flex flex-col gap-1.5 relative min-h-[220px]">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-bold tracking-wider text-zinc-500 font-sans uppercase">
+                          編輯與確認指令 EDIT PROMPT
+                        </label>
+                        <button
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(aiPromptText);
+                              toast.success("已複製 Prompt 到剪貼簿！");
+                            } catch (err) {
+                              toast.error("複製失敗");
+                            }
+                          }}
+                          className="text-[10px] text-zinc-400 hover:text-white flex items-center gap-1 bg-white/5 hover:bg-white/10 px-2 py-1 rounded transition-all cursor-pointer border border-white/5"
+                        >
+                          <Copy className="w-3 h-3" />
+                          <span>複製指令</span>
+                        </button>
+                      </div>
+                      <textarea
+                        value={aiPromptText}
+                        onChange={(e) => setAiPromptText(e.target.value)}
+                        className="flex-1 w-full bg-[#161616] border border-white/10 text-white rounded-lg p-3 text-xs focus:outline-none focus:border-red-500/50 resize-none font-sans leading-relaxed"
+                        placeholder="請輸入或選擇 Prompt 指令..."
+                      />
+                    </div>
+
+                    {/* Compact Tab Interface for AI Operations */}
+                    <div className="flex flex-col gap-2 mt-2 border-t border-white/5 pt-3 shrink-0">
+                      <div className="flex bg-black/40 p-0.5 rounded-lg border border-white/[0.03] gap-0.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAiLeftTab("upload");
+                            playClickSound();
+                          }}
+                          className={`flex-1 py-1 text-[11px] font-bold rounded transition-all cursor-pointer text-center ${
+                            aiLeftTab === "upload"
+                              ? "bg-[#10b981]/15 text-[#10b981] border border-[#10b981]/25"
+                              : "text-zinc-400 hover:text-zinc-200"
+                          }`}
+                        >
+                          上傳 HTML
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAiLeftTab("preview");
+                            playClickSound();
+                          }}
+                          className={`flex-1 py-1 text-[11px] font-bold rounded transition-all cursor-pointer text-center relative ${
+                            aiLeftTab === "preview"
+                              ? "bg-zinc-800 text-white border border-white/[0.05]"
+                              : "text-zinc-400 hover:text-zinc-200"
+                          }`}
+                        >
+                          預覽 HTML
+                          {aiHtmlFiles.length > 0 && (
+                            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[8px] px-1 rounded-full scale-90">
+                              {aiHtmlFiles.length}
+                            </span>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handlePasteOnDeepseek();
+                            playClickSound();
+                          }}
+                          className="flex-1 py-1 text-[11px] font-bold rounded transition-all cursor-pointer text-center text-amber-500 hover:text-amber-400 hover:bg-amber-500/5 border border-transparent hover:border-amber-500/10"
+                        >
+                          Paste on Deepseek
+                        </button>
+                      </div>
+
+                      {/* Tab Content Areas */}
+                      <div className="mt-1">
+                        {aiLeftTab === "upload" && (
+                          <div className="flex flex-col gap-2 p-2 bg-white/[0.02] border border-white/5 rounded-lg animate-fadeIn">
+                            <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
+                              上傳個股分析檔案 ({aiSelectedSymbol || "尚未選擇"})
+                            </div>
+                            
+                            <div className="relative border border-dashed border-white/10 hover:border-emerald-500/30 rounded-lg p-3 transition-all flex flex-col items-center justify-center gap-1.5 bg-black/20">
+                              <input
+                                type="file"
+                                accept=".html"
+                                onChange={handleAiFileChange}
+                                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                              />
+                              <Upload className="w-5 h-5 text-zinc-500" />
+                              <span className="text-[10px] text-zinc-300 font-sans">
+                                {aiUploadFile ? aiUploadFile.name : "點擊或拖曳選擇 HTML 檔案"}
+                              </span>
+                              {aiUploadFile && (
+                                <span className="text-[8px] font-mono text-zinc-500">
+                                  大小: {(aiUploadFile.size / 1024).toFixed(1)} KB
+                                </span>
+                              )}
+                            </div>
+
+                            <button
+                              onClick={handleAiUploadSubmit}
+                              disabled={isAiUploading || !aiUploadContent || !aiSelectedSymbol}
+                              className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-800 disabled:text-zinc-500 text-white font-bold rounded-lg transition-all text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow"
+                            >
+                              {isAiUploading ? (
+                                <>
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  <span>正在上傳中...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Check className="w-3.5 h-3.5" />
+                                  <span>確認上傳 HTML 檔案</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        )}
+
+                        {aiLeftTab === "preview" && (
+                          <div className="flex flex-col gap-2 animate-fadeIn">
+                            {aiHtmlFiles.length === 0 ? (
+                              <div className="text-center py-4 text-xs text-zinc-500 bg-white/[0.01] border border-white/5 rounded-lg">
+                                目前此個股尚無上傳之 HTML 檔案。
+                              </div>
+                            ) : (
+                              <div className="flex flex-col gap-1.5 max-h-[220px] overflow-y-auto scrollbar-hide">
+                                {aiHtmlFiles.map((file) => (
+                                  <div
+                                    key={`ai-html-${file.id}`}
+                                    onClick={() => {
+                                      setSelectedPreviewUrl(`/api/html-files/${file.id}/content`);
+                                      setSelectedPreviewLinkTitle(file.fileName);
+                                      playClickSound();
+                                    }}
+                                    className={`px-2.5 py-1.5 rounded bg-[#141414]/80 border text-xs cursor-pointer flex items-center justify-between transition-all group ${
+                                      selectedPreviewUrl === `/api/html-files/${file.id}/content`
+                                        ? "border-amber-500/40 bg-amber-500/10 text-white"
+                                        : "border-white/5 text-zinc-400 hover:text-white hover:bg-white/5"
+                                    }`}
+                                  >
+                                    <div className="flex-1 min-w-0 pr-2">
+                                      <div className="truncate font-semibold text-[11px]">{file.fileName}</div>
+                                      <div className="text-[9px] font-mono text-zinc-500 mt-0.5">{file.uploadDate}</div>
+                                    </div>
+                                    {confirmDeleteFileId === file.id ? (
+                                      <div className="flex items-center gap-1 bg-[#1a1a1a] p-1 rounded border border-red-500/20 animate-fadeIn" onClick={(e) => e.stopPropagation()}>
+                                        <button
+                                          onClick={(e) => {
+                                            handleAiDeleteHtmlFile(e, file.id);
+                                            playClickSound();
+                                          }}
+                                          className="px-1.5 py-0.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded text-[9px] transition-all cursor-pointer"
+                                          title="確認刪除"
+                                        >
+                                          確認
+                                        </button>
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setConfirmDeleteFileId(null);
+                                            playClickSound();
+                                          }}
+                                          className="px-1.5 py-0.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded text-[9px] transition-all cursor-pointer"
+                                          title="取消"
+                                        >
+                                          取消
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setConfirmDeleteFileId(file.id);
+                                          playClickSound();
+                                        }}
+                                        className="p-1 text-zinc-500 hover:text-red-400 hover:bg-white/5 rounded transition-colors"
+                                        title="刪除檔案"
+                                      >
+                                        <Trash className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Right Column (Output Display) */}
+              <div className="flex-1 flex flex-col min-h-0 bg-[#121212]/50 border border-white/5 rounded-xl overflow-hidden p-4">
+                
+                {/* Content Container */}
+                <div className="flex-1 overflow-hidden relative">
+                  
+                  {selectedPreviewUrl ? (
+                    <div className="h-full w-full flex flex-col">
+                      <div className="flex-1 bg-white rounded-lg overflow-hidden relative">
+                        <a
+                          href={selectedPreviewUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="absolute top-3 right-3 z-10 p-2 bg-black/85 hover:bg-black/95 text-white hover:text-[#10b981] rounded-full transition-all border border-white/10 hover:border-[#10b981]/50 shadow-lg flex items-center justify-center cursor-pointer"
+                          title="在新分頁開啟"
+                        >
+                          <ExternalLink className="w-4 h-4" />
+                        </a>
+                        <iframe
+                          src={selectedPreviewUrl}
+                          className="w-full h-full border-none"
+                          title="HTML Preview"
+                          sandbox="allow-scripts allow-same-origin allow-popups"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center gap-2 text-zinc-650">
+                      <FileJson className="w-10 h-10 text-zinc-800" />
+                      <p className="text-xs text-zinc-550 font-medium font-sans">請在左側選擇或上傳個股的 HTML 檔案以進行網頁預覽。</p>
+                    </div>
+                  )}
+
+                </div>
+              </div>
+
             </div>
           </motion.div>
         </AnimatePresence>

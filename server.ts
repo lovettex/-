@@ -575,6 +575,146 @@ async function startServer() {
     }
   });
 
+  // AI analysis prompt search with Google Search grounding and Airtop support
+  app.post("/api/ai-search-prompt", async (req, res) => {
+    try {
+      const { prompt, symbol } = req.body;
+      if (!prompt) {
+        return res.status(400).json({ error: "請提供 Prompt 內容。" });
+      }
+
+      const airtapKey = process.env.AIRTAP_API_KEY || process.env.AIRTOP_API_KEY || "at-pat-zLu8vgKJ6Ply4s1oZh3yyJatHOpoxNJkd2aIkWBh";
+
+      if (airtapKey) {
+        console.log("Using Airtop API key for web-grounded analysis...");
+        try {
+          // 1. Create Airtop session
+          console.log("Creating Airtop session...");
+          const sessionRes = await fetch("https://api.airtop.ai/v1/sessions", {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${airtapKey}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ configuration: {} })
+          });
+
+          if (!sessionRes.ok) {
+            const errText = await sessionRes.text();
+            throw new Error(`Airtop Session Creation failed: ${sessionRes.status} - ${errText}`);
+          }
+
+          const sessionJson: any = await sessionRes.json();
+          const sessionId = sessionJson.data?.id || sessionJson.id;
+          if (!sessionId) {
+            throw new Error(`Airtop did not return a session ID: ${JSON.stringify(sessionJson)}`);
+          }
+          console.log(`Successfully created Airtop session: ${sessionId}`);
+
+          try {
+            // 2. Create window and load search query
+            const searchUrl = symbol 
+              ? `https://www.google.com/search?q=${encodeURIComponent(symbol)}+stock+latest+news+fundamental+technical+analysis`
+              : "https://www.google.com";
+
+            console.log(`Creating Airtop window loading URL: ${searchUrl}`);
+            const windowRes = await fetch(`https://api.airtop.ai/v1/sessions/${sessionId}/windows`, {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${airtapKey}`,
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({ url: searchUrl })
+            });
+
+            if (!windowRes.ok) {
+              const errText = await windowRes.text();
+              throw new Error(`Airtop Window Creation failed: ${windowRes.status} - ${errText}`);
+            }
+
+            const windowJson: any = await windowRes.json();
+            const windowId = windowJson.data?.id || windowJson.id;
+            if (!windowId) {
+              throw new Error(`Airtop did not return a window ID: ${JSON.stringify(windowJson)}`);
+            }
+            console.log(`Successfully created Airtop window: ${windowId}`);
+
+            // 3. Execute prompt query on the window
+            console.log("Executing query prompt on Airtop window...");
+            const queryRes = await fetch(`https://api.airtop.ai/v1/sessions/${sessionId}/windows/${windowId}/query`, {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${airtapKey}`,
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({ prompt: prompt })
+            });
+
+            if (!queryRes.ok) {
+              const errText = await queryRes.text();
+              throw new Error(`Airtop Query execution failed: ${queryRes.status} - ${errText}`);
+            }
+
+            const queryJson: any = await queryRes.json();
+            const outputText = queryJson.data?.output || queryJson.data?.text || queryJson.output || queryJson.text;
+            if (!outputText) {
+              throw new Error(`Airtop query returned empty output: ${JSON.stringify(queryJson)}`);
+            }
+
+            console.log("Airtop search and analysis completed successfully!");
+            return res.json({ text: outputText });
+
+          } finally {
+            // Always terminate session to prevent leaking credits
+            console.log(`Cleaning up Airtop session: ${sessionId}`);
+            try {
+              await fetch(`https://api.airtop.ai/v1/sessions/${sessionId}`, {
+                method: "DELETE",
+                headers: {
+                  "Authorization": `Bearer ${airtapKey}`
+                }
+              });
+            } catch (cleanupErr) {
+              console.error("Failed to clean up Airtop session:", cleanupErr);
+            }
+          }
+        } catch (airtopError: any) {
+          console.error("Airtop flow failed, falling back to Gemini Search Grounding:", airtopError.message);
+          // Fall back to Gemini search grounding below
+        }
+      }
+
+      // FALLBACK: Gemini Search Grounding
+      console.log("Executing Gemini Search Grounding fallback...");
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return res.status(500).json({ error: "伺服器未設定 GEMINI_API_KEY 且 Airtop 執行失敗，請在設定中添加金鑰。" });
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey: apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
+
+      const response = await generateContentWithRetry(ai, {
+        model: "gemini-3.5-flash",
+        contents: prompt,
+        config: {
+          tools: [{ googleSearch: {} }]
+        }
+      });
+
+      res.json({ text: response.text || "" });
+    } catch (error: any) {
+      console.error("AI prompt search error:", error);
+      res.status(500).json({ error: error.message || "AI 搜尋分析失敗，請稍後再試。" });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
