@@ -3,6 +3,31 @@ import { PlannedOrder, ChartAnnotation } from "../types";
 import { MousePointer, Minus, Square, Type, Trash2, Eraser, Undo2, ArrowUpRight, Move, Download, Share2, Camera, Loader2 } from "lucide-react";
 import html2canvas from "html2canvas";
 import { toast } from "sonner";
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend,
+  Filler,
+} from "chart.js";
+import { Line } from "react-chartjs-2";
+
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend,
+  Filler
+);
 
 interface Props {
   plannedOrders: PlannedOrder[];
@@ -364,6 +389,81 @@ export const StockCardVisualizer: React.FC<Props> = ({
   // Export states
   const [showExportModal, setShowExportModal] = useState<boolean>(false);
   const [exportLoading, setExportLoading] = useState<boolean>(false);
+
+  // Dynamic Chart.js Dataset & Options for Interactive Background Curve
+  const chartJsData = useMemo(() => {
+    const baseP = dynamicPrice > 0 ? dynamicPrice : 100;
+    const labels = Array.from({ length: 24 }, (_, i) => `${i + 9}:00`);
+    const dataPoints = labels.map((_, i) => {
+      const offset = (Math.sin(i * 0.6) * 0.012 + Math.cos(i * 0.35) * 0.008) * baseP;
+      return +(baseP + offset).toFixed(2);
+    });
+    if (dataPoints.length > 0 && dynamicPrice > 0) {
+      dataPoints[dataPoints.length - 1] = dynamicPrice;
+    }
+
+    return {
+      labels,
+      datasets: [
+        {
+          label: stockName || "股價趨勢",
+          data: dataPoints,
+          borderColor: "rgba(59, 130, 246, 0.45)",
+          borderWidth: 1.5,
+          pointRadius: 0,
+          pointHoverRadius: 4,
+          pointHoverBackgroundColor: "#3b82f6",
+          pointHoverBorderColor: "#ffffff",
+          pointHoverBorderWidth: 2,
+          tension: 0.38,
+          fill: true,
+          backgroundColor: (context: any) => {
+            const ctx = context.chart?.ctx;
+            if (!ctx) return "rgba(59, 130, 246, 0.05)";
+            const gradient = ctx.createLinearGradient(0, 0, 0, 160);
+            gradient.addColorStop(0, "rgba(59, 130, 246, 0.12)");
+            gradient.addColorStop(1, "rgba(59, 130, 246, 0.0)");
+            return gradient;
+          },
+        },
+      ],
+    };
+  }, [dynamicPrice, stockName]);
+
+  const chartJsOptions = useMemo(() => ({
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: {
+      duration: 600,
+      easing: "easeOutQuart" as const,
+    },
+    scales: {
+      x: { display: false },
+      y: { display: false },
+    },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        enabled: mode === 'cursor',
+        mode: 'index' as const,
+        intersect: false,
+        backgroundColor: 'rgba(9, 9, 11, 0.9)',
+        titleFont: { size: 10, weight: 'bold' as const },
+        bodyFont: { size: 10 },
+        padding: 6,
+        cornerRadius: 6,
+        displayColors: false,
+        callbacks: {
+          label: (item: any) => `動態價: $${item.raw}`,
+        },
+      },
+    },
+    interaction: {
+      mode: 'nearest' as const,
+      axis: 'x' as const,
+      intersect: false,
+    },
+  }), [mode]);
 
   // Local undo history for visual annotations
   const [history, setHistory] = useState<ChartAnnotation[][]>([]);
@@ -1279,12 +1379,14 @@ export const StockCardVisualizer: React.FC<Props> = ({
   };
 
   const handleCanvasMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.stopPropagation();
     if (!isDrawing || !startPoint) return;
     const coords = getRelativeCoords(e.clientX, e.clientY);
     setActivePoint(coords);
   };
 
   const handleCanvasMouseUp = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.stopPropagation();
     if (!isDrawing || !startPoint || !activePoint) return;
     setIsDrawing(false);
     
@@ -1338,6 +1440,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
 
   const handleCanvasTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
     e.stopPropagation();
+    if (e.cancelable) e.preventDefault();
     if (e.touches.length === 0) return;
     const touch = e.touches[0];
     const coords = getRelativeCoords(touch.clientX, touch.clientY);
@@ -1352,6 +1455,8 @@ export const StockCardVisualizer: React.FC<Props> = ({
   };
 
   const handleCanvasTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    if (e.cancelable) e.preventDefault();
     if (!isDrawing || !startPoint) return;
     if (e.touches.length === 0) return;
     const touch = e.touches[0];
@@ -1359,7 +1464,8 @@ export const StockCardVisualizer: React.FC<Props> = ({
     setActivePoint(coords);
   };
 
-  const handleCanvasTouchEnd = () => {
+  const handleCanvasTouchEnd = (e?: React.TouchEvent<HTMLDivElement>) => {
+    if (e) e.stopPropagation();
     if (!isDrawing || !startPoint || !activePoint) return;
     setIsDrawing(false);
     const dx = Math.abs(activePoint.x - startPoint.x);
@@ -1409,6 +1515,97 @@ export const StockCardVisualizer: React.FC<Props> = ({
     setStartPoint(null);
     setActivePoint(null);
   };
+
+  React.useEffect(() => {
+    if (!isDrawing) return;
+
+    const handleWindowMouseMove = (e: MouseEvent) => {
+      if (!startPoint) return;
+      const coords = getRelativeCoords(e.clientX, e.clientY);
+      setActivePoint(coords);
+    };
+
+    const handleWindowTouchMove = (e: TouchEvent) => {
+      if (!startPoint) return;
+      if (e.touches.length === 0) return;
+      if (e.cancelable) e.preventDefault();
+      const touch = e.touches[0];
+      const coords = getRelativeCoords(touch.clientX, touch.clientY);
+      setActivePoint(coords);
+    };
+
+    const handleWindowMouseUp = () => {
+      if (!startPoint || !activePoint) {
+        setIsDrawing(false);
+        setStartPoint(null);
+        setActivePoint(null);
+        return;
+      }
+      setIsDrawing(false);
+      const dx = Math.abs(activePoint.x - startPoint.x);
+      const dy = Math.abs(activePoint.y - startPoint.y);
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist > 1) {
+        let newAnn: ChartAnnotation | null = null;
+        if (mode === 'line') {
+          newAnn = {
+            id: Date.now().toString(),
+            type: 'line',
+            color: activeColor,
+            strokeWidth: activeThickness,
+            x1: startPoint.x,
+            y1: startPoint.y,
+            x2: activePoint.x,
+            y2: activePoint.y,
+          };
+        } else if (mode === 'arrow') {
+          newAnn = {
+            id: Date.now().toString(),
+            type: 'arrow',
+            color: activeColor,
+            strokeWidth: activeThickness,
+            x1: startPoint.x,
+            y1: startPoint.y,
+            x2: activePoint.x,
+            y2: activePoint.y,
+          };
+        } else if (mode === 'box') {
+          newAnn = {
+            id: Date.now().toString(),
+            type: 'box',
+            color: activeColor,
+            strokeWidth: activeThickness,
+            x: Math.min(startPoint.x, activePoint.x),
+            y: Math.min(startPoint.y, activePoint.y),
+            width: Math.abs(activePoint.x - startPoint.x),
+            height: Math.abs(activePoint.y - startPoint.y),
+          };
+        }
+        if (newAnn) {
+          pushToHistoryAndSave([...annotationsRef.current, newAnn]);
+        }
+      }
+      setStartPoint(null);
+      setActivePoint(null);
+    };
+
+    const handleWindowTouchEnd = () => {
+      handleWindowMouseUp();
+    };
+
+    window.addEventListener('mousemove', handleWindowMouseMove, { passive: false });
+    window.addEventListener('mouseup', handleWindowMouseUp);
+    window.addEventListener('touchmove', handleWindowTouchMove, { passive: false });
+    window.addEventListener('touchend', handleWindowTouchEnd);
+
+    return () => {
+      window.removeEventListener('mousemove', handleWindowMouseMove);
+      window.removeEventListener('mouseup', handleWindowMouseUp);
+      window.removeEventListener('touchmove', handleWindowTouchMove);
+      window.removeEventListener('touchend', handleWindowTouchEnd);
+    };
+  }, [isDrawing, startPoint, activePoint, mode, activeColor, activeThickness]);
 
   const data = useMemo(() => {
     const validOrders = plannedOrders
@@ -2498,6 +2695,11 @@ export const StockCardVisualizer: React.FC<Props> = ({
       {/* COMPACT BAR AT THE BOTTOM OF CARD (Signal checkboxes in first row, Drawing toolbar in second row) */}
       <div 
         onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
+        onMouseMove={(e) => e.stopPropagation()}
+        onTouchMove={(e) => e.stopPropagation()}
         className="flex flex-col gap-1.5 mt-1 shrink-0 z-50 pointer-events-auto select-none w-full px-1 animate-fadeIn"
       >
         {/* Row 1: Main Path (主力路徑) Phase Tickboxes with Dynamic Stage Selection (前期, 中期, 後期) */}

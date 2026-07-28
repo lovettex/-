@@ -49,7 +49,7 @@
 }
 
 :root {
-    --background: #F5F1F0;
+    --background: #F5F5F5;
     --foreground: #1a1b1e;
     --card: rgba(255, 255, 255, 0.75);
     --card-foreground: #1a1b1e;
@@ -73,7 +73,7 @@
     --chart-4: #d1d5db;
     --chart-5: #e5e7eb;
     --radius: 1rem;
-    --sidebar: #F5F1F0;
+    --sidebar: #F5F5F5;
     --sidebar-foreground: #1a1b1e;
     --sidebar-primary: #1a1b1e;
     --sidebar-primary-foreground: #ffffff;
@@ -84,7 +84,7 @@
 }
 
 .dark {
-    /* Identical to :root, defaulting to light F5F1F0 per user request */
+    /* Identical to :root, defaulting to light F5F5F5 per user request */
 }
 
 @layer base {
@@ -101,6 +101,21 @@
   }
   html {
     @apply font-sans;
+  }
+  html.lenis, html.lenis body {
+    height: auto;
+  }
+  .lenis.lenis-smooth {
+    scroll-behavior: auto !important;
+  }
+  .lenis.lenis-smooth [data-lenis-prevent] {
+    overscroll-behavior: contain;
+  }
+  .lenis.lenis-stopped {
+    overflow: hidden;
+  }
+  .lenis.lenis-scrolling iframe {
+    pointer-events: none;
   }
 }
 

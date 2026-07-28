@@ -10,6 +10,7 @@ import { useStockTabs } from "../hooks/useStockTabs";
 import { playClickSound, playSwipeSound, playSuccessSound, playPriceImportSound, playAddStockSound } from "../lib/audio";
 import { useNavigate, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "motion/react";
+import Lenis from "lenis";
 import {
   collection,
   query,
@@ -98,6 +99,7 @@ import {
   Save,
   Edit3,
   Settings,
+  Layers,
 } from "lucide-react";
 import { calculateStats } from "../lib/calculations";
 import { safeLocalStorage, safeSessionStorage } from "../lib/utils";
@@ -394,6 +396,7 @@ export default function Dashboard() {
 
   // AI Analysis Panel States & Helpers
   const [isAiAnalysisOpen, setIsAiAnalysisOpen] = useState(false);
+  const [aiMobileActiveTab, setAiMobileActiveTab] = useState<"controls" | "preview">("controls");
   const [aiSelectedSymbol, setAiSelectedSymbol] = useState("");
   const [aiSelectedPromptId, setAiSelectedPromptId] = useState("fundamental");
   const [aiPromptText, setAiPromptText] = useState("");
@@ -562,9 +565,11 @@ export default function Dashboard() {
             const latestFile = data[0];
             setSelectedPreviewUrl(`/api/html-files/${latestFile.id}/content`);
             setSelectedPreviewLinkTitle(latestFile.fileName);
+            setAiMobileActiveTab("preview");
           }
         }
         setAiLeftTab("preview");
+        setAiMobileActiveTab("preview");
         playClickSound();
       } else {
         const err = await response.json();
@@ -608,11 +613,23 @@ export default function Dashboard() {
     }
     try {
       await navigator.clipboard.writeText(aiPromptText);
-      toast.success("已複製指令，即將開啓 Deepseek！");
-      try {
-        window.open("https://chat.deepseek.com", "_blank");
-      } catch (err) {
-        console.warn("Failed to open Deepseek window automatically", err);
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      if (isMobile) {
+        toast.success("已複製指令，即將開啓 Deepseek App！");
+        const start = Date.now();
+        window.location.href = "deepseek://";
+        setTimeout(() => {
+          if (Date.now() - start < 1500) {
+            window.open("https://chat.deepseek.com", "_blank");
+          }
+        }, 1200);
+      } else {
+        toast.success("已複製指令，即將開啓 Deepseek 網頁！");
+        try {
+          window.open("https://chat.deepseek.com", "_blank");
+        } catch (err) {
+          console.warn("Failed to open Deepseek window automatically", err);
+        }
       }
     } catch (error: any) {
       console.error("Deepseek copy error:", error);
@@ -664,6 +681,58 @@ export default function Dashboard() {
   const [activeViewTab, setActiveViewTab] = useState<
     "active" | "real" | "completed" | "socrates" | "alerts" | "notes"
   >("active");
+
+  // Lenis Smooth Scroll Engine Instance
+  const lenisRef = useRef<Lenis | null>(null);
+
+  useEffect(() => {
+    const lenis = new Lenis({
+      duration: 1.2,
+      easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
+      smoothWheel: true,
+      touchMultiplier: 1.5,
+    });
+    lenisRef.current = lenis;
+
+    function raf(time: number) {
+      lenis.raf(time);
+      requestAnimationFrame(raf);
+    }
+    const rafId = requestAnimationFrame(raf);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      lenis.destroy();
+      lenisRef.current = null;
+    };
+  }, []);
+
+  const scrollToElement = useCallback((target: string | HTMLElement, offset = -20) => {
+    if (lenisRef.current) {
+      lenisRef.current.scrollTo(target, {
+        offset,
+        duration: 1.0,
+        easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
+      });
+    } else {
+      const el = typeof target === "string" ? document.querySelector(target) : target;
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, []);
+
+  const handleViewTabChange = useCallback((newTab: "active" | "real" | "completed" | "notes") => {
+    playClickSound();
+    setActiveViewTab(newTab);
+    setTimeout(() => {
+      if (newTab === "active" || newTab === "real") {
+        scrollToElement("#active-cards-section", -20);
+      } else if (newTab === "completed") {
+        scrollToElement("#completed-cards-section", -20);
+      } else if (newTab === "notes") {
+        scrollToElement("#notes-cards-section", -20);
+      }
+    }, 80);
+  }, [scrollToElement]);
   const [activeHoldingSubTab, setActiveHoldingSubTab] = useState<
     "觀察中" | "候選名單" | "買進操作" | "賣出操作" | "平倉操作" | "乖離名單"
   >((safeSessionStorage.getItem('preferredHoldingSubTab') as any) || "候選名單");
@@ -1110,11 +1179,13 @@ export default function Dashboard() {
     startX: number;
     cardId: string | null;
     hasTriggeredFlip: boolean;
+    startTime: number;
   }>({
     startY: 0,
     startX: 0,
     cardId: null,
     hasTriggeredFlip: false,
+    startTime: 0,
   });
 
   const animFrameId = useRef<number | null>(null);
@@ -1348,6 +1419,8 @@ export default function Dashboard() {
   const [editCapitalVal, setEditCapitalVal] = useState("");
   const [isEditingVirtualCapital, setIsEditingVirtualCapital] = useState(false);
   const [editVirtualCapitalVal, setEditVirtualCapitalVal] = useState("");
+  const [isDesktopMetricsOpen, setIsDesktopMetricsOpen] = useState(false);
+  const [isMobileCinemaSidebarOpen, setIsMobileCinemaSidebarOpen] = useState(false);
 
   useEffect(() => {
     if (isManageHiddenOpen) {
@@ -3035,6 +3108,16 @@ export default function Dashboard() {
       }, 0);
   }, [activeTabs, activeTabTrades]);
 
+  const simulatedUnrealizedPnL = useMemo(() => {
+    return activeTabs
+      .filter((tab) => tab.tradeType === "simulated")
+      .reduce((acc, tab) => {
+        const trades = activeTabTrades[tab.id] || [];
+        const stats = calculateStats(trades, tab.currentPrice);
+        return acc + (stats.unrealizedPnL || 0);
+      }, 0);
+  }, [activeTabs, activeTabTrades]);
+
   const remainingBalance = totalCapital - totalRealHoldingCost;
 
   const visibleActiveTabs = activeTabs.filter((t) => !t.isHidden);
@@ -3591,8 +3674,7 @@ export default function Dashboard() {
           setActiveViewTab("active");
           setActiveHoldingSubTab(selectedTab);
           setTimeout(() => {
-            const el = document.getElementById("active-cards-section");
-            if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+            scrollToElement("#active-cards-section", -20);
           }, 50);
           return;
         }
@@ -3615,26 +3697,22 @@ export default function Dashboard() {
       if (e.shiftKey && !e.ctrlKey && !e.metaKey) {
         if (e.code === "Digit1") {
           e.preventDefault();
-          setActiveViewTab("active");
-          const el = document.getElementById("active-cards-section");
-          if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+          handleViewTabChange("active");
         } else if (e.code === "Digit2") {
           e.preventDefault();
-          setActiveViewTab("real");
-          const el = document.getElementById("active-cards-section");
-          if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+          handleViewTabChange("real");
         } else if (e.code === "Digit3") {
           e.preventDefault();
-          setActiveViewTab("completed");
+          handleViewTabChange("completed");
         } else if (e.code === "Digit4") {
           e.preventDefault();
-          setActiveViewTab("notes");
+          handleViewTabChange("notes");
         }
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleImportLatestPrices, handleFlipAllCards, orderedFilteredSubTabVisibleTabs, activeCardTabId, setActiveCinemaCardId, setIsCinemaModeActive]);
+  }, [handleImportLatestPrices, handleFlipAllCards, orderedFilteredSubTabVisibleTabs, activeCardTabId, setActiveCinemaCardId, setIsCinemaModeActive, handleViewTabChange, scrollToElement]);
 
   useEffect(() => {
     const updateIndicator = () => {
@@ -4382,82 +4460,113 @@ export default function Dashboard() {
       {/* 2. Main content container, aligned nicely with responsive layout */}
       <div className={`space-y-4 sm:space-y-6 mx-auto mt-4 sm:mt-6 px-3 sm:px-4 ${activeViewTab === "notes" ? "max-w-7xl lg:max-w-[96%] xl:max-w-[1760px]" : "max-w-7xl"}`}>
 
-      {/* Floating Metrics Section - Desktop Only (no cards, no shadows, no outer borders, pure seamless fusion with F2F1ED) */}
-      <div className="hidden sm:grid sm:grid-cols-5 gap-y-6 gap-x-0 py-6 select-none">
-        {[
-          {
-            title: "總持股數",
-            rawValue: activeTabs.length,
-            prefix: "",
-            suffix: "",
-            decimals: 0,
-            pnl: undefined,
-            showPlus: false,
-          },
-          {
-            title: "總實現損益",
-            rawValue: totalCompletedPnL,
-            prefix: "$",
-            suffix: "",
-            decimals: 2,
-            pnl: totalCompletedPnL,
-            showPlus: true,
-          },
-          {
-            title: "模擬實現損益",
-            rawValue: simulatedCompletedPnL,
-            prefix: "$",
-            suffix: "",
-            decimals: 2,
-            pnl: simulatedCompletedPnL,
-            showPlus: true,
-          },
-          {
-            title: "真實交易勝率",
-            rawValue: realWinRate,
-            prefix: "",
-            suffix: "%",
-            decimals: 0,
-            pnl: undefined,
-            showPlus: false,
-          },
-          {
-            title: "模擬交易勝率",
-            rawValue: simulatedWinRate,
-            prefix: "",
-            suffix: "%",
-            decimals: 0,
-            pnl: undefined,
-            showPlus: false,
-          },
-        ].map((metric: any, i) => {
-          const isPnl = metric.pnl !== undefined;
-          const isPositive = metric.rawValue >= 0;
-          const valueColor = isPnl 
-            ? (isPositive ? "text-[#085041]" : "text-rose-700") 
-            : "text-[#2C2C2A]";
-
-          return (
-            <div 
-              key={i} 
-              className={`flex flex-col items-center justify-center text-center py-2 px-4 border-r border-black/[0.07] last:border-r-0`}
-            >
-              <span className="text-xs text-[#888780] font-medium tracking-wide uppercase">
-                {metric.title}
-              </span>
-              <div className={`text-3xl font-bold tracking-tight mt-1.5 font-mono ${valueColor}`}>
-                <AnimatedNumber
-                  value={metric.rawValue}
-                  prefix={metric.prefix}
-                  suffix={metric.suffix}
-                  decimals={metric.decimals}
-                  showPlus={metric.showPlus}
-                />
-              </div>
-            </div>
-          );
-        })}
+      {/* Desktop Metrics Collapsible Controller */}
+      <div className="hidden sm:flex justify-end mt-2 mb-1">
+        <button
+          onClick={() => setIsDesktopMetricsOpen(!isDesktopMetricsOpen)}
+          className="flex items-center gap-2 text-xs font-semibold text-[#888780] hover:text-[#2C2C2A] transition-colors py-1.5 px-3 rounded-lg bg-black/[0.03] hover:bg-black/[0.06] cursor-pointer"
+        >
+          <span>{isDesktopMetricsOpen ? "隱藏數據統計" : "顯示數據統計"}</span>
+          <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-300 ${isDesktopMetricsOpen ? "rotate-180" : ""}`} />
+        </button>
       </div>
+
+      <AnimatePresence initial={false}>
+        {isDesktopMetricsOpen && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.25, ease: "easeInOut" }}
+            className="hidden sm:block overflow-hidden"
+          >
+            <div className="grid sm:grid-cols-6 gap-y-6 gap-x-0 py-6 select-none border-b border-black/[0.04] mb-2">
+              {[
+                {
+                  title: "總持股數",
+                  rawValue: activeTabs.length,
+                  prefix: "",
+                  suffix: "",
+                  decimals: 0,
+                  pnl: undefined,
+                  showPlus: false,
+                },
+                {
+                  title: "總實現損益",
+                  rawValue: totalCompletedPnL,
+                  prefix: "$",
+                  suffix: "",
+                  decimals: 2,
+                  pnl: totalCompletedPnL,
+                  showPlus: true,
+                },
+                {
+                  title: "模擬實現損益",
+                  rawValue: simulatedCompletedPnL,
+                  prefix: "$",
+                  suffix: "",
+                  decimals: 2,
+                  pnl: simulatedCompletedPnL,
+                  showPlus: true,
+                },
+                {
+                  title: "模擬未實現總損益",
+                  rawValue: simulatedUnrealizedPnL,
+                  prefix: "$",
+                  suffix: "",
+                  decimals: 2,
+                  pnl: simulatedUnrealizedPnL,
+                  showPlus: true,
+                },
+                {
+                  title: "真實交易勝率",
+                  rawValue: realWinRate,
+                  prefix: "",
+                  suffix: "%",
+                  decimals: 0,
+                  pnl: undefined,
+                  showPlus: false,
+                },
+                {
+                  title: "模擬交易勝率",
+                  rawValue: simulatedWinRate,
+                  prefix: "",
+                  suffix: "%",
+                  decimals: 0,
+                  pnl: undefined,
+                  showPlus: false,
+                },
+              ].map((metric: any, i) => {
+                const isPnl = metric.pnl !== undefined;
+                const isPositive = metric.rawValue >= 0;
+                const valueColor = isPnl 
+                  ? (isPositive ? "text-[#085041]" : "text-rose-700") 
+                  : "text-[#2C2C2A]";
+
+                return (
+                  <div 
+                    key={i} 
+                    className={`flex flex-col items-center justify-center text-center py-2 px-4 border-r border-black/[0.07] last:border-r-0`}
+                  >
+                    <span className="text-xs text-[#888780] font-medium tracking-wide uppercase">
+                      {metric.title}
+                    </span>
+                    <div className={`text-3xl font-bold tracking-tight mt-1.5 font-mono ${valueColor}`}>
+                      <AnimatedNumber
+                        value={metric.rawValue}
+                        prefix={metric.prefix}
+                        suffix={metric.suffix}
+                        decimals={metric.decimals}
+                        showPlus={metric.showPlus}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Floating Metrics Section - Mobile Only (Ultra-Compact & Designed for Mobile Reading proportions) */}
       <div className="block sm:hidden select-none px-4 py-4 mb-3 bg-transparent">
@@ -4495,8 +4604,21 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Row 2, Col 2: 真實交易勝率 */}
+          {/* Row 2, Col 2: 模擬未實現總損益 */}
           <div className="flex flex-col items-center justify-center py-1">
+            <span className="text-[11px] text-[#888780] font-medium tracking-wide">
+              模擬未實現總損益
+            </span>
+            <div className={`text-[19px] font-bold tracking-tight mt-0.5 font-mono leading-none ${simulatedUnrealizedPnL >= 0 ? "text-[#085041]" : "text-rose-700"}`}>
+              <AnimatedNumber value={simulatedUnrealizedPnL} prefix="$" suffix="" decimals={2} showPlus={true} />
+            </div>
+          </div>
+
+          {/* Divider 2 */}
+          <div className="col-span-2 h-[0.5px] bg-black/[0.06] mx-2" />
+
+          {/* Row 3, Col 1: 真實交易勝率 */}
+          <div className="flex flex-col items-center justify-center border-r border-black/[0.06] py-1">
             <span className="text-[11px] text-[#888780] font-medium tracking-wide">
               真實交易勝率
             </span>
@@ -4505,11 +4627,8 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Divider 2 */}
-          <div className="col-span-2 h-[0.5px] bg-black/[0.06] mx-2" />
-
-          {/* Row 3, Center: 模擬交易勝率 */}
-          <div className="col-span-2 flex flex-col items-center justify-center py-1">
+          {/* Row 3, Col 2: 模擬交易勝率 */}
+          <div className="flex flex-col items-center justify-center py-1">
             <span className="text-[11px] text-[#888780] font-medium tracking-wide">
               模擬交易勝率
             </span>
@@ -4520,55 +4639,41 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Tab Row (No bottom border, pill styling for selected tab, extremely lightweight) */}
+      {/* Tab Row (No bottom border, pill styling for selected tab with Lenis smooth scroll and motion layout transition) */}
       <div className="flex flex-row snap-x flex-nowrap w-full gap-2 sm:gap-3 mb-4 sm:mb-6 mt-4 sm:mt-5 overflow-x-auto pt-2 pb-px scrollbar-hide">
-        <button
-          onClick={() => setActiveViewTab("active")}
-          className={`h-[38px] snap-start flex-shrink-0 flex items-center justify-center gap-2 px-4 py-2 font-bold text-sm tracking-wide rounded-full transition-all duration-300 relative overflow-hidden cursor-pointer select-none border-none outline-none ${
-            activeViewTab === "active"
-              ? "bg-[#085041]/10 text-[#085041]"
-              : "bg-transparent text-[#888780] hover:text-[#2C2C2A]"
-          }`}
-        >
-          <Activity className="w-4 h-4" />
-          持有中 (<AnimatedNumber value={visibleActiveTabs.filter((t) => t.tradeType === "simulated").length} />)
-        </button>
-        
-        <button
-          onClick={() => setActiveViewTab("real")}
-          className={`h-[38px] snap-start flex-shrink-0 flex items-center justify-center gap-2 px-4 py-2 font-bold text-sm tracking-wide rounded-full transition-all duration-300 relative overflow-hidden cursor-pointer select-none border-none outline-none ${
-            activeViewTab === "real"
-              ? "bg-[#085041]/10 text-[#085041]"
-              : "bg-transparent text-[#888780] hover:text-[#2C2C2A]"
-          }`}
-        >
-          <ShieldCheck className="w-4 h-4" />
-          真實交易 (<AnimatedNumber value={visibleActiveTabs.filter((t) => t.tradeType === "real").length} />)
-        </button>
-        
-        <button
-          onClick={() => setActiveViewTab("completed")}
-          className={`h-[38px] snap-start flex-shrink-0 flex items-center justify-center gap-2 px-4 py-2 font-bold text-sm tracking-wide rounded-full transition-all duration-300 relative overflow-hidden cursor-pointer select-none border-none outline-none ${
-            activeViewTab === "completed"
-              ? "bg-[#085041]/10 text-[#085041]"
-              : "bg-transparent text-[#888780] hover:text-[#2C2C2A]"
-          }`}
-        >
-          <TrendingUp className="w-4 h-4" />
-          已完成 (<AnimatedNumber value={completedTabs.length} />)
-        </button>
-        
-        <button
-          onClick={() => setActiveViewTab("notes")}
-          className={`h-[38px] snap-start flex-shrink-0 flex items-center justify-center gap-2 px-4 py-2 font-bold text-sm tracking-wide rounded-full transition-all duration-300 relative overflow-hidden cursor-pointer select-none border-none outline-none ${
-            activeViewTab === "notes"
-              ? "bg-[#085041]/10 text-[#085041]"
-              : "bg-transparent text-[#888780] hover:text-[#2C2C2A]"
-          }`}
-        >
-          <FileText className="w-4 h-4" />
-          操作備註
-        </button>
+        {[
+          { id: "active", label: "持有中", icon: Activity, count: visibleActiveTabs.filter((t) => t.tradeType === "simulated").length },
+          { id: "real", label: "真實交易", icon: ShieldCheck, count: visibleActiveTabs.filter((t) => t.tradeType === "real").length },
+          { id: "completed", label: "已完成", icon: TrendingUp, count: completedTabs.length },
+          { id: "notes", label: "操作備註", icon: FileText, count: null },
+        ].map((tabItem) => {
+          const isActive = activeViewTab === tabItem.id;
+          const Icon = tabItem.icon;
+
+          return (
+            <button
+              key={tabItem.id}
+              onClick={() => handleViewTabChange(tabItem.id as any)}
+              className={`h-[38px] snap-start flex-shrink-0 flex items-center justify-center gap-2 px-4 py-2 font-bold text-sm tracking-wide rounded-full transition-colors duration-300 relative overflow-hidden cursor-pointer select-none border-none outline-none ${
+                isActive
+                  ? "text-[#085041]"
+                  : "bg-transparent text-[#888780] hover:text-[#2C2C2A]"
+              }`}
+            >
+              {isActive && (
+                <motion.div
+                  layoutId="mainActiveViewTabBg"
+                  className="absolute inset-0 bg-[#085041]/10 rounded-full z-0"
+                  transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                />
+              )}
+              <span className="relative z-10 flex items-center gap-2">
+                <Icon className="w-4 h-4" />
+                {tabItem.label} {tabItem.count !== null && `(${tabItem.count})`}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       <div className="space-y-6">
@@ -4990,7 +5095,13 @@ export default function Dashboard() {
                             return (
                               <button
                                 key={tab}
-                                onClick={() => setActiveHoldingSubTab(tab as any)}
+                                onClick={() => {
+                                  playClickSound();
+                                  setActiveHoldingSubTab(tab as any);
+                                  setTimeout(() => {
+                                    scrollToElement("#active-cards-section", -20);
+                                  }, 50);
+                                }}
                                 className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-2 border cursor-pointer ${
                                   isActive
                                     ? `${conf.colorClass} ${conf.bgClass} ${conf.borderClass} ${conf.shadowClass}`
@@ -5130,6 +5241,26 @@ export default function Dashboard() {
                           <InteractiveButton
                             noGlow
                             as="button"
+                            onClick={() => {
+                              if (filteredSubTabVisibleTabs.length > 0) {
+                                const isCurrentActiveVisible = filteredSubTabVisibleTabs.some(t => t.id === activeCardTabId);
+                                const targetId = isCurrentActiveVisible ? (activeCardTabId || filteredSubTabVisibleTabs[0].id) : filteredSubTabVisibleTabs[0].id;
+                                setActiveCinemaCardId(targetId);
+                                setIsCinemaModeActive(true);
+                                playClickSound();
+                              } else {
+                                toast.error("目前無可見的股票卡片可供放大");
+                              }
+                            }}
+                            className="px-2.5 py-1 bg-zinc-50 border border-zinc-200 text-zinc-650 hover:text-zinc-850 hover:bg-zinc-100 rounded-lg transition-all text-[11px] flex items-center gap-1 font-extrabold cursor-pointer"
+                            title="放大卡片"
+                          >
+                            <Maximize2 className="w-3 h-3" />
+                            放大
+                          </InteractiveButton>
+                          <InteractiveButton
+                            noGlow
+                            as="button"
                             onClick={handleExportMd}
                             className="px-2.5 py-1 bg-zinc-50 border border-zinc-200 text-zinc-650 hover:text-zinc-850 hover:bg-zinc-100 rounded-lg transition-all text-[11px] flex items-center gap-1 font-extrabold cursor-pointer"
                             title="匯出持股資料"
@@ -5158,12 +5289,16 @@ export default function Dashboard() {
                               <button
                                 key={tab}
                                 onClick={(e) => {
+                                  playClickSound();
                                   setActiveHoldingSubTab(tab as any);
                                   e.currentTarget.scrollIntoView({
                                     behavior: "smooth",
                                     block: "nearest",
                                     inline: "center",
                                   });
+                                  setTimeout(() => {
+                                    scrollToElement("#active-cards-section", -20);
+                                  }, 50);
                                 }}
                                 className={`flex-shrink-0 snap-center flex items-center gap-1.5 px-3.5 py-2 rounded-xl border font-bold text-xs transition-all duration-300 relative cursor-pointer ${
                                   isActive
@@ -5205,7 +5340,7 @@ export default function Dashboard() {
                         if (!open) setConfirmDeleteId(null);
                       }}
                     >
-                      <DialogContent className="border border-zinc-200 shadow-2xl bg-white text-zinc-800 outline-none w-11/12 sm:max-w-3xl max-h-[85vh] overflow-y-auto overflow-x-hidden scrollbar-hide !rounded-2xl p-6">
+                      <DialogContent data-lenis-prevent className="border border-zinc-200 shadow-2xl bg-white text-zinc-800 outline-none w-11/12 sm:max-w-3xl max-h-[85vh] overflow-y-auto overscroll-y-contain overflow-x-hidden !rounded-2xl p-6">
                         <DialogHeader>
                           <DialogTitle className="font-black text-xl text-zinc-900 border-b border-zinc-200 pb-3">
                             管理持有中股票
@@ -5765,6 +5900,7 @@ export default function Dashboard() {
                                           startX: e.pageX,
                                           cardId: tab.id,
                                           hasTriggeredFlip: false,
+                                          startTime: Date.now(),
                                         };
                                       }}
                                       onTouchStart={(e) => {
@@ -5774,6 +5910,7 @@ export default function Dashboard() {
                                             startX: e.touches[0].pageX,
                                             cardId: tab.id,
                                             hasTriggeredFlip: false,
+                                            startTime: Date.now(),
                                           };
                                         }
                                       }}
@@ -5781,16 +5918,38 @@ export default function Dashboard() {
                                         const tracker = cardDragTrackerRef.current;
                                         if (tracker.cardId !== tab.id || tracker.hasTriggeredFlip) return;
                                         
+                                        // Require holding down for about 0.5 seconds (~500ms) before vertical gesture triggers card flip
+                                        const holdDuration = Date.now() - (tracker.startTime || 0);
+                                        if (holdDuration < 500) return;
+
                                         const dy = tracker.startY - e.pageY; // dragging upward means final Y is smaller, so dy is positive
                                         const dx = Math.abs(tracker.startX - e.pageX);
                                         const absDy = Math.abs(dy);
                                         const currentShowBack = flippedCards[tab.id] !== false;
                                         
-                                        if (absDy > 40 && absDy > dx && isCardExpanded) {
-                                          const isDraggingUp = dy > 0;
-                                          const isDraggingDown = dy < 0;
+                                        if (absDy > 30 && absDy > dx && isCardExpanded) {
+                                          tracker.hasTriggeredFlip = true;
+                                          setFlippedCards((prev) => ({
+                                            ...prev,
+                                            [tab.id]: !currentShowBack,
+                                          }));
+                                          playClickSound();
+                                        }
+                                      }}
+                                      onTouchMove={(e) => {
+                                        const tracker = cardDragTrackerRef.current;
+                                        if (tracker.cardId !== tab.id || tracker.hasTriggeredFlip) return;
+                                        if (e.touches.length > 0) {
+                                          // Require holding down for about 0.5 seconds (~500ms) before vertical gesture triggers card flip
+                                          const holdDuration = Date.now() - (tracker.startTime || 0);
+                                          if (holdDuration < 500) return;
+
+                                          const dy = tracker.startY - e.touches[0].pageY;
+                                          const dx = Math.abs(tracker.startX - e.touches[0].pageX);
+                                          const absDy = Math.abs(dy);
+                                          const currentShowBack = flippedCards[tab.id] !== false;
                                           
-                                          if (true) {
+                                          if (absDy > 30 && absDy > dx && isCardExpanded) {
                                             tracker.hasTriggeredFlip = true;
                                             setFlippedCards((prev) => ({
                                               ...prev,
@@ -5800,38 +5959,16 @@ export default function Dashboard() {
                                           }
                                         }
                                       }}
-                                      onTouchMove={(e) => {
-                                        const tracker = cardDragTrackerRef.current;
-                                        if (tracker.cardId !== tab.id || tracker.hasTriggeredFlip) return;
-                                        if (e.touches.length > 0) {
-                                          const dy = tracker.startY - e.touches[0].pageY;
-                                          const dx = Math.abs(tracker.startX - e.touches[0].pageX);
-                                          const absDy = Math.abs(dy);
-                                          const currentShowBack = flippedCards[tab.id] !== false;
-                                          
-                                          if (absDy > 40 && absDy > dx && isCardExpanded) {
-                                            const isDraggingUp = dy > 0;
-                                            const isDraggingDown = dy < 0;
-                                            
-                                            if (true) {
-                                              tracker.hasTriggeredFlip = true;
-                                              setFlippedCards((prev) => ({
-                                                ...prev,
-                                                [tab.id]: !currentShowBack,
-                                              }));
-                                              playClickSound();
-                                            }
-                                          }
-                                        }
-                                      }}
                                       onMouseUp={() => {
                                         // keep cardId and hasTriggeredFlip intact for onClick to intercept
                                         cardDragTrackerRef.current.startY = 0;
                                         cardDragTrackerRef.current.startX = 0;
+                                        cardDragTrackerRef.current.startTime = 0;
                                       }}
                                       onTouchEnd={() => {
                                         cardDragTrackerRef.current.startY = 0;
                                         cardDragTrackerRef.current.startX = 0;
+                                        cardDragTrackerRef.current.startTime = 0;
                                       }}
                                       onClickCapture={(e) => {
                                         if (
@@ -5849,6 +5986,7 @@ export default function Dashboard() {
                                         // Reset tracker state for subsequent gestures
                                         tracker.cardId = null;
                                         tracker.hasTriggeredFlip = false;
+                                        tracker.startTime = 0;
 
                                         if (wasFlippedThisGesture) {
                                           e.preventDefault();
@@ -5895,7 +6033,7 @@ export default function Dashboard() {
                                           }}
                                           key={tab.id}
                                           className={`relative w-full h-full flex-1 flex flex-col cursor-pointer slide-drawer-container transition-all duration-300 ${isCardExpanded ? "min-h-[460px] h-[460px]" : "min-h-[135px] h-[135px]"} ${
-                                            ((isCinemaModeActive || flippedCards[tab.id] !== false) && isCardExpanded) ? "show-back" : ""
+                                            ((flippedCards[tab.id] !== false) && isCardExpanded) ? "show-back" : ""
                                           } ${activeTabStrategies[tab.id]?.observeChecked ? "card-breathe-observe" : activeTabStrategies[tab.id]?.closeChecked ? "card-breathe-close" : activeTabStrategies[tab.id]?.slChecked ? "card-breathe-sl" : activeTabStrategies[tab.id]?.addChecked ? "card-breathe-add" : activeTabStrategies[tab.id]?.tpChecked ? "card-breathe-tp" : ""}`}
                                         >
                                           {/* Corner label badges - stacked vertically (render on container level to avoid clip truncation) */}
@@ -5944,12 +6082,31 @@ export default function Dashboard() {
                                             })()}
                                           </div>
 
+                                          {/* Top Center Edge Badge: Stock's Unrealized PnL (未實現損益) */}
+                                          <div className="absolute -top-3 left-1/2 -translate-x-1/2 z-40 pointer-events-none flex items-center justify-center">
+                                            <div
+                                              className={`flex items-center gap-1.5 text-[11px] font-black px-3 py-0.5 rounded-full border shadow-md whitespace-nowrap select-none font-mono ${
+                                                unrealizedPnL > 0
+                                                  ? "bg-emerald-600 text-white border-emerald-400/80 shadow-emerald-600/30"
+                                                  : unrealizedPnL < 0
+                                                    ? "bg-rose-600 text-white border-rose-400/80 shadow-rose-600/30"
+                                                    : "bg-zinc-700 text-zinc-100 border-zinc-500/80 shadow-zinc-900/20"
+                                              }`}
+                                            >
+                                              <span className="text-[10px] font-medium opacity-90">未實現:</span>
+                                              <span className="tabular-nums">
+                                                {unrealizedPnL > 0 ? "+" : ""}
+                                                ${unrealizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                              </span>
+                                            </div>
+                                          </div>
+
                                           {/* Inner sliding wrapper that handles overflow: hidden for transition faces */}
                                           <div className="slide-drawer-inner">
                                             {/* Front Face */}
                                           <div
                                             style={{
-                                              pointerEvents: (isCinemaModeActive || flippedCards[tab.id] !== false)
+                                              pointerEvents: (flippedCards[tab.id] !== false)
                                                 ? "none"
                                                 : "auto",
                                             }}
@@ -6359,20 +6516,16 @@ export default function Dashboard() {
                                                   </div>
                                                 )}
 
-                                                {/* Flip button */}
+                                                {/* Flip hint overlay */}
                                                 {!isCinemaModeActive && (
                                                   <div
-                                                    className="absolute bottom-0 left-0 right-0 h-[60px] z-20 cursor-pointer group/flip bg-gradient-to-t from-white/[0.03] to-transparent sm:hover:from-white/[0.08] transition-colors"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      setFlippedCards(prev => ({ ...prev, [tab.id]: true }));
-                                                    }}
+                                                    className="absolute bottom-0 left-0 right-0 h-[40px] z-20 pointer-events-none bg-gradient-to-t from-white/[0.03] to-transparent transition-colors"
                                                   >
-                                                    <div className="absolute bottom-2 right-3 opacity-60 sm:opacity-0 sm:group-hover/flip:opacity-60 text-[10px] text-white transition-opacity flex items-center gap-1 font-bold">
+                                                    <div className="absolute bottom-2 right-3 opacity-60 text-[10px] text-white flex items-center gap-1 font-bold">
                                                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                                        <path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 0 1 9-9" />
+                                                        <path d="M7 13l5 5 5-5M7 11l5-5 5 5" />
                                                       </svg>
-                                                      數據圖視化
+                                                      ↑↓ 按住約0.5秒後上下滑動
                                                     </div>
                                                   </div>
                                                 )}
@@ -6388,7 +6541,7 @@ export default function Dashboard() {
                                             // Stop click event from bubbling to card-wrapper's onClick, so clicking on the chart side doesn't accidentally flip it back to the front!
                                             e.stopPropagation();
                                           }}
-                                          style={{ pointerEvents: (flippedCards[tab.id] !== false || isCinemaModeActive) ? "auto" : "none" }}
+                                          style={{ pointerEvents: (flippedCards[tab.id] !== false) ? "auto" : "none" }}
                                           className={`card-back absolute inset-0 glass-card bg-transparent rounded-2xl flex flex-col w-full h-full sm:hover:bg-white/[0.04] transition-all duration-500 overflow-hidden ${
                                             (activeTabStrategies[tab.id])?.observeChecked ? "card-breathe-observe" : (activeTabStrategies[tab.id])?.closeChecked ? "card-breathe-close" : (activeTabStrategies[tab.id])?.slChecked ? "card-breathe-sl" : (activeTabStrategies[tab.id])?.addChecked ? "card-breathe-add" : (activeTabStrategies[tab.id])?.tpChecked ? "card-breathe-tp" : ""
                                           }`}
@@ -6589,7 +6742,7 @@ export default function Dashboard() {
           )}
 
         {activeViewTab === "completed" && (
-          <div className="grid grid-cols-1 gap-6">
+          <div id="completed-cards-section" className="grid grid-cols-1 gap-6">
             <div className="space-y-4">
               <ScrollIn delay={0.2} translateY={20}>
                 <div className="bg-white border border-zinc-200/90 rounded-[2rem] overflow-hidden shadow-sm flex flex-col group transition-all duration-500 h-auto">
@@ -6787,7 +6940,7 @@ export default function Dashboard() {
 
         {activeViewTab === "notes" && (() => {
           return (
-            <div className="space-y-6">
+            <div id="notes-cards-section" className="space-y-6">
               {filledCategories.map((cat) => {
                     const filteredTabs = visibleActiveTabs.filter(
                       (t) => getDisplayHoldingStatus(t.holdingStatus) === cat
@@ -7630,11 +7783,23 @@ export default function Dashboard() {
               <div className="flex items-center gap-2">
                 <span className="text-[#e5484d] text-base leading-none animate-pulse">●</span>
                 <span className="text-[13px] font-semibold tracking-wider text-zinc-400 font-sans">
-                  電影觀賞專注模式 · CINEMA FOCUS
+                  電影觀賞專注模式 · {isMobile ? "FOCUS" : "CINEMA FOCUS"}
                 </span>
               </div>
-              <div className="flex items-center gap-4">
-                <span className="text-xs text-zinc-500 font-sans">
+              <div className="flex items-center gap-3 sm:gap-4">
+                {isMobile && (
+                  <button
+                    onClick={() => {
+                      setIsMobileCinemaSidebarOpen(true);
+                      playClickSound();
+                    }}
+                    className="px-2.5 py-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-[11.5px] font-bold text-zinc-300 flex items-center gap-1 cursor-pointer"
+                  >
+                    <Layers className="w-3.5 h-3.5 text-[#e5484d]" />
+                    <span>選擇個股</span>
+                  </button>
+                )}
+                <span className="hidden sm:inline text-xs text-zinc-500 font-sans">
                   ESC / X 鍵退出電影模式
                 </span>
                 <button
@@ -7654,7 +7819,7 @@ export default function Dashboard() {
             {/* Split Screen Container: Left Sidebar & Right Main View */}
             <div className="flex-1 w-full flex flex-col lg:flex-row min-h-0 relative mt-4 overflow-hidden gap-8">
               {/* Left Sidebar containing Category Tabs & CinemaDock (aligned start for compact layout) */}
-              <div className="w-full lg:w-64 shrink-0 flex flex-col gap-4 lg:border-r lg:border-white/5 lg:pr-6 justify-start items-start py-2 overflow-y-auto scrollbar-hide">
+              <div className="hidden lg:flex w-full lg:w-64 shrink-0 flex-col gap-4 lg:border-r lg:border-white/5 lg:pr-6 justify-start items-start py-2 overflow-y-auto scrollbar-hide">
                 {/* HTML Document Management Consolidated Panel (Tabbed Compact Layout) */}
                 <div className="w-full flex flex-col gap-1.5 p-1.5 bg-white/5 border border-white/[0.04] rounded-xl">
                   {/* Tab bar header */}
@@ -7922,6 +8087,9 @@ export default function Dashboard() {
                           transition={{ duration: 0.35, type: "spring", stiffness: 220, damping: 24 }}
                           className="origin-center shadow-[0_30px_80px_rgba(0,0,0,0.85)] rounded-2xl"
                           onClick={(e) => e.stopPropagation()}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onTouchStart={(e) => e.stopPropagation()}
+                          onPointerDown={(e) => e.stopPropagation()}
                         >
                           {renderCardRef.current && renderCardRef.current(tab, idx)}
                         </motion.div>
@@ -7982,6 +8150,253 @@ export default function Dashboard() {
                 </div>
               </div>
             </div>
+
+            {/* Mobile Drawer Slide-up Sheet */}
+            <AnimatePresence>
+              {isMobileCinemaSidebarOpen && (
+                <>
+                  {/* Backdrop */}
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 0.5 }}
+                    exit={{ opacity: 0 }}
+                    onClick={() => setIsMobileCinemaSidebarOpen(false)}
+                    className="fixed inset-0 z-[100000] bg-black/80 backdrop-blur-sm sm:hidden"
+                  />
+                  {/* Drawer */}
+                  <motion.div
+                    initial={{ translateY: "100%" }}
+                    animate={{ translateY: 0 }}
+                    exit={{ translateY: "100%" }}
+                    transition={{ type: "spring", damping: 25, stiffness: 200 }}
+                    className="fixed bottom-0 left-0 right-0 z-[100001] bg-[#121212] border-t border-white/10 rounded-t-3xl max-h-[85vh] flex flex-col p-5 text-white select-none sm:hidden"
+                  >
+                    {/* Header */}
+                    <div className="flex items-center justify-between pb-3 border-b border-white/5 mb-4">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-zinc-300">選擇股票與分類</span>
+                      </div>
+                      <button
+                        onClick={() => setIsMobileCinemaSidebarOpen(false)}
+                        className="w-7 h-7 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/70 hover:text-white transition-all cursor-pointer"
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    {/* Content Area with scroll */}
+                    <div className="flex-1 overflow-y-auto space-y-5 pb-8 scrollbar-hide">
+                      {/* 1. HTML Consolidated Panel */}
+                      <div className="w-full flex flex-col gap-1.5 p-2 bg-white/5 border border-white/[0.04] rounded-xl">
+                        <div className="grid grid-cols-5 gap-0.5 bg-black/40 p-0.5 rounded-lg border border-white/[0.03]">
+                          <button
+                            onClick={() => {
+                              setHtmlContext("dynamic");
+                              playClickSound();
+                            }}
+                            className={`py-1.5 text-center text-[10px] font-bold rounded transition-all cursor-pointer ${
+                              htmlContext === "dynamic"
+                                ? "bg-zinc-800 text-white border border-white/[0.05]"
+                                : "text-zinc-400 hover:text-zinc-200"
+                            }`}
+                          >
+                            <span>個股</span>
+                            {activeCinemaSymbol && (
+                              <span className="ml-0.5 text-[7px] font-bold px-1 rounded bg-red-500/20 text-red-400 font-mono">
+                                {activeCinemaSymbol}
+                              </span>
+                            )}
+                          </button>
+                          <button
+                            onClick={() => {
+                              setHtmlContext("market_filter");
+                              playClickSound();
+                            }}
+                            className={`py-1.5 text-center text-[10px] font-bold rounded transition-all cursor-pointer ${
+                              htmlContext === "market_filter"
+                                ? "bg-zinc-800 text-white border border-white/[0.05]"
+                                : "text-zinc-400 hover:text-zinc-200"
+                            }`}
+                          >
+                            大盤
+                          </button>
+                          <button
+                            onClick={() => {
+                              setHtmlContext("stock_micro");
+                              playClickSound();
+                            }}
+                            className={`py-1.5 text-center text-[10px] font-bold rounded transition-all cursor-pointer ${
+                              htmlContext === "stock_micro"
+                                ? "bg-zinc-800 text-white border border-white/[0.05]"
+                                : "text-zinc-400 hover:text-zinc-200"
+                            }`}
+                          >
+                            微觀
+                          </button>
+                          <button
+                            onClick={() => {
+                              setHtmlContext("fed");
+                              playClickSound();
+                            }}
+                            className={`py-1.5 text-center text-[10px] font-bold rounded transition-all cursor-pointer ${
+                              htmlContext === "fed"
+                                ? "bg-zinc-800 text-white border border-white/[0.05]"
+                                : "text-zinc-400 hover:text-zinc-200"
+                            }`}
+                          >
+                            FED
+                          </button>
+                          <button
+                            onClick={() => {
+                              setHtmlContext("plus_70");
+                              playClickSound();
+                            }}
+                            className={`py-1.5 text-center text-[10px] font-bold rounded transition-all cursor-pointer ${
+                              htmlContext === "plus_70"
+                                ? "bg-zinc-800 text-white border border-white/[0.05]"
+                                : "text-zinc-400 hover:text-zinc-200"
+                            }`}
+                          >
+                            +70
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-1.5 mt-1">
+                          <button
+                            onClick={() => {
+                              if (htmlContext === "dynamic") {
+                                const activeTab = orderedFilteredSubTabVisibleTabs.find(t => t.id === activeCinemaCardId);
+                                if (activeTab) {
+                                  setHtmlUploadSymbol(activeTab.symbol);
+                                } else {
+                                  setHtmlUploadSymbol("");
+                                }
+                              } else {
+                                setHtmlUploadSymbol(htmlContext.toUpperCase());
+                              }
+                              setHtmlFileToUpload(null);
+                              setHtmlFileContent("");
+                              setHtmlFileToUpload2(null);
+                              setHtmlFileContent2("");
+                              setIsUploadHtmlOpen(true);
+                              playClickSound();
+                            }}
+                            className="flex items-center justify-center gap-1.5 py-1.5 px-2 text-[10px] font-semibold rounded-md bg-red-600 hover:bg-red-500 text-white transition-all cursor-pointer"
+                          >
+                            <Upload className="w-3 h-3" />
+                            <span>上傳</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              setIsPreviewHtmlOpen(true);
+                              if (htmlContext === "dynamic") {
+                                const activeTab = orderedFilteredSubTabVisibleTabs.find(t => t.id === activeCinemaCardId);
+                                fetchUploadedHtmlFiles(activeTab?.symbol);
+                              } else {
+                                fetchUploadedHtmlFiles(htmlContext.toUpperCase());
+                              }
+                              playClickSound();
+                            }}
+                            className="flex items-center justify-center gap-1.5 py-1.5 px-2 text-[10px] font-semibold rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-all cursor-pointer border border-white/5"
+                          >
+                            <Eye className="w-3 h-3" />
+                            <span>預覽</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 2. Primary & Sub Categories */}
+                      <div className="space-y-2.5">
+                        <div className="text-[10px] font-bold tracking-widest text-zinc-500 font-sans uppercase">
+                          分類選單 CATEGORY
+                        </div>
+                        <div className="flex bg-[#161616] p-1 rounded-full border border-white/5 shadow-inner w-full">
+                          <button
+                            onClick={() => {
+                              setActiveViewTab("active");
+                              playClickSound();
+                            }}
+                            className={`flex-1 py-1.5 text-[11px] font-semibold rounded-full transition-all duration-200 flex items-center justify-center gap-1 cursor-pointer ${
+                              activeViewTab === "active"
+                                ? "bg-[#e5484d] text-white shadow-md font-bold"
+                                : "text-zinc-400"
+                            }`}
+                          >
+                            <Activity className="w-3 h-3" />
+                            <span>持有中</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              setActiveViewTab("real");
+                              playClickSound();
+                            }}
+                            className={`flex-1 py-1.5 text-[11px] font-semibold rounded-full transition-all duration-200 flex items-center justify-center gap-1 cursor-pointer ${
+                              activeViewTab === "real"
+                                ? "bg-[#e5484d] text-white shadow-md font-bold"
+                                : "text-zinc-400"
+                            }`}
+                          >
+                            <ShieldCheck className="w-3 h-3" />
+                            <span>真實交易</span>
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {visibleSubTabs.map((tab) => {
+                            const isActive = activeHoldingSubTab === tab;
+                            const tabCount = effectiveVisibleActiveTabs.filter(
+                              (t) => getDisplayHoldingStatus(t.holdingStatus) === tab
+                            ).length;
+                            return (
+                              <button
+                                key={`cinema-drawer-sub-${tab}`}
+                                onClick={() => {
+                                  setActiveHoldingSubTab(tab as any);
+                                  playClickSound();
+                                }}
+                                className={`px-3 py-2 text-[11px] font-medium rounded-lg transition-all flex items-center justify-between border cursor-pointer ${
+                                  isActive
+                                    ? "bg-white/10 text-white border-white/15 font-semibold"
+                                    : "text-zinc-400 border-transparent bg-white/5"
+                                }`}
+                              >
+                                <span>{tab === "觀察中" && activeViewTab === "active" ? "虛擬交易" : tab}</span>
+                                <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-zinc-800 text-zinc-400">
+                                  {tabCount}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* 3. Stock List Dock */}
+                      <div className="space-y-2.5">
+                        <div className="text-[10px] font-bold tracking-widest text-zinc-500 font-sans uppercase">
+                          個股導覽 STOCKS
+                        </div>
+                        <div className="bg-[#161616] rounded-xl p-2 max-h-[30vh] overflow-y-auto scrollbar-hide">
+                          {orderedFilteredSubTabVisibleTabs.length > 0 ? (
+                            <CinemaDock
+                              tabs={orderedFilteredSubTabVisibleTabs}
+                              activeId={activeCinemaCardId}
+                              onSelect={(id) => {
+                                setActiveCinemaCardId(id);
+                                setIsMobileCinemaSidebarOpen(false);
+                                playClickSound();
+                              }}
+                            />
+                          ) : (
+                            <div className="py-4 text-center text-xs text-[#6b6b6b] font-sans">
+                              此分類目前無股票卡片
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
           </motion.div>
         </AnimatePresence>
       )}
@@ -7992,7 +8407,7 @@ export default function Dashboard() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[99999] bg-[#0a0a0a] flex flex-col p-6 text-white select-none overflow-hidden"
+            className="fixed inset-0 z-[99999] bg-[#0a0a0a] flex flex-col p-4 sm:p-6 text-white select-none overflow-hidden"
           >
             {/* Top Bar */}
             <div className="w-full flex items-center justify-between border-b border-white/5 pb-4 opacity-90">
@@ -8015,10 +8430,47 @@ export default function Dashboard() {
               </div>
             </div>
 
+            {/* Mobile Tab Switcher */}
+            <div className="flex lg:hidden bg-zinc-950 p-0.5 rounded-lg border border-white/5 gap-0.5 mt-3 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setAiMobileActiveTab("controls");
+                  playClickSound();
+                }}
+                className={`flex-1 py-1.5 text-[11px] font-bold rounded transition-all cursor-pointer text-center ${
+                  aiMobileActiveTab === "controls"
+                    ? "bg-[#e5484d] text-white border border-[#e5484d]/10"
+                    : "text-zinc-400 hover:text-zinc-200 hover:bg-white/5"
+                }`}
+              >
+                指令與設定 Settings & Prompt
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAiMobileActiveTab("preview");
+                  playClickSound();
+                }}
+                className={`flex-1 py-1.5 text-[11px] font-bold rounded transition-all cursor-pointer text-center relative ${
+                  aiMobileActiveTab === "preview"
+                    ? "bg-[#e5484d] text-white border border-[#e5484d]/10"
+                    : "text-zinc-400 hover:text-zinc-200 hover:bg-white/5"
+                }`}
+              >
+                網頁預覽 Web Preview
+                {aiHtmlFiles.length > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-[#e5484d] text-white text-[8px] px-1.5 rounded-full font-bold">
+                    {aiHtmlFiles.length}
+                  </span>
+                )}
+              </button>
+            </div>
+
             {/* Main Section */}
             <div className="flex-1 w-full flex flex-col lg:flex-row min-h-0 relative mt-4 overflow-hidden gap-6">
               {/* Left Column (Dropdowns, Prompt Text Box, Execute button) */}
-              <div className="w-full lg:w-[420px] shrink-0 flex flex-col gap-4 lg:border-r lg:border-white/5 lg:pr-6 justify-start py-2 overflow-y-auto scrollbar-hide">
+              <div className={`w-full lg:w-[420px] shrink-0 flex-col gap-4 lg:border-r lg:border-white/5 lg:pr-6 justify-start py-2 overflow-y-auto scrollbar-hide ${aiMobileActiveTab === "controls" ? "flex" : "hidden lg:flex"}`}>
                 
                 {isPromptManagerOpen ? (
                   <div className="flex flex-col gap-4 animate-fadeIn">
@@ -8357,24 +8809,37 @@ export default function Dashboard() {
                     </div>
                                 {/* Prompt Text Box */}
                     <div className="flex-1 flex flex-col gap-1.5 relative min-h-[220px]">
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between gap-2">
                         <label className="text-[10px] font-bold tracking-wider text-zinc-500 font-sans uppercase">
                           編輯與確認指令 EDIT PROMPT
                         </label>
-                        <button
-                          onClick={async () => {
-                            try {
-                              await navigator.clipboard.writeText(aiPromptText);
-                              toast.success("已複製 Prompt 到剪貼簿！");
-                            } catch (err) {
-                              toast.error("複製失敗");
-                            }
-                          }}
-                          className="text-[10px] text-zinc-400 hover:text-white flex items-center gap-1 bg-white/5 hover:bg-white/10 px-2 py-1 rounded transition-all cursor-pointer border border-white/5"
-                        >
-                          <Copy className="w-3 h-3" />
-                          <span>複製指令</span>
-                        </button>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handlePasteOnDeepseek();
+                              playClickSound();
+                            }}
+                            className="lg:hidden text-[10px] text-amber-500 hover:text-amber-400 flex items-center gap-1 bg-amber-500/10 hover:bg-amber-500/20 px-2.5 py-1 rounded transition-all cursor-pointer border border-amber-500/20 font-bold"
+                          >
+                            <span>Deepseek</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </button>
+                          <button
+                            onClick={async () => {
+                              try {
+                                await navigator.clipboard.writeText(aiPromptText);
+                                toast.success("已複製 Prompt 到剪貼簿！");
+                              } catch (err) {
+                                toast.error("複製失敗");
+                              }
+                            }}
+                            className="text-[10px] text-zinc-400 hover:text-white flex items-center gap-1 bg-white/5 hover:bg-white/10 px-2 py-1 rounded transition-all cursor-pointer border border-white/5"
+                          >
+                            <Copy className="w-3 h-3" />
+                            <span>複製指令</span>
+                          </button>
+                        </div>
                       </div>
                       <textarea
                         value={aiPromptText}
@@ -8426,7 +8891,7 @@ export default function Dashboard() {
                             handlePasteOnDeepseek();
                             playClickSound();
                           }}
-                          className="flex-1 py-1 text-[11px] font-bold rounded transition-all cursor-pointer text-center text-amber-500 hover:text-amber-400 hover:bg-amber-500/5 border border-transparent hover:border-amber-500/10"
+                          className="hidden lg:block flex-1 py-1 text-[11px] font-bold rounded transition-all cursor-pointer text-center text-amber-500 hover:text-amber-400 hover:bg-amber-500/5 border border-transparent hover:border-amber-500/10"
                         >
                           Paste on Deepseek
                         </button>
@@ -8492,6 +8957,7 @@ export default function Dashboard() {
                                     onClick={() => {
                                       setSelectedPreviewUrl(`/api/html-files/${file.id}/content`);
                                       setSelectedPreviewLinkTitle(file.fileName);
+                                      setAiMobileActiveTab("preview");
                                       playClickSound();
                                     }}
                                     className={`px-2.5 py-1.5 rounded bg-[#141414]/80 border text-xs cursor-pointer flex items-center justify-between transition-all group ${
@@ -8554,7 +9020,7 @@ export default function Dashboard() {
               </div>
 
               {/* Right Column (Output Display) */}
-              <div className="flex-1 flex flex-col min-h-0 bg-[#121212]/50 border border-white/5 rounded-xl overflow-hidden p-4">
+              <div className={`flex-1 flex-col min-h-0 bg-[#121212]/50 border border-white/5 rounded-xl overflow-hidden p-4 ${aiMobileActiveTab === "preview" ? "flex" : "hidden lg:flex"}`}>
                 
                 {/* Content Container */}
                 <div className="flex-1 overflow-hidden relative">

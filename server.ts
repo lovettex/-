@@ -21,7 +21,24 @@ async function generateContentWithRetry(ai: GoogleGenAI, params: any, maxRetries
       console.error(`Gemini API attempt ${attempt} failed with model ${params.model}:`, error);
       
       const errStr = String(error?.message || error || "");
-      const isTransient = errStr.includes("503") || errStr.includes("UNAVAILABLE") || errStr.includes("high demand") || errStr.includes("429") || errStr.includes("ResourceExhausted") || errStr.includes("RESOURCE_EXHAUSTED") || errStr.includes("overloaded");
+      const isTransient = 
+        errStr.includes("503") || 
+        errStr.includes("502") || 
+        errStr.includes("504") || 
+        errStr.includes("500") || 
+        errStr.includes("UNAVAILABLE") || 
+        errStr.includes("high demand") || 
+        errStr.includes("429") || 
+        errStr.includes("ResourceExhausted") || 
+        errStr.includes("RESOURCE_EXHAUSTED") || 
+        errStr.includes("overloaded") || 
+        errStr.includes("timeout") || 
+        errStr.includes("limit") ||
+        error?.status === 503 ||
+        error?.status === 429 ||
+        error?.status === 500 ||
+        error?.status === 502 ||
+        error?.status === 504;
       
       if (attempt >= maxRetries || !isTransient) {
         // Restore the original model name before throwing

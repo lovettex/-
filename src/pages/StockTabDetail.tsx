@@ -14,8 +14,8 @@ import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
 import { format } from 'date-fns';
-import { Timestamp, collection, writeBatch, doc, serverTimestamp } from 'firebase/firestore';
-import { Trash2, BarChart3, ChevronDown, ChevronUp, Gamepad2, ShieldCheck, Upload, Download, ChevronLeft } from 'lucide-react';
+import { Timestamp, collection, writeBatch, doc, serverTimestamp, addDoc, getDocs } from 'firebase/firestore';
+import { Trash2, BarChart3, ChevronDown, ChevronUp, Gamepad2, ShieldCheck, Upload, Download, ChevronLeft, CheckCircle2, RotateCcw, Loader2 } from 'lucide-react';
 import { toast } from "sonner";
 import { motion, AnimatePresence } from 'motion/react';
 import { db } from '../lib/firebase';
@@ -45,6 +45,7 @@ export default function StockTabDetail() {
   });
   const [isTradeOpen, setIsTradeOpen] = useState(false);
   const [isCompleteOpen, setIsCompleteOpen] = useState(false);
+  const [isSubmittingComplete, setIsSubmittingComplete] = useState(false);
   const [isStatsOpen, setIsStatsOpen] = useState(false); 
   const [isTradeListOpen, setIsTradeListOpen] = useState(false);
   const [finalPnLInput, setFinalPnLInput] = useState('');
@@ -72,6 +73,7 @@ export default function StockTabDetail() {
     { price: '', quantity: '' }
   ]);
   const [includeCurrentHolding, setIncludeCurrentHolding] = useState(true);
+  const [refPnLPoint, setRefPnLPoint] = useState('');
 
   // Percentage calculator states
   const [calcExpression, setCalcExpression] = useState('');
@@ -254,6 +256,11 @@ export default function StockTabDetail() {
   };
 
   const avgResult = calculateAveraging();
+  const parsedRefPnL = parseFloat(refPnLPoint);
+  const hasRefPnL = refPnLPoint.trim() !== '' && !isNaN(parsedRefPnL);
+  const calculatedPnLResult = hasRefPnL
+    ? (avgResult.finalAveragePrice - parsedRefPnL) * avgResult.totalShares
+    : null;
   const parsedCalc = parseAndCalculatePercentage(calcExpression);
 
   // Four-batch transaction planning calculations
@@ -557,11 +564,63 @@ export default function StockTabDetail() {
     setIsTradeOpen(false);
   };
 
-  const handleCompleteSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    updateTabStatus(tab.id, 'COMPLETED', Number(finalPnLInput));
-    playSuccessSound();
-    setIsCompleteOpen(false);
+  const handleCompleteAndClose = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!tab) return;
+    const pnlVal = Number(finalPnLInput) || 0;
+    try {
+      setIsSubmittingComplete(true);
+      await updateTabStatus(tab.id, 'COMPLETED', pnlVal);
+      playSuccessSound();
+      setIsCompleteOpen(false);
+      toast.success('已完成交易結算，紀錄已移至「已完成」頁籤');
+    } catch (err) {
+      console.error(err);
+      toast.error('完成交易失敗');
+    } finally {
+      setIsSubmittingComplete(false);
+    }
+  };
+
+  const handleCompleteAndContinue = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!tab || !user) return;
+    const pnlVal = Number(finalPnLInput) || 0;
+    try {
+      setIsSubmittingComplete(true);
+      const { id: _, createdAt, updatedAt, ...restTab } = tab;
+
+      // 1. Create snapshot record in stockTabs with status = 'COMPLETED'
+      const newDocRef = await addDoc(collection(db, 'stockTabs'), {
+        ...restTab,
+        userId: user.uid,
+        status: 'COMPLETED',
+        finalPnL: pnlVal,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      // 2. Copy current trades to the completed snapshot tab
+      try {
+        const tradesQuery = await getDocs(collection(db, `stockTabs/${tab.id}/trades`));
+        for (const tradeDoc of tradesQuery.docs) {
+          const tradeData = tradeDoc.data();
+          await addDoc(collection(db, `stockTabs/${newDocRef.id}/trades`), tradeData);
+        }
+      } catch (tradeErr) {
+        console.error('Error copying trades to completed tab snapshot:', tradeErr);
+      }
+
+      playSuccessSound();
+      setIsCompleteOpen(false);
+      setFinalPnLInput('');
+      toast.success(`已為 ${tab.symbol} 產生一筆已完成交易紀錄，卡片保留在原區塊繼續交易 🚀`);
+    } catch (err) {
+      console.error(err);
+      toast.error('結算並繼續交易失敗');
+    } finally {
+      setIsSubmittingComplete(false);
+    }
   };
 
   const handleReactivate = () => {
@@ -815,26 +874,70 @@ export default function StockTabDetail() {
                     </button>
                   } 
                 />
-                <DialogContent className="glass-panel border-zinc-250 shadow-2xl bg-white text-zinc-800 max-w-sm">
-                  <DialogHeader>
-                    <DialogTitle className="font-bold text-xl text-zinc-800">結束交易並記錄最終損益</DialogTitle>
+                <DialogContent className="glass-panel border-zinc-250 shadow-2xl bg-white text-zinc-800 max-w-md p-6 rounded-3xl">
+                  <DialogHeader className="mb-1">
+                    <DialogTitle className="font-extrabold text-xl text-zinc-900 flex items-center gap-2">
+                      <span className="text-xl">🏆</span>
+                      <span>結束交易並記錄最終損益</span>
+                    </DialogTitle>
                   </DialogHeader>
-                  <form onSubmit={handleCompleteSubmit} className="space-y-5">
+                  <form onSubmit={(e) => e.preventDefault()} className="space-y-5 pt-1">
                     <div className="space-y-2">
-                      <Label className="text-zinc-600">最終獲利或虧損金額 ($)</Label>
+                      <div className="flex items-center justify-between">
+                        <Label className="text-zinc-700 font-bold text-xs">最終獲利或虧損金額 ($)</Label>
+                        {stats && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const calcPnL = (stats.realizedPnL + stats.unrealizedPnL);
+                              setFinalPnLInput(calcPnL.toFixed(2));
+                            }}
+                            className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer"
+                          >
+                            自動填入預估損益 (${(stats.realizedPnL + stats.unrealizedPnL).toFixed(2)})
+                          </button>
+                        )}
+                      </div>
                       <Input 
                         type="number" 
                         step="0.01"
                         value={finalPnLInput}
                         onChange={e => setFinalPnLInput(e.target.value)}
                         placeholder="例如：500 或 -200"
-                        className="bg-white border-zinc-200 text-zinc-800 placeholder-zinc-400 focus-visible:ring-emerald-500/50"
+                        className="bg-zinc-50/80 border-zinc-200 text-zinc-900 placeholder-zinc-400 focus-visible:ring-emerald-500/50 font-mono font-black text-sm h-11 rounded-xl"
                         required 
                       />
                     </div>
-                    <DialogFooter>
-                      <Button type="submit" className="bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 py-2 px-6 rounded-full">確認完成</Button>
-                    </DialogFooter>
+
+                    <div className="flex flex-col gap-3 pt-3 border-t border-zinc-200">
+                      <button
+                        type="button"
+                        onClick={handleCompleteAndClose}
+                        disabled={isSubmittingComplete}
+                        className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-extrabold text-xs sm:text-sm rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 shadow-md shadow-emerald-600/20 disabled:opacity-50"
+                      >
+                        {isSubmittingComplete ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <CheckCircle2 className="w-4 h-4 shrink-0" />
+                        )}
+                        <span>1. 輸入金額並關掉交易結算 (移至已完成)</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleCompleteAndContinue}
+                        disabled={isSubmittingComplete}
+                        className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] text-white font-extrabold text-xs sm:text-sm rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 shadow-md shadow-indigo-600/20 disabled:opacity-50"
+                      >
+                        {isSubmittingComplete ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <RotateCcw className="w-4 h-4 shrink-0" />
+                        )}
+                        <span>2. 輸入金額做交易結算並繼續交易 (保留卡片)</span>
+                      </button>
+                    </div>
                   </form>
                 </DialogContent>
               </Dialog>
@@ -1018,11 +1121,30 @@ export default function StockTabDetail() {
                               { price: '', quantity: '' },
                               { price: '', quantity: '' }
                             ]);
+                            setRefPnLPoint('');
                           }}
                           className="text-[10px] font-bold text-zinc-400 hover:text-zinc-600 transition-colors self-end sm:self-auto"
                         >
                           ✕ 清除所有輸入
                         </button>
+                      </div>
+
+                      {/* 參考損益點 輸入框 */}
+                      <div className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-zinc-50 border border-zinc-200/80">
+                        <div className="flex flex-col">
+                          <span className="text-xs font-bold text-zinc-700">參考損益點 ($)</span>
+                          <span className="text-[10px] text-zinc-400">估算目標價格與攤平後成本之差額</span>
+                        </div>
+                        <div className="relative w-36 shrink-0">
+                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-zinc-400 font-semibold">$</span>
+                          <Input
+                            type="number"
+                            placeholder="參考損益點"
+                            value={refPnLPoint}
+                            onChange={(e) => setRefPnLPoint(e.target.value)}
+                            className="h-8 pl-6 pr-2 text-xs font-bold text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 rounded-lg"
+                          />
+                        </div>
                       </div>
 
                       <div className="p-4 rounded-xl bg-zinc-50 border border-zinc-100 space-y-2.5">
@@ -1045,6 +1167,35 @@ export default function StockTabDetail() {
                             ${avgResult.finalAveragePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </span>
                         </div>
+                        {hasRefPnL && calculatedPnLResult !== null && (() => {
+                          const isLoss = avgResult.finalAveragePrice > parsedRefPnL;
+                          const isProfit = avgResult.finalAveragePrice < parsedRefPnL;
+                          const absAmount = Math.abs(calculatedPnLResult);
+                          const formattedAmount = absAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+                          let textColor = "text-zinc-800";
+                          let displayText = `$0.00`;
+
+                          if (isLoss) {
+                            textColor = "text-rose-600 font-bold";
+                            displayText = `-$${formattedAmount}`;
+                          } else if (isProfit) {
+                            textColor = "text-emerald-700 font-bold";
+                            displayText = `+$${formattedAmount}`;
+                          }
+
+                          return (
+                            <div className="flex justify-between items-baseline pt-2 border-t border-zinc-200/80 mt-1">
+                              <div className="flex flex-col">
+                                <span className="text-xs font-semibold text-zinc-600">試算結果:</span>
+                                <span className="text-[10px] text-zinc-400 font-normal">(攤平後平均成本 - 參考損益點) × 攤平後總股數</span>
+                              </div>
+                              <span className={`text-base font-black font-mono ${textColor}`}>
+                                {displayText}
+                              </span>
+                            </div>
+                          );
+                        })()}
                         {includeCurrentHolding && avgResult.costReducedPercent > 0 && (
                           <div className="text-[11px] text-emerald-700 font-semibold text-center bg-emerald-50/50 py-1.5 px-2.5 rounded-lg border border-emerald-100/50 mt-1">
                             📉 平均成本較原先降低了 {avgResult.costReducedPercent.toFixed(2)}%

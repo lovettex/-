@@ -26,7 +26,7 @@ export default function Layout() {
   if (authLoading) {
     if (loadingTimeout) {
       return (
-        <div className="h-screen w-full flex flex-col items-center justify-center px-4 relative overflow-hidden text-zinc-800">
+        <div className="min-h-screen w-full flex flex-col items-center justify-center px-4 py-10 relative text-zinc-800">
           {/* Nike Premium 3D Grid Background with depth-of-field effect */}
           <Premium3DGrid />
 
@@ -73,7 +73,7 @@ export default function Layout() {
     }
 
     return (
-      <div className="h-screen w-full flex flex-col items-center justify-center text-zinc-800 relative overflow-hidden">
+      <div className="min-h-screen w-full flex flex-col items-center justify-center py-10 text-zinc-800 relative">
         <Premium3DGrid />
         <div className="flex flex-col items-center space-y-4 relative z-10 p-8 bg-white/80 backdrop-blur-md rounded-2xl border border-zinc-200/50 shadow-lg">
           <div className="h-8 w-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
@@ -85,7 +85,7 @@ export default function Layout() {
 
   if (!user) {
     return (
-      <div className="h-screen w-full flex flex-col items-center justify-center px-4 relative overflow-hidden text-zinc-800">
+      <div className="min-h-screen w-full flex flex-col items-center justify-center px-4 py-10 relative text-zinc-800">
         {/* Nike Premium 3D Grid Background with depth-of-field effect */}
         <Premium3DGrid />
 
@@ -123,7 +123,7 @@ export default function Layout() {
         </div>
 
         {window.self !== window.top && (
-          <div className="flex flex-col items-center space-y-3 relative z-10 max-w-sm w-full">
+          <div className="flex flex-col items-center space-y-3 relative z-10 max-w-sm w-full mt-4">
             <p className="text-xs font-bold text-zinc-500 text-center leading-relaxed bg-white/50 border border-zinc-200/40 px-5 py-2.5 rounded-2xl backdrop-blur-sm shadow-xs">
               如遇到無法登入的情況，請點擊下方按鈕以獨立新分頁開啟本站。
             </p>
@@ -142,7 +142,7 @@ export default function Layout() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden text-zinc-800 relative">
+    <div className="flex min-h-screen text-zinc-800 relative w-full">
       {/* Nike Premium 3D Grid Background with depth-of-field effect */}
       <Premium3DGrid />
       
@@ -154,7 +154,7 @@ export default function Layout() {
       </div>
 
       {/* Main Content */}
-      <main className="flex-1 relative z-0 overflow-y-auto focus:outline-none">
+      <main className="flex-1 relative z-0 focus:outline-none w-full">
         <div className="w-full mx-auto px-2 sm:px-4 md:px-6 pt-16 sm:pt-16 md:pt-4 pb-10 md:pb-16 max-w-[1920px]">
           <Outlet />
         </div>
