@@ -1942,30 +1942,58 @@ export default function Dashboard() {
       const otherToFetch = otherTabs.filter(t => !fetchedTabIdsRef.current.has(t.id));
 
       const fetchSingleTab = async (tab: any) => {
-        // Fetch pending orders
-        const qOrders = query(
-          collection(db, `stockTabs/${tab.id}/plannedOrders`),
-          where("status", "==", "PENDING"),
-        );
-        const snapshotOrders = await getDocs(qOrders);
-        const orders = snapshotOrders.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        }));
+        let orders: any[] = [];
+        let trades: any[] = [];
+        let strategy: any = null;
 
-        // Fetch trades
-        const qTrades = query(collection(db, `stockTabs/${tab.id}/trades`));
-        const snapshotTrades = await getDocs(qTrades);
-        const trades = snapshotTrades.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        }));
+        try {
+          // Fetch pending orders
+          const qOrders = query(
+            collection(db, `stockTabs/${tab.id}/plannedOrders`),
+            where("status", "==", "PENDING"),
+          );
+          const snapshotOrders = await getDocs(qOrders);
+          orders = snapshotOrders.docs.map((doc) => ({
+            id: doc.id,
+            ...doc.data(),
+          }));
+        } catch (err) {
+          try {
+            handleFirestoreError(err, OperationType.GET, `stockTabs/${tab.id}/plannedOrders`, user);
+          } catch (e) {
+            // handleFirestoreError throws formatted JSON error
+          }
+        }
 
-        // Fetch strategy
-        const qStrategy = query(collection(db, `stockTabs/${tab.id}/strategy`));
-        const snapshotStrategy = await getDocs(qStrategy);
-        const mainStrategy = snapshotStrategy.docs.find((d) => d.id === "main");
-        const strategy = mainStrategy ? mainStrategy.data() : null;
+        try {
+          // Fetch trades
+          const qTrades = query(collection(db, `stockTabs/${tab.id}/trades`));
+          const snapshotTrades = await getDocs(qTrades);
+          trades = snapshotTrades.docs.map((doc) => ({
+            id: doc.id,
+            ...doc.data(),
+          }));
+        } catch (err) {
+          try {
+            handleFirestoreError(err, OperationType.GET, `stockTabs/${tab.id}/trades`, user);
+          } catch (e) {
+            // handleFirestoreError throws formatted JSON error
+          }
+        }
+
+        try {
+          // Fetch strategy
+          const qStrategy = query(collection(db, `stockTabs/${tab.id}/strategy`));
+          const snapshotStrategy = await getDocs(qStrategy);
+          const mainStrategy = snapshotStrategy.docs.find((d) => d.id === "main");
+          strategy = mainStrategy ? mainStrategy.data() : null;
+        } catch (err) {
+          try {
+            handleFirestoreError(err, OperationType.GET, `stockTabs/${tab.id}/strategy`, user);
+          } catch (e) {
+            // handleFirestoreError throws formatted JSON error
+          }
+        }
 
         return { id: tab.id, orders, trades, strategy };
       };
@@ -3204,7 +3232,11 @@ export default function Dashboard() {
               }));
               tradesMap[tab.id] = trades;
             } catch (err) {
-              console.error(`Error fetching trades for ${tab.symbol}:`, err);
+              try {
+                handleFirestoreError(err, OperationType.GET, `stockTabs/${tab.id}/trades`, user);
+              } catch (e) {
+                // handleFirestoreError throws formatted JSON error
+              }
               tradesMap[tab.id] = [];
             }
           })
