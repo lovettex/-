@@ -100,6 +100,7 @@ import {
   Edit3,
   Settings,
   Layers,
+  X,
 } from "lucide-react";
 import { calculateStats } from "../lib/calculations";
 import { safeLocalStorage, safeSessionStorage } from "../lib/utils";
@@ -681,6 +682,10 @@ export default function Dashboard() {
   const [activeViewTab, setActiveViewTab] = useState<
     "active" | "real" | "completed" | "socrates" | "alerts" | "notes"
   >("active");
+
+  const [completedMainTab, setCompletedMainTab] = useState<"all" | "real" | "simulated">("all");
+  const [completedResultFilter, setCompletedResultFilter] = useState<"all" | "win" | "lose">("all");
+  const [completedSearchQuery, setCompletedSearchQuery] = useState<string>("");
 
   // Lenis Smooth Scroll Engine Instance
   const lenisRef = useRef<Lenis | null>(null);
@@ -3939,6 +3944,67 @@ export default function Dashboard() {
     }
   };
 
+  const realCompletedTabs = completedTabs.filter((t) => t.tradeType === "real");
+  const simulatedCompletedTabs = completedTabs.filter((t) => t.tradeType === "simulated");
+
+  const totalCompletedPnL = realCompletedTabs.reduce(
+    (acc, tab) => acc + (tab.finalPnL || 0),
+    0,
+  );
+  const simulatedCompletedPnL = simulatedCompletedTabs.reduce(
+    (acc, tab) => acc + (tab.finalPnL || 0),
+    0,
+  );
+
+  const realWinningTrades = realCompletedTabs.filter(
+    (t) => (t.finalPnL || 0) >= 0,
+  );
+  const realLosingTrades = realCompletedTabs.filter(
+    (t) => (t.finalPnL || 0) < 0,
+  );
+  const realWinRate =
+    realCompletedTabs.length > 0
+      ? ((realWinningTrades.length / realCompletedTabs.length) * 100).toFixed(1)
+      : 0;
+
+  const simulatedWinningTrades = simulatedCompletedTabs.filter(
+    (t) => (t.finalPnL || 0) >= 0,
+  );
+  const simulatedLosingTrades = simulatedCompletedTabs.filter(
+    (t) => (t.finalPnL || 0) < 0,
+  );
+  const simulatedWinRate =
+    simulatedCompletedTabs.length > 0
+      ? (
+          (simulatedWinningTrades.length / simulatedCompletedTabs.length) *
+          100
+        ).toFixed(1)
+      : 0;
+
+  // Filtered Completed Tabs calculation based on completedMainTab, completedResultFilter & completedSearchQuery
+  const baseCompletedTabs = useMemo(() => {
+    if (completedMainTab === "real") return realCompletedTabs;
+    if (completedMainTab === "simulated") return simulatedCompletedTabs;
+    return completedTabs;
+  }, [completedMainTab, completedTabs, realCompletedTabs, simulatedCompletedTabs]);
+
+  const displayCompletedTabs = useMemo(() => {
+    return baseCompletedTabs.filter((tab) => {
+      const pnl = tab.finalPnL || 0;
+      if (completedResultFilter === "win" && pnl < 0) return false;
+      if (completedResultFilter === "lose" && pnl >= 0) return false;
+
+      if (completedSearchQuery.trim()) {
+        const q = completedSearchQuery.trim().toLowerCase();
+        const symbolMatch = (tab.symbol || "").toLowerCase().includes(q);
+        const companyMatch = (tab.companyName || "").toLowerCase().includes(q);
+        if (!symbolMatch && !companyMatch) return false;
+      }
+
+      return true;
+    });
+  }, [baseCompletedTabs, completedResultFilter, completedSearchQuery]);
+
   if (loading) {
     return (
       <div className="min-h-[50vh] flex items-center justify-center font-mono">
@@ -3979,36 +4045,15 @@ export default function Dashboard() {
     }
   };
 
-  const realCompletedTabs = completedTabs.filter((t) => t.tradeType === "real");
-  const totalCompletedPnL = realCompletedTabs.reduce(
+  const displayCompletedPnL = displayCompletedTabs.reduce(
     (acc, tab) => acc + (tab.finalPnL || 0),
     0,
   );
-  const simulatedCompletedPnL = completedTabs
-    .filter((tab) => tab.tradeType === "simulated")
-    .reduce((acc, tab) => acc + (tab.finalPnL || 0), 0);
-
-  const realWinningTrades = realCompletedTabs.filter(
-    (t) => (t.finalPnL || 0) > 0,
-  );
-  const realWinRate =
-    realCompletedTabs.length > 0
-      ? ((realWinningTrades.length / realCompletedTabs.length) * 100).toFixed(1)
-      : 0;
-
-  const simulatedCompletedTabs = completedTabs.filter(
-    (t) => t.tradeType === "simulated",
-  );
-  const simulatedWinningTrades = simulatedCompletedTabs.filter(
-    (t) => (t.finalPnL || 0) > 0,
-  );
-  const simulatedWinRate =
-    simulatedCompletedTabs.length > 0
-      ? (
-          (simulatedWinningTrades.length / simulatedCompletedTabs.length) *
-          100
-        ).toFixed(1)
-      : 0;
+  const displayWinCount = displayCompletedTabs.filter((t) => (t.finalPnL || 0) >= 0).length;
+  const displayLoseCount = displayCompletedTabs.filter((t) => (t.finalPnL || 0) < 0).length;
+  const displayWinRate = displayCompletedTabs.length > 0
+    ? ((displayWinCount / displayCompletedTabs.length) * 100).toFixed(1)
+    : "0.0";
 
   // Neo-brutalist card variants
   const cardVariants = {
@@ -4490,7 +4535,7 @@ export default function Dashboard() {
       </Dialog>
 
       {/* 2. Main content container, aligned nicely with responsive layout */}
-      <div className={`space-y-4 sm:space-y-6 mx-auto mt-4 sm:mt-6 px-3 sm:px-4 ${activeViewTab === "notes" ? "max-w-7xl lg:max-w-[96%] xl:max-w-[1760px]" : "max-w-7xl"}`}>
+      <div className={`space-y-4 sm:space-y-6 mx-auto mt-4 sm:mt-6 px-2 sm:px-4 ${activeViewTab === "notes" || activeViewTab === "completed" ? "w-full max-w-full lg:max-w-[98%] xl:max-w-[1920px]" : "max-w-7xl"}`}>
 
       {/* Desktop Metrics Collapsible Controller */}
       <div className="hidden sm:flex justify-end mt-2 mb-1">
@@ -6774,201 +6819,308 @@ export default function Dashboard() {
           )}
 
         {activeViewTab === "completed" && (
-          <div id="completed-cards-section" className="grid grid-cols-1 gap-6">
-            <div className="space-y-4">
-              <ScrollIn delay={0.2} translateY={20}>
-                <div className="bg-white border border-zinc-200/90 rounded-[2rem] overflow-hidden shadow-sm flex flex-col group transition-all duration-500 h-auto">
-                  <div className="px-6 py-5 flex items-center justify-between bg-zinc-50/60 border-b border-zinc-150">
-                    <div className="flex items-center gap-3">
-                      <div className="w-1.5 h-6 bg-gradient-to-b from-blue-500 to-blue-600 rounded-full shadow-[0_0_10px_rgba(59,130,246,0.25)]"></div>
-                      <h3 className="font-extrabold text-lg sm:text-xl tracking-tight text-zinc-800">
-                        已完成交易
-                      </h3>
-                      <span className="text-xs font-black border border-blue-200 bg-blue-50 text-blue-700 px-3 py-1 rounded-full shadow-sm">
-                        <AnimatedNumber value={completedTabs.length} /> 檔個股
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-3">
+          <div id="completed-cards-section" className="w-full space-y-4">
+            <ScrollIn delay={0.1} translateY={15}>
+              <div className="bg-white border border-zinc-200/90 rounded-[1.5rem] sm:rounded-[2rem] overflow-hidden shadow-sm flex flex-col transition-all duration-300">
+                
+                {/* Top Header & Search / Actions Bar */}
+                <div className="px-4 sm:px-6 py-4 bg-zinc-50/80 border-b border-zinc-200/80 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="w-1.5 h-6 bg-gradient-to-b from-blue-500 to-indigo-600 rounded-full shadow-[0_0_10px_rgba(59,130,246,0.3)]" />
+                    <h3 className="font-black text-lg sm:text-xl tracking-tight text-zinc-900">
+                      已完成交易
+                    </h3>
+                    <span className="text-xs font-black border border-blue-200 bg-blue-50 text-blue-700 px-2.5 py-0.5 rounded-full shadow-2xs">
+                      <AnimatedNumber value={completedTabs.length} /> 檔總紀錄
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                    {/* Search Input */}
+                    <div className="relative flex-1 sm:w-64 min-w-[180px]">
+                      <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
                       <input
-                        type="file"
-                        accept="application/json"
-                        className="hidden"
-                        ref={completedJsonFileInputRef}
-                        onChange={handleImportCompletedTabsJson}
+                        type="text"
+                        value={completedSearchQuery}
+                        onChange={(e) => setCompletedSearchQuery(e.target.value)}
+                        placeholder="搜尋代號或公司..."
+                        className="w-full pl-8 pr-7 py-1.5 text-xs bg-white border border-zinc-200 rounded-xl text-zinc-800 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all font-medium"
                       />
-                      <div className="flex items-center gap-1 bg-white border border-zinc-200 rounded-xl p-1 shadow-sm">
+                      {completedSearchQuery && (
                         <button
                           type="button"
-                          onClick={handleExportCompletedTabsJson}
-                          disabled={isExportingCompleted}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-zinc-600 hover:text-zinc-800 hover:bg-zinc-100 transition-all text-xs font-bold leading-none select-none cursor-pointer disabled:opacity-50"
-                          title="匯出 JSON 備份"
+                          onClick={() => setCompletedSearchQuery("")}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 p-0.5 cursor-pointer"
                         >
-                          <Download className="w-3.5 h-3.5" />
-                          匯出 Json
+                          <X className="w-3 h-3" />
                         </button>
-                        <div className="w-[1px] h-3 bg-zinc-200 shrink-0" />
-                        <button
-                          type="button"
-                          onClick={() => completedJsonFileInputRef.current?.click()}
-                          disabled={isImportingCompleted}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-zinc-600 hover:text-zinc-800 hover:bg-zinc-100 transition-all text-xs font-bold leading-none select-none cursor-pointer disabled:opacity-50"
-                          title="匯入 JSON 備份"
-                        >
-                          <Upload className="w-3.5 h-3.5" />
-                          匯入 Json
-                        </button>
-                      </div>
-                      <TrendingUp className="h-5 w-5 text-zinc-500 opacity-80" />
+                      )}
+                    </div>
+
+                    {/* Json Import/Export */}
+                    <input
+                      type="file"
+                      accept="application/json"
+                      className="hidden"
+                      ref={completedJsonFileInputRef}
+                      onChange={handleImportCompletedTabsJson}
+                    />
+                    <div className="flex items-center gap-1 bg-white border border-zinc-200 rounded-xl p-1 shadow-2xs">
+                      <button
+                        type="button"
+                        onClick={handleExportCompletedTabsJson}
+                        disabled={isExportingCompleted}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 transition-all text-xs font-bold leading-none select-none cursor-pointer disabled:opacity-50"
+                        title="匯出 JSON 備份"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>匯出</span>
+                      </button>
+                      <div className="w-[1px] h-3 bg-zinc-200 shrink-0" />
+                      <button
+                        type="button"
+                        onClick={() => completedJsonFileInputRef.current?.click()}
+                        disabled={isImportingCompleted}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 transition-all text-xs font-bold leading-none select-none cursor-pointer disabled:opacity-50"
+                        title="匯入 JSON 備份"
+                      >
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>匯入</span>
+                      </button>
                     </div>
                   </div>
-                  <div className="bg-transparent">
-                    <div className="overflow-hidden">
-                      <div className="p-6 flex flex-col min-h-[200px]">
-                        <AnimatePresence mode="wait">
-                          {completedTabs.length === 0 ? (
+                </div>
+
+                {/* Sub-Tabs: Main Category & Result Filters */}
+                <div className="px-4 sm:px-6 py-3 bg-white border-b border-zinc-200/70 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                  
+                  {/* Category Tabs: All | Real Trades | Simulated Trades */}
+                  <div className="flex flex-wrap items-center gap-1.5 bg-zinc-100/80 p-1 rounded-2xl border border-zinc-200/60 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setCompletedMainTab("all")}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                        completedMainTab === "all"
+                          ? "bg-white text-zinc-900 shadow-sm border border-zinc-200"
+                          : "text-zinc-500 hover:text-zinc-800 hover:bg-zinc-200/50"
+                      }`}
+                    >
+                      <span>🌐 全部類別</span>
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                        completedMainTab === "all" ? "bg-zinc-900 text-white" : "bg-zinc-200 text-zinc-600"
+                      }`}>
+                        {completedTabs.length}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setCompletedMainTab("real")}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                        completedMainTab === "real"
+                          ? "bg-emerald-600 text-white shadow-sm shadow-emerald-600/20"
+                          : "text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800"
+                      }`}
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      <span>真實交易 (Real)</span>
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                        completedMainTab === "real" ? "bg-white/30 text-white" : "bg-emerald-100 text-emerald-800"
+                      }`}>
+                        {realCompletedTabs.length}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setCompletedMainTab("simulated")}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                        completedMainTab === "simulated"
+                          ? "bg-amber-600 text-white shadow-sm shadow-amber-600/20"
+                          : "text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+                      }`}
+                    >
+                      <Gamepad2 className="w-3.5 h-3.5" />
+                      <span>模擬交易 (Simulated)</span>
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                        completedMainTab === "simulated" ? "bg-white/30 text-white" : "bg-amber-100 text-amber-800"
+                      }`}>
+                        {simulatedCompletedTabs.length}
+                      </span>
+                    </button>
+                  </div>
+
+                  {/* Sub-Filters: Result WIN / LOSE Tabs */}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[11px] font-bold text-zinc-400 mr-1 hidden sm:inline">損益分類:</span>
+                    
+                    <button
+                      type="button"
+                      onClick={() => setCompletedResultFilter("all")}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-extrabold transition-all cursor-pointer border ${
+                        completedResultFilter === "all"
+                          ? "bg-zinc-800 text-white border-zinc-800 shadow-2xs"
+                          : "bg-white text-zinc-600 border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50"
+                      }`}
+                    >
+                      全部結果 ({baseCompletedTabs.length})
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setCompletedResultFilter("win")}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-extrabold transition-all cursor-pointer border flex items-center gap-1 ${
+                        completedResultFilter === "win"
+                          ? "bg-emerald-500 text-white border-emerald-500 shadow-2xs"
+                          : "bg-emerald-50/80 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
+                      }`}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 shrink-0" />
+                      <span>獲利 WIN</span>
+                      <span className="text-[10px] opacity-90 font-mono">
+                        ({baseCompletedTabs.filter((t) => (t.finalPnL || 0) >= 0).length})
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setCompletedResultFilter("lose")}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-extrabold transition-all cursor-pointer border flex items-center gap-1 ${
+                        completedResultFilter === "lose"
+                          ? "bg-rose-500 text-white border-rose-500 shadow-2xs"
+                          : "bg-rose-50/80 text-rose-700 border-rose-200 hover:bg-rose-100"
+                      }`}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-rose-300 shrink-0" />
+                      <span>虧損 LOSE</span>
+                      <span className="text-[10px] opacity-90 font-mono">
+                        ({baseCompletedTabs.filter((t) => (t.finalPnL || 0) < 0).length})
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Stats Summary Strip */}
+                <div className="px-4 sm:px-6 py-2.5 bg-zinc-50/50 border-b border-zinc-200/60 flex flex-wrap items-center justify-between text-xs gap-3">
+                  <div className="flex flex-wrap items-center gap-4 text-zinc-600 font-semibold">
+                    <span className="flex items-center gap-1.5">
+                      <span className="font-mono font-bold text-zinc-800">{displayCompletedTabs.length} 筆</span>
+                    </span>
+                    <div className="w-[1px] h-3 bg-zinc-300 shrink-0" />
+                    <span className="flex items-center gap-1.5">
+                      <span className="text-zinc-400">勝率:</span>
+                      <span className="font-mono font-black text-emerald-700 bg-emerald-50 border border-emerald-200/80 px-2 py-0.5 rounded-md">
+                        {displayWinRate}% ({displayWinCount}勝 / {displayLoseCount}敗)
+                      </span>
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-zinc-400 font-medium">小計損益:</span>
+                    <span className={`font-mono text-sm font-black px-2.5 py-0.5 rounded-lg border ${
+                      displayCompletedPnL >= 0
+                        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                        : "bg-rose-50 text-rose-700 border-rose-200"
+                    }`}>
+                      {displayCompletedPnL >= 0 ? "+" : ""}${displayCompletedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+                {/* Cards Grid - High Density Responsive Layout */}
+                <div className="p-4 sm:p-5 flex flex-col min-h-[220px]">
+                  <AnimatePresence mode="wait">
+                    {displayCompletedTabs.length === 0 ? (
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.95 }}
+                        className="h-full flex flex-col items-center justify-center text-zinc-500 flex-1 py-14"
+                      >
+                        <div className="bg-zinc-50 p-4 border border-zinc-200 rounded-full mb-3">
+                          <TrendingUp className="h-8 w-8 text-zinc-400" />
+                        </div>
+                        <p className="text-sm font-black text-zinc-700 tracking-wide">
+                          尚無符合條件的已完成交易紀錄
+                        </p>
+                        <p className="text-xs text-zinc-400 mt-1 text-center max-w-xs leading-relaxed">
+                          請切換頂部分類 Tab (全部 / 真實 / 模擬) 或調整 WIN / LOSE 損益篩選條件。
+                        </p>
+                      </motion.div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2.5 sm:gap-3">
+                        {displayCompletedTabs.map((tab, idx) => {
+                          const val = tab.finalPnL || 0;
+                          const isProfit = val >= 0;
+                          const isReal = tab.tradeType === "real";
+
+                          return (
                             <motion.div
-                              initial={{ opacity: 0, scale: 0.95 }}
-                              animate={{ opacity: 1, scale: 1 }}
-                              exit={{ opacity: 0, scale: 0.95 }}
-                              className="h-full flex flex-col items-center justify-center text-zinc-500 flex-1 py-16"
+                              layout
+                              initial={{ opacity: 0, y: 10 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ delay: Math.min(idx * 0.02, 0.3) }}
+                              whileHover={{ y: -2, scale: 1.01 }}
+                              key={tab.id}
+                              onClick={() => navigate(`/stock/${tab.id}`)}
+                              onMouseEnter={() => tab.symbol && prefetchStockPrice(tab.symbol)}
+                              className="bg-white border border-zinc-200 hover:border-zinc-350 shadow-2xs hover:shadow-md p-3.5 rounded-xl cursor-pointer relative overflow-hidden group flex flex-col justify-between transition-all duration-200 gap-2.5"
                             >
-                              <div className="bg-zinc-50 p-5 border border-zinc-200 rounded-full mb-4">
-                                <TrendingUp className="h-10 w-10 text-zinc-400" />
-                              </div>
-                              <p className="text-base font-black text-zinc-700 tracking-wide">
-                                尚無已完成交易
-                              </p>
-                              <p className="text-xs text-zinc-405 mt-1 text-center max-w-xs leading-relaxed">
-                                您可以在個股頁面將其狀態更新為「已完成」，交易紀錄即會整理並儲存在此。
-                              </p>
-                            </motion.div>
-                          ) : (
-                            <div className="space-y-8">
-                              {realCompletedTabs.length > 0 && (
-                                <div className="space-y-4">
-                                  <div className="flex items-center gap-2 border-l-4 border-emerald-500 pl-3">
-                                    <h4 className="text-xs font-black text-emerald-800 tracking-widest uppercase">
-                                      真實交易 (Real Trades)
-                                    </h4>
+                              {/* Top row: Symbol + Badges */}
+                              <div className="flex items-start justify-between gap-1.5">
+                                <div className="min-w-0">
+                                  <div className="font-mono font-black text-base sm:text-lg tracking-tight text-zinc-900 group-hover:text-blue-600 transition-colors truncate">
+                                    {tab.symbol}
                                   </div>
-                                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                    {realCompletedTabs.map((tab, idx) => (
-                                      <motion.div
-                                        layout
-                                        initial={{ opacity: 0, y: 15 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        transition={{ delay: idx * 0.05 }}
-                                        whileHover={{ scale: 1.02, y: -2 }}
-                                        key={tab.id}
-                                        onClick={() =>
-                                          navigate(`/stock/${tab.id}`)
-                                        }
-                                        onMouseEnter={() => tab.symbol && prefetchStockPrice(tab.symbol)}
-                                        className="bg-white border border-zinc-200/85 hover:border-zinc-350 shadow-sm hover:shadow-md p-5 rounded-2xl cursor-pointer relative overflow-hidden group/item flex items-center justify-between transition-all duration-300"
-                                      >
-                                        <div className="relative z-10 flex flex-col gap-1">
-                                          <div className="font-extrabold text-xl tracking-tight text-zinc-850">
-                                            {tab.symbol}
-                                          </div>
-                                          <div className="text-xs font-semibold text-zinc-500 truncate max-w-[150px]">
-                                            {tab.companyName || "實盤交易已結算"}
-                                          </div>
-                                        </div>
-                                        <div className="relative z-10">
-                                          {(() => {
-                                            const val = tab.finalPnL || 0;
-                                            const isProfit = val >= 0;
-                                            return (
-                                              <div className={`px-4 py-2 rounded-xl flex flex-col items-end border transition-all ${
-                                                isProfit 
-                                                  ? "bg-emerald-50 text-emerald-700 border-emerald-200/80 shadow-[0_2px_8px_rgba(16,185,129,0.03)]" 
-                                                  : "bg-rose-50 text-rose-700 border-rose-200/80 shadow-[0_2px_8px_rgba(244,63,94,0.03)]"
-                                              }`}>
-                                                <span className="text-[9px] font-black uppercase tracking-wider opacity-80 mb-0.5">結算損益</span>
-                                                <span className="font-mono text-base font-black">
-                                                  {isProfit ? "+" : ""}${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                                </span>
-                                              </div>
-                                            );
-                                          })()}
-                                        </div>
-                                      </motion.div>
-                                    ))}
+                                  <div className="text-[11px] font-medium text-zinc-500 truncate max-w-[120px]">
+                                    {tab.companyName || "已結算個股"}
                                   </div>
                                 </div>
-                              )}
 
-                              {completedTabs.filter(
-                                (t) => t.tradeType === "simulated",
-                              ).length > 0 && (
-                                <div className="space-y-4">
-                                  <div className="flex items-center gap-2 border-l-4 border-amber-500 pl-3">
-                                    <h4 className="text-xs font-black text-amber-800 tracking-widest uppercase">
-                                      模擬交易 (Simulated Trades)
-                                    </h4>
-                                  </div>
-                                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                    {completedTabs
-                                      .filter(
-                                        (t) => t.tradeType === "simulated",
-                                      )
-                                      .map((tab, idx) => (
-                                        <motion.div
-                                          layout
-                                          initial={{ opacity: 0, y: 15 }}
-                                          animate={{ opacity: 1, y: 0 }}
-                                          transition={{ delay: idx * 0.05 }}
-                                          whileHover={{ scale: 1.02, y: -2 }}
-                                          key={tab.id}
-                                          onClick={() =>
-                                            navigate(`/stock/${tab.id}`)
-                                          }
-                                          onMouseEnter={() => tab.symbol && prefetchStockPrice(tab.symbol)}
-                                          className="bg-white border border-zinc-200/85 hover:border-zinc-350 shadow-sm hover:shadow-md p-5 rounded-2xl cursor-pointer relative overflow-hidden group/item flex items-center justify-between transition-all duration-300"
-                                        >
-                                          <div className="relative z-10 flex flex-col gap-1">
-                                            <div className="font-extrabold text-xl tracking-tight text-zinc-850">
-                                              {tab.symbol}
-                                            </div>
-                                            <div className="text-xs font-semibold text-zinc-500 truncate max-w-[150px]">
-                                              {tab.companyName || "模擬交易已結算"}
-                                            </div>
-                                          </div>
-                                          <div className="relative z-10">
-                                            {(() => {
-                                              const val = tab.finalPnL || 0;
-                                              const isProfit = val >= 0;
-                                              return (
-                                                <div className={`px-4 py-2 rounded-xl flex flex-col items-end border transition-all ${
-                                                  isProfit 
-                                                    ? "bg-emerald-50 text-emerald-700 border-emerald-200/80 shadow-[0_2px_8px_rgba(16,185,129,0.03)]" 
-                                                    : "bg-rose-50 text-rose-700 border-rose-200/80 shadow-[0_2px_8px_rgba(244,63,94,0.03)]"
-                                                }`}>
-                                                  <span className="text-[9px] font-black uppercase tracking-wider opacity-80 mb-0.5">預估損益</span>
-                                                  <span className="font-mono text-base font-black">
-                                                    {isProfit ? "+" : ""}${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                                  </span>
-                                                </div>
-                                              );
-                                            })()}
-                                          </div>
-                                        </motion.div>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
+                                <div className="flex flex-col items-end gap-1 shrink-0">
+                                  {/* Type badge */}
+                                  <span className={`text-[9px] font-black px-1.5 py-0.2 rounded border ${
+                                    isReal
+                                      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                      : "bg-amber-50 text-amber-700 border-amber-200"
+                                  }`}>
+                                    {isReal ? "真實" : "模擬"}
+                                  </span>
+                                  
+                                  {/* WIN/LOSE badge */}
+                                  <span className={`text-[9px] font-mono font-black px-1.5 py-0.2 rounded ${
+                                    isProfit
+                                      ? "bg-emerald-500 text-white"
+                                      : "bg-rose-500 text-white"
+                                  }`}>
+                                    {isProfit ? "WIN" : "LOSE"}
+                                  </span>
+                                </div>
                               </div>
-                            )}
+
+                              {/* Bottom row: PnL Display */}
+                              <div className="pt-2 border-t border-zinc-100 flex items-center justify-between">
+                                <span className="text-[10px] font-bold text-zinc-400">
+                                  {isReal ? "實盤損益" : "預估損益"}
+                                </span>
+                                <div className={`px-2 py-0.5 rounded-lg font-mono text-xs font-black ${
+                                  isProfit 
+                                    ? "bg-emerald-50 text-emerald-700 border border-emerald-200/80" 
+                                    : "bg-rose-50 text-rose-700 border border-rose-200/80"
+                                }`}>
+                                  {isProfit ? "+" : ""}${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </div>
+                              </div>
+                            </motion.div>
+                          );
+                        })}
+                      </div>
+                    )}
                           </AnimatePresence>
                         </div>
                       </div>
-                    </div>
+                    </ScrollIn>
                   </div>
-                </ScrollIn>
-              </div>
-            </div>
-          )}
+                )}
 
         {activeViewTab === "notes" && (() => {
           return (
