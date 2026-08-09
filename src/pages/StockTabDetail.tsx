@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
 import { format } from 'date-fns';
 import { Timestamp, collection, writeBatch, doc, serverTimestamp, addDoc, getDocs } from 'firebase/firestore';
-import { Trash2, BarChart3, ChevronDown, ChevronUp, Gamepad2, ShieldCheck, Upload, Download, ChevronLeft, CheckCircle2, RotateCcw, Loader2 } from 'lucide-react';
+import { Trash2, BarChart3, ChevronDown, ChevronUp, Gamepad2, ShieldCheck, Upload, Download, ChevronLeft, CheckCircle2, RotateCcw, Loader2, HelpCircle, AlertTriangle } from 'lucide-react';
 import { toast } from "sonner";
 import { motion, AnimatePresence } from 'motion/react';
 import { db } from '../lib/firebase';
@@ -47,6 +47,7 @@ export default function StockTabDetail() {
   const [isCompleteOpen, setIsCompleteOpen] = useState(false);
   const [isSubmittingComplete, setIsSubmittingComplete] = useState(false);
   const [isStatsOpen, setIsStatsOpen] = useState(false); 
+  const [isAveragingHelpOpen, setIsAveragingHelpOpen] = useState(false);
   const [isTradeListOpen, setIsTradeListOpen] = useState(false);
   const [finalPnLInput, setFinalPnLInput] = useState('');
   const [activeTab, setActiveTab] = useState('trades');
@@ -60,6 +61,10 @@ export default function StockTabDetail() {
   }, [activeTab]);
   const [currentPriceInput, setCurrentPriceInput] = useState('');
   const [plannedBuyQtyInput, setPlannedBuyQtyInput] = useState<string>('');
+  const [stopLossInput, setStopLossInput] = useState<string>('');
+  const [takeProfitInput, setTakeProfitInput] = useState<string>('');
+  const [isEditingPrice, setIsEditingPrice] = useState(false);
+  const [tempPrice, setTempPrice] = useState('');
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const tradesJsonFileInputRef = React.useRef<HTMLInputElement>(null);
   const { user } = useAuth();
@@ -97,6 +102,24 @@ export default function StockTabDetail() {
     }
   }, [tab?.id, tab?.plannedBuyQty]);
 
+  // Update stopLossInput when tab data loads or changes
+  React.useEffect(() => {
+    if (tab?.stopLossPrice !== undefined && tab?.stopLossPrice !== null) {
+      setStopLossInput(tab.stopLossPrice ? tab.stopLossPrice.toString() : '');
+    } else {
+      setStopLossInput('');
+    }
+  }, [tab?.id, tab?.stopLossPrice]);
+
+  // Update takeProfitInput when tab data loads or changes
+  React.useEffect(() => {
+    if (tab?.takeProfitPrice !== undefined && tab?.takeProfitPrice !== null) {
+      setTakeProfitInput(tab.takeProfitPrice ? tab.takeProfitPrice.toString() : '');
+    } else {
+      setTakeProfitInput('');
+    }
+  }, [tab?.id, tab?.takeProfitPrice]);
+
   const handlePlannedBuyQtyChange = async (val: string) => {
     setPlannedBuyQtyInput(val);
     const parsed = parseFloat(val);
@@ -109,13 +132,40 @@ export default function StockTabDetail() {
     }
   };
 
+  const handleStopLossChange = async (val: string) => {
+    setStopLossInput(val);
+    const parsed = parseFloat(val);
+    if (tab) {
+      if (!isNaN(parsed) && parsed >= 0) {
+        await updateTab(tab.id, { stopLossPrice: parsed });
+      } else if (val === '') {
+        await updateTab(tab.id, { stopLossPrice: 0 });
+      }
+    }
+  };
+
+  const handleTakeProfitChange = async (val: string) => {
+    setTakeProfitInput(val);
+    const parsed = parseFloat(val);
+    if (tab) {
+      if (!isNaN(parsed) && parsed >= 0) {
+        await updateTab(tab.id, { takeProfitPrice: parsed });
+      } else if (val === '') {
+        await updateTab(tab.id, { takeProfitPrice: 0 });
+      }
+    }
+  };
+
   // Update preferredHoldingSubTab when tab changes so dashboard goes back to the right tab
   React.useEffect(() => {
+    if (id) {
+      safeSessionStorage.setItem('lastViewedStockId', id);
+    }
     if (tab?.holdingStatus) {
        const displayStatus = ['觀察中', '買進操作', '賣出操作', '平倉操作', '乖離名單'].includes(tab.holdingStatus) ? tab.holdingStatus : '候選名單';
        safeSessionStorage.setItem('preferredHoldingSubTab', displayStatus);
     }
-  }, [tab?.holdingStatus]);
+  }, [id, tab?.holdingStatus]);
 
   // Keyboard shortcut handle (Shift + B) to go back to dashboard
   React.useEffect(() => {
@@ -127,24 +177,50 @@ export default function StockTabDetail() {
         
         if (!isInput) {
           e.preventDefault();
-          navigate('/');
+          navigate('/', { state: { autoFlipTabId: id, returnStockId: id } });
         }
       }
     };
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [navigate]);
+  }, [navigate, id]);
 
   const stats = calculateStats(trades, tab?.currentPrice);
+  const prevTabIdRef = React.useRef<string | null>(null);
 
-  // Prefill percentage calculator base price when data loaded
+  // Prefill percentage calculator base price & refPnLPoint when data loaded
   React.useEffect(() => {
     if (tab && stats) {
-      const baseVal = tab.currentPrice || stats.averagePrice || 0;
-      if (baseVal > 0 && !calcBasePrice) {
-        setCalcBasePrice(baseVal.toFixed(2));
-        setCalcPercent('7');
-        setCalcType('SUB');
+      const avgPrice = stats.averagePrice && stats.averagePrice > 0 ? stats.averagePrice : 0;
+      const curPrice = tab.currentPrice && tab.currentPrice > 0 ? tab.currentPrice : 0;
+      const baseVal = avgPrice > 0 ? avgPrice : curPrice;
+
+      const isNewTab = prevTabIdRef.current !== tab.id;
+      if (isNewTab) {
+        prevTabIdRef.current = tab.id;
+        if (baseVal > 0) {
+          setCalcBasePrice(baseVal.toFixed(2));
+          setCalcPercent('3');
+          setCalcType('SUB');
+        } else {
+          setCalcBasePrice('');
+          setCalcPercent('3');
+          setCalcType('SUB');
+        }
+        if (curPrice > 0) {
+          setRefPnLPoint(curPrice.toFixed(2));
+        } else {
+          setRefPnLPoint('');
+        }
+      } else {
+        if (baseVal > 0 && !calcBasePrice) {
+          setCalcBasePrice(baseVal.toFixed(2));
+          setCalcPercent('3');
+          setCalcType('SUB');
+        }
+        if (curPrice > 0 && !refPnLPoint) {
+          setRefPnLPoint(curPrice.toFixed(2));
+        }
       }
     }
   }, [tab?.id, tab?.currentPrice, stats?.averagePrice]);
@@ -163,8 +239,6 @@ export default function StockTabDetail() {
       }
     }
   }, [calcBasePrice, calcType, calcPercent]);
-
-  if (!tab) return <div className="text-slate-500">找不到該股票分頁，或已被刪除。</div>;
 
   // Helper to parse and calculate: e.g. "56 - 7%" or "56 + 8%"
   const parseAndCalculatePercentage = (expr: string) => {
@@ -207,8 +281,27 @@ export default function StockTabDetail() {
     return { success: false };
   };
 
+  const parsedCalc = parseAndCalculatePercentage(calcExpression);
+
+  // Automatically fill calculation result into averagingRows[0].price
+  React.useEffect(() => {
+    if (parsedCalc.success && typeof parsedCalc.result === 'number' && !isNaN(parsedCalc.result) && parsedCalc.result > 0) {
+      const formattedResult = parsedCalc.result.toFixed(2);
+      setAveragingRows((prevRows) => {
+        if (prevRows[0].price === formattedResult) return prevRows;
+        const newRows = [...prevRows];
+        newRows[0] = { ...newRows[0], price: formattedResult };
+        return newRows;
+      });
+    }
+  }, [parsedCalc.success, parsedCalc.result]);
+
+  if (!tab) return <div className="text-slate-500">找不到該股票分頁，或已被刪除。</div>;
+
   const handlePresetClick = (p: string) => {
-    const base = parseFloat(calcBasePrice) || tab?.currentPrice || stats?.averagePrice || 0;
+    const avgPrice = stats?.averagePrice && stats.averagePrice > 0 ? stats.averagePrice : 0;
+    const curPrice = tab?.currentPrice && tab.currentPrice > 0 ? tab.currentPrice : 0;
+    const base = parseFloat(calcBasePrice) || avgPrice || curPrice || 0;
     if (base > 0) {
       const isNeg = p.startsWith('-');
       const val = p.replace(/[\+\-%]/g, '');
@@ -261,7 +354,6 @@ export default function StockTabDetail() {
   const calculatedPnLResult = hasRefPnL
     ? (avgResult.finalAveragePrice - parsedRefPnL) * avgResult.totalShares
     : null;
-  const parsedCalc = parseAndCalculatePercentage(calcExpression);
 
   // Four-batch transaction planning calculations
   const totalBought = trades
@@ -312,6 +404,42 @@ export default function StockTabDetail() {
     currentBatchText = "已滿批進場 (已完成)";
     currentBatchOrderText = "已滿批";
   }
+
+  const handleBatchClick = (batchIndex: number, batchName: string, batchSize: number) => {
+    if (!batchSize || batchSize <= 0) {
+      toast.error('請先輸入有效的預計購買數量');
+      return;
+    }
+    playClickSound();
+    const halfQty = Math.ceil(batchSize / 2);
+    const basePrice = (stats?.averagePrice && stats.averagePrice > 0)
+      ? stats.averagePrice
+      : (tab?.currentPrice && tab.currentPrice > 0 ? tab.currentPrice : 0);
+
+    if (batchIndex === 0 || batchIndex === 1) {
+      // 第一批 or 第二批 -> Fill Row #1 (-3%) & Row #2 (-6%)
+      const price3 = basePrice > 0 ? (basePrice * 0.97).toFixed(2) : '';
+      const price6 = basePrice > 0 ? (basePrice * 0.94).toFixed(2) : '';
+      setAveragingRows(prev => {
+        const next = [...prev];
+        next[0] = { price: price3, quantity: halfQty.toString() };
+        next[1] = { price: price6, quantity: halfQty.toString() };
+        return next;
+      });
+      toast.success(`已將 ${batchName} 股數 (${batchSize}股) 平分 (${halfQty}股) 帶入攤平試算第 1 欄 (-3%) 與第 2 欄 (-6%)`);
+    } else if (batchIndex === 2 || batchIndex === 3) {
+      // 第三批 or 第四批 -> Fill Row #3 (-9%) & Row #4 (-12%)
+      const price9 = basePrice > 0 ? (basePrice * 0.91).toFixed(2) : '';
+      const price12 = basePrice > 0 ? (basePrice * 0.88).toFixed(2) : '';
+      setAveragingRows(prev => {
+        const next = [...prev];
+        next[2] = { price: price9, quantity: halfQty.toString() };
+        next[3] = { price: price12, quantity: halfQty.toString() };
+        return next;
+      });
+      toast.success(`已將 ${batchName} 股數 (${batchSize}股) 平分 (${halfQty}股) 帶入攤平試算第 3 欄 (-9%) 與第 4 欄 (-12%)`);
+    }
+  };
 
   const isStaleData = tab.updatedAt && typeof tab.updatedAt.toDate === 'function' 
     ? (new Date().getTime() - tab.updatedAt.toDate().getTime() > 17 * 60 * 60 * 1000)
@@ -639,7 +767,7 @@ export default function StockTabDetail() {
       {/* Breadcrumb Navigation */}
       <div className="h-[36px] flex items-center gap-2 bg-transparent select-none">
         <button
-          onClick={() => navigate('/', { state: { autoFlipTabId: id } })}
+          onClick={() => navigate('/', { state: { autoFlipTabId: id, returnStockId: id } })}
           className="flex items-center gap-1 text-[12px] font-bold transition-all hover:opacity-85 text-zinc-600 hover:text-zinc-900 cursor-pointer"
         >
           <ChevronLeft className="w-3.5 h-3.5" />
@@ -669,8 +797,18 @@ export default function StockTabDetail() {
                 </div>
               </div>
 
-              {/* Mobile Only: Avg Cost & Total Shares */}
-              <div className="flex sm:hidden flex-row gap-4 shrink-0 text-right mt-0.5">
+              {/* Mobile Only: Current Price, Avg Cost & Total Shares */}
+              <div className="flex sm:hidden flex-row gap-3.5 shrink-0 text-right mt-0.5">
+                <div 
+                  className="flex flex-col cursor-pointer"
+                  onClick={() => {
+                    setTempPrice(tab.currentPrice?.toString() || '');
+                    setIsEditingPrice(true);
+                  }}
+                >
+                  <span className="text-[9px] font-semibold text-zinc-400 uppercase tracking-widest leading-tight">現在價格</span>
+                  <span className="text-base font-bold text-emerald-700 tracking-tight leading-none mt-0.5">${(tab.currentPrice || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
                 <div className="flex flex-col">
                   <span className="text-[9px] font-semibold text-zinc-400 uppercase tracking-widest leading-tight">Avg Cost</span>
                   <span className="text-base font-bold text-zinc-800 tracking-tight leading-none mt-0.5">${stats.averagePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
@@ -685,7 +823,52 @@ export default function StockTabDetail() {
             <div className="h-8 w-px bg-zinc-200 hidden md:block" />
 
             <div className="flex flex-col md:flex-row md:items-center gap-5 sm:gap-4 lg:gap-5 w-full md:w-auto mt-2 md:mt-0">
-              <div className="hidden sm:flex flex-row gap-6 sm:gap-4 shrink-0">
+              <div className="hidden sm:flex flex-row gap-6 sm:gap-4 shrink-0 items-center">
+                {isEditingPrice ? (
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-widest leading-tight">現在價格</span>
+                    <Input
+                      type="number"
+                      step="any"
+                      autoFocus
+                      className="h-6 w-20 text-xs font-bold text-zinc-800 bg-white border-emerald-500 p-1 mt-0.5"
+                      value={tempPrice}
+                      onChange={(e) => setTempPrice(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          const val = parseFloat(tempPrice);
+                          if (!isNaN(val) && val >= 0) {
+                            updateCurrentPrice(tab.id, val);
+                          }
+                          setIsEditingPrice(false);
+                        } else if (e.key === 'Escape') {
+                          setIsEditingPrice(false);
+                        }
+                      }}
+                      onBlur={() => {
+                        const val = parseFloat(tempPrice);
+                        if (!isNaN(val) && val >= 0) {
+                          updateCurrentPrice(tab.id, val);
+                        }
+                        setIsEditingPrice(false);
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <div 
+                    className="flex flex-col group cursor-pointer"
+                    onClick={() => {
+                      setTempPrice(tab.currentPrice?.toString() || '');
+                      setIsEditingPrice(true);
+                    }}
+                    title="點擊修改現在價格"
+                  >
+                    <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-widest leading-tight flex items-center gap-1">
+                      現在價格 <span className="opacity-0 group-hover:opacity-100 text-[9px] text-emerald-600 transition-opacity">✏️</span>
+                    </span>
+                    <span className="text-lg font-bold text-emerald-700 tracking-tight leading-none mt-0.5">${(tab.currentPrice || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                )}
                 <div className="flex flex-col">
                   <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-widest leading-tight">Avg Cost</span>
                   <span className="text-lg font-bold text-zinc-800 tracking-tight leading-none mt-0.5">${stats.averagePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
@@ -970,6 +1153,17 @@ export default function StockTabDetail() {
                 <BarChart3 className="h-4 w-4" />
               </div>
               <h3 className="font-bold text-base tracking-wide">庫存摘要</h3>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsAveragingHelpOpen(true);
+                }}
+                className="p-1 text-zinc-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-full transition-colors flex items-center justify-center ml-0.5"
+                title="股價向下攤平試算與交易紀律說明"
+              >
+                <HelpCircle className="h-4 w-4" />
+              </button>
             </div>
             <div className="flex items-center gap-3">
               <span className="text-xs font-semibold text-zinc-400 tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1486,26 +1680,58 @@ export default function StockTabDetail() {
                       </div>
                     </div>
 
-                    {/* Input box for plannedBuyQty */}
+                    {/* Input box for plannedBuyQty, stopLoss, takeProfit */}
                     <div 
-                      className="flex items-center gap-2 bg-zinc-50 border border-zinc-200 px-3 py-1.5 rounded-xl self-start sm:self-auto shadow-sm"
+                      className="flex flex-wrap items-center gap-2.5 bg-zinc-50 border border-zinc-200 px-3 py-1.5 rounded-xl self-start sm:self-auto shadow-sm"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <label className="text-xs font-bold text-zinc-500 whitespace-nowrap">預計購買數量:</label>
-                      <Input
-                        type="number"
-                        min="0"
-                        placeholder="請輸入數量"
-                        className="w-24 h-8 bg-white border border-zinc-250 text-zinc-800 font-mono font-bold text-center text-xs focus-visible:ring-emerald-500/55 rounded-lg p-1 shadow-inner"
-                        value={plannedBuyQtyInput}
-                        onChange={(e) => handlePlannedBuyQtyChange(e.target.value)}
-                      />
+                      <div className="flex items-center gap-1.5">
+                        <label className="text-xs font-bold text-zinc-500 whitespace-nowrap">預計購買數量:</label>
+                        <Input
+                          type="number"
+                          min="0"
+                          placeholder="請輸入數量"
+                          className="w-20 sm:w-24 h-8 bg-white border border-zinc-250 text-zinc-800 font-mono font-bold text-center text-xs focus-visible:ring-emerald-500/55 rounded-lg p-1 shadow-inner"
+                          value={plannedBuyQtyInput}
+                          onChange={(e) => handlePlannedBuyQtyChange(e.target.value)}
+                        />
+                      </div>
+
+                      <div className="h-4 w-[1px] bg-zinc-200 hidden sm:block" />
+
+                      <div className="flex items-center gap-1.5">
+                        <label className="text-xs font-bold text-rose-600 whitespace-nowrap">停損價位:</label>
+                        <Input
+                          type="number"
+                          step="any"
+                          min="0"
+                          placeholder="停損價"
+                          className="w-20 sm:w-24 h-8 bg-white border border-zinc-250 text-rose-700 font-mono font-bold text-center text-xs focus-visible:ring-rose-500/55 rounded-lg p-1 shadow-inner"
+                          value={stopLossInput}
+                          onChange={(e) => handleStopLossChange(e.target.value)}
+                        />
+                      </div>
+
+                      <div className="h-4 w-[1px] bg-zinc-200 hidden sm:block" />
+
+                      <div className="flex items-center gap-1.5">
+                        <label className="text-xs font-bold text-emerald-600 whitespace-nowrap">止盈價位:</label>
+                        <Input
+                          type="number"
+                          step="any"
+                          min="0"
+                          placeholder="止盈價"
+                          className="w-20 sm:w-24 h-8 bg-white border border-zinc-250 text-emerald-700 font-mono font-bold text-center text-xs focus-visible:ring-emerald-500/55 rounded-lg p-1 shadow-inner"
+                          value={takeProfitInput}
+                          onChange={(e) => handleTakeProfitChange(e.target.value)}
+                        />
+                      </div>
                     </div>
                   </div>
 
                   {plannedQty > 0 && (
                     <div 
-                      className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 flex-1 max-w-lg w-full lg:ml-2"
+                      className="grid grid-cols-2 sm:grid-cols-4 gap-2 flex-1 max-w-xl w-full lg:ml-2"
                       onClick={(e) => e.stopPropagation()}
                     >
                       {[
@@ -1514,55 +1740,56 @@ export default function StockTabDetail() {
                           size: size1, 
                           bought: bought1, 
                           remaining: remaining1, 
-                          color: "border-emerald-200 bg-emerald-50 hover:border-emerald-300 hover:bg-emerald-100/70",
-                          numColor: "text-emerald-700"
                         },
                         { 
                           name: "第二批 (25%)", 
                           size: size2, 
                           bought: bought2, 
                           remaining: remaining2, 
-                          color: "border-sky-200 bg-sky-50 hover:border-sky-300 hover:bg-sky-100/70",
-                          numColor: "text-sky-700"
                         },
                         { 
                           name: "第三批 (35%)", 
                           size: size3, 
                           bought: bought3, 
                           remaining: remaining3, 
-                          color: "border-amber-200 bg-amber-50 hover:border-amber-300 hover:bg-amber-100/70",
-                          numColor: "text-amber-700"
                         },
                         { 
                           name: "第四批 (25%)", 
                           size: size4, 
                           bought: bought4, 
                           remaining: remaining4, 
-                          color: "border-fuchsia-200 bg-fuchsia-50 hover:border-fuchsia-300 hover:bg-fuchsia-100/70",
-                          numColor: "text-fuchsia-700"
                         },
                       ].map((b, idx) => {
                         const isFinished = b.remaining === 0;
                         return (
                           <div 
                             key={idx} 
-                            className={`p-1.5 border rounded-lg flex flex-col justify-between text-center relative transition-all duration-300 hover:scale-[1.02] ${b.color} ${isFinished ? 'opacity-70' : 'opacity-100 font-bold'}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleBatchClick(idx, b.name, b.size);
+                            }}
+                            title="點擊將此批股數平分帶入攤平試算"
+                            className={`p-2 border rounded-xl flex flex-col justify-between text-center relative transition-all duration-300 hover:scale-[1.03] active:scale-95 cursor-pointer select-none ${
+                              isFinished 
+                                ? 'bg-emerald-100 border-emerald-300 hover:bg-emerald-200/80 text-black' 
+                                : 'bg-zinc-100 border-zinc-200 hover:bg-zinc-200/80 text-black'
+                            }`}
                           >
-                            <span className="text-[9px] font-bold text-zinc-650 uppercase tracking-wider leading-none mb-0.5">{b.name}</span>
-                            <span className="text-xs font-black font-mono text-zinc-800 leading-tight">{b.size} 股</span>
-                            <div className="flex items-center justify-around text-[9px] mt-1 pt-1 border-t border-zinc-200/60 opacity-90 font-medium font-sans">
+                            <span className="text-[10px] font-bold text-black uppercase tracking-wider leading-none mb-1 whitespace-nowrap">{b.name}</span>
+                            <span className="text-[13px] font-black font-mono text-black leading-tight my-0.5">{b.size} 股</span>
+                            <div className="flex items-center justify-around text-[10px] mt-1 pt-1.5 border-t border-zinc-300/70 font-medium font-sans text-black">
                               <div className="flex flex-col items-center">
-                                <span className="text-zinc-500 font-bold text-[7.5px] scale-90 leading-none">已購</span>
-                                <span className="font-mono font-bold mt-0.5 text-zinc-400">{b.bought}</span>
+                                <span className="text-black font-bold text-[10px] leading-none opacity-80">已購</span>
+                                <span className="font-mono font-bold mt-1 text-black text-[10px]">{b.bought}</span>
                               </div>
-                              <div className="bg-zinc-200/70 w-[1px] h-3.5 self-center" />
+                              <div className="bg-zinc-400/50 w-[1px] h-4 self-center" />
                               <div className="flex flex-col items-center">
-                                <span className="text-zinc-500 font-bold text-[7.5px] scale-90 leading-none">餘額</span>
-                                <span className={`font-mono font-bold mt-0.5 ${b.numColor}`}>{b.remaining}</span>
+                                <span className="text-black font-bold text-[10px] leading-none opacity-80">餘額</span>
+                                <span className="font-mono font-bold mt-1 text-black text-[10px]">{b.remaining}</span>
                               </div>
                             </div>
                             {isFinished && (
-                              <span className="absolute -top-1 -right-1 bg-emerald-600 text-white rounded-full text-[8px] px-1 py-0.5 font-bold shadow-md border border-white animate-pulse leading-none">滿</span>
+                              <span className="absolute -top-1.5 -right-1.5 bg-red-600 text-white rounded-full text-[10px] px-1.5 py-0.5 font-bold shadow-md border border-white animate-pulse leading-none">滿</span>
                             )}
                           </div>
                         );
@@ -1675,6 +1902,84 @@ export default function StockTabDetail() {
 
 
       </Tabs>
+
+      {/* Averaging Calculation & Trading Discipline Help Dialog */}
+      <Dialog open={isAveragingHelpOpen} onOpenChange={setIsAveragingHelpOpen}>
+        <DialogContent className="max-w-xl bg-white rounded-2xl p-6 shadow-2xl border border-zinc-200">
+          <DialogHeader className="border-b border-zinc-100 pb-3">
+            <DialogTitle className="flex items-center gap-2 text-lg font-bold text-zinc-900">
+              <HelpCircle className="h-5 w-5 text-emerald-600 shrink-0" />
+              股價向下攤平試算與交易紀律說明
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 my-2 text-sm text-zinc-700 leading-relaxed max-h-[75vh] overflow-y-auto pr-1">
+            {/* Downward Averaging Logic */}
+            <div className="bg-zinc-50 border border-zinc-200/90 rounded-xl p-4 space-y-2.5">
+              <h4 className="font-bold text-zinc-900 flex items-center gap-1.5 text-sm">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0"></span>
+                股價向下攤平試算運算邏輯
+              </h4>
+              <p className="text-xs text-zinc-600 leading-normal">
+                點擊預計購買數量的規劃批次標籤（第一批 ~ 第四批）時，會將該批次計算出的股數分成平均的 2 份數量（無條件進位 Roundup），並自動填入「股價向下攤平試算」相對應的欄位：
+              </p>
+              
+              <div className="space-y-2 text-xs pt-1">
+                <div className="bg-white p-3 rounded-lg border border-zinc-200 shadow-sm space-y-1">
+                  <span className="font-bold text-emerald-700 block">第一批 (15%) / 第二批 (25%) 點擊後：</span>
+                  <div className="text-zinc-600 pl-2 space-y-1">
+                    <div>• <strong>第 1 欄位</strong>：預計購入股價為 <span className="text-zinc-800 font-semibold">平均成本 -3%</span> | 購入數量為 1 份數量 (roundup)</div>
+                    <div>• <strong>第 2 欄位</strong>：預計購入股價為 <span className="text-zinc-800 font-semibold">平均成本 -6%</span> | 購入數量為 1 份數量 (roundup)</div>
+                  </div>
+                </div>
+
+                <div className="bg-white p-3 rounded-lg border border-zinc-200 shadow-sm space-y-1">
+                  <span className="font-bold text-emerald-700 block">第三批 (35%) / 第四批 (25%) 點擊後：</span>
+                  <div className="text-zinc-600 pl-2 space-y-1">
+                    <div>• <strong>第 3 欄位</strong>：預計購入股價為 <span className="text-zinc-800 font-semibold">平均成本 -9%</span> | 購入數量為 1 份數量 (roundup)</div>
+                    <div>• <strong>第 4 欄位</strong>：預計購入股價為 <span className="text-zinc-800 font-semibold">平均成本 -12%</span> | 購入數量為 1 份數量 (roundup)</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Strict Trading Rules in Red Text */}
+            <div className="bg-rose-50/90 border-2 border-rose-300 rounded-xl p-4 space-y-2.5 text-rose-700">
+              <h4 className="font-black text-rose-800 flex items-center gap-1.5 text-sm border-b border-rose-200/80 pb-2">
+                <AlertTriangle className="h-5 w-5 text-rose-600 shrink-0" />
+                特別註明：風控與交易紀律 (嚴格執行)
+              </h4>
+              <ul className="space-y-2 font-bold text-xs leading-relaxed text-rose-700">
+                <li className="flex items-start gap-1.5">
+                  <span className="text-rose-600 shrink-0">•</span>
+                  <span>單筆交易浮動攤平虧損最大為虧損金額達到 6%，請自動平倉與停止交易。</span>
+                </li>
+                <li className="flex items-start gap-1.5">
+                  <span className="text-rose-600 shrink-0">•</span>
+                  <span>根據凱利公式，禁止全資產梭哈。</span>
+                </li>
+                <li className="flex items-start gap-1.5">
+                  <span className="text-rose-600 shrink-0">•</span>
+                  <span>第一批與第二批的交易 40% 為單筆交易的最大資產使用量，第三批與第四批禁止使用。</span>
+                </li>
+                <li className="flex items-start gap-1.5">
+                  <span className="text-rose-600 shrink-0">•</span>
+                  <span>評估本交易的勝率為 50% 則不能下注，唯有高於 60% ~ 80% 才可以下注，且使用最大資產額度仍為 40%。</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <DialogFooter className="pt-3 border-t border-zinc-100">
+            <Button 
+              onClick={() => setIsAveragingHelpOpen(false)}
+              className="w-full sm:w-auto bg-zinc-900 hover:bg-black text-white font-bold rounded-xl px-6 py-2 text-xs"
+            >
+              了解並遵守紀律
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

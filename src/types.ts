@@ -32,6 +32,8 @@ export interface StockTab {
   isNew?: boolean;
   chartAnnotations?: ChartAnnotation[];
   plannedBuyQty?: number;
+  stopLossPrice?: number;
+  takeProfitPrice?: number;
 }
 
 export interface ChartAnnotation {

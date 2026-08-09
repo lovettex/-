@@ -638,20 +638,7 @@ export default function Dashboard() {
     }
   };
 
-  useEffect(() => {
-    const state = location.state as { autoFlipTabId?: string } | null;
-    if (state?.autoFlipTabId) {
-      setFlippedCards(prev => ({ ...prev, [state.autoFlipTabId!]: true }));
-      // Use setTimeout to ensure DOM is ready before scrolling
-      setTimeout(() => {
-        const el = document.getElementById(`stock-card-${state.autoFlipTabId}`);
-        if (el) {
-          el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
-        }
-      }, 300);
-      window.history.replaceState({}, document.title);
-    }
-  }, [location.state]);
+  const scrolledStockCardRef = useRef<string | null>(null);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -750,6 +737,71 @@ export default function Dashboard() {
     safeSessionStorage.setItem('preferredHoldingSubTab', activeHoldingSubTab);
     setActiveCardDefinitionFilter("all");
   }, [activeHoldingSubTab]);
+
+  useEffect(() => {
+    const state = location.state as { autoFlipTabId?: string; returnStockId?: string } | null;
+    const targetStockId = state?.autoFlipTabId || state?.returnStockId || safeSessionStorage.getItem('lastViewedStockId');
+
+    if (!targetStockId || loading || !tabs || tabs.length === 0) return;
+    if (scrolledStockCardRef.current === targetStockId) return;
+
+    const targetTab = tabs.find((t) => t.id === targetStockId || t.symbol === targetStockId);
+
+    if (targetTab) {
+      scrolledStockCardRef.current = targetStockId;
+
+      // Clear consumed target flags immediately so it won't loop
+      safeSessionStorage.removeItem('lastViewedStockId');
+      if (state?.autoFlipTabId || state?.returnStockId) {
+        window.history.replaceState({}, document.title);
+      }
+
+      // If hidden, unhide it so it renders
+      if (targetTab.isHidden) {
+        updateTabHidden(targetTab.id, false);
+      }
+
+      // 1. Switch activeViewTab based on stock status / tradeType
+      if (targetTab.status === "COMPLETED") {
+        setActiveViewTab("completed");
+      } else if (targetTab.tradeType === "real") {
+        setActiveViewTab("real");
+      } else {
+        setActiveViewTab("active");
+      }
+
+      // 2. Switch holding subtab
+      const targetSubTab = getDisplayHoldingStatus(targetTab.holdingStatus);
+      setActiveHoldingSubTab(targetSubTab);
+
+      // 3. Reset card definition filter so card is not filtered out
+      setActiveCardDefinitionFilter("all");
+
+      // 4. Poll and scroll into view once DOM element is rendered
+      let attempts = 0;
+      const attemptScroll = () => {
+        const el = document.getElementById(`stock-card-${targetTab.id}`) || document.getElementById(`notes-row-${targetTab.id}`);
+        if (el) {
+          // Vertical scroll to section/card
+          scrollToElement(el, -120);
+
+          // Horizontal scroll in carousel container
+          el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+
+          // Visual highlight animation ring
+          el.classList.add("ring-4", "ring-emerald-500", "ring-offset-2", "scale-[1.03]", "transition-all", "duration-300");
+          setTimeout(() => {
+            el.classList.remove("ring-4", "ring-emerald-500", "ring-offset-2", "scale-[1.03]");
+          }, 2000);
+        } else if (attempts < 30) {
+          attempts++;
+          setTimeout(attemptScroll, 100);
+        }
+      };
+
+      setTimeout(attemptScroll, 100);
+    }
+  }, [location.state, tabs, loading, scrollToElement, updateTabHidden]);
 
   const [activeManageTab, setActiveManageTab] = useState<
     "觀察中" | "候選名單" | "買進操作" | "賣出操作" | "平倉操作" | "乖離名單" | "持股監控"
@@ -3119,7 +3171,7 @@ export default function Dashboard() {
     }
   };
 
-  const activeTabs = tabs.filter((t) => t.status === "ACTIVE");
+  const activeTabs = useMemo(() => tabs.filter((t) => t.status === "ACTIVE"), [tabs]);
 
   const totalRealHoldingCost = useMemo(() => {
     return activeTabs
@@ -3153,8 +3205,8 @@ export default function Dashboard() {
 
   const remainingBalance = totalCapital - totalRealHoldingCost;
 
-  const visibleActiveTabs = activeTabs.filter((t) => !t.isHidden);
-  const hiddenActiveTabs = activeTabs.filter((t) => t.isHidden);
+  const visibleActiveTabs = useMemo(() => activeTabs.filter((t) => !t.isHidden), [activeTabs]);
+  const hiddenActiveTabs = useMemo(() => activeTabs.filter((t) => t.isHidden), [activeTabs]);
 
   const filledCategories = useMemo(() => {
     const allCats = ["觀察中", "候選名單", "買進操作", "賣出操作", "平倉操作", "乖離名單"] as const;
@@ -3212,10 +3264,17 @@ export default function Dashboard() {
 
   // Adjust active sub tab if the current one has no cards & other active sub tabs are available
   useEffect(() => {
-    if (visibleSubTabs.length > 0 && !visibleSubTabs.includes(activeHoldingSubTab)) {
-      setActiveHoldingSubTab(visibleSubTabs[0]);
+    const hasCardsInCurrentSubTab = effectiveVisibleActiveTabs.some(
+      (t) => getDisplayHoldingStatus(t.holdingStatus) === activeHoldingSubTab
+    );
+    if (!hasCardsInCurrentSubTab && visibleSubTabs.length > 0 && !visibleSubTabs.includes(activeHoldingSubTab)) {
+      const state = location.state as { autoFlipTabId?: string; returnStockId?: string } | null;
+      const hasPendingFocus = state?.autoFlipTabId || state?.returnStockId || safeSessionStorage.getItem('lastViewedStockId');
+      if (!hasPendingFocus) {
+        setActiveHoldingSubTab(visibleSubTabs[0]);
+      }
     }
-  }, [visibleSubTabs, activeHoldingSubTab]);
+  }, [visibleSubTabs, activeHoldingSubTab, effectiveVisibleActiveTabs, location.state]);
 
   const handleExportMd = useCallback(async () => {
     toast.info("正在準備持股交易數據...");
@@ -3837,7 +3896,7 @@ export default function Dashboard() {
     }
   };
 
-  const completedTabs = tabs.filter((t) => t.status === "COMPLETED");
+  const completedTabs = useMemo(() => tabs.filter((t) => t.status === "COMPLETED"), [tabs]);
 
   const handleSmartSuggestion = async (tab: any) => {
     if (!tab) return;
@@ -3944,8 +4003,8 @@ export default function Dashboard() {
     }
   };
 
-  const realCompletedTabs = completedTabs.filter((t) => t.tradeType === "real");
-  const simulatedCompletedTabs = completedTabs.filter((t) => t.tradeType === "simulated");
+  const realCompletedTabs = useMemo(() => completedTabs.filter((t) => t.tradeType === "real"), [completedTabs]);
+  const simulatedCompletedTabs = useMemo(() => completedTabs.filter((t) => t.tradeType === "simulated"), [completedTabs]);
 
   const totalCompletedPnL = realCompletedTabs.reduce(
     (acc, tab) => acc + (tab.finalPnL || 0),
@@ -5787,7 +5846,7 @@ export default function Dashboard() {
                                 {renderGroups.map((group, groupIdx) => {
                                   const renderCard = (tab: any, idx: number) => {
                                     const getCardStatusInfo = (tabItem: any) => {
-                                      const statusName = getDisplayHoldingStatus(tabItem.list || tabItem.status);
+                                      const statusName = getDisplayHoldingStatus(tabItem.holdingStatus || tabItem.list);
                                       let color = "#38bdf8";
                                       if (statusName === "候選名單") color = "#fbbf24";
                                       else if (statusName === "買進操作") color = "#34d399";
@@ -7061,6 +7120,7 @@ export default function Dashboard() {
                               transition={{ delay: Math.min(idx * 0.02, 0.3) }}
                               whileHover={{ y: -2, scale: 1.01 }}
                               key={tab.id}
+                              id={`stock-card-${tab.id}`}
                               onClick={() => navigate(`/stock/${tab.id}`)}
                               onMouseEnter={() => tab.symbol && prefetchStockPrice(tab.symbol)}
                               className="bg-white border border-zinc-200 hover:border-zinc-350 shadow-2xs hover:shadow-md p-3.5 rounded-xl cursor-pointer relative overflow-hidden group flex flex-col justify-between transition-all duration-200 gap-2.5"
