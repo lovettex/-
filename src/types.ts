@@ -34,6 +34,9 @@ export interface StockTab {
   plannedBuyQty?: number;
   stopLossPrice?: number;
   takeProfitPrice?: number;
+  averagingRows?: { price: string; quantity: string; bought?: boolean; riskFlag?: boolean }[];
+  refPnLPoint?: number | string;
+  includeCurrentHolding?: boolean;
 }
 
 export interface ChartAnnotation {

@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
 import { format } from 'date-fns';
 import { Timestamp, collection, writeBatch, doc, serverTimestamp, addDoc, getDocs } from 'firebase/firestore';
-import { Trash2, BarChart3, ChevronDown, ChevronUp, Gamepad2, ShieldCheck, Upload, Download, ChevronLeft, CheckCircle2, RotateCcw, Loader2, HelpCircle, AlertTriangle } from 'lucide-react';
+import { Trash2, BarChart3, ChevronDown, ChevronUp, Gamepad2, ShieldCheck, Upload, Download, ChevronLeft, CheckCircle2, RotateCcw, Loader2, HelpCircle, AlertTriangle, Save } from 'lucide-react';
 import { toast } from "sonner";
 import { motion, AnimatePresence } from 'motion/react';
 import { db } from '../lib/firebase';
@@ -69,13 +69,12 @@ export default function StockTabDetail() {
   const tradesJsonFileInputRef = React.useRef<HTMLInputElement>(null);
   const { user } = useAuth();
 
-  // 5 rows for stock averaging
-  const [averagingRows, setAveragingRows] = useState([
-    { price: '', quantity: '' },
-    { price: '', quantity: '' },
-    { price: '', quantity: '' },
-    { price: '', quantity: '' },
-    { price: '', quantity: '' }
+  // 4 rows for stock averaging
+  const [averagingRows, setAveragingRows] = useState<{ price: string; quantity: string; bought?: boolean; riskFlag?: boolean }[]>([
+    { price: '', quantity: '', bought: false, riskFlag: false },
+    { price: '', quantity: '', bought: false, riskFlag: false },
+    { price: '', quantity: '', bought: false, riskFlag: false },
+    { price: '', quantity: '', bought: false, riskFlag: false }
   ]);
   const [includeCurrentHolding, setIncludeCurrentHolding] = useState(true);
   const [refPnLPoint, setRefPnLPoint] = useState('');
@@ -119,6 +118,39 @@ export default function StockTabDetail() {
       setTakeProfitInput('');
     }
   }, [tab?.id, tab?.takeProfitPrice]);
+
+  // Update averaging rows & settings when tab loads
+  React.useEffect(() => {
+    if (tab?.averagingRows && Array.isArray(tab.averagingRows) && tab.averagingRows.length > 0) {
+      setAveragingRows(tab.averagingRows);
+    }
+    if (tab?.refPnLPoint !== undefined) {
+      setRefPnLPoint(tab.refPnLPoint ? tab.refPnLPoint.toString() : '');
+    }
+    if (tab?.includeCurrentHolding !== undefined) {
+      setIncludeCurrentHolding(tab.includeCurrentHolding);
+    }
+  }, [tab?.id]);
+
+  const [isSavingAveraging, setIsSavingAveraging] = useState(false);
+
+  const handleSaveAveraging = async () => {
+    if (!tab) return;
+    setIsSavingAveraging(true);
+    try {
+      await updateTab(tab.id, {
+        averagingRows,
+        refPnLPoint,
+        includeCurrentHolding,
+      });
+      playSuccessSound();
+      toast.success('向下攤平試算內容已成功儲存！');
+    } catch (error) {
+      toast.error('儲存失敗，請稍後再試');
+    } finally {
+      setIsSavingAveraging(false);
+    }
+  };
 
   const handlePlannedBuyQtyChange = async (val: string) => {
     setPlannedBuyQtyInput(val);
@@ -422,8 +454,8 @@ export default function StockTabDetail() {
       const price6 = basePrice > 0 ? (basePrice * 0.94).toFixed(2) : '';
       setAveragingRows(prev => {
         const next = [...prev];
-        next[0] = { price: price3, quantity: halfQty.toString() };
-        next[1] = { price: price6, quantity: halfQty.toString() };
+        next[0] = { ...next[0], price: price3, quantity: halfQty.toString() };
+        next[1] = { ...next[1], price: price6, quantity: halfQty.toString() };
         return next;
       });
       toast.success(`已將 ${batchName} 股數 (${batchSize}股) 平分 (${halfQty}股) 帶入攤平試算第 1 欄 (-3%) 與第 2 欄 (-6%)`);
@@ -433,8 +465,8 @@ export default function StockTabDetail() {
       const price12 = basePrice > 0 ? (basePrice * 0.88).toFixed(2) : '';
       setAveragingRows(prev => {
         const next = [...prev];
-        next[2] = { price: price9, quantity: halfQty.toString() };
-        next[3] = { price: price12, quantity: halfQty.toString() };
+        next[2] = { ...next[2], price: price9, quantity: halfQty.toString() };
+        next[3] = { ...next[3], price: price12, quantity: halfQty.toString() };
         return next;
       });
       toast.success(`已將 ${batchName} 股數 (${batchSize}股) 平分 (${halfQty}股) 帶入攤平試算第 3 欄 (-9%) 與第 4 欄 (-12%)`);
@@ -1145,27 +1177,32 @@ export default function StockTabDetail() {
       <ScrollIn delay={0.1}>
         <div className="w-full glass-panel bg-white/95 border border-zinc-200 rounded-2xl p-5 space-y-4 transition-all duration-300 hover:bg-zinc-50 shadow-[0_4px_20px_rgba(0,0,0,0.02)]">
           <div 
-            className="flex items-center justify-between cursor-pointer group"
+            className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 cursor-pointer group"
             onClick={() => setIsStatsOpen(!isStatsOpen)}
           >
-            <div className="flex items-center space-x-2 text-zinc-800">
-              <div className="p-1.5 bg-emerald-50 text-emerald-700 rounded-lg">
-                <BarChart3 className="h-4 w-4" />
+            <div className="space-y-1">
+              <div className="flex items-center space-x-2 text-zinc-800">
+                <div className="p-1.5 bg-emerald-50 text-emerald-700 rounded-lg shrink-0">
+                  <BarChart3 className="h-4 w-4" />
+                </div>
+                <h3 className="font-bold text-base tracking-wide">籌碼管理</h3>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsAveragingHelpOpen(true);
+                  }}
+                  className="p-1 text-zinc-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-full transition-colors flex items-center justify-center ml-0.5 shrink-0"
+                  title="股價向下攤平試算與交易紀律說明"
+                >
+                  <HelpCircle className="h-4 w-4" />
+                </button>
               </div>
-              <h3 className="font-bold text-base tracking-wide">庫存摘要</h3>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsAveragingHelpOpen(true);
-                }}
-                className="p-1 text-zinc-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-full transition-colors flex items-center justify-center ml-0.5"
-                title="股價向下攤平試算與交易紀律說明"
-              >
-                <HelpCircle className="h-4 w-4" />
-              </button>
+              <p className="text-[11px] font-semibold text-rose-600 bg-rose-50/80 border border-rose-200/80 px-2.5 py-1 rounded-lg inline-block">
+                註：請遵守分批進出場原則 與 凱利公式。強制執行浮動平倉價位。單筆最大資產使用為40%。總虧損金額為平均成本的 6%
+              </p>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 self-end sm:self-center">
               <span className="text-xs font-semibold text-zinc-400 tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
                 {isStatsOpen ? '點擊收合' : '點擊展開'}
               </span>
@@ -1245,55 +1282,133 @@ export default function StockTabDetail() {
                       </p>
 
                       <div className="space-y-2 mt-2">
-                        <div className="grid grid-cols-12 gap-2 text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-1">
-                          <span className="col-span-2 text-center">組別</span>
-                          <span className="col-span-5">預計購入股價 ($)</span>
-                          <span className="col-span-5">預計購入數量 (股)</span>
+                        <div className="grid grid-cols-12 gap-1.5 text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-1 items-center">
+                          <span className="col-span-3 text-left">組別</span>
+                          <span className="col-span-3">預計購入股價 ($)</span>
+                          <span className="col-span-3">預計購入數量 (股)</span>
+                          <span className="col-span-3 text-right pr-1">狀態</span>
                         </div>
 
-                        {averagingRows.map((row, idx) => (
-                          <div key={idx} className="grid grid-cols-12 gap-2 items-center">
-                            <span className="col-span-2 text-center text-xs text-zinc-400 font-bold">#{idx + 1}</span>
-                            <div className="col-span-5 relative">
-                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-zinc-400 font-semibold">$</span>
-                              <Input
-                                type="number"
-                                placeholder="股價"
-                                value={row.price}
-                                onChange={(e) => {
-                                  const newRows = [...averagingRows];
-                                  newRows[idx].price = e.target.value;
-                                  setAveragingRows(newRows);
-                                }}
-                                className="h-8 pl-6 pr-1 text-xs text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500"
-                              />
+                        {averagingRows.map((row, idx) => {
+                          const discountLabels = ['-3%', '-6%', '-9%', '-12%'];
+                          const discountLabel = discountLabels[idx];
+                          const riskMessages: Record<number, string> = {
+                            1: '(進入平倉籌碼倉位)',
+                            2: '(進入負籌碼博弈倉位)',
+                            3: '(進入強制關閉倉位)',
+                          };
+
+                          return (
+                            <div key={idx} className="grid grid-cols-12 gap-1.5 items-center">
+                              {/* 組別 ( Tickbox + #1 + -3% + 三角形Tickbox ) */}
+                              <div className="col-span-3 flex items-center gap-1 min-w-0 flex-wrap">
+                                <input
+                                  type="checkbox"
+                                  checked={!!row.bought}
+                                  onChange={(e) => {
+                                    const newRows = [...averagingRows];
+                                    newRows[idx] = { ...newRows[idx], bought: e.target.checked };
+                                    setAveragingRows(newRows);
+                                  }}
+                                  className="rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500 h-3.5 w-3.5 cursor-pointer shrink-0"
+                                  title={row.bought ? "已購入" : "勾選標記為已購入"}
+                                />
+                                <span className="text-xs text-zinc-500 font-bold shrink-0">#{idx + 1}</span>
+                                {discountLabel && (
+                                  <span className="text-[11px] font-black text-red-600 shrink-0">{discountLabel}</span>
+                                )}
+
+                                {idx >= 1 && (
+                                  <label
+                                    className="inline-flex items-center cursor-pointer ml-0.5 shrink-0"
+                                    title="點擊勾選切換風險倉位提示"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={!!row.riskFlag}
+                                      onChange={(e) => {
+                                        const newRows = [...averagingRows];
+                                        newRows[idx] = { ...newRows[idx], riskFlag: e.target.checked };
+                                        setAveragingRows(newRows);
+                                      }}
+                                      className="sr-only"
+                                    />
+                                    <div className={`p-0.5 rounded transition-all flex items-center justify-center ${
+                                      row.riskFlag
+                                        ? 'bg-rose-100 text-rose-600 ring-1 ring-rose-400'
+                                        : 'text-zinc-400 hover:text-rose-500 hover:bg-rose-50'
+                                    }`}>
+                                      <AlertTriangle className="h-3 w-3 fill-current" />
+                                    </div>
+                                  </label>
+                                )}
+                              </div>
+
+                              {/* 預計購入股價 */}
+                              <div className="col-span-3 relative">
+                                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-zinc-400 font-semibold">$</span>
+                                <Input
+                                  type="number"
+                                  placeholder="股價"
+                                  value={row.price}
+                                  onChange={(e) => {
+                                    const newRows = [...averagingRows];
+                                    newRows[idx] = { ...newRows[idx], price: e.target.value };
+                                    setAveragingRows(newRows);
+                                  }}
+                                  className="h-8 pl-5 pr-1 text-xs text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500"
+                                />
+                              </div>
+
+                              {/* 預計購入數量 + 清除按鈕 */}
+                              <div className="col-span-3 flex items-center gap-1">
+                                <Input
+                                  type="number"
+                                  placeholder="數量"
+                                  value={row.quantity}
+                                  onChange={(e) => {
+                                    const newRows = [...averagingRows];
+                                    newRows[idx] = { ...newRows[idx], quantity: e.target.value };
+                                    setAveragingRows(newRows);
+                                  }}
+                                  className="h-8 px-1.5 text-xs text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const newRows = [...averagingRows];
+                                    newRows[idx] = { price: '', quantity: '', bought: false, riskFlag: false };
+                                    setAveragingRows(newRows);
+                                  }}
+                                  className="h-8 w-5 text-zinc-400 hover:text-red-650 hover:bg-zinc-100 rounded-md shrink-0 transition-colors flex items-center justify-center font-bold text-xs"
+                                  title="清除這組"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+
+                              {/* 狀態 */}
+                              <div className="col-span-3 text-right pr-0.5 flex flex-col items-end justify-center gap-0.5">
+                                <div>
+                                  {row.bought ? (
+                                    <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/80 inline-block whitespace-nowrap">
+                                      已購入
+                                    </span>
+                                  ) : (
+                                    <span className="text-[11px] font-medium text-zinc-600 bg-zinc-50 px-1.5 py-0.5 rounded border border-zinc-200/60 inline-block whitespace-nowrap">
+                                      尚未購入
+                                    </span>
+                                  )}
+                                </div>
+                                {idx >= 1 && row.riskFlag && riskMessages[idx] && (
+                                  <span className="text-[10px] sm:text-[11px] font-bold text-red-600 leading-tight whitespace-nowrap">
+                                    {riskMessages[idx]}
+                                  </span>
+                                )}
+                              </div>
                             </div>
-                            <div className="col-span-5 flex items-center gap-1">
-                              <Input
-                                type="number"
-                                placeholder="數量"
-                                value={row.quantity}
-                                onChange={(e) => {
-                                  const newRows = [...averagingRows];
-                                  newRows[idx].quantity = e.target.value;
-                                  setAveragingRows(newRows);
-                                }}
-                                className="h-8 px-2 text-xs text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500"
-                              />
-                              <button
-                                onClick={() => {
-                                  const newRows = [...averagingRows];
-                                  newRows[idx] = { price: '', quantity: '' };
-                                  setAveragingRows(newRows);
-                                }}
-                                className="h-8 w-8 text-zinc-400 hover:text-red-650 hover:bg-zinc-100 rounded-md shrink-0 transition-colors flex items-center justify-center font-bold text-xs"
-                                title="清除這組"
-                              >
-                                ✕
-                              </button>
-                            </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
 
                       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 pt-2">
@@ -1309,11 +1424,10 @@ export default function StockTabDetail() {
                         <button
                           onClick={() => {
                             setAveragingRows([
-                              { price: '', quantity: '' },
-                              { price: '', quantity: '' },
-                              { price: '', quantity: '' },
-                              { price: '', quantity: '' },
-                              { price: '', quantity: '' }
+                              { price: '', quantity: '', bought: false },
+                              { price: '', quantity: '', bought: false },
+                              { price: '', quantity: '', bought: false },
+                              { price: '', quantity: '', bought: false }
                             ]);
                             setRefPnLPoint('');
                           }}
@@ -1520,6 +1634,32 @@ export default function StockTabDetail() {
                           )}
                         </div>
                       </div>
+                    </div>
+
+                    {/* Bottom Save Action Bar */}
+                    <div className="pt-4 border-t border-zinc-200/80 flex flex-col sm:flex-row items-center justify-between gap-3 bg-zinc-50/60 p-3.5 rounded-xl border border-zinc-200/60 mt-2">
+                      <div className="flex items-center gap-2 text-xs text-zinc-500">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                        <span>儲存試算內容將會將本次設定（包含預計購入股價、數量與倉位狀態）記錄至雲端</span>
+                      </div>
+                      <Button
+                        type="button"
+                        onClick={handleSaveAveraging}
+                        disabled={isSavingAveraging}
+                        className="w-full sm:w-auto bg-[#0F6E56] hover:bg-[#0B5240] active:scale-95 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-sm hover:shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer shrink-0"
+                      >
+                        {isSavingAveraging ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>儲存中...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Save className="w-3.5 h-3.5" />
+                            <span>儲存攤平試算設定</span>
+                          </>
+                        )}
+                      </Button>
                     </div>
                   </div>
                 </div>
