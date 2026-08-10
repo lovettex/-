@@ -69,8 +69,15 @@ export default function StockTabDetail() {
   const tradesJsonFileInputRef = React.useRef<HTMLInputElement>(null);
   const { user } = useAuth();
 
-  // 4 rows for stock averaging
+  // 4 rows for stock averaging (System 1: -3%, -6%, -9%, -12%)
   const [averagingRows, setAveragingRows] = useState<{ price: string; quantity: string; bought?: boolean; riskFlag?: boolean }[]>([
+    { price: '', quantity: '', bought: false, riskFlag: false },
+    { price: '', quantity: '', bought: false, riskFlag: false },
+    { price: '', quantity: '', bought: false, riskFlag: false },
+    { price: '', quantity: '', bought: false, riskFlag: false }
+  ]);
+  // 4 rows for stock averaging (System 2: -2%, -4%, -6%, -8%)
+  const [averagingRowsSys2, setAveragingRowsSys2] = useState<{ price: string; quantity: string; bought?: boolean; riskFlag?: boolean }[]>([
     { price: '', quantity: '', bought: false, riskFlag: false },
     { price: '', quantity: '', bought: false, riskFlag: false },
     { price: '', quantity: '', bought: false, riskFlag: false },
@@ -78,6 +85,7 @@ export default function StockTabDetail() {
   ]);
   const [includeCurrentHolding, setIncludeCurrentHolding] = useState(true);
   const [refPnLPoint, setRefPnLPoint] = useState('');
+  const [refPnLPointSys2, setRefPnLPointSys2] = useState('');
 
   // Percentage calculator states
   const [calcExpression, setCalcExpression] = useState('');
@@ -121,14 +129,40 @@ export default function StockTabDetail() {
 
   // Update averaging rows & settings when tab loads
   React.useEffect(() => {
-    if (tab?.averagingRows && Array.isArray(tab.averagingRows) && tab.averagingRows.length > 0) {
-      setAveragingRows(tab.averagingRows);
-    }
-    if (tab?.refPnLPoint !== undefined) {
-      setRefPnLPoint(tab.refPnLPoint ? tab.refPnLPoint.toString() : '');
-    }
-    if (tab?.includeCurrentHolding !== undefined) {
-      setIncludeCurrentHolding(tab.includeCurrentHolding);
+    if (tab) {
+      if (tab.averagingRows && Array.isArray(tab.averagingRows)) {
+        const normalized = [0, 1, 2, 3].map(i => {
+          const row = tab.averagingRows?.[i];
+          return {
+            price: row?.price ?? '',
+            quantity: row?.quantity ?? '',
+            bought: !!row?.bought,
+            riskFlag: !!row?.riskFlag
+          };
+        });
+        setAveragingRows(normalized);
+      }
+      if (tab.averagingRowsSys2 && Array.isArray(tab.averagingRowsSys2)) {
+        const normalized2 = [0, 1, 2, 3].map(i => {
+          const row = tab.averagingRowsSys2?.[i];
+          return {
+            price: row?.price ?? '',
+            quantity: row?.quantity ?? '',
+            bought: !!row?.bought,
+            riskFlag: !!row?.riskFlag
+          };
+        });
+        setAveragingRowsSys2(normalized2);
+      }
+      if (tab.refPnLPoint !== undefined) {
+        setRefPnLPoint(tab.refPnLPoint ? tab.refPnLPoint.toString() : '');
+      }
+      if (tab.refPnLPointSys2 !== undefined) {
+        setRefPnLPointSys2(tab.refPnLPointSys2 ? tab.refPnLPointSys2.toString() : '');
+      }
+      if (tab.includeCurrentHolding !== undefined) {
+        setIncludeCurrentHolding(tab.includeCurrentHolding);
+      }
     }
   }, [tab?.id]);
 
@@ -142,9 +176,11 @@ export default function StockTabDetail() {
         averagingRows,
         refPnLPoint,
         includeCurrentHolding,
+        averagingRowsSys2,
+        refPnLPointSys2,
       });
       playSuccessSound();
-      toast.success('向下攤平試算內容已成功儲存！');
+      toast.success('向下攤平試算內容（系統一與系統二）已成功儲存！');
     } catch (error) {
       toast.error('儲存失敗，請稍後再試');
     } finally {
@@ -240,9 +276,15 @@ export default function StockTabDetail() {
           setCalcType('SUB');
         }
         if (curPrice > 0) {
-          setRefPnLPoint(curPrice.toFixed(2));
+          if (!tab.refPnLPoint) {
+            setRefPnLPoint(curPrice.toFixed(2));
+          }
+          if (!tab.refPnLPointSys2) {
+            setRefPnLPointSys2(curPrice.toFixed(2));
+          }
         } else {
-          setRefPnLPoint('');
+          if (!tab.refPnLPoint) setRefPnLPoint('');
+          if (!tab.refPnLPointSys2) setRefPnLPointSys2('');
         }
       } else {
         if (baseVal > 0 && !calcBasePrice) {
@@ -252,6 +294,9 @@ export default function StockTabDetail() {
         }
         if (curPrice > 0 && !refPnLPoint) {
           setRefPnLPoint(curPrice.toFixed(2));
+        }
+        if (curPrice > 0 && !refPnLPointSys2) {
+          setRefPnLPointSys2(curPrice.toFixed(2));
         }
       }
     }
@@ -315,11 +360,17 @@ export default function StockTabDetail() {
 
   const parsedCalc = parseAndCalculatePercentage(calcExpression);
 
-  // Automatically fill calculation result into averagingRows[0].price
+  // Automatically fill calculation result into averagingRows[0].price and averagingRowsSys2[0].price
   React.useEffect(() => {
     if (parsedCalc.success && typeof parsedCalc.result === 'number' && !isNaN(parsedCalc.result) && parsedCalc.result > 0) {
       const formattedResult = parsedCalc.result.toFixed(2);
       setAveragingRows((prevRows) => {
+        if (prevRows[0].price === formattedResult) return prevRows;
+        const newRows = [...prevRows];
+        newRows[0] = { ...newRows[0], price: formattedResult };
+        return newRows;
+      });
+      setAveragingRowsSys2((prevRows) => {
         if (prevRows[0].price === formattedResult) return prevRows;
         const newRows = [...prevRows];
         newRows[0] = { ...newRows[0], price: formattedResult };
@@ -343,12 +394,49 @@ export default function StockTabDetail() {
     }
   };
 
-  // Calculation of stock averaging
+  // Calculation of stock averaging for System 1 (-3%, -6%, -9%, -12%)
   const calculateAveraging = () => {
     let newSharesSum = 0;
     let newCostSum = 0;
 
     averagingRows.forEach(row => {
+      const p = parseFloat(row.price);
+      const q = parseFloat(row.quantity);
+      if (!isNaN(p) && p > 0 && !isNaN(q) && q > 0) {
+        newSharesSum += q;
+        newCostSum += p * q;
+      }
+    });
+
+    const currentShares = includeCurrentHolding ? stats.totalQuantity : 0;
+    const currentPrice = includeCurrentHolding ? stats.averagePrice : 0;
+    const currentCost = currentShares * currentPrice;
+
+    const totalShares = currentShares + newSharesSum;
+    const totalCost = currentCost + newCostSum;
+    const finalAveragePrice = totalShares > 0 ? (totalCost / totalShares) : 0;
+
+    let costReducedPercent = 0;
+    if (stats.averagePrice > 0 && finalAveragePrice < stats.averagePrice) {
+      costReducedPercent = ((stats.averagePrice - finalAveragePrice) / stats.averagePrice) * 100;
+    }
+
+    return {
+      newSharesSum,
+      newCostSum,
+      totalShares,
+      totalCost,
+      finalAveragePrice,
+      costReducedPercent
+    };
+  };
+
+  // Calculation of stock averaging for System 2 (-2%, -4%, -6%, -8%)
+  const calculateAveragingSys2 = () => {
+    let newSharesSum = 0;
+    let newCostSum = 0;
+
+    averagingRowsSys2.forEach(row => {
       const p = parseFloat(row.price);
       const q = parseFloat(row.quantity);
       if (!isNaN(p) && p > 0 && !isNaN(q) && q > 0) {
@@ -387,6 +475,13 @@ export default function StockTabDetail() {
     ? (avgResult.finalAveragePrice - parsedRefPnL) * avgResult.totalShares
     : null;
 
+  const avgResultSys2 = calculateAveragingSys2();
+  const parsedRefPnLSys2 = parseFloat(refPnLPointSys2);
+  const hasRefPnLSys2 = refPnLPointSys2.trim() !== '' && !isNaN(parsedRefPnLSys2);
+  const calculatedPnLResultSys2 = hasRefPnLSys2
+    ? (avgResultSys2.finalAveragePrice - parsedRefPnLSys2) * avgResultSys2.totalShares
+    : null;
+
   // Four-batch transaction planning calculations
   const totalBought = trades
     .filter(t => t.type === 'BUY')
@@ -417,24 +512,38 @@ export default function StockTabDetail() {
 
   let currentBatchText = "";
   let currentBatchOrderText = "";
+  let currentBatchBought = 0;
+  let currentBatchRemaining = 0;
   if (plannedQty <= 0) {
     currentBatchText = "未規劃預計購買";
     currentBatchOrderText = "無";
+    currentBatchBought = 0;
+    currentBatchRemaining = 0;
   } else if (totalBought < size1) {
     currentBatchText = "第 1 批進場中";
     currentBatchOrderText = "第一批";
+    currentBatchBought = bought1;
+    currentBatchRemaining = remaining1;
   } else if (totalBought < (size1 + size2)) {
     currentBatchText = "第 2 批進場中";
     currentBatchOrderText = "第二批";
+    currentBatchBought = bought2;
+    currentBatchRemaining = remaining2;
   } else if (totalBought < (size1 + size2 + size3)) {
     currentBatchText = "第 3 批進場中";
     currentBatchOrderText = "第三批";
+    currentBatchBought = bought3;
+    currentBatchRemaining = remaining3;
   } else if (totalBought < (size1 + size2 + size3 + size4)) {
     currentBatchText = "第 4 批進場中";
     currentBatchOrderText = "第四批";
+    currentBatchBought = bought4;
+    currentBatchRemaining = remaining4;
   } else {
     currentBatchText = "已滿批進場 (已完成)";
     currentBatchOrderText = "已滿批";
+    currentBatchBought = size1 + size2 + size3 + size4;
+    currentBatchRemaining = 0;
   }
 
   const handleBatchClick = (batchIndex: number, batchName: string, batchSize: number) => {
@@ -449,7 +558,7 @@ export default function StockTabDetail() {
       : (tab?.currentPrice && tab.currentPrice > 0 ? tab.currentPrice : 0);
 
     if (batchIndex === 0 || batchIndex === 1) {
-      // 第一批 or 第二批 -> Fill Row #1 (-3%) & Row #2 (-6%)
+      // 第一批 or 第二批 -> Fill System 1 Row #1 (-3%) & Row #2 (-6%), System 2 Row #1 (-2%) & Row #2 (-4%)
       const price3 = basePrice > 0 ? (basePrice * 0.97).toFixed(2) : '';
       const price6 = basePrice > 0 ? (basePrice * 0.94).toFixed(2) : '';
       setAveragingRows(prev => {
@@ -458,9 +567,19 @@ export default function StockTabDetail() {
         next[1] = { ...next[1], price: price6, quantity: halfQty.toString() };
         return next;
       });
-      toast.success(`已將 ${batchName} 股數 (${batchSize}股) 平分 (${halfQty}股) 帶入攤平試算第 1 欄 (-3%) 與第 2 欄 (-6%)`);
+
+      const price2 = basePrice > 0 ? (basePrice * 0.98).toFixed(2) : '';
+      const price4 = basePrice > 0 ? (basePrice * 0.96).toFixed(2) : '';
+      setAveragingRowsSys2(prev => {
+        const next = [...prev];
+        next[0] = { ...next[0], price: price2, quantity: halfQty.toString() };
+        next[1] = { ...next[1], price: price4, quantity: halfQty.toString() };
+        return next;
+      });
+
+      toast.success(`已將 ${batchName} 股數 (${batchSize}股) 平分 (${halfQty}股) 帶入系統一 (-3%/-6%) 與系統二 (-2%/-4%)`);
     } else if (batchIndex === 2 || batchIndex === 3) {
-      // 第三批 or 第四批 -> Fill Row #3 (-9%) & Row #4 (-12%)
+      // 第三批 or 第四批 -> Fill System 1 Row #3 (-9%) & Row #4 (-12%), System 2 Row #3 (-6%) & Row #4 (-8%)
       const price9 = basePrice > 0 ? (basePrice * 0.91).toFixed(2) : '';
       const price12 = basePrice > 0 ? (basePrice * 0.88).toFixed(2) : '';
       setAveragingRows(prev => {
@@ -469,7 +588,17 @@ export default function StockTabDetail() {
         next[3] = { ...next[3], price: price12, quantity: halfQty.toString() };
         return next;
       });
-      toast.success(`已將 ${batchName} 股數 (${batchSize}股) 平分 (${halfQty}股) 帶入攤平試算第 3 欄 (-9%) 與第 4 欄 (-12%)`);
+
+      const price6_2 = basePrice > 0 ? (basePrice * 0.94).toFixed(2) : '';
+      const price8 = basePrice > 0 ? (basePrice * 0.92).toFixed(2) : '';
+      setAveragingRowsSys2(prev => {
+        const next = [...prev];
+        next[2] = { ...next[2], price: price6_2, quantity: halfQty.toString() };
+        next[3] = { ...next[3], price: price8, quantity: halfQty.toString() };
+        return next;
+      });
+
+      toast.success(`已將 ${batchName} 股數 (${batchSize}股) 平分 (${halfQty}股) 帶入系統一 (-9%/-12%) 與系統二 (-6%/-8%)`);
     }
   };
 
@@ -1267,152 +1396,155 @@ export default function StockTabDetail() {
                     </div>
                   </div>
 
-                  {/* 股價攤平與比例計算工具 */}
-                  <div className="mt-6 pt-6 border-t border-zinc-200/80 grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* Left Column: 股價向下攤平試算 */}
-                    <div className="space-y-4">
-                      <div className="flex items-center space-x-2">
-                        <div className="p-1 bg-emerald-50 text-emerald-700 rounded-md">
-                          <span className="text-xs">📉</span>
+                  {/* 預計購買數量、停損/止盈價位與分批規劃 (原本在紀錄列表，現移至籌碼管理) */}
+                  <div className="mt-5 pt-5 border-t border-zinc-200/80 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+                    {/* Left Column: Input box & Remaining Planned Buy Badge underneath */}
+                    <div className="flex flex-col gap-2 w-full lg:w-auto">
+                      {/* Input box for plannedBuyQty, stopLoss, takeProfit */}
+                      <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 bg-zinc-50 border border-zinc-200 px-3.5 py-2 rounded-2xl shadow-2xs w-full lg:w-auto">
+                        <div className="flex items-center gap-1.5">
+                          <label className="text-xs font-bold text-zinc-600 whitespace-nowrap">預計購買數量:</label>
+                          <Input
+                            type="number"
+                            min="0"
+                            placeholder="請輸入數量"
+                            className="w-20 sm:w-24 h-8 bg-white border border-zinc-250 text-zinc-800 font-mono font-bold text-center text-xs focus-visible:ring-emerald-500/55 rounded-xl p-1 shadow-inner"
+                            value={plannedBuyQtyInput}
+                            onChange={(e) => handlePlannedBuyQtyChange(e.target.value)}
+                          />
                         </div>
-                        <h4 className="font-bold text-sm tracking-wide text-zinc-800">股價向下攤平試算</h4>
+
+                        <div className="h-4 w-[1px] bg-zinc-250 hidden sm:block" />
+
+                        <div className="flex items-center gap-1.5">
+                          <label className="text-xs font-bold text-rose-600 whitespace-nowrap">停損價位:</label>
+                          <Input
+                            type="number"
+                            step="any"
+                            min="0"
+                            placeholder="停損價"
+                            className="w-20 sm:w-24 h-8 bg-white border border-zinc-250 text-rose-700 font-mono font-bold text-center text-xs focus-visible:ring-rose-500/55 rounded-xl p-1 shadow-inner"
+                            value={stopLossInput}
+                            onChange={(e) => handleStopLossChange(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="h-4 w-[1px] bg-zinc-250 hidden sm:block" />
+
+                        <div className="flex items-center gap-1.5">
+                          <label className="text-xs font-bold text-emerald-600 whitespace-nowrap">止盈價位:</label>
+                          <Input
+                            type="number"
+                            step="any"
+                            min="0"
+                            placeholder="止盈價"
+                            className="w-20 sm:w-24 h-8 bg-white border border-zinc-250 text-emerald-700 font-mono font-bold text-center text-xs focus-visible:ring-emerald-500/55 rounded-xl p-1 shadow-inner"
+                            value={takeProfitInput}
+                            onChange={(e) => handleTakeProfitChange(e.target.value)}
+                          />
+                        </div>
                       </div>
-                      <p className="text-[11px] text-zinc-500">
-                        輸入預計加碼的股價與數量，系統會實時估算攤平後的平均持有成本。
-                      </p>
 
-                      <div className="space-y-2 mt-2">
-                        <div className="grid grid-cols-12 gap-1.5 text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-1 items-center">
-                          <span className="col-span-3 text-left">組別</span>
-                          <span className="col-span-3">預計購入股價 ($)</span>
-                          <span className="col-span-3">預計購入數量 (股)</span>
-                          <span className="col-span-3 text-right pr-1">狀態</span>
+                      {/* 剩餘預計購買與當前順序提示標籤 (位在輸入欄位下方) */}
+                      {plannedQty > 0 && (
+                        <div className="pt-0.5">
+                          <span className="text-xs font-bold bg-[#B1C28D]/20 text-[#6F7D50] border border-[#B1C28D]/40 px-3 py-1 rounded-full inline-flex flex-wrap items-center gap-2 shadow-2xs">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#6F7D50] animate-pulse" />
+                            剩餘預計購買: <span className="font-mono font-black">{remainingToBuy}</span> 股
+                            <span className="opacity-40">|</span>
+                            當前順序: <span className="font-semibold text-zinc-800">{currentBatchOrderText}</span> ({currentBatchText}
+                            {currentBatchOrderText !== "無" && currentBatchOrderText !== "已滿批" && (
+                              <span className="ml-1 text-zinc-700">
+                                ‧ 已購: <span className="font-mono font-black">{currentBatchBought}</span> 股 / 餘額: <span className="font-mono font-black">{currentBatchRemaining}</span> 股
+                              </span>
+                            )})
+                          </span>
                         </div>
+                      )}
+                    </div>
 
-                        {averagingRows.map((row, idx) => {
-                          const discountLabels = ['-3%', '-6%', '-9%', '-12%'];
-                          const discountLabel = discountLabels[idx];
-                          const riskMessages: Record<number, string> = {
-                            1: '(進入平倉籌碼倉位)',
-                            2: '(進入負籌碼博弈倉位)',
-                            3: '(進入強制關閉倉位)',
-                          };
-
+                    {/* Batch Planning Cards */}
+                    {plannedQty > 0 && (
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 w-full lg:max-w-xl">
+                        {[
+                          { 
+                            name: "第一批 (15%)", 
+                            size: size1, 
+                            bought: bought1, 
+                            remaining: remaining1, 
+                          },
+                          { 
+                            name: "第二批 (25%)", 
+                            size: size2, 
+                            bought: bought2, 
+                            remaining: remaining2, 
+                          },
+                          { 
+                            name: "第三批 (35%)", 
+                            size: size3, 
+                            bought: bought3, 
+                            remaining: remaining3, 
+                          },
+                          { 
+                            name: "第四批 (25%)", 
+                            size: size4, 
+                            bought: bought4, 
+                            remaining: remaining4, 
+                          },
+                        ].map((b, idx) => {
+                          const isFinished = b.remaining === 0;
                           return (
-                            <div key={idx} className="grid grid-cols-12 gap-1.5 items-center">
-                              {/* 組別 ( Tickbox + #1 + -3% + 三角形Tickbox ) */}
-                              <div className="col-span-3 flex items-center gap-1 min-w-0 flex-wrap">
-                                <input
-                                  type="checkbox"
-                                  checked={!!row.bought}
-                                  onChange={(e) => {
-                                    const newRows = [...averagingRows];
-                                    newRows[idx] = { ...newRows[idx], bought: e.target.checked };
-                                    setAveragingRows(newRows);
-                                  }}
-                                  className="rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500 h-3.5 w-3.5 cursor-pointer shrink-0"
-                                  title={row.bought ? "已購入" : "勾選標記為已購入"}
-                                />
-                                <span className="text-xs text-zinc-500 font-bold shrink-0">#{idx + 1}</span>
-                                {discountLabel && (
-                                  <span className="text-[11px] font-black text-red-600 shrink-0">{discountLabel}</span>
-                                )}
-
-                                {idx >= 1 && (
-                                  <label
-                                    className="inline-flex items-center cursor-pointer ml-0.5 shrink-0"
-                                    title="點擊勾選切換風險倉位提示"
-                                  >
-                                    <input
-                                      type="checkbox"
-                                      checked={!!row.riskFlag}
-                                      onChange={(e) => {
-                                        const newRows = [...averagingRows];
-                                        newRows[idx] = { ...newRows[idx], riskFlag: e.target.checked };
-                                        setAveragingRows(newRows);
-                                      }}
-                                      className="sr-only"
-                                    />
-                                    <div className={`p-0.5 rounded transition-all flex items-center justify-center ${
-                                      row.riskFlag
-                                        ? 'bg-rose-100 text-rose-600 ring-1 ring-rose-400'
-                                        : 'text-zinc-400 hover:text-rose-500 hover:bg-rose-50'
-                                    }`}>
-                                      <AlertTriangle className="h-3 w-3 fill-current" />
-                                    </div>
-                                  </label>
-                                )}
-                              </div>
-
-                              {/* 預計購入股價 */}
-                              <div className="col-span-3 relative">
-                                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-zinc-400 font-semibold">$</span>
-                                <Input
-                                  type="number"
-                                  placeholder="股價"
-                                  value={row.price}
-                                  onChange={(e) => {
-                                    const newRows = [...averagingRows];
-                                    newRows[idx] = { ...newRows[idx], price: e.target.value };
-                                    setAveragingRows(newRows);
-                                  }}
-                                  className="h-8 pl-5 pr-1 text-xs text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500"
-                                />
-                              </div>
-
-                              {/* 預計購入數量 + 清除按鈕 */}
-                              <div className="col-span-3 flex items-center gap-1">
-                                <Input
-                                  type="number"
-                                  placeholder="數量"
-                                  value={row.quantity}
-                                  onChange={(e) => {
-                                    const newRows = [...averagingRows];
-                                    newRows[idx] = { ...newRows[idx], quantity: e.target.value };
-                                    setAveragingRows(newRows);
-                                  }}
-                                  className="h-8 px-1.5 text-xs text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const newRows = [...averagingRows];
-                                    newRows[idx] = { price: '', quantity: '', bought: false, riskFlag: false };
-                                    setAveragingRows(newRows);
-                                  }}
-                                  className="h-8 w-5 text-zinc-400 hover:text-red-650 hover:bg-zinc-100 rounded-md shrink-0 transition-colors flex items-center justify-center font-bold text-xs"
-                                  title="清除這組"
-                                >
-                                  ✕
-                                </button>
-                              </div>
-
-                              {/* 狀態 */}
-                              <div className="col-span-3 text-right pr-0.5 flex flex-col items-end justify-center gap-0.5">
-                                <div>
-                                  {row.bought ? (
-                                    <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/80 inline-block whitespace-nowrap">
-                                      已購入
-                                    </span>
-                                  ) : (
-                                    <span className="text-[11px] font-medium text-zinc-600 bg-zinc-50 px-1.5 py-0.5 rounded border border-zinc-200/60 inline-block whitespace-nowrap">
-                                      尚未購入
-                                    </span>
-                                  )}
+                            <div 
+                              key={idx} 
+                              onClick={() => handleBatchClick(idx, b.name, b.size)}
+                              title="點擊將此批股數平分帶入雙系統攤平試算"
+                              className={`p-2 border rounded-xl flex flex-col justify-between text-center relative transition-all duration-300 hover:scale-[1.03] active:scale-95 cursor-pointer select-none ${
+                                isFinished 
+                                  ? 'bg-emerald-100/90 border-emerald-300 hover:bg-emerald-200/80 text-black shadow-2xs' 
+                                  : 'bg-zinc-100/90 border-zinc-200 hover:bg-zinc-200/80 text-black shadow-2xs'
+                              }`}
+                            >
+                              <span className="text-[10px] font-bold text-black uppercase tracking-wider leading-none mb-1 whitespace-nowrap">{b.name}</span>
+                              <span className="text-[13px] font-black font-mono text-black leading-tight my-0.5">{b.size} 股</span>
+                              <div className="flex items-center justify-around text-[10px] mt-1 pt-1.5 border-t border-zinc-300/70 font-medium font-sans text-black">
+                                <div className="flex flex-col items-center">
+                                  <span className="text-black font-bold text-[10px] leading-none opacity-80">已購</span>
+                                  <span className="font-mono font-bold mt-1 text-black text-[10px]">{b.bought}</span>
                                 </div>
-                                {idx >= 1 && row.riskFlag && riskMessages[idx] && (
-                                  <span className="text-[10px] sm:text-[11px] font-bold text-red-600 leading-tight whitespace-nowrap">
-                                    {riskMessages[idx]}
-                                  </span>
-                                )}
+                                <div className="bg-zinc-400/50 w-[1px] h-4 self-center" />
+                                <div className="flex flex-col items-center">
+                                  <span className="text-black font-bold text-[10px] leading-none opacity-80">餘額</span>
+                                  <span className="font-mono font-bold mt-1 text-black text-[10px]">{b.remaining}</span>
+                                </div>
                               </div>
+                              {isFinished && (
+                                <span className="absolute -top-1.5 -right-1.5 bg-red-600 text-white rounded-full text-[10px] px-1.5 py-0.5 font-bold shadow-md border border-white animate-pulse leading-none">滿</span>
+                              )}
                             </div>
                           );
                         })}
                       </div>
+                    )}
+                  </div>
 
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 pt-2">
-                        <label className="flex items-center gap-2 cursor-pointer select-none text-[11px] text-zinc-600 font-medium">
+                  {/* 股價攤平 (雙系統) 與 比例計算工具 */}
+                  <div className="mt-6 pt-6 border-t border-zinc-200/80 space-y-6">
+                    {/* Header for 股價向下攤平試算區塊 */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-zinc-150">
+                      <div>
+                        <div className="flex items-center space-x-2">
+                          <div className="p-1 bg-emerald-50 text-emerald-700 rounded-md">
+                            <span className="text-xs">📉</span>
+                          </div>
+                          <h4 className="font-bold text-base tracking-wide text-zinc-800">股價向下攤平試算 (雙系統對比)</h4>
+                        </div>
+                        <p className="text-[11px] text-zinc-500 mt-0.5">
+                          系統一採用標準 3% 遞減策略；系統二採用緊密 2% 遞減策略。輸入股價與數量可即時對比兩組攤平結果。
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-3 shrink-0">
+                        <label className="flex items-center gap-1.5 cursor-pointer select-none text-xs text-zinc-700 font-semibold bg-zinc-100/80 hover:bg-zinc-100 px-3 py-1.5 rounded-lg border border-zinc-200/60 transition-colors">
                           <input
                             type="checkbox"
                             checked={includeCurrentHolding}
@@ -1422,98 +1554,516 @@ export default function StockTabDetail() {
                           <span>包含當前庫存 ({stats.totalQuantity} 股 @ ${stats.averagePrice.toFixed(2)})</span>
                         </label>
                         <button
+                          type="button"
                           onClick={() => {
                             setAveragingRows([
-                              { price: '', quantity: '', bought: false },
-                              { price: '', quantity: '', bought: false },
-                              { price: '', quantity: '', bought: false },
-                              { price: '', quantity: '', bought: false }
+                              { price: '', quantity: '', bought: false, riskFlag: false },
+                              { price: '', quantity: '', bought: false, riskFlag: false },
+                              { price: '', quantity: '', bought: false, riskFlag: false },
+                              { price: '', quantity: '', bought: false, riskFlag: false }
+                            ]);
+                            setAveragingRowsSys2([
+                              { price: '', quantity: '', bought: false, riskFlag: false },
+                              { price: '', quantity: '', bought: false, riskFlag: false },
+                              { price: '', quantity: '', bought: false, riskFlag: false },
+                              { price: '', quantity: '', bought: false, riskFlag: false }
                             ]);
                             setRefPnLPoint('');
+                            setRefPnLPointSys2('');
                           }}
-                          className="text-[10px] font-bold text-zinc-400 hover:text-zinc-600 transition-colors self-end sm:self-auto"
+                          className="text-xs font-bold text-zinc-400 hover:text-zinc-700 transition-colors px-2 py-1"
+                          title="清除雙系統所有輸入"
                         >
-                          ✕ 清除所有輸入
+                          ✕ 清除全域輸入
                         </button>
-                      </div>
-
-                      {/* 參考損益點 輸入框 */}
-                      <div className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-zinc-50 border border-zinc-200/80">
-                        <div className="flex flex-col">
-                          <span className="text-xs font-bold text-zinc-700">參考損益點 ($)</span>
-                          <span className="text-[10px] text-zinc-400">估算目標價格與攤平後成本之差額</span>
-                        </div>
-                        <div className="relative w-36 shrink-0">
-                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-zinc-400 font-semibold">$</span>
-                          <Input
-                            type="number"
-                            placeholder="參考損益點"
-                            value={refPnLPoint}
-                            onChange={(e) => setRefPnLPoint(e.target.value)}
-                            className="h-8 pl-6 pr-2 text-xs font-bold text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 rounded-lg"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="p-4 rounded-xl bg-zinc-50 border border-zinc-100 space-y-2.5">
-                        <div className="flex justify-between text-xs text-zinc-500">
-                          <span>加碼購入總股數:</span>
-                          <span className="font-bold font-mono text-zinc-800">{avgResult.newSharesSum} 股</span>
-                        </div>
-                        <div className="flex justify-between text-xs text-zinc-500">
-                          <span>加碼所需資金:</span>
-                          <span className="font-bold font-mono text-zinc-800">${avgResult.newCostSum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                        </div>
-                        <div className="h-[0.5px] bg-zinc-200/80 my-1" />
-                        <div className="flex justify-between items-baseline">
-                          <span className="text-xs font-semibold text-zinc-600">攤平後總股數:</span>
-                          <span className="text-sm font-bold font-mono text-zinc-800">{avgResult.totalShares} 股</span>
-                        </div>
-                        <div className="flex justify-between items-baseline">
-                          <span className="text-xs font-semibold text-zinc-600">攤平後平均成本:</span>
-                          <span className="text-base font-black font-mono text-[#0F6E56]">
-                            ${avgResult.finalAveragePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </span>
-                        </div>
-                        {hasRefPnL && calculatedPnLResult !== null && (() => {
-                          const isLoss = avgResult.finalAveragePrice > parsedRefPnL;
-                          const isProfit = avgResult.finalAveragePrice < parsedRefPnL;
-                          const absAmount = Math.abs(calculatedPnLResult);
-                          const formattedAmount = absAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-                          let textColor = "text-zinc-800";
-                          let displayText = `$0.00`;
-
-                          if (isLoss) {
-                            textColor = "text-rose-600 font-bold";
-                            displayText = `-$${formattedAmount}`;
-                          } else if (isProfit) {
-                            textColor = "text-emerald-700 font-bold";
-                            displayText = `+$${formattedAmount}`;
-                          }
-
-                          return (
-                            <div className="flex justify-between items-baseline pt-2 border-t border-zinc-200/80 mt-1">
-                              <div className="flex flex-col">
-                                <span className="text-xs font-semibold text-zinc-600">試算結果:</span>
-                                <span className="text-[10px] text-zinc-400 font-normal">(攤平後平均成本 - 參考損益點) × 攤平後總股數</span>
-                              </div>
-                              <span className={`text-base font-black font-mono ${textColor}`}>
-                                {displayText}
-                              </span>
-                            </div>
-                          );
-                        })()}
-                        {includeCurrentHolding && avgResult.costReducedPercent > 0 && (
-                          <div className="text-[11px] text-emerald-700 font-semibold text-center bg-emerald-50/50 py-1.5 px-2.5 rounded-lg border border-emerald-100/50 mt-1">
-                            📉 平均成本較原先降低了 {avgResult.costReducedPercent.toFixed(2)}%
-                          </div>
-                        )}
                       </div>
                     </div>
 
-                    {/* Right Column: 比例股價變動計算器 */}
-                    <div className="space-y-4">
+                    {/* Dual System Comparison Layout: Left = System 1 (-3%/-6%/-9%/-12%), Right = System 2 (-2%/-4%/-6%/-8%) */}
+                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+                      {/* System 1 (Left) */}
+                      <div className="bg-white/90 border border-emerald-200/70 rounded-2xl p-4 shadow-2xs space-y-3.5 flex flex-col justify-between">
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between pb-2 border-b border-emerald-100/80">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-black text-white bg-[#0F6E56] px-2.5 py-0.5 rounded-md shadow-2xs">
+                                系統一
+                              </span>
+                              <span className="text-xs font-bold text-zinc-700">標準 3% 階梯攤平</span>
+                            </div>
+                            <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/60">
+                              -3% / -6% / -9% / -12%
+                            </span>
+                          </div>
+
+                          {/* 剩餘預計購買與當前順序資訊 (系統一) */}
+                          {plannedQty > 0 && (
+                            <div className="text-[11px] font-bold bg-[#B1C28D]/20 text-[#6F7D50] border border-[#B1C28D]/40 px-2.5 py-1 rounded-xl flex flex-wrap items-center justify-between gap-1.5 shadow-2xs">
+                              <div className="flex items-center gap-1.5">
+                                <span className="w-1.5 h-1.5 rounded-full bg-[#6F7D50] animate-pulse" />
+                                <span>剩餘預計購買: <span className="font-mono font-black">{remainingToBuy}</span> 股</span>
+                              </div>
+                              <div>
+                                <span>當前順序: <span className="font-bold text-zinc-800">{currentBatchOrderText}</span></span>
+                                {currentBatchOrderText !== "無" && currentBatchOrderText !== "已滿批" && (
+                                  <span className="ml-1 text-zinc-700 font-medium">
+                                    (已購 <span className="font-mono font-bold text-zinc-800">{currentBatchBought}</span> / 餘額 <span className="font-mono font-bold text-zinc-800">{currentBatchRemaining}</span> 股)
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="space-y-2">
+                            <div className="grid grid-cols-12 gap-1.5 text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-1 items-center">
+                              <span className="col-span-3 text-left">組別</span>
+                              <span className="col-span-3">預計購入股價 ($)</span>
+                              <span className="col-span-3">預計購入數量 (股)</span>
+                              <span className="col-span-3 text-right pr-1">狀態</span>
+                            </div>
+
+                            {averagingRows.map((row, idx) => {
+                              const discountLabels = ['-3%', '-6%', '-9%', '-12%'];
+                              const discountLabel = discountLabels[idx];
+                              const riskMessages: Record<number, string> = {
+                                1: '(進入平倉籌碼倉位)',
+                                2: '(進入負籌碼博弈倉位)',
+                                3: '(進入強制關閉倉位)',
+                              };
+
+                              return (
+                                <div key={idx} className="grid grid-cols-12 gap-1.5 items-center">
+                                  {/* 組別 */}
+                                  <div className="col-span-3 flex items-center gap-1 min-w-0 flex-wrap">
+                                    <input
+                                      type="checkbox"
+                                      checked={!!row.bought}
+                                      onChange={(e) => {
+                                        const newRows = [...averagingRows];
+                                        newRows[idx] = { ...newRows[idx], bought: e.target.checked };
+                                        setAveragingRows(newRows);
+                                      }}
+                                      className="rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500 h-3.5 w-3.5 cursor-pointer shrink-0"
+                                      title={row.bought ? "已購入" : "勾選標記為已購入"}
+                                    />
+                                    <span className="text-xs text-zinc-500 font-bold shrink-0">#{idx + 1}</span>
+                                    {discountLabel && (
+                                      <span className="text-[11px] font-black text-red-600 shrink-0">{discountLabel}</span>
+                                    )}
+
+                                    {idx >= 1 && (
+                                      <label
+                                        className="inline-flex items-center cursor-pointer ml-0.5 shrink-0"
+                                        title="點擊勾選切換風險倉位提示"
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={!!row.riskFlag}
+                                          onChange={(e) => {
+                                            const newRows = [...averagingRows];
+                                            newRows[idx] = { ...newRows[idx], riskFlag: e.target.checked };
+                                            setAveragingRows(newRows);
+                                          }}
+                                          className="sr-only"
+                                        />
+                                        <div className={`p-0.5 rounded transition-all flex items-center justify-center ${
+                                          row.riskFlag
+                                            ? 'bg-rose-100 text-rose-600 ring-1 ring-rose-400'
+                                            : 'text-zinc-400 hover:text-rose-500 hover:bg-rose-50'
+                                        }`}>
+                                          <AlertTriangle className="h-3 w-3 fill-current" />
+                                        </div>
+                                      </label>
+                                    )}
+                                  </div>
+
+                                  {/* 預計購入股價 */}
+                                  <div className="col-span-3 relative">
+                                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-zinc-400 font-semibold">$</span>
+                                    <Input
+                                      type="number"
+                                      placeholder="股價"
+                                      value={row.price}
+                                      onChange={(e) => {
+                                        const newRows = [...averagingRows];
+                                        newRows[idx] = { ...newRows[idx], price: e.target.value };
+                                        setAveragingRows(newRows);
+                                      }}
+                                      className="h-8 pl-5 pr-1 text-xs text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500"
+                                    />
+                                  </div>
+
+                                  {/* 預計購入數量 + 清除按鈕 */}
+                                  <div className="col-span-3 flex items-center gap-1">
+                                    <Input
+                                      type="number"
+                                      placeholder="數量"
+                                      value={row.quantity}
+                                      onChange={(e) => {
+                                        const newRows = [...averagingRows];
+                                        newRows[idx] = { ...newRows[idx], quantity: e.target.value };
+                                        setAveragingRows(newRows);
+                                      }}
+                                      className="h-8 px-1.5 text-xs text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const newRows = [...averagingRows];
+                                        newRows[idx] = { price: '', quantity: '', bought: false, riskFlag: false };
+                                        setAveragingRows(newRows);
+                                      }}
+                                      className="h-8 w-5 text-zinc-400 hover:text-red-650 hover:bg-zinc-100 rounded-md shrink-0 transition-colors flex items-center justify-center font-bold text-xs"
+                                      title="清除這組"
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
+
+                                  {/* 狀態 */}
+                                  <div className="col-span-3 text-right pr-0.5 flex flex-col items-end justify-center gap-0.5">
+                                    <div>
+                                      {row.bought ? (
+                                        <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/80 inline-block whitespace-nowrap">
+                                          已購入
+                                        </span>
+                                      ) : (
+                                        <span className="text-[11px] font-medium text-zinc-600 bg-zinc-50 px-1.5 py-0.5 rounded border border-zinc-200/60 inline-block whitespace-nowrap">
+                                          尚未購入
+                                        </span>
+                                      )}
+                                    </div>
+                                    {idx >= 1 && row.riskFlag && riskMessages[idx] && (
+                                      <span className="text-[10px] font-bold text-red-600 leading-tight whitespace-nowrap">
+                                        {riskMessages[idx]}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          {/* 系統一 參考損益點 */}
+                          <div className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-zinc-50 border border-zinc-200/80 mt-2">
+                            <div className="flex flex-col">
+                              <span className="text-xs font-bold text-zinc-700">系統一參考損益點 ($)</span>
+                              <span className="text-[10px] text-zinc-400">估算目標價格與攤平後成本之差額</span>
+                            </div>
+                            <div className="relative w-32 shrink-0">
+                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-zinc-400 font-semibold">$</span>
+                              <Input
+                                type="number"
+                                placeholder="參考價"
+                                value={refPnLPoint}
+                                onChange={(e) => setRefPnLPoint(e.target.value)}
+                                className="h-8 pl-6 pr-2 text-xs font-bold text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 rounded-lg"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 系統一 計算結果卡片 */}
+                        <div className="p-3.5 rounded-xl bg-zinc-50/80 border border-zinc-200/80 space-y-2">
+                          <div className="flex justify-between text-xs text-zinc-500">
+                            <span>加碼購入總股數:</span>
+                            <span className="font-bold font-mono text-zinc-800">{avgResult.newSharesSum} 股</span>
+                          </div>
+                          <div className="flex justify-between text-xs text-zinc-500">
+                            <span>加碼所需資金:</span>
+                            <span className="font-bold font-mono text-zinc-800">${avgResult.newCostSum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          </div>
+                          <div className="h-[0.5px] bg-zinc-200/80 my-1" />
+                          <div className="flex justify-between items-baseline">
+                            <span className="text-xs font-semibold text-zinc-600">攤平後總股數:</span>
+                            <span className="text-sm font-bold font-mono text-zinc-800">{avgResult.totalShares} 股</span>
+                          </div>
+                          <div className="flex justify-between items-baseline">
+                            <span className="text-xs font-semibold text-zinc-600">攤平後平均成本:</span>
+                            <span className="text-base font-black font-mono text-[#0F6E56]">
+                              ${avgResult.finalAveragePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                          </div>
+                          {hasRefPnL && calculatedPnLResult !== null && (() => {
+                            const isLoss = avgResult.finalAveragePrice > parsedRefPnL;
+                            const isProfit = avgResult.finalAveragePrice < parsedRefPnL;
+                            const absAmount = Math.abs(calculatedPnLResult);
+                            const formattedAmount = absAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+                            let textColor = "text-zinc-800";
+                            let displayText = `$0.00`;
+
+                            if (isLoss) {
+                              textColor = "text-rose-600 font-bold";
+                              displayText = `-$${formattedAmount}`;
+                            } else if (isProfit) {
+                              textColor = "text-emerald-700 font-bold";
+                              displayText = `+$${formattedAmount}`;
+                            }
+
+                            return (
+                              <div className="flex justify-between items-baseline pt-2 border-t border-zinc-200/80 mt-1">
+                                <div className="flex flex-col">
+                                  <span className="text-xs font-semibold text-zinc-600">試算結果:</span>
+                                  <span className="text-[10px] text-zinc-400 font-normal">(攤平成本 - 參考損益點) × 總股數</span>
+                                </div>
+                                <span className={`text-base font-black font-mono ${textColor}`}>
+                                  {displayText}
+                                </span>
+                              </div>
+                            );
+                          })()}
+                          {includeCurrentHolding && avgResult.costReducedPercent > 0 && (
+                            <div className="text-[11px] text-emerald-700 font-semibold text-center bg-emerald-50 py-1 px-2 rounded-lg border border-emerald-100 mt-1">
+                              📉 平均成本降低 {avgResult.costReducedPercent.toFixed(2)}%
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* System 2 (Right) */}
+                      <div className="bg-white/90 border border-blue-200/70 rounded-2xl p-4 shadow-2xs space-y-3.5 flex flex-col justify-between">
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between pb-2 border-b border-blue-100/80">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-black text-white bg-blue-600 px-2.5 py-0.5 rounded-md shadow-2xs">
+                                系統二
+                              </span>
+                              <span className="text-xs font-bold text-zinc-700">緊密 2% 階梯攤平</span>
+                            </div>
+                            <span className="text-[11px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200/60">
+                              -2% / -4% / -6% / -8%
+                            </span>
+                          </div>
+
+                          {/* 剩餘預計購買與當前順序資訊 (系統二) */}
+                          {plannedQty > 0 && (
+                            <div className="text-[11px] font-bold bg-[#B1C28D]/20 text-[#6F7D50] border border-[#B1C28D]/40 px-2.5 py-1 rounded-xl flex flex-wrap items-center justify-between gap-1.5 shadow-2xs">
+                              <div className="flex items-center gap-1.5">
+                                <span className="w-1.5 h-1.5 rounded-full bg-[#6F7D50] animate-pulse" />
+                                <span>剩餘預計購買: <span className="font-mono font-black">{remainingToBuy}</span> 股</span>
+                              </div>
+                              <div>
+                                <span>當前順序: <span className="font-bold text-zinc-800">{currentBatchOrderText}</span></span>
+                                {currentBatchOrderText !== "無" && currentBatchOrderText !== "已滿批" && (
+                                  <span className="ml-1 text-zinc-700 font-medium">
+                                    (已購 <span className="font-mono font-bold text-zinc-800">{currentBatchBought}</span> / 餘額 <span className="font-mono font-bold text-zinc-800">{currentBatchRemaining}</span> 股)
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="space-y-2">
+                            <div className="grid grid-cols-12 gap-1.5 text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-1 items-center">
+                              <span className="col-span-3 text-left">組別</span>
+                              <span className="col-span-3">預計購入股價 ($)</span>
+                              <span className="col-span-3">預計購入數量 (股)</span>
+                              <span className="col-span-3 text-right pr-1">狀態</span>
+                            </div>
+
+                            {averagingRowsSys2.map((row, idx) => {
+                              const discountLabels = ['-2%', '-4%', '-6%', '-8%'];
+                              const discountLabel = discountLabels[idx];
+                              const riskMessages: Record<number, string> = {
+                                1: '(進入平倉籌碼倉位)',
+                                2: '(進入負籌碼博弈倉位)',
+                                3: '(進入強制關閉倉位)',
+                              };
+
+                              return (
+                                <div key={idx} className="grid grid-cols-12 gap-1.5 items-center">
+                                  {/* 組別 */}
+                                  <div className="col-span-3 flex items-center gap-1 min-w-0 flex-wrap">
+                                    <input
+                                      type="checkbox"
+                                      checked={!!row.bought}
+                                      onChange={(e) => {
+                                        const newRows = [...averagingRowsSys2];
+                                        newRows[idx] = { ...newRows[idx], bought: e.target.checked };
+                                        setAveragingRowsSys2(newRows);
+                                      }}
+                                      className="rounded border-zinc-300 text-blue-600 focus:ring-blue-500 h-3.5 w-3.5 cursor-pointer shrink-0"
+                                      title={row.bought ? "已購入" : "勾選標記為已購入"}
+                                    />
+                                    <span className="text-xs text-zinc-500 font-bold shrink-0">#{idx + 1}</span>
+                                    {discountLabel && (
+                                      <span className="text-[11px] font-black text-red-600 shrink-0">{discountLabel}</span>
+                                    )}
+
+                                    {idx >= 1 && (
+                                      <label
+                                        className="inline-flex items-center cursor-pointer ml-0.5 shrink-0"
+                                        title="點擊勾選切換風險倉位提示"
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={!!row.riskFlag}
+                                          onChange={(e) => {
+                                            const newRows = [...averagingRowsSys2];
+                                            newRows[idx] = { ...newRows[idx], riskFlag: e.target.checked };
+                                            setAveragingRowsSys2(newRows);
+                                          }}
+                                          className="sr-only"
+                                        />
+                                        <div className={`p-0.5 rounded transition-all flex items-center justify-center ${
+                                          row.riskFlag
+                                            ? 'bg-rose-100 text-rose-600 ring-1 ring-rose-400'
+                                            : 'text-zinc-400 hover:text-rose-500 hover:bg-rose-50'
+                                        }`}>
+                                          <AlertTriangle className="h-3 w-3 fill-current" />
+                                        </div>
+                                      </label>
+                                    )}
+                                  </div>
+
+                                  {/* 預計購入股價 */}
+                                  <div className="col-span-3 relative">
+                                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-zinc-400 font-semibold">$</span>
+                                    <Input
+                                      type="number"
+                                      placeholder="股價"
+                                      value={row.price}
+                                      onChange={(e) => {
+                                        const newRows = [...averagingRowsSys2];
+                                        newRows[idx] = { ...newRows[idx], price: e.target.value };
+                                        setAveragingRowsSys2(newRows);
+                                      }}
+                                      className="h-8 pl-5 pr-1 text-xs text-zinc-800 bg-white border-zinc-200 focus-visible:ring-blue-500"
+                                    />
+                                  </div>
+
+                                  {/* 預計購入數量 + 清除按鈕 */}
+                                  <div className="col-span-3 flex items-center gap-1">
+                                    <Input
+                                      type="number"
+                                      placeholder="數量"
+                                      value={row.quantity}
+                                      onChange={(e) => {
+                                        const newRows = [...averagingRowsSys2];
+                                        newRows[idx] = { ...newRows[idx], quantity: e.target.value };
+                                        setAveragingRowsSys2(newRows);
+                                      }}
+                                      className="h-8 px-1.5 text-xs text-zinc-800 bg-white border-zinc-200 focus-visible:ring-blue-500"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const newRows = [...averagingRowsSys2];
+                                        newRows[idx] = { price: '', quantity: '', bought: false, riskFlag: false };
+                                        setAveragingRowsSys2(newRows);
+                                      }}
+                                      className="h-8 w-5 text-zinc-400 hover:text-red-650 hover:bg-zinc-100 rounded-md shrink-0 transition-colors flex items-center justify-center font-bold text-xs"
+                                      title="清除這組"
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
+
+                                  {/* 狀態 */}
+                                  <div className="col-span-3 text-right pr-0.5 flex flex-col items-end justify-center gap-0.5">
+                                    <div>
+                                      {row.bought ? (
+                                        <span className="text-[11px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200/80 inline-block whitespace-nowrap">
+                                          已購入
+                                        </span>
+                                      ) : (
+                                        <span className="text-[11px] font-medium text-zinc-600 bg-zinc-50 px-1.5 py-0.5 rounded border border-zinc-200/60 inline-block whitespace-nowrap">
+                                          尚未購入
+                                        </span>
+                                      )}
+                                    </div>
+                                    {idx >= 1 && row.riskFlag && riskMessages[idx] && (
+                                      <span className="text-[10px] font-bold text-red-600 leading-tight whitespace-nowrap">
+                                        {riskMessages[idx]}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          {/* 系統二 參考損益點 */}
+                          <div className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-zinc-50 border border-zinc-200/80 mt-2">
+                            <div className="flex flex-col">
+                              <span className="text-xs font-bold text-zinc-700">系統二參考損益點 ($)</span>
+                              <span className="text-[10px] text-zinc-400">估算目標價格與攤平後成本之差額</span>
+                            </div>
+                            <div className="relative w-32 shrink-0">
+                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-zinc-400 font-semibold">$</span>
+                              <Input
+                                type="number"
+                                placeholder="參考價"
+                                value={refPnLPointSys2}
+                                onChange={(e) => setRefPnLPointSys2(e.target.value)}
+                                className="h-8 pl-6 pr-2 text-xs font-bold text-zinc-800 bg-white border-zinc-200 focus-visible:ring-blue-500 rounded-lg"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 系統二 計算結果卡片 */}
+                        <div className="p-3.5 rounded-xl bg-zinc-50/80 border border-zinc-200/80 space-y-2">
+                          <div className="flex justify-between text-xs text-zinc-500">
+                            <span>加碼購入總股數:</span>
+                            <span className="font-bold font-mono text-zinc-800">{avgResultSys2.newSharesSum} 股</span>
+                          </div>
+                          <div className="flex justify-between text-xs text-zinc-500">
+                            <span>加碼所需資金:</span>
+                            <span className="font-bold font-mono text-zinc-800">${avgResultSys2.newCostSum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          </div>
+                          <div className="h-[0.5px] bg-zinc-200/80 my-1" />
+                          <div className="flex justify-between items-baseline">
+                            <span className="text-xs font-semibold text-zinc-600">攤平後總股數:</span>
+                            <span className="text-sm font-bold font-mono text-zinc-800">{avgResultSys2.totalShares} 股</span>
+                          </div>
+                          <div className="flex justify-between items-baseline">
+                            <span className="text-xs font-semibold text-zinc-600">攤平後平均成本:</span>
+                            <span className="text-base font-black font-mono text-blue-700">
+                              ${avgResultSys2.finalAveragePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                          </div>
+                          {hasRefPnLSys2 && calculatedPnLResultSys2 !== null && (() => {
+                            const isLoss = avgResultSys2.finalAveragePrice > parsedRefPnLSys2;
+                            const isProfit = avgResultSys2.finalAveragePrice < parsedRefPnLSys2;
+                            const absAmount = Math.abs(calculatedPnLResultSys2);
+                            const formattedAmount = absAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+                            let textColor = "text-zinc-800";
+                            let displayText = `$0.00`;
+
+                            if (isLoss) {
+                              textColor = "text-rose-600 font-bold";
+                              displayText = `-$${formattedAmount}`;
+                            } else if (isProfit) {
+                              textColor = "text-[#0F6E56] font-bold";
+                              displayText = `+$${formattedAmount}`;
+                            }
+
+                            return (
+                              <div className="flex justify-between items-baseline pt-2 border-t border-zinc-200/80 mt-1">
+                                <div className="flex flex-col">
+                                  <span className="text-xs font-semibold text-zinc-600">試算結果:</span>
+                                  <span className="text-[10px] text-zinc-400 font-normal">(攤平成本 - 參考損益點) × 總股數</span>
+                                </div>
+                                <span className={`text-base font-black font-mono ${textColor}`}>
+                                  {displayText}
+                                </span>
+                              </div>
+                            );
+                          })()}
+                          {includeCurrentHolding && avgResultSys2.costReducedPercent > 0 && (
+                            <div className="text-[11px] text-blue-700 font-semibold text-center bg-blue-50 py-1 px-2 rounded-lg border border-blue-100 mt-1">
+                              📉 平均成本降低 {avgResultSys2.costReducedPercent.toFixed(2)}%
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Full-width Section: 比例股價變動計算器 */}
+                    <div className="pt-4 border-t border-zinc-200/80 space-y-3 bg-zinc-50/50 p-4 rounded-2xl border border-zinc-200/60">
                       <div className="flex items-center space-x-2">
                         <div className="p-1 bg-emerald-50 text-emerald-700 rounded-md">
                           <span className="text-xs">🧮</span>
@@ -1524,8 +2074,8 @@ export default function StockTabDetail() {
                         依據百分比增減計算目標價（例如：設定停損限價、獲利目標、滿足點）。
                       </p>
 
-                      <div className="space-y-3.5">
-                        <div className="space-y-1.5">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+                        <div className="space-y-2">
                           <Label className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wide">1. 算式計算（例: 56 - 7% 或 56 + 8%）</Label>
                           <div className="relative">
                             <Input
@@ -1533,7 +2083,7 @@ export default function StockTabDetail() {
                               placeholder="56 - 7% 或 56 + 8%"
                               value={calcExpression}
                               onChange={(e) => setCalcExpression(e.target.value)}
-                              className="h-10 text-sm font-semibold tracking-wide text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500"
+                              className="h-10 text-sm font-semibold tracking-wide text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 rounded-xl"
                             />
                             {calcExpression && (
                               <button 
@@ -1557,7 +2107,7 @@ export default function StockTabDetail() {
                                 <button
                                   key={p}
                                   onClick={() => handlePresetClick(p)}
-                                  className={`text-[10px] font-bold px-2 py-1 rounded-md transition-all cursor-pointer ${
+                                  className={`text-[10px] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
                                     isNeg 
                                       ? 'bg-rose-50 text-rose-700 hover:bg-rose-100/80 border border-rose-200/50' 
                                       : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100/80 border border-emerald-200/50'
@@ -1570,9 +2120,9 @@ export default function StockTabDetail() {
                           </div>
                         </div>
 
-                        {/* Structured adjustment */}
-                        <div className="space-y-2 pt-3 border-t border-zinc-200/60">
-                          <Label className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wide">2. 數值微調與輔助設定</Label>
+                        {/* Structured adjustment & Result Output */}
+                        <div className="space-y-3">
+                          <Label className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wide">2. 數值微調與計算結果</Label>
                           <div className="grid grid-cols-3 gap-2">
                             <div>
                               <span className="text-[9px] text-zinc-400 font-bold block mb-1">基準股價 ($)</span>
@@ -1580,12 +2130,12 @@ export default function StockTabDetail() {
                                 type="number"
                                 value={calcBasePrice}
                                 onChange={(e) => setCalcBasePrice(e.target.value)}
-                                className="h-8 text-xs text-zinc-800 bg-white border-zinc-200"
+                                className="h-8 text-xs text-zinc-800 bg-white border-zinc-200 rounded-lg"
                               />
                             </div>
                             <div>
                               <span className="text-[9px] text-zinc-400 font-bold block mb-1">運算符</span>
-                              <div className="flex h-8 border border-zinc-200 rounded-md overflow-hidden bg-white">
+                              <div className="flex h-8 border border-zinc-200 rounded-lg overflow-hidden bg-white">
                                 <button
                                   onClick={() => setCalcType('SUB')}
                                   className={`flex-1 text-[10px] font-bold transition-all cursor-pointer ${calcType === 'SUB' ? 'bg-rose-500 text-white font-black' : 'text-zinc-500 hover:bg-zinc-50'}`}
@@ -1607,31 +2157,31 @@ export default function StockTabDetail() {
                                 value={calcPercent}
                                 placeholder="例 7"
                                 onChange={(e) => setCalcPercent(e.target.value)}
-                                className="h-8 text-xs text-zinc-800 bg-white border-zinc-200"
+                                className="h-8 text-xs text-zinc-800 bg-white border-zinc-200 rounded-lg"
                               />
                             </div>
                           </div>
-                        </div>
 
-                        {/* Display Area */}
-                        <div className={`p-4 rounded-xl border flex flex-col justify-center transition-all ${parsedCalc.success ? 'bg-emerald-50/30 border-emerald-100/60' : 'bg-zinc-50 border-zinc-150'} min-h-[78px]`}>
-                          {parsedCalc.success && parsedCalc.result !== undefined ? (
-                            <div className="text-center">
-                              <div className="text-[10px] text-zinc-400 font-bold tracking-wider uppercase mb-0.5">計算結果</div>
-                              <div className="text-2xl font-black text-[#0F6E56] font-mono tracking-tight leading-none py-1">
-                                ${parsedCalc.result.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              </div>
-                              {parsedCalc.percent !== 0 && (
-                                <div className="text-[10px] text-zinc-500 font-medium mt-1">
-                                  以 <span className="font-semibold text-zinc-800">${parsedCalc.base?.toFixed(2)}</span> 為基準，{parsedCalc.isAdd ? '增加' : '減少'} <span className="font-black text-zinc-700">{parsedCalc.percent}%</span>
+                          {/* Display Area */}
+                          <div className={`p-3 rounded-xl border flex flex-col justify-center transition-all ${parsedCalc.success ? 'bg-emerald-50/40 border-emerald-200/80' : 'bg-white border-zinc-200/80'} min-h-[64px]`}>
+                            {parsedCalc.success && parsedCalc.result !== undefined ? (
+                              <div className="text-center">
+                                <div className="text-[10px] text-zinc-400 font-bold tracking-wider uppercase">計算結果</div>
+                                <div className="text-xl font-black text-[#0F6E56] font-mono tracking-tight leading-tight">
+                                  ${parsedCalc.result.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </div>
-                              )}
-                            </div>
-                          ) : (
-                            <div className="text-center text-xs text-zinc-400 font-medium leading-relaxed">
-                              請於上方直接輸入（如 <span className="font-mono">56 - 7%</span> 或 <span className="font-mono">56 + 8%</span>）<br/>或點擊快捷按鈕。
-                            </div>
-                          )}
+                                {parsedCalc.percent !== 0 && (
+                                  <div className="text-[10px] text-zinc-500 font-medium">
+                                    以 <span className="font-semibold text-zinc-800">${parsedCalc.base?.toFixed(2)}</span> 為基準，{parsedCalc.isAdd ? '增加' : '減少'} <span className="font-black text-zinc-700">{parsedCalc.percent}%</span>
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="text-center text-xs text-zinc-400 font-medium">
+                                請於上方輸入算式（如 <span className="font-mono">56 - 7%</span>）或點選快捷鍵
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1689,14 +2239,6 @@ export default function StockTabDetail() {
                      <span>股</span>
                    </span>
                  </div>
-                 {plannedQty > 0 && (
-                   <span className="text-xs font-bold bg-[#B1C28D]/20 text-[#6F7D50] border border-[#B1C28D]/40 px-2.5 py-1 rounded-full flex items-center gap-2 shadow-sm">
-                     <span className="w-1.5 h-1.5 rounded-full bg-[#6F7D50] animate-pulse" />
-                     剩餘預計購買: <span className="font-mono font-black">{remainingToBuy}</span> 股
-                     <span className="opacity-40">|</span>
-                     當前順序: <span className="font-semibold text-zinc-800">{currentBatchOrderText}</span> ({currentBatchText})
-                   </span>
-                 )}
                </div>
                <Badge className="bg-emerald-50 text-emerald-700 border border-zinc-150 text-[10px] py-1 px-2.5 font-bold whitespace-nowrap shadow-sm">{trades.length} 筆</Badge>
                
@@ -1805,8 +2347,7 @@ export default function StockTabDetail() {
                    onClick={() => setIsTradeListOpen(!isTradeListOpen)}
                    className="p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4 cursor-pointer border-b border-zinc-100 hover:bg-zinc-50/50 transition-colors group"
                  >
-                  <div className="flex flex-col sm:flex-row sm:items-center gap-4 flex-1">
-                    <div className="flex items-center gap-4">
+                     <div className="flex items-center gap-4">
                       <Magnetic>
                        <div className="p-3 bg-zinc-50 border border-zinc-200 rounded-xl text-zinc-500 group-hover:text-zinc-800 transition-colors">
                          <BarChart3 className="h-5 w-5" />
@@ -1820,124 +2361,7 @@ export default function StockTabDetail() {
                       </div>
                     </div>
 
-                    {/* Input box for plannedBuyQty, stopLoss, takeProfit */}
-                    <div 
-                      className="flex flex-wrap items-center gap-2.5 bg-zinc-50 border border-zinc-200 px-3 py-1.5 rounded-xl self-start sm:self-auto shadow-sm"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <div className="flex items-center gap-1.5">
-                        <label className="text-xs font-bold text-zinc-500 whitespace-nowrap">預計購買數量:</label>
-                        <Input
-                          type="number"
-                          min="0"
-                          placeholder="請輸入數量"
-                          className="w-20 sm:w-24 h-8 bg-white border border-zinc-250 text-zinc-800 font-mono font-bold text-center text-xs focus-visible:ring-emerald-500/55 rounded-lg p-1 shadow-inner"
-                          value={plannedBuyQtyInput}
-                          onChange={(e) => handlePlannedBuyQtyChange(e.target.value)}
-                        />
-                      </div>
-
-                      <div className="h-4 w-[1px] bg-zinc-200 hidden sm:block" />
-
-                      <div className="flex items-center gap-1.5">
-                        <label className="text-xs font-bold text-rose-600 whitespace-nowrap">停損價位:</label>
-                        <Input
-                          type="number"
-                          step="any"
-                          min="0"
-                          placeholder="停損價"
-                          className="w-20 sm:w-24 h-8 bg-white border border-zinc-250 text-rose-700 font-mono font-bold text-center text-xs focus-visible:ring-rose-500/55 rounded-lg p-1 shadow-inner"
-                          value={stopLossInput}
-                          onChange={(e) => handleStopLossChange(e.target.value)}
-                        />
-                      </div>
-
-                      <div className="h-4 w-[1px] bg-zinc-200 hidden sm:block" />
-
-                      <div className="flex items-center gap-1.5">
-                        <label className="text-xs font-bold text-emerald-600 whitespace-nowrap">止盈價位:</label>
-                        <Input
-                          type="number"
-                          step="any"
-                          min="0"
-                          placeholder="止盈價"
-                          className="w-20 sm:w-24 h-8 bg-white border border-zinc-250 text-emerald-700 font-mono font-bold text-center text-xs focus-visible:ring-emerald-500/55 rounded-lg p-1 shadow-inner"
-                          value={takeProfitInput}
-                          onChange={(e) => handleTakeProfitChange(e.target.value)}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {plannedQty > 0 && (
-                    <div 
-                      className="grid grid-cols-2 sm:grid-cols-4 gap-2 flex-1 max-w-xl w-full lg:ml-2"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      {[
-                        { 
-                          name: "第一批 (15%)", 
-                          size: size1, 
-                          bought: bought1, 
-                          remaining: remaining1, 
-                        },
-                        { 
-                          name: "第二批 (25%)", 
-                          size: size2, 
-                          bought: bought2, 
-                          remaining: remaining2, 
-                        },
-                        { 
-                          name: "第三批 (35%)", 
-                          size: size3, 
-                          bought: bought3, 
-                          remaining: remaining3, 
-                        },
-                        { 
-                          name: "第四批 (25%)", 
-                          size: size4, 
-                          bought: bought4, 
-                          remaining: remaining4, 
-                        },
-                      ].map((b, idx) => {
-                        const isFinished = b.remaining === 0;
-                        return (
-                          <div 
-                            key={idx} 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleBatchClick(idx, b.name, b.size);
-                            }}
-                            title="點擊將此批股數平分帶入攤平試算"
-                            className={`p-2 border rounded-xl flex flex-col justify-between text-center relative transition-all duration-300 hover:scale-[1.03] active:scale-95 cursor-pointer select-none ${
-                              isFinished 
-                                ? 'bg-emerald-100 border-emerald-300 hover:bg-emerald-200/80 text-black' 
-                                : 'bg-zinc-100 border-zinc-200 hover:bg-zinc-200/80 text-black'
-                            }`}
-                          >
-                            <span className="text-[10px] font-bold text-black uppercase tracking-wider leading-none mb-1 whitespace-nowrap">{b.name}</span>
-                            <span className="text-[13px] font-black font-mono text-black leading-tight my-0.5">{b.size} 股</span>
-                            <div className="flex items-center justify-around text-[10px] mt-1 pt-1.5 border-t border-zinc-300/70 font-medium font-sans text-black">
-                              <div className="flex flex-col items-center">
-                                <span className="text-black font-bold text-[10px] leading-none opacity-80">已購</span>
-                                <span className="font-mono font-bold mt-1 text-black text-[10px]">{b.bought}</span>
-                              </div>
-                              <div className="bg-zinc-400/50 w-[1px] h-4 self-center" />
-                              <div className="flex flex-col items-center">
-                                <span className="text-black font-bold text-[10px] leading-none opacity-80">餘額</span>
-                                <span className="font-mono font-bold mt-1 text-black text-[10px]">{b.remaining}</span>
-                              </div>
-                            </div>
-                            {isFinished && (
-                              <span className="absolute -top-1.5 -right-1.5 bg-red-600 text-white rounded-full text-[10px] px-1.5 py-0.5 font-bold shadow-md border border-white animate-pulse leading-none">滿</span>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  <div className="flex items-center gap-3 justify-end self-end lg:self-auto">
+                  <div className="flex items-center gap-3">
                     <span className="text-xs font-semibold text-zinc-400 tracking-widest opacity-0 lg:group-hover:opacity-100 transition-opacity whitespace-nowrap">
                       {isTradeListOpen ? '收合明細' : '展開明細'}
                     </span>

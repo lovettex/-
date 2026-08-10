@@ -37,6 +37,8 @@ export interface StockTab {
   averagingRows?: { price: string; quantity: string; bought?: boolean; riskFlag?: boolean }[];
   refPnLPoint?: number | string;
   includeCurrentHolding?: boolean;
+  averagingRowsSys2?: { price: string; quantity: string; bought?: boolean; riskFlag?: boolean }[];
+  refPnLPointSys2?: number | string;
 }
 
 export interface ChartAnnotation {
