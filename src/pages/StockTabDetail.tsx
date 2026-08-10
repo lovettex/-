@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
 import { format } from 'date-fns';
 import { Timestamp, collection, writeBatch, doc, serverTimestamp, addDoc, getDocs } from 'firebase/firestore';
-import { Trash2, BarChart3, ChevronDown, ChevronUp, Gamepad2, ShieldCheck, Upload, Download, ChevronLeft, CheckCircle2, RotateCcw, Loader2, HelpCircle, AlertTriangle, Save } from 'lucide-react';
+import { Trash2, BarChart3, ChevronDown, ChevronUp, Gamepad2, ShieldCheck, Upload, Download, ChevronLeft, CheckCircle2, RotateCcw, Loader2, HelpCircle, AlertTriangle, Save, Calculator, History } from 'lucide-react';
 import { toast } from "sonner";
 import { motion, AnimatePresence } from 'motion/react';
 import { db } from '../lib/firebase';
@@ -46,9 +46,10 @@ export default function StockTabDetail() {
   const [isTradeOpen, setIsTradeOpen] = useState(false);
   const [isCompleteOpen, setIsCompleteOpen] = useState(false);
   const [isSubmittingComplete, setIsSubmittingComplete] = useState(false);
-  const [isStatsOpen, setIsStatsOpen] = useState(false); 
+  const [isStatsOpen, setIsStatsOpen] = useState(true); 
   const [isAveragingHelpOpen, setIsAveragingHelpOpen] = useState(false);
-  const [isTradeListOpen, setIsTradeListOpen] = useState(false);
+  const [isTradeListOpen, setIsTradeListOpen] = useState(true);
+  const [chipsSubTab, setChipsSubTab] = useState<'calc' | 'trades'>('calc');
   const [finalPnLInput, setFinalPnLInput] = useState('');
   const [activeTab, setActiveTab] = useState('trades');
   const isInitialActiveTabMount = React.useRef(true);
@@ -1302,9 +1303,18 @@ export default function StockTabDetail() {
         </div>
       </ScrollIn>
 
-      {/* Stats Summary */}
-      <ScrollIn delay={0.1}>
-        <div className="w-full glass-panel bg-white/95 border border-zinc-200 rounded-2xl p-5 space-y-4 transition-all duration-300 hover:bg-zinc-50 shadow-[0_4px_20px_rgba(0,0,0,0.02)]">
+      {/* Main Tabs Container */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="flex w-full bg-zinc-100 border border-zinc-200 p-1 rounded-xl gap-1 shadow-sm mb-4">
+          <TabsTrigger value="trades" className="flex-1 py-2 text-xs font-black rounded-lg data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-md text-zinc-700 hover:text-black transition-all cursor-pointer">籌碼管理與交易紀錄</TabsTrigger>
+          <TabsTrigger value="strategy" className="flex-1 py-2 text-xs font-black rounded-lg data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-md text-zinc-700 hover:text-black transition-all cursor-pointer">策略計畫</TabsTrigger>
+          <TabsTrigger value="chips" className="flex-1 py-2 text-xs font-black rounded-lg data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-md text-zinc-700 hover:text-black transition-all cursor-pointer">主力與籌碼分析</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="trades" className="space-y-4 pb-20 outline-none">
+          {/* Stats Summary & Chips Management */}
+          <ScrollIn delay={0.1}>
+            <div className="w-full glass-panel bg-white/95 border border-zinc-200 rounded-2xl p-5 space-y-4 transition-all duration-300 hover:bg-zinc-50 shadow-[0_4px_20px_rgba(0,0,0,0.02)]">
           <div 
             className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 cursor-pointer group"
             onClick={() => setIsStatsOpen(!isStatsOpen)}
@@ -1396,8 +1406,29 @@ export default function StockTabDetail() {
                     </div>
                   </div>
 
-                  {/* 預計購買數量、停損/止盈價位與分批規劃 (原本在紀錄列表，現移至籌碼管理) */}
-                  <div className="mt-5 pt-5 border-t border-zinc-200/80 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+                  {/* 籌碼管理內部子分頁 (籌碼與攤平試算 vs 交易紀錄) */}
+                  <Tabs value={chipsSubTab} onValueChange={(v) => setChipsSubTab(v as 'calc' | 'trades')} className="w-full mt-4">
+                    <TabsList className="flex w-full bg-zinc-100 border border-zinc-200 p-1 rounded-xl gap-1 shadow-2xs">
+                      <TabsTrigger 
+                        value="calc" 
+                        className="flex-1 py-2 text-xs font-black rounded-lg data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm text-zinc-600 hover:text-zinc-900 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                      >
+                        <Calculator className="h-3.5 w-3.5" />
+                        <span>籌碼與攤平試算</span>
+                      </TabsTrigger>
+                      <TabsTrigger 
+                        value="trades" 
+                        className="flex-1 py-2 text-xs font-black rounded-lg data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm text-zinc-600 hover:text-zinc-900 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                      >
+                        <History className="h-3.5 w-3.5" />
+                        <span>交易紀錄 ({trades.length} 筆)</span>
+                      </TabsTrigger>
+                    </TabsList>
+
+                    {/* 子分頁 1: 籌碼試算與規劃 */}
+                    <TabsContent value="calc" className="pt-3 space-y-4 outline-none">
+                      {/* 預計購買數量、停損/止盈價位與分批規劃 */}
+                      <div className="pt-2 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
                     {/* Left Column: Input box & Remaining Planned Buy Badge underneath */}
                     <div className="flex flex-col gap-2 w-full lg:w-auto">
                       {/* Input box for plannedBuyQty, stopLoss, takeProfit */}
@@ -2212,60 +2243,44 @@ export default function StockTabDetail() {
                       </Button>
                     </div>
                   </div>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-      </ScrollIn>
+                </TabsContent>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="flex w-full bg-zinc-100 border border-zinc-200 p-1 rounded-xl gap-1 shadow-sm">
-            <TabsTrigger value="trades" className="flex-1 py-2 text-xs font-black rounded-lg data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-md text-zinc-700 hover:text-black transition-all cursor-pointer">交易紀錄</TabsTrigger>
-            <TabsTrigger value="strategy" className="flex-1 py-2 text-xs font-black rounded-lg data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-md text-zinc-700 hover:text-black transition-all cursor-pointer">策略計畫</TabsTrigger>
-            <TabsTrigger value="chips" className="flex-1 py-2 text-xs font-black rounded-lg data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-md text-zinc-700 hover:text-black transition-all cursor-pointer">主力與籌碼分析</TabsTrigger>
-          </TabsList>
-
-        <TabsContent value="trades" className="pt-4 space-y-4 pb-20 outline-none">
-           {/* Trades Content */}
-           <div className="flex justify-between items-center border-b border-zinc-200 pb-2 mb-4">
-             <div className="flex flex-wrap items-center gap-2">
-               <div className="flex items-center gap-3 flex-wrap">
-                 <div className="flex items-center gap-2 flex-wrap">
-                   <h2 className="text-xl font-bold tracking-tight text-zinc-800">交易紀錄</h2>
-                   <span className="text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded-full flex items-center gap-1.5 whitespace-nowrap">
-                     <span>已持有:</span>
-                     <span className="font-mono font-black text-zinc-800">{stats.totalQuantity}</span>
-                     <span>股</span>
-                   </span>
-                 </div>
-               </div>
-               <Badge className="bg-emerald-50 text-emerald-700 border border-zinc-150 text-[10px] py-1 px-2.5 font-bold whitespace-nowrap shadow-sm">{trades.length} 筆</Badge>
-               
-               <input
-                 type="file"
-                 accept="application/json"
-                 className="hidden"
-                 ref={tradesJsonFileInputRef}
-                 onChange={handleImportTradesJson}
-               />
-               <button
-                 type="button"
-                 onClick={handleExportTradesJson}
-                 className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-violet-50 text-violet-700 hover:bg-violet-100 border border-violet-200 transition-all text-[10px] font-bold ml-1 border shadow-xs"
-               >
-                 <Download className="w-3 h-3" />
-                 匯出Json
-               </button>
-               <button
-                 type="button"
-                 onClick={() => tradesJsonFileInputRef.current?.click()}
-                 className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 transition-all text-[10px] font-bold border shadow-xs"
-               >
-                 <Upload className="w-3 h-3" />
-                 匯入Json
-               </button>
-             </div>
+                {/* 子分頁 2: 交易紀錄 */}
+                <TabsContent value="trades" className="pt-3 space-y-4 outline-none">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-zinc-50 border border-zinc-200/80 p-3 rounded-2xl">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="text-base font-bold tracking-tight text-zinc-800 mr-1">交易紀錄清單</h4>
+                      <span className="text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded-full flex items-center gap-1.5 whitespace-nowrap">
+                        <span>已持有:</span>
+                        <span className="font-mono font-black text-zinc-800">{stats.totalQuantity}</span>
+                        <span>股</span>
+                      </span>
+                      <Badge className="bg-emerald-50 text-emerald-700 border border-zinc-150 text-[10px] py-1 px-2.5 font-bold whitespace-nowrap shadow-sm">{trades.length} 筆</Badge>
+                      
+                      <input
+                        type="file"
+                        accept="application/json"
+                        className="hidden"
+                        ref={tradesJsonFileInputRef}
+                        onChange={handleImportTradesJson}
+                      />
+                      <button
+                        type="button"
+                        onClick={handleExportTradesJson}
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-violet-50 text-violet-700 hover:bg-violet-100 border border-violet-200 transition-all text-[11px] font-bold ml-1 shadow-2xs"
+                      >
+                        <Download className="w-3 h-3" />
+                        匯出Json
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => tradesJsonFileInputRef.current?.click()}
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 transition-all text-[11px] font-bold shadow-2xs"
+                      >
+                        <Upload className="w-3 h-3" />
+                        匯入Json
+                      </button>
+                    </div>
              <Dialog open={isTradeOpen} onOpenChange={setIsTradeOpen}>
                <DialogTrigger 
                   render={
@@ -2450,8 +2465,16 @@ export default function StockTabDetail() {
                  )}
                </AnimatePresence>
              </div>
-           </ScrollIn>
-        </TabsContent>
+            </ScrollIn>
+          </TabsContent>
+        </Tabs>
+        </div>
+      </motion.div>
+    )}
+  </AnimatePresence>
+</div>
+</ScrollIn>
+</TabsContent>
 
         <TabsContent value="strategy" className="pt-4">
            {id && <StrategyTab tabId={id} readOnly={false} />}
