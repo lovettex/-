@@ -4322,7 +4322,7 @@ export default function Dashboard() {
 
       {/* 2. Mobile-only Compact Investment Portfolio Card Section */}
       <ScrollIn className="block sm:hidden my-4 px-3">
-        <div className="w-full max-w-[340px] mx-auto bg-transparent rounded-[32px] select-none">
+        <div className="w-full max-w-[380px] mx-auto bg-transparent rounded-[32px] select-none">
           {/* Header section (rich deep green background: bg-[#084D38]) */}
           <div className="bg-[#084D38] p-6 pb-6 text-left flex flex-col gap-3 relative rounded-t-[32px]">
             {/* Top row: small pill badge "PORTFOLIO OVERVIEW" | logout icon on the right */}

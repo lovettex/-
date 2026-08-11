@@ -961,16 +961,48 @@ export default function StockTabDetail() {
 
               {/* Mobile Only: Current Price, Avg Cost & Total Shares */}
               <div className="flex sm:hidden flex-row gap-3.5 shrink-0 text-right mt-0.5">
-                <div 
-                  className="flex flex-col cursor-pointer"
-                  onClick={() => {
-                    setTempPrice(tab.currentPrice?.toString() || '');
-                    setIsEditingPrice(true);
-                  }}
-                >
-                  <span className="text-[9px] font-semibold text-zinc-400 uppercase tracking-widest leading-tight">現在價格</span>
-                  <span className="text-base font-bold text-emerald-700 tracking-tight leading-none mt-0.5">${(tab.currentPrice || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                </div>
+                {isEditingPrice ? (
+                  <div className="flex flex-col items-end">
+                    <span className="text-[9px] font-semibold text-zinc-400 uppercase tracking-widest leading-tight">現在價格</span>
+                    <Input
+                      type="number"
+                      step="any"
+                      autoFocus
+                      className="h-6 w-20 text-xs font-bold text-zinc-800 bg-white border-emerald-500 p-1 mt-0.5 text-right"
+                      value={tempPrice}
+                      onChange={(e) => setTempPrice(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          const val = parseFloat(tempPrice);
+                          if (!isNaN(val) && val >= 0) {
+                            updateCurrentPrice(tab.id, val);
+                          }
+                          setIsEditingPrice(false);
+                        } else if (e.key === 'Escape') {
+                          setIsEditingPrice(false);
+                        }
+                      }}
+                      onBlur={() => {
+                        const val = parseFloat(tempPrice);
+                        if (!isNaN(val) && val >= 0) {
+                          updateCurrentPrice(tab.id, val);
+                        }
+                        setIsEditingPrice(false);
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <div 
+                    className="flex flex-col cursor-pointer"
+                    onClick={() => {
+                      setTempPrice(tab.currentPrice?.toString() || '');
+                      setIsEditingPrice(true);
+                    }}
+                  >
+                    <span className="text-[9px] font-semibold text-zinc-400 uppercase tracking-widest leading-tight">現在價格</span>
+                    <span className="text-base font-bold text-emerald-700 tracking-tight leading-none mt-0.5">${(tab.currentPrice || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                )}
                 <div className="flex flex-col">
                   <span className="text-[9px] font-semibold text-zinc-400 uppercase tracking-widest leading-tight">Avg Cost</span>
                   <span className="text-base font-bold text-zinc-800 tracking-tight leading-none mt-0.5">${stats.averagePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
@@ -1306,9 +1338,17 @@ export default function StockTabDetail() {
       {/* Main Tabs Container */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="flex w-full bg-zinc-100 border border-zinc-200 p-1 rounded-xl gap-1 shadow-sm mb-4">
-          <TabsTrigger value="trades" className="flex-1 py-2 text-xs font-black rounded-lg data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-md text-zinc-700 hover:text-black transition-all cursor-pointer">籌碼管理與交易紀錄</TabsTrigger>
-          <TabsTrigger value="strategy" className="flex-1 py-2 text-xs font-black rounded-lg data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-md text-zinc-700 hover:text-black transition-all cursor-pointer">策略計畫</TabsTrigger>
-          <TabsTrigger value="chips" className="flex-1 py-2 text-xs font-black rounded-lg data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-md text-zinc-700 hover:text-black transition-all cursor-pointer">主力與籌碼分析</TabsTrigger>
+          <TabsTrigger value="trades" className="flex-1 py-2 text-[11px] sm:text-xs font-black rounded-lg data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-md text-zinc-700 hover:text-black transition-all cursor-pointer text-center px-1">
+            <span className="hidden sm:inline">籌碼管理與交易紀錄</span>
+            <span className="inline sm:hidden">籌碼與紀錄</span>
+          </TabsTrigger>
+          <TabsTrigger value="strategy" className="flex-1 py-2 text-[11px] sm:text-xs font-black rounded-lg data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-md text-zinc-700 hover:text-black transition-all cursor-pointer text-center px-1">
+            <span>策略計畫</span>
+          </TabsTrigger>
+          <TabsTrigger value="chips" className="flex-1 py-2 text-[11px] sm:text-xs font-black rounded-lg data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-md text-zinc-700 hover:text-black transition-all cursor-pointer text-center px-1">
+            <span className="hidden sm:inline">主力與籌碼分析</span>
+            <span className="inline sm:hidden">主力與籌碼</span>
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="trades" className="space-y-4 pb-20 outline-none">
@@ -2292,10 +2332,10 @@ export default function StockTabDetail() {
                     </button>
                   } 
                 />
-               <DialogContent className="glass-panel border-zinc-200 shadow-2xl bg-white text-zinc-800">
-                 <DialogHeader><DialogTitle className="font-bold text-2xl tracking-tight text-zinc-800 mb-2">新增交易紀錄</DialogTitle></DialogHeader>
-                 <form onSubmit={handleTradeSubmit} className="space-y-6">
-                   <div className="grid grid-cols-2 gap-5">
+               <DialogContent className="glass-panel border-zinc-200 shadow-2xl bg-white text-zinc-800 w-[92vw] sm:max-w-md max-h-[90vh] overflow-y-auto p-5 sm:p-6 rounded-2xl sm:rounded-3xl">
+                 <DialogHeader><DialogTitle className="font-bold text-xl sm:text-2xl tracking-tight text-zinc-800 mb-2">新增交易紀錄</DialogTitle></DialogHeader>
+                 <form onSubmit={handleTradeSubmit} className="space-y-4 sm:space-y-6">
+                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 sm:gap-5">
                      <div className="space-y-2">
                        <Label className="font-bold text-zinc-500">交易方向</Label>
                        <div className="flex gap-3">
@@ -2400,14 +2440,14 @@ export default function StockTabDetail() {
                    >
                      <div className="p-0 bg-transparent overflow-x-auto">
                        <table className="w-full text-sm text-left">
-                         <thead className="text-xs text-zinc-500 bg-zinc-100 uppercase tracking-widest border-b border-zinc-200 font-bold">
+                         <thead className="text-[11px] sm:text-xs text-zinc-500 bg-zinc-100 uppercase tracking-wider sm:tracking-widest border-b border-zinc-200 font-bold">
                            <tr>
-                             <th className="px-6 py-4 font-semibold">日期</th>
-                             <th className="px-6 py-4 font-semibold">方向</th>
-                             <th className="px-6 py-4 font-semibold">價格</th>
-                             <th className="px-6 py-4 font-semibold">數量</th>
-                             <th className="px-6 py-4 font-semibold">總計</th>
-                             <th className="px-6 py-4 text-right font-semibold">操作</th>
+                             <th className="px-3 sm:px-6 py-3 sm:py-4 font-semibold">日期</th>
+                             <th className="px-3 sm:px-6 py-3 sm:py-4 font-semibold">方向</th>
+                             <th className="px-3 sm:px-6 py-3 sm:py-4 font-semibold">價格</th>
+                             <th className="px-3 sm:px-6 py-3 sm:py-4 font-semibold">數量</th>
+                             <th className="px-3 sm:px-6 py-3 sm:py-4 font-semibold">總計</th>
+                             <th className="px-3 sm:px-6 py-3 sm:py-4 text-right font-semibold">操作</th>
                            </tr>
                          </thead>
                          <motion.tbody layout>
@@ -2423,8 +2463,8 @@ export default function StockTabDetail() {
                                  exit={{ opacity: 0 }}
                                  className="border-b border-zinc-150 last:border-0 hover:bg-zinc-50/50 transition-colors text-zinc-800 font-semibold bg-white"
                                >
-                                 <td className="px-6 py-4 whitespace-nowrap">{t.tradeDate?.toDate() ? format(t.tradeDate.toDate(), 'yyyy/MM/dd') : ''}</td>
-                                 <td className="px-6 py-4">
+                                 <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">{t.tradeDate?.toDate() ? format(t.tradeDate.toDate(), 'yyyy/MM/dd') : ''}</td>
+                                 <td className="px-3 sm:px-6 py-3 sm:py-4">
                                    <div className="flex flex-col gap-1.5 items-start">
                                      <div className="flex items-center gap-1.5">
                                        <span className={`px-2 py-0.5 text-[10px] tracking-wider rounded-md font-bold ${t.type === 'BUY' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30'}`}>
@@ -2444,10 +2484,10 @@ export default function StockTabDetail() {
                                      )}
                                    </div>
                                  </td>
-                                 <td className="px-6 py-4 whitespace-nowrap">${t.price}</td>
-                                 <td className="px-6 py-4 whitespace-nowrap">{t.quantity}</td>
+                                 <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">${t.price}</td>
+                                 <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">{t.quantity}</td>
                                  <td className="px-6 py-4 whitespace-nowrap text-zinc-700">${(t.price * t.quantity).toFixed(2)}</td>
-                                 <td className="px-6 py-4 text-right">
+                                 <td className="px-3 sm:px-6 py-3 sm:py-4 text-right">
                                    <button 
                                       onClick={() => deleteTrade(t.id)} 
                                       className="text-rose-650 hover:text-rose-700 py-1.5 px-3 font-semibold rounded-lg hover:bg-rose-500/10 transition-colors"
