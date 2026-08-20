@@ -4,6 +4,7 @@ import { db, OperationType, handleFirestoreError } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
 import { PlannedOrder } from '../types';
 import { toast } from 'sonner';
+import { getTimestampMillis } from '../lib/dateUtils';
 
 export function usePlannedOrders(tabId: string | undefined) {
   const { user } = useAuth();
@@ -24,7 +25,7 @@ export function usePlannedOrders(tabId: string | undefined) {
         id: docSnap.id,
         ...docSnap.data()
       })) as PlannedOrder[];
-      const sorted = data.sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+      const sorted = data.sort((a, b) => getTimestampMillis(b.createdAt) - getTimestampMillis(a.createdAt));
       setOrders(sorted);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, `stockTabs/${tabId}/plannedOrders`);

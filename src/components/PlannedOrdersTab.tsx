@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { format } from 'date-fns';
 import { Timestamp } from 'firebase/firestore';
 import { Clock } from 'lucide-react';
+import { formatTimestamp } from '../lib/dateUtils';
 
 export default function PlannedOrdersTab({ tabId, readOnly }: { tabId: string, readOnly: boolean }) {
   const { orders, addOrder, updateOrderStatus, deleteOrder, toggleHighlight } = usePlannedOrders(tabId);
@@ -55,15 +56,15 @@ export default function PlannedOrdersTab({ tabId, readOnly }: { tabId: string, r
                 </button>
               } 
             />
-            <DialogContent className="border border-white/10 bg-[#121212]/95 backdrop-blur-xl rounded-2xl shadow-2xl">
+            <DialogContent className="border border-white/10 bg-[#121212]/95 backdrop-blur-xl rounded-2xl shadow-2xl max-h-[90vh] overflow-y-auto w-[92vw] sm:max-w-lg p-5 sm:p-6">
               <DialogHeader><DialogTitle className="font-semibold text-xl text-white/90">新增預定操作</DialogTitle></DialogHeader>
               <form onSubmit={handleSubmit} className="space-y-4 mt-2">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label className="font-medium text-white/70">類別</Label>
                     <Select value={form.category} onValueChange={(val) => setForm({...form, category: val})}>
                       <SelectTrigger className="w-full border border-white/10 bg-white/5 rounded-md font-medium text-white/90 focus:ring-emerald-500/50"><SelectValue/></SelectTrigger>
-                      <SelectContent className="border border-white/10 bg-[#121212]/90 backdrop-blur-md">
+                      <SelectContent className="border border-white/10 bg-[#121212]/95 backdrop-blur-md">
                         <SelectItem value="止損設定" className="font-medium text-[#D6B2AB]">止損設定</SelectItem>
                         <SelectItem value="止盈設定" className="font-medium text-emerald-400">止盈設定</SelectItem>
                         <SelectItem value="分批進出場規劃" className="font-medium text-blue-400">分批進出場規劃</SelectItem>
@@ -78,14 +79,14 @@ export default function PlannedOrdersTab({ tabId, readOnly }: { tabId: string, r
                     <div className="flex gap-2">
                       <Select value={form.direction} onValueChange={(val) => setForm({...form, direction: val})}>
                         <SelectTrigger className="flex-1 border border-white/10 bg-white/5 rounded-md font-medium text-white/90"><SelectValue/></SelectTrigger>
-                        <SelectContent className="border border-white/10 bg-[#121212]/90 backdrop-blur-md">
+                        <SelectContent className="border border-white/10 bg-[#121212]/95 backdrop-blur-md">
                           <SelectItem value="BUY" className="font-medium text-white/90">買入</SelectItem>
                           <SelectItem value="SELL" className="font-medium text-white/90">賣出</SelectItem>
                         </SelectContent>
                       </Select>
                       <Select value={form.purpose} onValueChange={(val) => setForm({...form, purpose: val})}>
                         <SelectTrigger className="flex-1 border border-white/10 bg-white/5 rounded-md font-medium text-white/90"><SelectValue/></SelectTrigger>
-                        <SelectContent className="border border-white/10 bg-[#121212]/90 backdrop-blur-md">
+                        <SelectContent className="border border-white/10 bg-[#121212]/95 backdrop-blur-md">
                           <SelectItem value="加碼" className="font-medium text-white/90">加碼</SelectItem>
                           <SelectItem value="平倉" className="font-medium text-white/90">平倉</SelectItem>
                         </SelectContent>
@@ -100,16 +101,19 @@ export default function PlannedOrdersTab({ tabId, readOnly }: { tabId: string, r
                     <Label className="font-medium text-white/70">數量</Label>
                     <Input type="number" step="0.01" className="border border-white/10 bg-white/5 rounded-md font-medium text-white/90" required value={form.quantity} onChange={e => setForm({...form, quantity: e.target.value})} />
                   </div>
-                  <div className="space-y-2">
+                  <div className="space-y-2 sm:col-span-2">
                     <Label className="font-medium text-white/70">預定日期 (選填)</Label>
                     <Input type="date" className="border border-white/10 bg-white/5 rounded-md font-medium text-white/90" value={form.plannedDate} onChange={e => setForm({...form, plannedDate: e.target.value})} />
                   </div>
-                  <div className="space-y-2 col-span-2">
+                  <div className="space-y-2 sm:col-span-2">
                     <Label className="font-medium text-white/70">觸發條件 / 備註</Label>
                     <Input className="border border-white/10 bg-white/5 rounded-md font-medium text-white/90" value={form.conditions} onChange={e => setForm({...form, conditions: e.target.value})} placeholder="例如：若開盤跳空則取消..." />
                   </div>
                 </div>
-                <DialogFooter><Button type="submit" className="bg-white/10 hover:bg-white/20 text-white border border-white/10 font-medium rounded-xl">儲存</Button></DialogFooter>
+                <div className="flex justify-end gap-2 pt-2">
+                  <button type="button" onClick={() => setIsOpen(false)} className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/70 font-medium text-xs">取消</button>
+                  <button type="submit" className="px-4 py-2 rounded-lg bg-[#e5484d] hover:bg-[#e5484d]/90 text-white font-bold text-xs">確認新增</button>
+                </div>
               </form>
             </DialogContent>
           </Dialog>
@@ -246,20 +250,20 @@ export default function PlannedOrdersTab({ tabId, readOnly }: { tabId: string, r
                               {o.plannedDate && (
                                 <div className={`text-[9px] font-medium flex items-center gap-1 mt-1 ${isHighlighted ? 'text-[#0F0F0F]/40' : 'text-white/20'}`}>
                                   <Clock className="w-2.5 h-2.5" />
-                                  {format(o.plannedDate.toDate(), 'yyyy/MM/dd')}
+                                  {formatTimestamp(o.plannedDate, 'yyyy/MM/dd')}
                                 </div>
                               )}
                             </div>
 
                             {/* Actions Overlay */}
-                            <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="absolute top-1 right-1 flex gap-1 sm:opacity-0 sm:group-hover:opacity-100 opacity-100 transition-opacity">
                               {!readOnly && (
                                 <>
                                   <Select 
                                     value={o.status} 
                                     onValueChange={(val: any) => updateOrderStatus(o.id, val)}
                                   >
-                                    <SelectTrigger className="h-6 w-16 text-[9px] font-bold bg-[#121212]/80 border-white/10 rounded px-1">
+                                    <SelectTrigger className="h-6 w-16 text-[9px] font-bold bg-[#121212]/90 border-white/10 rounded px-1">
                                       <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent className="bg-[#121212] border-white/10 text-[10px]">
@@ -270,7 +274,7 @@ export default function PlannedOrdersTab({ tabId, readOnly }: { tabId: string, r
                                   </Select>
                                   <button 
                                     onClick={() => deleteOrder(o.id)}
-                                    className="h-6 px-1.5 rounded bg-rose-500/20 text-rose-400 hover:bg-rose-500/30 text-[9px] font-black border border-rose-500/20 transition-all"
+                                    className="h-6 px-1.5 rounded bg-rose-500/20 text-rose-400 hover:bg-rose-500/30 text-[9px] font-black border border-rose-500/20 transition-all cursor-pointer"
                                   >
                                     刪除
                                   </button>

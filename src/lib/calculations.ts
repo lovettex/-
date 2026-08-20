@@ -1,4 +1,5 @@
 import { Trade } from '../types';
+import { getTimestampMillis } from './dateUtils';
 
 export function calculateStats(trades: Trade[], currentPrice?: number) {
   let positionQty = 0;
@@ -7,10 +8,10 @@ export function calculateStats(trades: Trade[], currentPrice?: number) {
 
   // Ensure trades are sorted sequentially from oldest to newest for average cost calculation
   const sorted = [...trades].sort((a, b) => {
-    const timeA = a.tradeDate?.toMillis() || 0;
-    const timeB = b.tradeDate?.toMillis() || 0;
+    const timeA = getTimestampMillis(a.tradeDate);
+    const timeB = getTimestampMillis(b.tradeDate);
     if (timeA === timeB) {
-      return (a.createdAt?.toMillis() || 0) - (b.createdAt?.toMillis() || 0);
+      return getTimestampMillis(a.createdAt) - getTimestampMillis(b.createdAt);
     }
     return timeA - timeB;
   });

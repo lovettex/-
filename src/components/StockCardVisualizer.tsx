@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useRef } from "react";
 import { PlannedOrder, ChartAnnotation } from "../types";
-import { MousePointer, Minus, Square, Type, Trash2, Eraser, Undo2, ArrowUpRight, Move, Download, Share2, Camera, Loader2 } from "lucide-react";
+import { MousePointer, Minus, Square, Type, Trash2, Eraser, Undo2, ArrowUpRight, Move, Download, Share2, Camera, Loader2, SeparatorHorizontal } from "lucide-react";
 import html2canvas from "html2canvas";
 import { toast } from "sonner";
 import {
@@ -357,6 +357,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
   onUpdateCloseChecked,
   onUpdateObserveChecked,
   onUpdateNotesHighlighted,
+  onOpenActionSettings,
 }) => {
   const { price: dynamicPrice, isLoading: isCardLoading } = useStockPrice(stockName, currentPrice);
 
@@ -374,15 +375,16 @@ export const StockCardVisualizer: React.FC<Props> = ({
   const longPressTimers = useRef<{ [key: string]: NodeJS.Timeout }>({});
 
   // Annotations State
-  const [mode, setMode] = useState<'cursor' | 'line' | 'box' | 'text' | 'eraser' | 'arrow' | 'move'>('cursor');
-  const [activeColor, setActiveColor] = useState<string>('#ffffff');
+  const [mode, setMode] = useState<'cursor' | 'line' | 'box' | 'text' | 'eraser' | 'arrow' | 'move' | 'divider'>('cursor');
+  const [activeColor, setActiveColor] = useState<string>('#000000');
   const [isMobileColorOpen, setIsMobileColorOpen] = useState<boolean>(false);
   const [openSubField, setOpenSubField] = useState<string | null>(null);
-  const [activeThickness, setActiveThickness] = useState<number>(2);
-  const [activeFontSize, setActiveFontSize] = useState<number>(12);
+  const [activeThickness, setActiveThickness] = useState<number>(8);
+  const [activeFontSize, setActiveFontSize] = useState<number>(24);
   const [isDrawing, setIsDrawing] = useState<boolean>(false);
   const [startPoint, setStartPoint] = useState<{ x: number, y: number } | null>(null);
   const [activePoint, setActivePoint] = useState<{ x: number, y: number } | null>(null);
+  const [hoverPoint, setHoverPoint] = useState<{ x: number, y: number } | null>(null);
   const [inputCoords, setInputCoords] = useState<{ x: number, y: number } | null>(null);
   const [inputText, setInputText] = useState<string>('');
 
@@ -469,7 +471,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
   const [history, setHistory] = useState<ChartAnnotation[][]>([]);
 
   const pushToHistoryAndSave = (nextAnnotations: ChartAnnotation[]) => {
-    setHistory((prev) => [...prev, annotations]);
+    setHistory((prev) => [...prev, annotationsRef.current]);
     onUpdateAnnotations?.(nextAnnotations);
   };
 
@@ -1253,6 +1255,16 @@ export const StockCardVisualizer: React.FC<Props> = ({
           x: Math.max(0, Math.min(100, (initial.x ?? 0) + dx)),
           y: Math.max(0, Math.min(100, (initial.y ?? 0) + dy)),
         };
+      } else if (initial.type === 'divider') {
+        const newY = Math.max(0, Math.min(100, (initial.y ?? initial.y1 ?? 0) + dy));
+        return {
+          ...ann,
+          y: newY,
+          y1: newY,
+          y2: newY,
+          x1: 0,
+          x2: 100,
+        };
       } else if (initial.type === 'line' || initial.type === 'arrow') {
         return {
           ...ann,
@@ -1310,9 +1322,10 @@ export const StockCardVisualizer: React.FC<Props> = ({
 
   const cycleThickness = () => {
     setActiveThickness((prev) => {
-      if (prev === 2) return 4;
-      if (prev === 4) return 6;
-      return 2;
+      const thicknesses = [2, 4, 6, 8, 10];
+      const idx = thicknesses.indexOf(prev);
+      if (idx === -1) return 8;
+      return thicknesses[(idx + 1) % thicknesses.length];
     });
   };
 
@@ -1323,10 +1336,16 @@ export const StockCardVisualizer: React.FC<Props> = ({
   };
 
   const handleDeleteAnnotation = (idToDelete: string) => {
-    pushToHistoryAndSave(annotations.filter((ann) => ann.id !== idToDelete));
+    pushToHistoryAndSave(annotationsRef.current.filter((ann) => ann.id !== idToDelete));
   };
 
   const getCenterCoords = (ann: ChartAnnotation) => {
+    if (ann.type === 'divider') {
+      return {
+        x: 50,
+        y: ann.y ?? ann.y1 ?? 0,
+      };
+    }
     if (ann.type === 'line' || ann.type === 'arrow') {
       return {
         x: ((ann.x1 ?? 0) + (ann.x2 ?? 0)) / 2,
@@ -1358,7 +1377,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
         y: inputCoords.y,
         text: inputText,
       };
-      pushToHistoryAndSave([...annotations, newAnn]);
+      pushToHistoryAndSave([...annotationsRef.current, newAnn]);
     }
     setInputCoords(null);
     setInputText('');
@@ -1368,7 +1387,21 @@ export const StockCardVisualizer: React.FC<Props> = ({
     e.stopPropagation();
     e.preventDefault();
     const coords = getRelativeCoords(e.clientX, e.clientY);
-    if (mode === 'text') {
+    if (mode === 'divider') {
+      const newAnn: ChartAnnotation = {
+        id: Date.now().toString(),
+        type: 'divider',
+        color: activeColor,
+        strokeWidth: activeThickness,
+        x1: 0,
+        x2: 100,
+        y1: coords.y,
+        y2: coords.y,
+        y: coords.y,
+      };
+      pushToHistoryAndSave([...annotationsRef.current, newAnn]);
+      toast.success("已新增水平線 (Divider)");
+    } else if (mode === 'text') {
       setInputCoords(coords);
       setInputText('');
     } else if (mode === 'line' || mode === 'box' || mode === 'arrow') {
@@ -1380,8 +1413,11 @@ export const StockCardVisualizer: React.FC<Props> = ({
 
   const handleCanvasMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     e.stopPropagation();
-    if (!isDrawing || !startPoint) return;
     const coords = getRelativeCoords(e.clientX, e.clientY);
+    if (mode === 'divider') {
+      setHoverPoint(coords);
+    }
+    if (!isDrawing || !startPoint) return;
     setActivePoint(coords);
   };
 
@@ -1431,7 +1467,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
         };
       }
       if (newAnn) {
-        pushToHistoryAndSave([...annotations, newAnn]);
+        pushToHistoryAndSave([...annotationsRef.current, newAnn]);
       }
     }
     setStartPoint(null);
@@ -1444,7 +1480,21 @@ export const StockCardVisualizer: React.FC<Props> = ({
     if (e.touches.length === 0) return;
     const touch = e.touches[0];
     const coords = getRelativeCoords(touch.clientX, touch.clientY);
-    if (mode === 'text') {
+    if (mode === 'divider') {
+      const newAnn: ChartAnnotation = {
+        id: Date.now().toString(),
+        type: 'divider',
+        color: activeColor,
+        strokeWidth: activeThickness,
+        x1: 0,
+        x2: 100,
+        y1: coords.y,
+        y2: coords.y,
+        y: coords.y,
+      };
+      pushToHistoryAndSave([...annotationsRef.current, newAnn]);
+      toast.success("已新增水平線 (Divider)");
+    } else if (mode === 'text') {
       setInputCoords(coords);
       setInputText('');
     } else if (mode === 'line' || mode === 'box' || mode === 'arrow') {
@@ -1457,15 +1507,21 @@ export const StockCardVisualizer: React.FC<Props> = ({
   const handleCanvasTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
     e.stopPropagation();
     if (e.cancelable) e.preventDefault();
-    if (!isDrawing || !startPoint) return;
     if (e.touches.length === 0) return;
     const touch = e.touches[0];
     const coords = getRelativeCoords(touch.clientX, touch.clientY);
+    if (mode === 'divider') {
+      setHoverPoint(coords);
+    }
+    if (!isDrawing || !startPoint) return;
     setActivePoint(coords);
   };
 
   const handleCanvasTouchEnd = (e?: React.TouchEvent<HTMLDivElement>) => {
-    if (e) e.stopPropagation();
+    if (e) {
+      e.stopPropagation();
+      if (e.cancelable) e.preventDefault();
+    }
     if (!isDrawing || !startPoint || !activePoint) return;
     setIsDrawing(false);
     const dx = Math.abs(activePoint.x - startPoint.x);
@@ -1509,7 +1565,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
         };
       }
       if (newAnn) {
-        pushToHistoryAndSave([...annotations, newAnn]);
+        pushToHistoryAndSave([...annotationsRef.current, newAnn]);
       }
     }
     setStartPoint(null);
@@ -1913,70 +1969,6 @@ export const StockCardVisualizer: React.FC<Props> = ({
         <Share2 className="w-2.5 h-2.5 sm:w-3.5 sm:h-3.5" />
       </button>
 
-      <div 
-        className={`flex flex-wrap sm:flex-wrap items-center justify-center sm:justify-center gap-1 sm:gap-1.5 mb-2 shrink-0 select-none cursor-pointer w-full ${hasActiveStrategy ? "pl-[36px] sm:pl-[54px]" : ""}`}
-        onDoubleClick={onRatingBarDoubleClick}
-        onTouchEnd={(e) => {
-          const now = Date.now();
-          const lastTap = (e.currentTarget as any).dataset.lastTap || 0;
-          if (now - lastTap < 300) {
-            onRatingBarDoubleClick?.(e);
-          }
-          (e.currentTarget as any).dataset.lastTap = now;
-        }}
-      >
-        <div className="flex items-center border border-zinc-200 rounded overflow-hidden h-4 sm:h-5 bg-zinc-50/80 shrink-0">
-          <div className="px-1 sm:px-1.5 h-full flex items-center border-r border-zinc-200">
-            <span className="text-[9px] sm:text-[10px] font-black text-zinc-600">
-              ★ {ratingVal}
-            </span>
-          </div>
-          <div className="px-1 sm:px-1.5 h-full flex items-center border-r border-zinc-200">
-            <span className="text-[9px] sm:text-[10px] font-black text-zinc-600">
-              Q {qualityVal}
-            </span>
-          </div>
-          <div className="px-1 sm:px-1.5 h-full flex items-center border-r border-zinc-200">
-            <span className="text-[9px] sm:text-[10px] font-black text-zinc-600">
-              V {valueVal}
-            </span>
-          </div>
-          <div className="px-1 sm:px-1.5 h-full flex items-center border-r border-zinc-200">
-            <span className="text-[9px] sm:text-[10px] font-black text-zinc-600">
-              B {buyVal}
-            </span>
-          </div>
-          <div className="px-1 sm:px-1.5 h-full flex items-center border-r border-zinc-200">
-            <span className="text-[9px] sm:text-[10px] font-black text-zinc-600">
-              S {sellVal}
-            </span>
-          </div>
-          <div className="px-1 sm:px-1.5 h-full flex items-center border-none">
-            <span className="text-[9px] sm:text-[10px] font-black text-zinc-600">
-              C {crashVal}
-            </span>
-          </div>
-        </div>
-
-        <div className="flex items-center border border-zinc-200 rounded overflow-hidden h-4 sm:h-5 bg-zinc-50/80 shrink-0">
-          <div className="px-1 sm:px-1.5 h-full flex items-center border-r border-zinc-200 text-zinc-600">
-            <span className="text-[9px] sm:text-[10px] font-black">
-              {volatility || "中等"}
-            </span>
-          </div>
-          <div className="px-1 sm:px-1.5 h-full flex items-center border-r border-zinc-200 text-zinc-600" title="Positive Value">
-            <span className="text-[9px] sm:text-[10px] font-black">
-              P+ {posValue}
-            </span>
-          </div>
-          <div className="px-1 sm:px-1.5 h-full flex items-center text-zinc-600" title="Negative Value">
-            <span className="text-[9px] sm:text-[10px] font-black">
-              N- {negValue}
-            </span>
-          </div>
-        </div>
-      </div>
-
       {/* Chart container */}
       <div
         ref={canvasRef}
@@ -1984,7 +1976,15 @@ export const StockCardVisualizer: React.FC<Props> = ({
       >
         <div className="absolute top-2 left-2.5 right-2 flex items-center justify-between z-20 pointer-events-none select-none">
           {stockName && (
-            <div className="font-extrabold text-base sm:text-2xl tracking-tighter leading-none text-zinc-900 shrink-0">
+            <div 
+              className="font-extrabold text-base sm:text-2xl tracking-tighter leading-none text-zinc-900 shrink-0 pointer-events-auto cursor-pointer hover:opacity-80 transition-opacity"
+              onTouchStart={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenActionSettings?.();
+              }}
+              title="開啟操作設定對話窗"
+            >
               {stockName}
             </div>
           )}
@@ -2097,6 +2097,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
               { hex: '#10b981', id: 'arrow-10b981' },
               { hex: '#facc15', id: 'arrow-facc15' },
               { hex: '#3b82f6', id: 'arrow-3b82f6' },
+              { hex: '#000000', id: 'arrow-000000' },
               { hex: '#ffffff', id: 'arrow-ffffff' }
             ].map((m) => (
               <marker
@@ -2287,7 +2288,8 @@ export const StockCardVisualizer: React.FC<Props> = ({
           {/* Render Vector-Scalable Drawing Annotations */}
           {annotations.map((ann) => {
             if (ann.type === 'line' || ann.type === 'arrow') {
-              const markerId = ann.type === 'arrow' ? `arrow-${ann.color.replace('#', '')}` : undefined;
+              const hexClean = (ann.color || '#000000').replace('#', '').toLowerCase();
+              const markerId = ann.type === 'arrow' ? `arrow-${hexClean}` : undefined;
               return (
                 <line
                   key={ann.id}
@@ -2309,8 +2311,8 @@ export const StockCardVisualizer: React.FC<Props> = ({
                   }`}
                   style={
                     mode === 'eraser' || mode === 'move'
-                      ? { strokeWidth: Math.max(ann.strokeWidth * 3, 12), cursor: mode === 'move' ? 'move' : 'pointer' }
-                      : undefined
+                      ? { strokeWidth: Math.max(ann.strokeWidth * 3, 16), cursor: mode === 'move' ? 'move' : 'pointer', touchAction: 'none' }
+                      : { touchAction: 'none' }
                   }
                   onClick={(e) => {
                     if (mode === 'eraser') {
@@ -2327,8 +2329,65 @@ export const StockCardVisualizer: React.FC<Props> = ({
                   onTouchStart={(e) => {
                     if (mode === 'move') {
                       e.stopPropagation();
+                      if (e.cancelable) e.preventDefault();
                       const touch = e.touches[0];
                       handleDragStart(ann, touch.clientX, touch.clientY);
+                    } else if (mode === 'eraser') {
+                      e.stopPropagation();
+                      if (e.cancelable) e.preventDefault();
+                      handleDeleteAnnotation(ann.id);
+                    }
+                  }}
+                />
+              );
+            }
+            if (ann.type === 'divider') {
+              const dividerY = ann.y ?? ann.y1 ?? 0;
+              return (
+                <line
+                  key={ann.id}
+                  x1="0"
+                  y1={dividerY}
+                  x2="100"
+                  y2={dividerY}
+                  stroke={ann.color}
+                  strokeWidth={ann.strokeWidth}
+                  vectorEffect="non-scaling-stroke"
+                  opacity={mode === 'eraser' || mode === 'move' ? "0.75" : "0.85"}
+                  className={`pointer-events-auto transition-all ${
+                    mode === 'eraser'
+                      ? 'cursor-pointer hover:stroke-red-500 hover:opacity-100 transition-all duration-150 [stroke-dasharray:none]'
+                      : mode === 'move'
+                      ? 'cursor-move hover:stroke-amber-400 hover:opacity-100 transition-all duration-150'
+                      : ''
+                  }`}
+                  style={
+                    mode === 'eraser' || mode === 'move'
+                      ? { strokeWidth: Math.max(ann.strokeWidth * 3, 16), cursor: mode === 'move' ? 'move' : 'pointer', touchAction: 'none' }
+                      : { touchAction: 'none' }
+                  }
+                  onClick={(e) => {
+                    if (mode === 'eraser') {
+                      e.stopPropagation();
+                      handleDeleteAnnotation(ann.id);
+                    }
+                  }}
+                  onMouseDown={(e) => {
+                    if (mode === 'move') {
+                      e.stopPropagation();
+                      handleDragStart(ann, e.clientX, e.clientY);
+                    }
+                  }}
+                  onTouchStart={(e) => {
+                    if (mode === 'move') {
+                      e.stopPropagation();
+                      if (e.cancelable) e.preventDefault();
+                      const touch = e.touches[0];
+                      handleDragStart(ann, touch.clientX, touch.clientY);
+                    } else if (mode === 'eraser') {
+                      e.stopPropagation();
+                      if (e.cancelable) e.preventDefault();
+                      handleDeleteAnnotation(ann.id);
                     }
                   }}
                 />
@@ -2356,8 +2415,8 @@ export const StockCardVisualizer: React.FC<Props> = ({
                   }`}
                   style={
                     mode === 'eraser' || mode === 'move'
-                      ? { strokeWidth: Math.max(ann.strokeWidth * 3, 12), cursor: mode === 'move' ? 'move' : 'pointer' }
-                      : undefined
+                      ? { strokeWidth: Math.max(ann.strokeWidth * 3, 16), cursor: mode === 'move' ? 'move' : 'pointer', touchAction: 'none' }
+                      : { touchAction: 'none' }
                   }
                   onClick={(e) => {
                     if (mode === 'eraser') {
@@ -2374,8 +2433,13 @@ export const StockCardVisualizer: React.FC<Props> = ({
                   onTouchStart={(e) => {
                     if (mode === 'move') {
                       e.stopPropagation();
+                      if (e.cancelable) e.preventDefault();
                       const touch = e.touches[0];
                       handleDragStart(ann, touch.clientX, touch.clientY);
+                    } else if (mode === 'eraser') {
+                      e.stopPropagation();
+                      if (e.cancelable) e.preventDefault();
+                      handleDeleteAnnotation(ann.id);
                     }
                   }}
                 />
@@ -2407,7 +2471,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
               y2={activePoint.y}
               stroke={activeColor}
               strokeWidth={activeThickness}
-              markerEnd={`url(#arrow-${activeColor.replace('#', '')})`}
+              markerEnd={`url(#arrow-${(activeColor || '#000000').replace('#', '').toLowerCase()})`}
               vectorEffect="non-scaling-stroke"
               opacity="0.9"
             />
@@ -2427,6 +2491,21 @@ export const StockCardVisualizer: React.FC<Props> = ({
               opacity="0.9"
             />
           )}
+
+          {mode === 'divider' && hoverPoint && (
+            <line
+              x1="0"
+              y1={hoverPoint.y}
+              x2="100"
+              y2={hoverPoint.y}
+              stroke={activeColor}
+              strokeWidth={activeThickness}
+              strokeDasharray="4 4"
+              vectorEffect="non-scaling-stroke"
+              opacity="0.8"
+              className="pointer-events-none"
+            />
+          )}
         </svg>
 
         {/* Floating Drawing interaction canvas handler overlay */}
@@ -2436,6 +2515,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
             onMouseDown={handleCanvasMouseDown}
             onMouseMove={handleCanvasMouseMove}
             onMouseUp={handleCanvasMouseUp}
+            onMouseLeave={() => setHoverPoint(null)}
             onTouchStart={handleCanvasTouchStart}
             onTouchMove={handleCanvasTouchMove}
             onTouchEnd={handleCanvasTouchEnd}
@@ -2449,12 +2529,13 @@ export const StockCardVisualizer: React.FC<Props> = ({
           <form
             onSubmit={handleTextSubmit}
             style={{
-              left: `${inputCoords.x}%`,
-              top: `${inputCoords.y}%`,
+              left: `${Math.min(75, Math.max(10, inputCoords.x))}%`,
+              top: `${Math.min(85, Math.max(12, inputCoords.y))}%`,
             }}
-            className="absolute z-50 -translate-y-1/2 flex items-center gap-1"
+            className="absolute z-50 -translate-y-1/2 flex items-center gap-1.5 max-w-[92%]"
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
           >
             <input
               autoFocus
@@ -2463,9 +2544,15 @@ export const StockCardVisualizer: React.FC<Props> = ({
               onChange={(e) => setInputText(e.target.value)}
               onBlur={() => handleTextSubmit()}
               placeholder="輸入備註文字..."
-              className="bg-black/95 border border-white/20 text-white rounded px-2 py-1 outline-none shadow-2xl min-w-[120px] focus:ring-1 focus:ring-blue-500 font-black leading-none"
-              style={{ color: activeColor, fontSize: `${activeFontSize}px` }}
+              className="bg-black/95 border border-white/30 text-white rounded-lg px-2.5 py-1.5 outline-none shadow-2xl min-w-[120px] max-w-[190px] sm:max-w-[280px] focus:ring-2 focus:ring-blue-500 font-black leading-none text-xs sm:text-sm"
+              style={{ color: activeColor }}
             />
+            <button
+              type="submit"
+              className="px-2 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] sm:text-xs rounded-lg shadow-md shrink-0 cursor-pointer"
+            >
+              確定
+            </button>
           </form>
         )}
 
@@ -2590,12 +2677,13 @@ export const StockCardVisualizer: React.FC<Props> = ({
                     color: ann.color,
                     transform: "translate(-50%, -50%)",
                     fontSize: `${ann.fontSize || 12}px`,
+                    touchAction: 'none',
                   }}
                   className={`absolute z-40 font-black tracking-wide whitespace-nowrap drop-shadow-[0_1.5px_2px_rgba(0,0,0,1)] select-none pointer-events-auto transition-all ${
                     mode === 'eraser'
-                      ? 'cursor-pointer hover:text-red-500 hover:scale-110 active:scale-90 bg-red-500/10 px-1 rounded border border-dashed border-red-500/30'
+                      ? 'cursor-pointer hover:text-red-500 hover:scale-110 active:scale-90 bg-red-500/10 px-1.5 py-0.5 rounded border border-dashed border-red-500/40'
                       : mode === 'move'
-                      ? 'cursor-move hover:text-amber-400 hover:scale-105 bg-amber-500/10 px-1 rounded border border-dashed border-amber-500/30'
+                      ? 'cursor-move hover:text-amber-400 hover:scale-105 bg-amber-500/10 px-1.5 py-0.5 rounded border border-dashed border-amber-500/40'
                       : ''
                   }`}
                   onClick={(e) => {
@@ -2613,8 +2701,13 @@ export const StockCardVisualizer: React.FC<Props> = ({
                   onTouchStart={(e) => {
                     if (mode === 'move') {
                       e.stopPropagation();
+                      if (e.cancelable) e.preventDefault();
                       const touch = e.touches[0];
                       handleDragStart(ann, touch.clientX, touch.clientY);
+                    } else if (mode === 'eraser') {
+                      e.stopPropagation();
+                      if (e.cancelable) e.preventDefault();
+                      handleDeleteAnnotation(ann.id);
                     }
                   }}
                 >
@@ -2635,16 +2728,26 @@ export const StockCardVisualizer: React.FC<Props> = ({
                   left: `${center.x}%`,
                   top: `${center.y}%`,
                   transform: 'translate(-50%, -50%)',
+                  touchAction: 'none',
                 }}
-                className="absolute z-[45] pointer-events-auto group/del"
+                className="absolute z-[45] pointer-events-auto group/del p-1 cursor-pointer"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDeleteAnnotation(ann.id);
+                }}
+                onTouchStart={(e) => {
+                  e.stopPropagation();
+                  if (e.cancelable) e.preventDefault();
+                  handleDeleteAnnotation(ann.id);
+                }}
               >
-                {/* Micro circle representing annotation target anchor, colored according to style */}
+                {/* Micro circle representing annotation target anchor */}
                 <div 
-                  className="w-1.5 h-1.5 rounded-full border border-black/50 shadow shadow-black flex items-center justify-center transition-all duration-200 cursor-pointer group-hover/del:scale-125 bg-white/20" 
+                  className="w-2.5 h-2.5 sm:w-1.5 sm:h-1.5 rounded-full border border-black/50 shadow shadow-black flex items-center justify-center transition-all duration-200 cursor-pointer group-hover/del:scale-125 bg-white/30" 
                   style={{ backgroundColor: ann.color }}
                 />
                 
-                {/* Deletion handle triggers on hover */}
+                {/* Deletion handle triggers on hover or tap */}
                 <button
                   type="button"
                   onClick={(e) => {
@@ -2883,8 +2986,8 @@ export const StockCardVisualizer: React.FC<Props> = ({
         </div>
 
         {/* Row 2: Drawing Toolbar */}
-        <div className="flex justify-center w-full mt-0.5">
-          <div className="flex items-center gap-0 sm:gap-0.5 p-[2px] px-0.5 sm:px-1 bg-white/40 border border-zinc-200/80 backdrop-blur-md rounded-md shadow-none shrink-0">
+        <div className="flex justify-start sm:justify-center w-full mt-0.5 overflow-x-auto max-w-full [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] py-0.5 px-0.5">
+          <div className="flex items-center gap-0 sm:gap-0.5 p-[2px] px-1 sm:px-1 bg-white/60 border border-zinc-200/90 backdrop-blur-md rounded-lg sm:rounded-md shadow-none shrink-0">
             {/* Cursor Interactive Mode Button */}
             <button
               type="button"
@@ -2925,6 +3028,16 @@ export const StockCardVisualizer: React.FC<Props> = ({
               className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'line' ? 'bg-zinc-900/15 text-zinc-950 font-bold ring-1 ring-zinc-200' : 'text-zinc-700 hover:text-zinc-950 hover:bg-zinc-900/5'}`}
             >
               <Minus className="w-3 h-3 sm:w-3 sm:h-3" />
+            </button>
+
+            {/* Divider Horizontal Line Mode Button */}
+            <button
+              type="button"
+              title="水平線 Divider (點擊卡片任何位置劃出全幅水平線)"
+              onClick={() => { setMode('divider'); setInputCoords(null); }}
+              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'divider' ? 'bg-zinc-900/15 text-zinc-950 font-bold ring-1 ring-zinc-200' : 'text-zinc-700 hover:text-zinc-950 hover:bg-zinc-900/5'}`}
+            >
+              <SeparatorHorizontal className="w-3 h-3 sm:w-3 sm:h-3" />
             </button>
 
             {/* Arrow Mode Button */}
@@ -3030,33 +3143,49 @@ export const StockCardVisualizer: React.FC<Props> = ({
               <div className="flex sm:hidden items-center relative">
                 <button
                   type="button"
-                  className="w-2.5 h-2.5 rounded-full border border-zinc-400 shadow-sm"
+                  className="w-3.5 h-3.5 rounded-full border border-zinc-400 shadow-sm p-0.5 flex items-center justify-center cursor-pointer"
                   style={{ backgroundColor: activeColor }}
-                  onClick={() => setIsMobileColorOpen(!isMobileColorOpen)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsMobileColorOpen(!isMobileColorOpen);
+                  }}
                 />
                 
                 {isMobileColorOpen && (
-                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-white border border-zinc-200 rounded-lg p-1.5 shadow-2xl flex flex-col gap-2 z-[100]">
-                    {[
-                      { hex: '#ef4444', name: '止損紅' },
-                      { hex: '#10b981', name: '止盈綠' },
-                      { hex: '#facc15', name: '關鍵黃' },
-                      { hex: '#3b82f6', name: '系統藍' },
-                      { hex: '#000000', name: '亮色黑' }
-                    ].map((col) => (
-                      <button
-                        key={col.hex}
-                        type="button"
-                        title={col.name}
-                        onClick={() => {
-                          setActiveColor(col.hex);
-                          setIsMobileColorOpen(false);
-                        }}
-                        style={{ backgroundColor: col.hex }}
-                        className={`w-4 h-4 rounded-full border border-black/30 transition-transform ${activeColor === col.hex ? 'scale-110 ring-2 ring-zinc-400' : 'opacity-85 hover:opacity-100'}`}
-                      />
-                    ))}
-                  </div>
+                  <>
+                    <div 
+                      className="fixed inset-0 z-[99]" 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsMobileColorOpen(false);
+                      }} 
+                    />
+                    <div 
+                      onClick={(e) => e.stopPropagation()}
+                      className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-white/95 backdrop-blur-md border border-zinc-200 rounded-xl p-1.5 shadow-2xl flex flex-row items-center gap-2 z-[100]"
+                    >
+                      {[
+                        { hex: '#ef4444', name: '止損紅' },
+                        { hex: '#10b981', name: '止盈綠' },
+                        { hex: '#facc15', name: '關鍵黃' },
+                        { hex: '#3b82f6', name: '系統藍' },
+                        { hex: '#000000', name: '亮色黑' }
+                      ].map((col) => (
+                        <button
+                          key={col.hex}
+                          type="button"
+                          title={col.name}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveColor(col.hex);
+                            setIsMobileColorOpen(false);
+                          }}
+                          style={{ backgroundColor: col.hex }}
+                          className={`w-5 h-5 rounded-full border border-black/30 transition-transform ${activeColor === col.hex ? 'scale-110 ring-2 ring-zinc-400' : 'opacity-85'}`}
+                        />
+                      ))}
+                    </div>
+                  </>
                 )}
               </div>
             </div>
@@ -3081,7 +3210,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
 
       {showExportModal && (
         <div 
-          className="absolute inset-0 bg-white/60 backdrop-blur-md border border-zinc-200/80 z-[200] flex flex-col items-center justify-center p-4 rounded-xl animate-fadeIn pointer-events-auto select-none"
+          className="absolute inset-0 bg-white/70 backdrop-blur-md border border-zinc-200/80 z-[200] flex flex-col items-center justify-center p-4 rounded-xl animate-fadeIn pointer-events-auto select-none overflow-y-auto max-h-full"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Close button in top right */}
@@ -3092,7 +3221,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
             ✕
           </button>
           
-          <div className="w-full max-w-sm flex flex-col text-center">
+          <div className="w-full max-w-sm flex flex-col text-center my-auto py-2">
             {/* Title */}
             <div className="flex justify-center items-center gap-2 mb-1">
               <Share2 className="w-5 h-5 text-indigo-600" />

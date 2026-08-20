@@ -34,16 +34,16 @@ export interface StockTab {
   plannedBuyQty?: number;
   stopLossPrice?: number;
   takeProfitPrice?: number;
-  averagingRows?: { price: string; quantity: string; bought?: boolean; riskFlag?: boolean }[];
+  averagingRows?: { price: string; quantity: string; quantity2?: string; bought?: boolean; riskFlag?: boolean }[];
   refPnLPoint?: number | string;
   includeCurrentHolding?: boolean;
-  averagingRowsSys2?: { price: string; quantity: string; bought?: boolean; riskFlag?: boolean }[];
+  averagingRowsSys2?: { price: string; quantity: string; quantity2?: string; bought?: boolean; riskFlag?: boolean }[];
   refPnLPointSys2?: number | string;
 }
 
 export interface ChartAnnotation {
   id: string;
-  type: 'box' | 'text' | 'line' | 'arrow';
+  type: 'box' | 'text' | 'line' | 'arrow' | 'divider';
   color: string;
   strokeWidth: number;
   x1?: number;

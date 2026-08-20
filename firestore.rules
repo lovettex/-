@@ -72,8 +72,7 @@ service cloud.firestore {
 
     // Validation for StrategyConfig
     function isValidStrategyConfig(data) {
-      return data.keys().hasAll(['updatedAt'])
-        && (data.updatedAt is timestamp || data.updatedAt == request.time)
+      return ( !('updatedAt' in data) || data.updatedAt is timestamp || data.updatedAt == request.time )
         && ( !('entries' in data) || data.entries is list )
         && ( !('resistanceZones' in data) || data.resistanceZones is list )
         && ( !('supportZones' in data) || data.supportZones is list )
@@ -87,14 +86,26 @@ service cloud.firestore {
         && ( !('slConditions' in data) || data.slConditions is string )
         && ( !('strategyNotes' in data) || data.strategyNotes is string )
         && ( !('operationNote' in data) || data.operationNote is string )
+        && ( !('operationFocus' in data) || data.operationFocus is string )
+        && ( !('tpChecked' in data) || data.tpChecked is bool )
+        && ( !('slChecked' in data) || data.slChecked is bool )
+        && ( !('addChecked' in data) || data.addChecked is bool )
+        && ( !('closeChecked' in data) || data.closeChecked is bool )
+        && ( !('observeChecked' in data) || data.observeChecked is bool )
+        && ( !('notesHighlighted' in data) || data.notesHighlighted is bool )
+        && ( !('buyPercentage' in data) || data.buyPercentage is number || data.buyPercentage is string )
+        && ( !('refPnLPoint' in data) || data.refPnLPoint is number || data.refPnLPoint is string )
+        && ( !('refPnLPointSys2' in data) || data.refPnLPointSys2 is number || data.refPnLPointSys2 is string )
+        && ( !('includeCurrentHolding' in data) || data.includeCurrentHolding is bool )
+        && ( !('averagingRows' in data) || data.averagingRows is list )
+        && ( !('averagingRowsSys2' in data) || data.averagingRowsSys2 is list )
         && ( !('tags' in data) || data.tags is list )
         && ( !('id' in data) || data.id is string );
     }
 
     // Validation for DailyReport
     function isValidDailyReport(data) {
-      return data.keys().hasAll(['updatedAt'])
-        && (data.updatedAt is timestamp || data.updatedAt == request.time)
+      return ( !('updatedAt' in data) || data.updatedAt is timestamp || data.updatedAt == request.time )
         && ( !('pdfUrl1' in data) || (data.pdfUrl1 is string && data.pdfUrl1.size() <= 2000) )
         && ( !('pdfUrl2' in data) || (data.pdfUrl2 is string && data.pdfUrl2.size() <= 2000) );
     }
@@ -121,8 +132,9 @@ service cloud.firestore {
 
     // Validation for UserSettings
     function isValidUserSettings(data) {
-      return data.keys().hasAll(['totalCapital'])
-        && data.totalCapital is number && data.totalCapital >= 0
+      return ( !('totalCapital' in data) || (data.totalCapital is number && data.totalCapital >= 0) )
+        && ( !('virtualCapital' in data) || (data.virtualCapital is number && data.virtualCapital >= 0) )
+        && ( !('bankAccountBalance' in data) || (data.bankAccountBalance is number && data.bankAccountBalance >= 0) )
         && ( !('updatedAt' in data) || data.updatedAt is timestamp || data.updatedAt == request.time );
     }
 

@@ -443,13 +443,13 @@ export default function ChipAnalysisTab({ tabId, symbol }: { tabId: string; symb
                     key={stg.key}
                     id={`checkbox-${stg.key}`}
                     onClick={() => handleStageToggle(stg.key as keyof typeof data.stage)}
-                    className={`flex items-center justify-center gap-1.5 py-2 px-1.5 rounded-xl border text-xs font-bold transition-all ${
+                    className={`flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl border text-xs font-bold transition-all ${
                       isChecked 
-                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 shadow-md' 
-                        : 'bg-zinc-50 border-zinc-200/50 text-zinc-400 hover:border-zinc-205 hover:text-zinc-500'
+                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-800 shadow-md' 
+                        : 'bg-zinc-50 border-zinc-200/50 text-zinc-500 hover:border-zinc-300 hover:text-zinc-700'
                     }`}
                   >
-                    <CheckCircle2 className={`w-3.5 h-3.5 transition-all ${isChecked ? 'scale-100 text-emerald-705 font-bold' : 'scale-0 text-transparent opacity-0 w-0'}`} />
+                    <CheckCircle2 className={`w-3.5 h-3.5 transition-all ${isChecked ? 'scale-100 text-emerald-600' : 'scale-0 text-transparent opacity-0 w-0'}`} />
                     <span>{stg.label}</span>
                   </button>
                 );
@@ -458,49 +458,49 @@ export default function ChipAnalysisTab({ tabId, symbol }: { tabId: string; symb
           </div>
 
           {/* Quick analysis details badges */}
-          <div id="analysis-badges-grid" className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div id="analysis-badges-grid" className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
             {/* Signal Badge Card */}
-            <div className="p-4 rounded-xl bg-zinc-50 border border-zinc-205 space-y-2 flex flex-col justify-between">
-              <span className="text-[11px] font-bold text-zinc-400 font-semibold flex items-center gap-1">K線技術型態信號</span>
+            <div className="p-4 rounded-xl bg-zinc-50 border border-zinc-200 space-y-2 flex flex-col justify-between shadow-xs">
+              <span className="text-[11px] font-bold text-zinc-500 flex items-center gap-1">K線技術型態信號</span>
               <div className="flex items-center gap-2">
                 <span className={`px-2.5 py-1 text-xs font-black rounded-lg border ${getSignalColor(data.signalType)}`}>
                   {data.signalType}
                 </span>
-                <span className="text-[10px] text-zinc-500 line-clamp-2 leading-tight">
+                <span className="text-[11px] text-zinc-600 line-clamp-2 leading-tight">
                   {data.signalExplanation || '尚未掃描'}
                 </span>
               </div>
             </div>
 
             {/* Warnings Badge Card */}
-            <div className="p-4 rounded-xl bg-zinc-50 border border-zinc-205 space-y-2 flex flex-col justify-between">
-              <span className="text-[11px] font-bold text-zinc-400 font-semibold flex items-center gap-1">
-                <AlertTriangle className="w-3 h-3 text-rose-700 font-bold" /> 趨勢偏離/暴跌警告
+            <div className="p-4 rounded-xl bg-zinc-50 border border-zinc-200 space-y-2 flex flex-col justify-between shadow-xs">
+              <span className="text-[11px] font-bold text-zinc-500 flex items-center gap-1">
+                <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" /> 趨勢偏離/暴跌警告
               </span>
               <div className="flex items-center gap-2">
                 <span className={`px-2 py-0.5 text-[10px] font-black rounded border whitespace-nowrap ${getWarningBadgeColor(data.warnings.type)}`}>
                   {data.warnings.type || '無'}
                 </span>
-                <span className="text-[10px] text-zinc-500 line-clamp-2 leading-tight">
+                <span className="text-[11px] text-zinc-600 line-clamp-2 leading-tight">
                   {data.warnings.details || '安全無虞。'}
                 </span>
               </div>
             </div>
 
             {/* Micro Candlestick Badge Card */}
-            <div className="p-4 rounded-xl bg-zinc-50 border border-zinc-205 space-y-2 flex flex-col justify-between">
-              <span className="text-[11px] font-bold text-zinc-400 font-semibold flex items-center gap-1">
+            <div className="p-4 rounded-xl bg-zinc-50 border border-zinc-200 space-y-2 flex flex-col justify-between shadow-xs">
+              <span className="text-[11px] font-bold text-zinc-500 flex items-center gap-1">
                 十字星 / 影線強力支撐
               </span>
               <div className="flex items-center gap-2">
                 <span className={`px-2 py-0.5 text-[10px] font-black rounded border whitespace-nowrap ${
                   data.candlestickSupport.hasSupport 
-                    ? 'bg-emerald-500/10 text-emerald-705 font-bold border-emerald-500/30' 
-                    : 'bg-zinc-50 text-zinc-400 font-semibold border-zinc-205'
+                    ? 'bg-emerald-500/10 text-emerald-700 border-emerald-500/30 font-bold' 
+                    : 'bg-zinc-50 text-zinc-400 font-semibold border-zinc-200'
                 }`}>
                   {data.candlestickSupport.type || '無'}
                 </span>
-                <span className="text-[10px] text-zinc-500 line-clamp-2 leading-tight">
+                <span className="text-[11px] text-zinc-600 line-clamp-2 leading-tight">
                   {data.candlestickSupport.details || '無。'}
                 </span>
               </div>
@@ -509,20 +509,20 @@ export default function ChipAnalysisTab({ tabId, symbol }: { tabId: string; symb
 
           {/* Technical pattern and layout details text areas */}
           <div id="narrative-analysis-box" className="space-y-4">
-            <div className="p-5 rounded-2xl bg-zinc-50/80 border border-zinc-205 space-y-3">
-              <h3 className="text-zinc-850 font-bold text-sm leading-none flex items-center gap-1.5 border-b border-zinc-200/50 pb-2">
-                <FileText className="w-4 h-4 text-emerald-705 font-bold" /> 技術與籌碼型態說明
+            <div className="p-4 sm:p-5 rounded-2xl bg-zinc-50/80 border border-zinc-200 space-y-3 shadow-xs">
+              <h3 className="text-zinc-900 font-bold text-sm leading-none flex items-center gap-1.5 border-b border-zinc-200/60 pb-2">
+                <FileText className="w-4 h-4 text-emerald-600 shrink-0" /> 技術與籌碼型態說明
               </h3>
-              <div id="pattern-explanation-details" className="text-xs text-zinc-650 font-medium leading-relaxed max-h-[140px] overflow-y-auto whitespace-pre-wrap pr-1">
+              <div id="pattern-explanation-details" className="text-xs text-zinc-700 leading-relaxed max-h-[160px] overflow-y-auto whitespace-pre-wrap pr-1">
                 {data.patternExplanation || '尚未分析。請上傳並掃描股票主產圖或走勢圖。'}
               </div>
             </div>
 
-            <div className="p-5 rounded-2xl bg-emerald-500/5 border border-emerald-500/10 space-y-3">
-              <h3 className="text-emerald-705 font-bold font-bold text-sm leading-none flex items-center gap-1.5 border-b border-emerald-500/10 pb-2">
-                <UserCheck className="w-4 h-4 text-emerald-705 font-bold" /> 散戶應對策略與操作建議
+            <div className="p-4 sm:p-5 rounded-2xl bg-emerald-50/70 border border-emerald-200/80 space-y-3 shadow-xs">
+              <h3 className="text-emerald-800 font-bold text-sm leading-none flex items-center gap-1.5 border-b border-emerald-200 pb-2">
+                <UserCheck className="w-4 h-4 text-emerald-600 shrink-0" /> 散戶應對策略與操作建議
               </h3>
-              <div id="retail-action-details" className="text-xs text-emerald-200/80 leading-relaxed max-h-[140px] overflow-y-auto whitespace-pre-wrap pr-1">
+              <div id="retail-action-details" className="text-xs text-emerald-950 font-medium leading-relaxed max-h-[160px] overflow-y-auto whitespace-pre-wrap pr-1">
                 {data.actionSuggestions || '尚未提供。掃描成功後，此處將顯示專業級防守建倉操作策略。'}
               </div>
             </div>

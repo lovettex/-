@@ -94,13 +94,13 @@ const DockItem: React.FC<DockItemProps> = ({
         onSelect(tab.id);
         playClickSound();
       }}
-      className="relative flex items-center justify-start py-1.5 pl-8 pr-4 min-w-[120px] cursor-pointer h-10 select-none"
+      className="relative flex items-center justify-start py-2 sm:py-1.5 pl-7 sm:pl-8 pr-4 min-w-[110px] sm:min-w-[120px] cursor-pointer h-11 sm:h-10 select-none active:bg-white/5 transition-colors rounded-lg touch-manipulation"
     >
       {/* Minimal Red Accent Vertical Left Indicator */}
       {isIndicatorActive && (
         <motion.div
           layoutId="cinemaActiveBar"
-          className="absolute left-3 top-2 bottom-2 w-[3px] bg-[#e5484d] rounded-sm shadow-[0_0_8px_rgba(229,72,77,0.7)] z-10"
+          className="absolute left-2.5 sm:left-3 top-2 bottom-2 w-[3px] bg-[#e5484d] rounded-sm shadow-[0_0_8px_rgba(229,72,77,0.7)] z-10"
           transition={{ type: "spring", stiffness: 350, damping: 30 }}
         />
       )}
@@ -116,7 +116,7 @@ const DockItem: React.FC<DockItemProps> = ({
         className="w-full flex items-center justify-start"
       >
         <span
-          className={`font-sans text-[16px] tracking-wider font-bold uppercase transition-colors duration-150 ${
+          className={`font-sans text-[15px] sm:text-[16px] tracking-wider font-bold uppercase transition-colors duration-150 ${
             isSelected ? "text-white" : "text-white/40 hover:text-white/85"
           }`}
         >
@@ -143,6 +143,17 @@ export const CinemaDock: React.FC<CinemaDockProps> = ({ tabs, activeId, onSelect
     setHoveredId(null);
   };
 
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length > 0) {
+      mouseY.set(e.touches[0].clientY);
+    }
+  };
+
+  const handleTouchEnd = () => {
+    mouseY.set(Infinity);
+    setHoveredId(null);
+  };
+
   // If hovering, indicator follows the hovered item. Otherwise, it snaps back to activeId.
   const activeIndicatorId = hoveredId || activeId;
 
@@ -151,7 +162,9 @@ export const CinemaDock: React.FC<CinemaDockProps> = ({ tabs, activeId, onSelect
       <div
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
-        className="flex flex-col items-start gap-3.5 py-6 relative z-50 w-full"
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        className="flex flex-col items-start gap-1 sm:gap-3.5 py-2 sm:py-6 relative z-50 w-full"
       >
         {tabs.map((tab) => {
           const isSelected = tab.id === activeId;

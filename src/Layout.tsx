@@ -16,7 +16,7 @@ export default function Layout() {
     if (authLoading) {
       const timer = setTimeout(() => {
         setLoadingTimeout(true);
-      }, 3500);
+      }, 7000);
       return () => clearTimeout(timer);
     } else {
       setLoadingTimeout(false);

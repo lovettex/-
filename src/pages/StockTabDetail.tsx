@@ -14,8 +14,8 @@ import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
 import { format } from 'date-fns';
-import { Timestamp, collection, writeBatch, doc, serverTimestamp, addDoc, getDocs } from 'firebase/firestore';
-import { Trash2, BarChart3, ChevronDown, ChevronUp, Gamepad2, ShieldCheck, Upload, Download, ChevronLeft, CheckCircle2, RotateCcw, Loader2, HelpCircle, AlertTriangle, Save, Calculator, History } from 'lucide-react';
+import { Timestamp, collection, writeBatch, doc, serverTimestamp, addDoc, getDocs, deleteDoc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { Trash2, BarChart3, ChevronDown, ChevronUp, Gamepad2, ShieldCheck, Upload, Download, ChevronLeft, CheckCircle2, RotateCcw, Loader2, HelpCircle, AlertTriangle, Save, Calculator, History, RefreshCw } from 'lucide-react';
 import { toast } from "sonner";
 import { motion, AnimatePresence } from 'motion/react';
 import { db } from '../lib/firebase';
@@ -23,6 +23,7 @@ import { useAuth } from '../lib/AuthContext';
 import { safeSessionStorage } from '../lib/utils';
 import { ScrollIn, InteractiveButton, Magnetic } from '../components/MotionWrappers';
 import StrategyTab from '../components/StrategyTab';
+import { formatTimestamp, getTimestampMillis, getTimestampDate } from '../lib/dateUtils';
 import ChipAnalysisTab from '../components/ChipAnalysisTab';
 
 export default function StockTabDetail() {
@@ -70,19 +71,19 @@ export default function StockTabDetail() {
   const tradesJsonFileInputRef = React.useRef<HTMLInputElement>(null);
   const { user } = useAuth();
 
-  // 4 rows for stock averaging (System 1: -3%, -6%, -9%, -12%)
-  const [averagingRows, setAveragingRows] = useState<{ price: string; quantity: string; bought?: boolean; riskFlag?: boolean }[]>([
-    { price: '', quantity: '', bought: false, riskFlag: false },
-    { price: '', quantity: '', bought: false, riskFlag: false },
-    { price: '', quantity: '', bought: false, riskFlag: false },
-    { price: '', quantity: '', bought: false, riskFlag: false }
+  // 4 rows for stock averaging (System 1: -2%, -4%, -6%, -8%)
+  const [averagingRows, setAveragingRows] = useState<{ price: string; quantity: string; quantity2?: string; bought?: boolean; riskFlag?: boolean }[]>([
+    { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false },
+    { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false },
+    { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false },
+    { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false }
   ]);
-  // 4 rows for stock averaging (System 2: -2%, -4%, -6%, -8%)
-  const [averagingRowsSys2, setAveragingRowsSys2] = useState<{ price: string; quantity: string; bought?: boolean; riskFlag?: boolean }[]>([
-    { price: '', quantity: '', bought: false, riskFlag: false },
-    { price: '', quantity: '', bought: false, riskFlag: false },
-    { price: '', quantity: '', bought: false, riskFlag: false },
-    { price: '', quantity: '', bought: false, riskFlag: false }
+  // 4 rows for stock averaging (System 2: -3%, -6%, -9%, -12%)
+  const [averagingRowsSys2, setAveragingRowsSys2] = useState<{ price: string; quantity: string; quantity2?: string; bought?: boolean; riskFlag?: boolean }[]>([
+    { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false },
+    { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false },
+    { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false },
+    { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false }
   ]);
   const [includeCurrentHolding, setIncludeCurrentHolding] = useState(true);
   const [refPnLPoint, setRefPnLPoint] = useState('');
@@ -137,6 +138,7 @@ export default function StockTabDetail() {
           return {
             price: row?.price ?? '',
             quantity: row?.quantity ?? '',
+            quantity2: row?.quantity2 ?? '',
             bought: !!row?.bought,
             riskFlag: !!row?.riskFlag
           };
@@ -149,6 +151,7 @@ export default function StockTabDetail() {
           return {
             price: row?.price ?? '',
             quantity: row?.quantity ?? '',
+            quantity2: row?.quantity2 ?? '',
             bought: !!row?.bought,
             riskFlag: !!row?.riskFlag
           };
@@ -236,18 +239,28 @@ export default function StockTabDetail() {
     }
   }, [id, tab?.holdingStatus]);
 
-  // Keyboard shortcut handle (Shift + B) to go back to dashboard
+  // Keyboard shortcut handle (Shift + B to go back, Shift + H for fullscreen)
   React.useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      if (e.shiftKey && e.key.toUpperCase() === 'B' && !e.ctrlKey && !e.metaKey) {
-        // Only trigger if not in an input/textarea
-        const activeEl = document.activeElement;
-        const isInput = activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA';
-        
-        if (!isInput) {
-          e.preventDefault();
-          navigate('/', { state: { autoFlipTabId: id, returnStockId: id } });
+      const activeEl = document.activeElement;
+      const isInput = activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA' || activeEl?.getAttribute('contenteditable') === 'true';
+      
+      if (isInput) return;
+
+      if (e.shiftKey && e.key.toUpperCase() === 'B' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        navigate('/', { state: { autoFlipTabId: id, returnStockId: id } });
+        return;
+      }
+
+      if (e.shiftKey && e.key.toUpperCase() === 'H' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen().catch(() => {});
+        } else {
+          document.exitFullscreen().catch(() => {});
         }
+        return;
       }
     };
     window.addEventListener('keydown', handleGlobalKeyDown);
@@ -387,23 +400,109 @@ export default function StockTabDetail() {
     const curPrice = tab?.currentPrice && tab.currentPrice > 0 ? tab.currentPrice : 0;
     const base = parseFloat(calcBasePrice) || avgPrice || curPrice || 0;
     if (base > 0) {
-      const isNeg = p.startsWith('-');
-      const val = p.replace(/[\+\-%]/g, '');
+      const trimmed = p.trim();
+      const isNeg = trimmed.startsWith('-');
+      const val = trimmed.replace(/[\+\-%]/g, '').trim();
       setCalcType(isNeg ? 'SUB' : 'ADD');
       setCalcPercent(val);
       setCalcBasePrice(base.toFixed(2));
     }
   };
 
-  // Calculation of stock averaging for System 1 (-3%, -6%, -9%, -12%)
+  // 一鍵根據手動輸入的基準股價 ($) 計算結果並匯入到系統一 (-2%, -4%, -6%, -8%)
+  const handleImportBaseToSys1 = () => {
+    const base = parseFloat(calcBasePrice) || stats?.averagePrice || tab?.currentPrice || 0;
+    if (!base || base <= 0) {
+      toast.error('請先於下方「基準股價 ($)」欄位輸入或確認有效數值');
+      return;
+    }
+    playSuccessSound();
+    const p2 = (base * 0.98).toFixed(2);
+    const p4 = (base * 0.96).toFixed(2);
+    const p6 = (base * 0.94).toFixed(2);
+    const p8 = (base * 0.92).toFixed(2);
+    setAveragingRows(prev => {
+      const next = [...prev];
+      next[0] = { ...next[0], price: p2 };
+      next[1] = { ...next[1], price: p4 };
+      next[2] = { ...next[2], price: p6 };
+      next[3] = { ...next[3], price: p8 };
+      return next;
+    });
+    toast.success(`已將基準價 $${base.toFixed(2)} 依系統一階梯 (-2%, -4%, -6%, -8%) 匯入至系統一欄位`);
+  };
+
+  // 一鍵根據手動輸入的基準股價 ($) 計算結果並匯入到系統二 (-3%, -6%, -9%, -12%)
+  const handleImportBaseToSys2 = () => {
+    const base = parseFloat(calcBasePrice) || stats?.averagePrice || tab?.currentPrice || 0;
+    if (!base || base <= 0) {
+      toast.error('請先於下方「基準股價 ($)」欄位輸入或確認有效數值');
+      return;
+    }
+    playSuccessSound();
+    const p3 = (base * 0.97).toFixed(2);
+    const p6 = (base * 0.94).toFixed(2);
+    const p9 = (base * 0.91).toFixed(2);
+    const p12 = (base * 0.88).toFixed(2);
+    setAveragingRowsSys2(prev => {
+      const next = [...prev];
+      next[0] = { ...next[0], price: p3 };
+      next[1] = { ...next[1], price: p6 };
+      next[2] = { ...next[2], price: p9 };
+      next[3] = { ...next[3], price: p12 };
+      return next;
+    });
+    toast.success(`已將基準價 $${base.toFixed(2)} 依系統二階梯 (-3%, -6%, -9%, -12%) 匯入至系統二欄位`);
+  };
+
+  // 一鍵同步匯入雙系統欄位
+  const handleImportBaseToBoth = () => {
+    const base = parseFloat(calcBasePrice) || stats?.averagePrice || tab?.currentPrice || 0;
+    if (!base || base <= 0) {
+      toast.error('請先於下方「基準股價 ($)」欄位輸入或確認有效數值');
+      return;
+    }
+    playSuccessSound();
+    // 系統一: -2%, -4%, -6%, -8%
+    const p2 = (base * 0.98).toFixed(2);
+    const p4 = (base * 0.96).toFixed(2);
+    const p6 = (base * 0.94).toFixed(2);
+    const p8 = (base * 0.92).toFixed(2);
+    setAveragingRows(prev => {
+      const next = [...prev];
+      next[0] = { ...next[0], price: p2 };
+      next[1] = { ...next[1], price: p4 };
+      next[2] = { ...next[2], price: p6 };
+      next[3] = { ...next[3], price: p8 };
+      return next;
+    });
+    // 系統二: -3%, -6%, -9%, -12%
+    const p3 = (base * 0.97).toFixed(2);
+    const p6_2 = (base * 0.94).toFixed(2);
+    const p9 = (base * 0.91).toFixed(2);
+    const p12 = (base * 0.88).toFixed(2);
+    setAveragingRowsSys2(prev => {
+      const next = [...prev];
+      next[0] = { ...next[0], price: p3 };
+      next[1] = { ...next[1], price: p6_2 };
+      next[2] = { ...next[2], price: p9 };
+      next[3] = { ...next[3], price: p12 };
+      return next;
+    });
+    toast.success(`已將基準價 $${base.toFixed(2)} 同步匯入至系統一 (-2%~-8%) 與系統二 (-3%~-12%) 全部欄位！`);
+  };
+
+  // Calculation of stock averaging for System 1 (-2%, -4%, -6%, -8%)
   const calculateAveraging = () => {
     let newSharesSum = 0;
     let newCostSum = 0;
 
     averagingRows.forEach(row => {
       const p = parseFloat(row.price);
-      const q = parseFloat(row.quantity);
-      if (!isNaN(p) && p > 0 && !isNaN(q) && q > 0) {
+      const q1 = parseFloat(row.quantity) || 0;
+      const q2 = parseFloat(row.quantity2 ?? '') || 0;
+      const q = q1 + q2;
+      if (!isNaN(p) && p > 0 && q > 0) {
         newSharesSum += q;
         newCostSum += p * q;
       }
@@ -432,15 +531,17 @@ export default function StockTabDetail() {
     };
   };
 
-  // Calculation of stock averaging for System 2 (-2%, -4%, -6%, -8%)
+  // Calculation of stock averaging for System 2 (-3%, -6%, -9%, -12%)
   const calculateAveragingSys2 = () => {
     let newSharesSum = 0;
     let newCostSum = 0;
 
     averagingRowsSys2.forEach(row => {
       const p = parseFloat(row.price);
-      const q = parseFloat(row.quantity);
-      if (!isNaN(p) && p > 0 && !isNaN(q) && q > 0) {
+      const q1 = parseFloat(row.quantity) || 0;
+      const q2 = parseFloat(row.quantity2 ?? '') || 0;
+      const q = q1 + q2;
+      if (!isNaN(p) && p > 0 && q > 0) {
         newSharesSum += q;
         newCostSum += p * q;
       }
@@ -484,9 +585,9 @@ export default function StockTabDetail() {
     : null;
 
   // Four-batch transaction planning calculations
-  const totalBought = trades
-    .filter(t => t.type === 'BUY')
-    .reduce((acc, t) => acc + (t.quantity || 0), 0);
+  // 若持有數量為 0，則此分批購入的紀錄歸零
+  const currentHoldingQty = Math.max(0, stats?.totalQuantity || 0);
+  const totalBought = currentHoldingQty > 0 ? currentHoldingQty : 0;
 
   const plannedQty = parseFloat(plannedBuyQtyInput) || tab?.plannedBuyQty || 0;
   const size1 = Math.ceil(plannedQty * 0.15);
@@ -558,53 +659,46 @@ export default function StockTabDetail() {
       ? stats.averagePrice
       : (tab?.currentPrice && tab.currentPrice > 0 ? tab.currentPrice : 0);
 
-    if (batchIndex === 0 || batchIndex === 1) {
-      // 第一批 or 第二批 -> Fill System 1 Row #1 (-3%) & Row #2 (-6%), System 2 Row #1 (-2%) & Row #2 (-4%)
-      const price3 = basePrice > 0 ? (basePrice * 0.97).toFixed(2) : '';
-      const price6 = basePrice > 0 ? (basePrice * 0.94).toFixed(2) : '';
+    // 系統一階梯比例: 第一欄 -2%, 第二欄 -4%, 第三欄 -6%, 第四欄 -8%
+    const sys1Ratios = [0.98, 0.96, 0.94, 0.92];
+    const sys1PercentTexts = ['-2%', '-4%', '-6%', '-8%'];
+    // 系統二階梯比例: 第一欄 -3%, 第二欄 -6%, 第三欄 -9%, 第四欄 -12%
+    const sys2Ratios = [0.97, 0.94, 0.91, 0.88];
+    const sys2PercentTexts = ['-3%', '-6%', '-9%', '-12%'];
+
+    if (batchIndex >= 0 && batchIndex < 4) {
+      const priceSys1 = basePrice > 0 ? (basePrice * sys1Ratios[batchIndex]).toFixed(2) : '';
+      const priceSys2 = basePrice > 0 ? (basePrice * sys2Ratios[batchIndex]).toFixed(2) : '';
+
       setAveragingRows(prev => {
         const next = [...prev];
-        next[0] = { ...next[0], price: price3, quantity: halfQty.toString() };
-        next[1] = { ...next[1], price: price6, quantity: halfQty.toString() };
+        next[batchIndex] = {
+          ...next[batchIndex],
+          price: priceSys1,
+          quantity: halfQty.toString(),
+          quantity2: halfQty.toString()
+        };
         return next;
       });
 
-      const price2 = basePrice > 0 ? (basePrice * 0.98).toFixed(2) : '';
-      const price4 = basePrice > 0 ? (basePrice * 0.96).toFixed(2) : '';
       setAveragingRowsSys2(prev => {
         const next = [...prev];
-        next[0] = { ...next[0], price: price2, quantity: halfQty.toString() };
-        next[1] = { ...next[1], price: price4, quantity: halfQty.toString() };
+        next[batchIndex] = {
+          ...next[batchIndex],
+          price: priceSys2,
+          quantity: halfQty.toString(),
+          quantity2: halfQty.toString()
+        };
         return next;
       });
 
-      toast.success(`已將 ${batchName} 股數 (${batchSize}股) 平分 (${halfQty}股) 帶入系統一 (-3%/-6%) 與系統二 (-2%/-4%)`);
-    } else if (batchIndex === 2 || batchIndex === 3) {
-      // 第三批 or 第四批 -> Fill System 1 Row #3 (-9%) & Row #4 (-12%), System 2 Row #3 (-6%) & Row #4 (-8%)
-      const price9 = basePrice > 0 ? (basePrice * 0.91).toFixed(2) : '';
-      const price12 = basePrice > 0 ? (basePrice * 0.88).toFixed(2) : '';
-      setAveragingRows(prev => {
-        const next = [...prev];
-        next[2] = { ...next[2], price: price9, quantity: halfQty.toString() };
-        next[3] = { ...next[3], price: price12, quantity: halfQty.toString() };
-        return next;
-      });
-
-      const price6_2 = basePrice > 0 ? (basePrice * 0.94).toFixed(2) : '';
-      const price8 = basePrice > 0 ? (basePrice * 0.92).toFixed(2) : '';
-      setAveragingRowsSys2(prev => {
-        const next = [...prev];
-        next[2] = { ...next[2], price: price6_2, quantity: halfQty.toString() };
-        next[3] = { ...next[3], price: price8, quantity: halfQty.toString() };
-        return next;
-      });
-
-      toast.success(`已將 ${batchName} 股數 (${batchSize}股) 平分 (${halfQty}股) 帶入系統一 (-9%/-12%) 與系統二 (-6%/-8%)`);
+      toast.success(`已將 ${batchName} (${batchSize}股) 平分為 2 份 (${halfQty} + ${halfQty} 股)，帶入第 ${batchIndex + 1} 欄位：系統一 (${sys1PercentTexts[batchIndex]}) 與系統二 (${sys2PercentTexts[batchIndex]})`);
     }
   };
 
-  const isStaleData = tab.updatedAt && typeof tab.updatedAt.toDate === 'function' 
-    ? (new Date().getTime() - tab.updatedAt.toDate().getTime() > 17 * 60 * 60 * 1000)
+  const updatedAtMillis = getTimestampMillis(tab.updatedAt);
+  const isStaleData = updatedAtMillis > 0
+    ? (Date.now() - updatedAtMillis > 17 * 60 * 60 * 1000)
     : false;
 
   const handleJsonUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -732,11 +826,7 @@ export default function StockTabDetail() {
         operator: t.operator || '人',
         price: t.price,
         quantity: t.quantity,
-        tradeDate: t.tradeDate instanceof Timestamp 
-          ? t.tradeDate.toDate().toISOString() 
-          : (t.tradeDate && (t.tradeDate as any).seconds 
-             ? new Date((t.tradeDate as any).seconds * 1000).toISOString() 
-             : new Date().toISOString()),
+        tradeDate: getTimestampDate(t.tradeDate)?.toISOString() || new Date().toISOString(),
         fees: t.fees || 0,
         notes: t.notes || ''
       }));
@@ -864,6 +954,7 @@ export default function StockTabDetail() {
       playSuccessSound();
       setIsCompleteOpen(false);
       toast.success('已完成交易結算，紀錄已移至「已完成」頁籤');
+      navigate('/', { state: { returnStockId: tab.id } });
     } catch (err) {
       console.error(err);
       toast.error('完成交易失敗');
@@ -890,21 +981,56 @@ export default function StockTabDetail() {
         updatedAt: serverTimestamp(),
       });
 
-      // 2. Copy current trades to the completed snapshot tab
-      try {
-        const tradesQuery = await getDocs(collection(db, `stockTabs/${tab.id}/trades`));
+      // 2. Transfer current trades to the completed snapshot tab
+      const tradesQuery = await getDocs(collection(db, `stockTabs/${tab.id}/trades`));
+      if (!tradesQuery.empty) {
         for (const tradeDoc of tradesQuery.docs) {
           const tradeData = tradeDoc.data();
           await addDoc(collection(db, `stockTabs/${newDocRef.id}/trades`), tradeData);
         }
-      } catch (tradeErr) {
-        console.error('Error copying trades to completed tab snapshot:', tradeErr);
+      }
+
+      // 3. Copy strategy snapshot if exists
+      try {
+        const stratDoc = await getDoc(doc(db, `stockTabs/${tab.id}/strategy`, 'main'));
+        if (stratDoc.exists()) {
+          await setDoc(doc(db, `stockTabs/${newDocRef.id}/strategy`, 'main'), {
+            ...stratDoc.data(),
+            updatedAt: serverTimestamp()
+          });
+        }
+      } catch (stratErr) {
+        console.error('Error copying strategy to completed tab snapshot:', stratErr);
+      }
+
+      // 4. Delete current trades from active tab so that realized PnL, holdings, and trade count reset to 0
+      if (!tradesQuery.empty) {
+        const deletePromises = tradesQuery.docs.map((d) => deleteDoc(d.ref));
+        await Promise.all(deletePromises);
+      }
+
+      // 5. Reset finalPnL on active tab
+      await updateDoc(doc(db, 'stockTabs', tab.id), {
+        finalPnL: 0,
+        updatedAt: serverTimestamp()
+      });
+
+      // 6. Update user-scoped cached trades in sessionStorage
+      try {
+        const cachedTradesRaw = safeSessionStorage.getItem(`cached_tab_trades_v3_${user.uid}`);
+        if (cachedTradesRaw) {
+          const cachedTrades = JSON.parse(cachedTradesRaw);
+          cachedTrades[tab.id] = [];
+          safeSessionStorage.setItem(`cached_tab_trades_v3_${user.uid}`, JSON.stringify(cachedTrades));
+        }
+      } catch (e) {
+        // Safe fail
       }
 
       playSuccessSound();
       setIsCompleteOpen(false);
       setFinalPnLInput('');
-      toast.success(`已為 ${tab.symbol} 產生一筆已完成交易紀錄，卡片保留在原區塊繼續交易 🚀`);
+      toast.success(`已為 ${tab.symbol} 產生已完成交易紀錄（損益 $${pnlVal.toFixed(2)}），當前卡片籌碼與損益已歸零，可繼續記錄下一輪交易 🚀`);
     } catch (err) {
       console.error(err);
       toast.error('結算並繼續交易失敗');
@@ -1251,7 +1377,7 @@ export default function StockTabDetail() {
                     </button>
                   } 
                 />
-                <DialogContent className="glass-panel border-zinc-250 shadow-2xl bg-white text-zinc-800 max-w-md p-6 rounded-3xl">
+                <DialogContent className="glass-panel border-zinc-250 shadow-2xl bg-white text-zinc-800 w-[92vw] sm:max-w-md max-h-[90vh] overflow-y-auto p-5 sm:p-6 rounded-2xl sm:rounded-3xl">
                   <DialogHeader className="mb-1">
                     <DialogTitle className="font-extrabold text-xl text-zinc-900 flex items-center gap-2">
                       <span className="text-xl">🏆</span>
@@ -1610,7 +1736,7 @@ export default function StockTabDetail() {
                           <h4 className="font-bold text-base tracking-wide text-zinc-800">股價向下攤平試算 (雙系統對比)</h4>
                         </div>
                         <p className="text-[11px] text-zinc-500 mt-0.5">
-                          系統一採用標準 3% 遞減策略；系統二採用緊密 2% 遞減策略。輸入股價與數量可即時對比兩組攤平結果。
+                          系統一採用 2% 遞減策略；系統二採用 3% 遞減策略。輸入股價與數量可即時對比兩組攤平結果。
                         </p>
                       </div>
 
@@ -1650,7 +1776,7 @@ export default function StockTabDetail() {
                       </div>
                     </div>
 
-                    {/* Dual System Comparison Layout: Left = System 1 (-3%/-6%/-9%/-12%), Right = System 2 (-2%/-4%/-6%/-8%) */}
+                    {/* Dual System Comparison Layout: Left = System 1 (-2%/-4%/-6%/-8%), Right = System 2 (-3%/-6%/-9%/-12%) */}
                     <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
                       {/* System 1 (Left) */}
                       <div className="bg-white/90 border border-emerald-200/70 rounded-2xl p-4 shadow-2xs space-y-3.5 flex flex-col justify-between">
@@ -1660,10 +1786,10 @@ export default function StockTabDetail() {
                               <span className="text-xs font-black text-white bg-[#0F6E56] px-2.5 py-0.5 rounded-md shadow-2xs">
                                 系統一
                               </span>
-                              <span className="text-xs font-bold text-zinc-700">標準 3% 階梯攤平</span>
+                              <span className="text-xs font-bold text-zinc-700">2% 階梯攤平</span>
                             </div>
                             <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/60">
-                              -3% / -6% / -9% / -12%
+                              -2% / -4% / -6% / -8%
                             </span>
                           </div>
 
@@ -1689,12 +1815,12 @@ export default function StockTabDetail() {
                             <div className="grid grid-cols-12 gap-1.5 text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-1 items-center">
                               <span className="col-span-3 text-left">組別</span>
                               <span className="col-span-3">預計購入股價 ($)</span>
-                              <span className="col-span-3">預計購入數量 (股)</span>
-                              <span className="col-span-3 text-right pr-1">狀態</span>
+                              <span className="col-span-4">預計購入數量 (股)</span>
+                              <span className="col-span-2 text-right pr-1">狀態</span>
                             </div>
 
                             {averagingRows.map((row, idx) => {
-                              const discountLabels = ['-3%', '-6%', '-9%', '-12%'];
+                              const discountLabels = ['-2%', '-4%', '-6%', '-8%'];
                               const discountLabel = discountLabels[idx];
                               const riskMessages: Record<number, string> = {
                                 1: '(進入平倉籌碼倉位)',
@@ -1764,27 +1890,43 @@ export default function StockTabDetail() {
                                     />
                                   </div>
 
-                                  {/* 預計購入數量 + 清除按鈕 */}
-                                  <div className="col-span-3 flex items-center gap-1">
-                                    <Input
-                                      type="number"
-                                      placeholder="數量"
-                                      value={row.quantity}
-                                      onChange={(e) => {
-                                        const newRows = [...averagingRows];
-                                        newRows[idx] = { ...newRows[idx], quantity: e.target.value };
-                                        setAveragingRows(newRows);
-                                      }}
-                                      className="h-8 px-1.5 text-xs text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500"
-                                    />
+                                  {/* 預計購入數量 (拆分為兩個輸入框，總和為該列預計購入總數量) + 清除按鈕 */}
+                                  <div className="col-span-4 flex items-center gap-1">
+                                    <div className="flex-1 flex items-center gap-0.5 min-w-0">
+                                      <Input
+                                        type="number"
+                                        placeholder="數量"
+                                        value={row.quantity}
+                                        onChange={(e) => {
+                                          const newRows = [...averagingRows];
+                                          newRows[idx] = { ...newRows[idx], quantity: e.target.value };
+                                          setAveragingRows(newRows);
+                                        }}
+                                        className="h-8 px-1 text-center text-xs font-mono font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 rounded-lg min-w-0"
+                                        title="第一數量"
+                                      />
+                                      <span className="text-[10px] font-bold text-zinc-400 shrink-0 select-none">+</span>
+                                      <Input
+                                        type="number"
+                                        placeholder="數量"
+                                        value={row.quantity2 ?? ''}
+                                        onChange={(e) => {
+                                          const newRows = [...averagingRows];
+                                          newRows[idx] = { ...newRows[idx], quantity2: e.target.value };
+                                          setAveragingRows(newRows);
+                                        }}
+                                        className="h-8 px-1 text-center text-xs font-mono font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 rounded-lg min-w-0"
+                                        title="第二數量"
+                                      />
+                                    </div>
                                     <button
                                       type="button"
                                       onClick={() => {
                                         const newRows = [...averagingRows];
-                                        newRows[idx] = { price: '', quantity: '', bought: false, riskFlag: false };
+                                        newRows[idx] = { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false };
                                         setAveragingRows(newRows);
                                       }}
-                                      className="h-8 w-5 text-zinc-400 hover:text-red-650 hover:bg-zinc-100 rounded-md shrink-0 transition-colors flex items-center justify-center font-bold text-xs"
+                                      className="h-8 w-5 text-zinc-400 hover:text-red-600 hover:bg-zinc-100 rounded-md shrink-0 transition-colors flex items-center justify-center font-bold text-xs cursor-pointer"
                                       title="清除這組"
                                     >
                                       ✕
@@ -1792,7 +1934,7 @@ export default function StockTabDetail() {
                                   </div>
 
                                   {/* 狀態 */}
-                                  <div className="col-span-3 text-right pr-0.5 flex flex-col items-end justify-center gap-0.5">
+                                  <div className="col-span-2 text-right pr-0.5 flex flex-col items-end justify-center gap-0.5">
                                     <div>
                                       {row.bought ? (
                                         <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/80 inline-block whitespace-nowrap">
@@ -1805,7 +1947,7 @@ export default function StockTabDetail() {
                                       )}
                                     </div>
                                     {idx >= 1 && row.riskFlag && riskMessages[idx] && (
-                                      <span className="text-[10px] font-bold text-red-600 leading-tight whitespace-nowrap">
+                                      <span className="text-[9px] font-bold text-red-600 leading-tight whitespace-nowrap">
                                         {riskMessages[idx]}
                                       </span>
                                     )}
@@ -1900,10 +2042,10 @@ export default function StockTabDetail() {
                               <span className="text-xs font-black text-white bg-blue-600 px-2.5 py-0.5 rounded-md shadow-2xs">
                                 系統二
                               </span>
-                              <span className="text-xs font-bold text-zinc-700">緊密 2% 階梯攤平</span>
+                              <span className="text-xs font-bold text-zinc-700">3% 階梯攤平</span>
                             </div>
                             <span className="text-[11px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200/60">
-                              -2% / -4% / -6% / -8%
+                              -3% / -6% / -9% / -12%
                             </span>
                           </div>
 
@@ -1929,12 +2071,12 @@ export default function StockTabDetail() {
                             <div className="grid grid-cols-12 gap-1.5 text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-1 items-center">
                               <span className="col-span-3 text-left">組別</span>
                               <span className="col-span-3">預計購入股價 ($)</span>
-                              <span className="col-span-3">預計購入數量 (股)</span>
-                              <span className="col-span-3 text-right pr-1">狀態</span>
+                              <span className="col-span-4">預計購入數量 (股)</span>
+                              <span className="col-span-2 text-right pr-1">狀態</span>
                             </div>
 
                             {averagingRowsSys2.map((row, idx) => {
-                              const discountLabels = ['-2%', '-4%', '-6%', '-8%'];
+                              const discountLabels = ['-3%', '-6%', '-9%', '-12%'];
                               const discountLabel = discountLabels[idx];
                               const riskMessages: Record<number, string> = {
                                 1: '(進入平倉籌碼倉位)',
@@ -2004,27 +2146,43 @@ export default function StockTabDetail() {
                                     />
                                   </div>
 
-                                  {/* 預計購入數量 + 清除按鈕 */}
-                                  <div className="col-span-3 flex items-center gap-1">
-                                    <Input
-                                      type="number"
-                                      placeholder="數量"
-                                      value={row.quantity}
-                                      onChange={(e) => {
-                                        const newRows = [...averagingRowsSys2];
-                                        newRows[idx] = { ...newRows[idx], quantity: e.target.value };
-                                        setAveragingRowsSys2(newRows);
-                                      }}
-                                      className="h-8 px-1.5 text-xs text-zinc-800 bg-white border-zinc-200 focus-visible:ring-blue-500"
-                                    />
+                                  {/* 預計購入數量 (拆分為兩個輸入框，總和為該列預計購入總數量) + 清除按鈕 */}
+                                  <div className="col-span-4 flex items-center gap-1">
+                                    <div className="flex-1 flex items-center gap-0.5 min-w-0">
+                                      <Input
+                                        type="number"
+                                        placeholder="數量"
+                                        value={row.quantity}
+                                        onChange={(e) => {
+                                          const newRows = [...averagingRowsSys2];
+                                          newRows[idx] = { ...newRows[idx], quantity: e.target.value };
+                                          setAveragingRowsSys2(newRows);
+                                        }}
+                                        className="h-8 px-1 text-center text-xs font-mono font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-blue-500 rounded-lg min-w-0"
+                                        title="第一數量"
+                                      />
+                                      <span className="text-[10px] font-bold text-zinc-400 shrink-0 select-none">+</span>
+                                      <Input
+                                        type="number"
+                                        placeholder="數量"
+                                        value={row.quantity2 ?? ''}
+                                        onChange={(e) => {
+                                          const newRows = [...averagingRowsSys2];
+                                          newRows[idx] = { ...newRows[idx], quantity2: e.target.value };
+                                          setAveragingRowsSys2(newRows);
+                                        }}
+                                        className="h-8 px-1 text-center text-xs font-mono font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-blue-500 rounded-lg min-w-0"
+                                        title="第二數量"
+                                      />
+                                    </div>
                                     <button
                                       type="button"
                                       onClick={() => {
                                         const newRows = [...averagingRowsSys2];
-                                        newRows[idx] = { price: '', quantity: '', bought: false, riskFlag: false };
+                                        newRows[idx] = { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false };
                                         setAveragingRowsSys2(newRows);
                                       }}
-                                      className="h-8 w-5 text-zinc-400 hover:text-red-650 hover:bg-zinc-100 rounded-md shrink-0 transition-colors flex items-center justify-center font-bold text-xs"
+                                      className="h-8 w-5 text-zinc-400 hover:text-red-600 hover:bg-zinc-100 rounded-md shrink-0 transition-colors flex items-center justify-center font-bold text-xs cursor-pointer"
                                       title="清除這組"
                                     >
                                       ✕
@@ -2032,7 +2190,7 @@ export default function StockTabDetail() {
                                   </div>
 
                                   {/* 狀態 */}
-                                  <div className="col-span-3 text-right pr-0.5 flex flex-col items-end justify-center gap-0.5">
+                                  <div className="col-span-2 text-right pr-0.5 flex flex-col items-end justify-center gap-0.5">
                                     <div>
                                       {row.bought ? (
                                         <span className="text-[11px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200/80 inline-block whitespace-nowrap">
@@ -2045,7 +2203,7 @@ export default function StockTabDetail() {
                                       )}
                                     </div>
                                     {idx >= 1 && row.riskFlag && riskMessages[idx] && (
-                                      <span className="text-[10px] font-bold text-red-600 leading-tight whitespace-nowrap">
+                                      <span className="text-[9px] font-bold text-red-600 leading-tight whitespace-nowrap">
                                         {riskMessages[idx]}
                                       </span>
                                     )}
@@ -2134,125 +2292,235 @@ export default function StockTabDetail() {
                     </div>
 
                     {/* Full-width Section: 比例股價變動計算器 */}
-                    <div className="pt-4 border-t border-zinc-200/80 space-y-3 bg-zinc-50/50 p-4 rounded-2xl border border-zinc-200/60">
-                      <div className="flex items-center space-x-2">
-                        <div className="p-1 bg-emerald-50 text-emerald-700 rounded-md">
-                          <span className="text-xs">🧮</span>
+                    <div className="pt-4 border-t border-zinc-200/80 space-y-4 bg-zinc-50/70 p-4 sm:p-5 rounded-2xl border border-zinc-200/70 shadow-2xs">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-zinc-200/60">
+                        <div className="flex items-center space-x-2">
+                          <div className="p-1.5 bg-emerald-100 text-emerald-800 rounded-lg">
+                            <span className="text-sm">🧮</span>
+                          </div>
+                          <div>
+                            <h4 className="font-bold text-sm tracking-wide text-zinc-800 flex items-center gap-2">
+                              比例股價變動計算器
+                              <span className="text-[10px] font-normal text-zinc-500 bg-white px-2 py-0.5 rounded-full border border-zinc-200">
+                                支援快速試算與雙系統階梯匯入
+                              </span>
+                            </h4>
+                            <p className="text-[11px] text-zinc-500 mt-0.5">
+                              依據百分比增減計算目標價（例如：設定停損限價、獲利目標、滿足點），並可一鍵匯入攤平試算表。
+                            </p>
+                          </div>
                         </div>
-                        <h4 className="font-bold text-sm tracking-wide text-zinc-800">比例股價變動計算器</h4>
                       </div>
-                      <p className="text-[11px] text-zinc-500">
-                        依據百分比增減計算目標價（例如：設定停損限價、獲利目標、滿足點）。
-                      </p>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
-                        <div className="space-y-2">
-                          <Label className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wide">1. 算式計算（例: 56 - 7% 或 56 + 8%）</Label>
+                      {/* 2-Column Responsive Layout */}
+                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+                        {/* Left Column: 1. 算式計算 & 系統一 / 系統二 試算比例按鈕 (7 cols) */}
+                        <div className="lg:col-span-7 space-y-3 bg-white p-3.5 sm:p-4 rounded-xl border border-zinc-200/70 shadow-2xs">
+                          <div className="flex items-center justify-between">
+                            <Label className="text-xs font-bold text-zinc-700 tracking-wide flex items-center gap-1.5">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                              1. 算式計算（例: 56 - 7% 或 56 + 8%）
+                            </Label>
+                            {calcExpression && (
+                              <button 
+                                type="button"
+                                onClick={() => {
+                                  setCalcExpression('');
+                                  setCalcBasePrice('');
+                                  setCalcPercent('');
+                                }}
+                                className="text-[11px] text-zinc-400 hover:text-zinc-700 font-bold transition-colors cursor-pointer px-1"
+                              >
+                                ✕ 清除算式
+                              </button>
+                            )}
+                          </div>
+
                           <div className="relative">
                             <Input
                               type="text"
                               placeholder="56 - 7% 或 56 + 8%"
                               value={calcExpression}
                               onChange={(e) => setCalcExpression(e.target.value)}
-                              className="h-10 text-sm font-semibold tracking-wide text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 rounded-xl"
+                              className="h-10 text-sm font-semibold tracking-wide text-zinc-800 bg-zinc-50/50 border-zinc-200 focus-visible:ring-emerald-500 rounded-xl pr-14"
                             />
-                            {calcExpression && (
-                              <button 
-                                onClick={() => {
-                                  setCalcExpression('');
-                                  setCalcBasePrice('');
-                                  setCalcPercent('');
-                                }}
-                                className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-zinc-400 hover:text-zinc-600 font-bold"
-                              >
-                                清除
-                              </button>
-                            )}
                           </div>
 
-                          {/* Preset Buttons */}
-                          <div className="flex flex-wrap gap-1.5 pt-1">
-                            {['-10%', '-7%', '-5%', '-3%', '+3%', '+5%', '+8%', '+10%'].map((p) => {
-                              const isNeg = p.startsWith('-');
-                              return (
-                                <button
-                                  key={p}
-                                  onClick={() => handlePresetClick(p)}
-                                  className={`text-[10px] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
-                                    isNeg 
-                                      ? 'bg-rose-50 text-rose-700 hover:bg-rose-100/80 border border-rose-200/50' 
-                                      : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100/80 border border-emerald-200/50'
-                                  }`}
-                                >
-                                  {p}
-                                </button>
-                              );
-                            })}
+                          {/* Preset Buttons for System 1 & System 2 */}
+                          <div className="space-y-2.5 pt-1">
+                            {/* System 1 Presets: -8% -6% -4% -2% 2% 4% 6% 8% */}
+                            <div className="space-y-1.5 bg-emerald-50/40 p-2.5 rounded-xl border border-emerald-100">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[11px] font-bold text-[#0F6E56] flex items-center gap-1">
+                                  <span className="w-2 h-2 rounded-full bg-[#0F6E56] inline-block" />
+                                  系統一試算:
+                                </span>
+                                <span className="text-[10px] text-zinc-400 font-medium">點擊快速代入</span>
+                              </div>
+                              <div className="grid grid-cols-4 sm:grid-cols-8 gap-1.5">
+                                {['-8%', '-6%', '-4%', '-2%', '2%', '4%', '6%', '8%'].map((p) => {
+                                  const isNeg = p.startsWith('-');
+                                  return (
+                                    <button
+                                      key={`sys1-${p}`}
+                                      type="button"
+                                      onClick={() => handlePresetClick(p)}
+                                      className={`text-xs font-black py-1.5 px-1 rounded-lg transition-all text-center cursor-pointer shadow-2xs ${
+                                        isNeg 
+                                          ? 'bg-rose-50 text-rose-700 hover:bg-rose-100 hover:scale-105 border border-rose-200/60 active:scale-95' 
+                                          : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:scale-105 border border-emerald-200/60 active:scale-95'
+                                      }`}
+                                    >
+                                      {isNeg ? p : `+${p}`}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            {/* System 2 Presets: -12% -9% -6% -3% 3% 6% 9% 12% */}
+                            <div className="space-y-1.5 bg-blue-50/40 p-2.5 rounded-xl border border-blue-100">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[11px] font-bold text-blue-700 flex items-center gap-1">
+                                  <span className="w-2 h-2 rounded-full bg-blue-600 inline-block" />
+                                  系統二試算:
+                                </span>
+                                <span className="text-[10px] text-zinc-400 font-medium">點擊快速代入</span>
+                              </div>
+                              <div className="grid grid-cols-4 sm:grid-cols-8 gap-1.5">
+                                {['-12%', '-9%', '-6%', '-3%', '3%', '6%', '9%', '12%'].map((p) => {
+                                  const isNeg = p.startsWith('-');
+                                  return (
+                                    <button
+                                      key={`sys2-${p}`}
+                                      type="button"
+                                      onClick={() => handlePresetClick(p)}
+                                      className={`text-xs font-black py-1.5 px-1 rounded-lg transition-all text-center cursor-pointer shadow-2xs ${
+                                        isNeg 
+                                          ? 'bg-rose-50 text-rose-700 hover:bg-rose-100 hover:scale-105 border border-rose-200/60 active:scale-95' 
+                                          : 'bg-blue-50 text-blue-700 hover:bg-blue-100 hover:scale-105 border border-blue-200/60 active:scale-95'
+                                      }`}
+                                    >
+                                      {isNeg ? p : `+${p}`}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
                           </div>
                         </div>
 
-                        {/* Structured adjustment & Result Output */}
-                        <div className="space-y-3">
-                          <Label className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wide">2. 數值微調與計算結果</Label>
-                          <div className="grid grid-cols-3 gap-2">
-                            <div>
-                              <span className="text-[9px] text-zinc-400 font-bold block mb-1">基準股價 ($)</span>
-                              <Input
-                                type="number"
-                                value={calcBasePrice}
-                                onChange={(e) => setCalcBasePrice(e.target.value)}
-                                className="h-8 text-xs text-zinc-800 bg-white border-zinc-200 rounded-lg"
-                              />
-                            </div>
-                            <div>
-                              <span className="text-[9px] text-zinc-400 font-bold block mb-1">運算符</span>
-                              <div className="flex h-8 border border-zinc-200 rounded-lg overflow-hidden bg-white">
-                                <button
-                                  onClick={() => setCalcType('SUB')}
-                                  className={`flex-1 text-[10px] font-bold transition-all cursor-pointer ${calcType === 'SUB' ? 'bg-rose-500 text-white font-black' : 'text-zinc-500 hover:bg-zinc-50'}`}
-                                >
-                                  減 (-)
-                                </button>
-                                <button
-                                  onClick={() => setCalcType('ADD')}
-                                  className={`flex-1 text-[10px] font-bold transition-all cursor-pointer ${calcType === 'ADD' ? 'bg-emerald-600 text-white font-black' : 'text-zinc-500 hover:bg-zinc-50'}`}
-                                >
-                                  加 (+)
-                                </button>
+                        {/* Right Column: 2. 數值微調與計算結果 (5 cols) */}
+                        <div className="lg:col-span-5 space-y-3 bg-white p-3.5 sm:p-4 rounded-xl border border-zinc-200/70 shadow-2xs flex flex-col justify-between h-full">
+                          <div className="space-y-2.5">
+                            <Label className="text-xs font-bold text-zinc-700 tracking-wide flex items-center gap-1.5">
+                              <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                              2. 數值微調與計算結果
+                            </Label>
+                            <div className="grid grid-cols-3 gap-2">
+                              <div>
+                                <span className="text-[10px] text-zinc-500 font-bold block mb-1">基準股價 ($)</span>
+                                <Input
+                                  type="number"
+                                  value={calcBasePrice}
+                                  onChange={(e) => setCalcBasePrice(e.target.value)}
+                                  className="h-8 text-xs font-mono font-bold text-zinc-800 bg-zinc-50/50 border-zinc-200 rounded-lg focus-visible:ring-emerald-500"
+                                />
                               </div>
-                            </div>
-                            <div>
-                              <span className="text-[9px] text-zinc-400 font-bold block mb-1">百分比 (%)</span>
-                              <Input
-                                type="number"
-                                value={calcPercent}
-                                placeholder="例 7"
-                                onChange={(e) => setCalcPercent(e.target.value)}
-                                className="h-8 text-xs text-zinc-800 bg-white border-zinc-200 rounded-lg"
-                              />
-                            </div>
-                          </div>
-
-                          {/* Display Area */}
-                          <div className={`p-3 rounded-xl border flex flex-col justify-center transition-all ${parsedCalc.success ? 'bg-emerald-50/40 border-emerald-200/80' : 'bg-white border-zinc-200/80'} min-h-[64px]`}>
-                            {parsedCalc.success && parsedCalc.result !== undefined ? (
-                              <div className="text-center">
-                                <div className="text-[10px] text-zinc-400 font-bold tracking-wider uppercase">計算結果</div>
-                                <div className="text-xl font-black text-[#0F6E56] font-mono tracking-tight leading-tight">
-                                  ${parsedCalc.result.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              <div>
+                                <span className="text-[10px] text-zinc-500 font-bold block mb-1">運算符</span>
+                                <div className="flex h-8 border border-zinc-200 rounded-lg overflow-hidden bg-white">
+                                  <button
+                                    type="button"
+                                    onClick={() => setCalcType('SUB')}
+                                    className={`flex-1 text-[11px] font-bold transition-all cursor-pointer ${calcType === 'SUB' ? 'bg-rose-500 text-white font-black' : 'text-zinc-500 hover:bg-zinc-50'}`}
+                                  >
+                                    減 (-)
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setCalcType('ADD')}
+                                    className={`flex-1 text-[11px] font-bold transition-all cursor-pointer ${calcType === 'ADD' ? 'bg-emerald-600 text-white font-black' : 'text-zinc-500 hover:bg-zinc-50'}`}
+                                  >
+                                    加 (+)
+                                  </button>
                                 </div>
-                                {parsedCalc.percent !== 0 && (
-                                  <div className="text-[10px] text-zinc-500 font-medium">
-                                    以 <span className="font-semibold text-zinc-800">${parsedCalc.base?.toFixed(2)}</span> 為基準，{parsedCalc.isAdd ? '增加' : '減少'} <span className="font-black text-zinc-700">{parsedCalc.percent}%</span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] text-zinc-500 font-bold block mb-1">百分比 (%)</span>
+                                <Input
+                                  type="number"
+                                  value={calcPercent}
+                                  placeholder="例 7"
+                                  onChange={(e) => setCalcPercent(e.target.value)}
+                                  className="h-8 text-xs font-mono font-bold text-zinc-800 bg-zinc-50/50 border-zinc-200 rounded-lg focus-visible:ring-emerald-500"
+                                />
+                              </div>
+                            </div>
+
+                            {/* Display Result Area */}
+                            <div className={`p-3 rounded-xl border flex flex-col justify-center transition-all ${parsedCalc.success ? 'bg-emerald-50/50 border-emerald-300 shadow-2xs' : 'bg-zinc-50 border-zinc-200/80'} min-h-[72px]`}>
+                              {parsedCalc.success && parsedCalc.result !== undefined ? (
+                                <div className="text-center">
+                                  <div className="text-[10px] text-zinc-400 font-bold tracking-wider uppercase">計算結果</div>
+                                  <div className="text-2xl font-black text-[#0F6E56] font-mono tracking-tight leading-tight">
+                                    ${parsedCalc.result.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                   </div>
-                                )}
-                              </div>
-                            ) : (
-                              <div className="text-center text-xs text-zinc-400 font-medium">
-                                請於上方輸入算式（如 <span className="font-mono">56 - 7%</span>）或點選快捷鍵
-                              </div>
-                            )}
+                                  {parsedCalc.percent !== 0 && (
+                                    <div className="text-[11px] text-zinc-500 font-medium mt-0.5">
+                                      以 <span className="font-semibold text-zinc-800">${parsedCalc.base?.toFixed(2)}</span> 為基準，{parsedCalc.isAdd ? '增加' : '減少'} <span className="font-black text-zinc-700">{parsedCalc.percent}%</span>
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="text-center text-xs text-zinc-400 font-medium py-2">
+                                  請於左方輸入算式（如 <span className="font-mono">56 - 7%</span>）或點選比例按鈕
+                                </div>
+                              )}
+                            </div>
                           </div>
+                        </div>
+                      </div>
+
+                      {/* One-Click Import Action Bar */}
+                      <div className="bg-white p-3.5 rounded-xl border border-zinc-200/80 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shadow-2xs">
+                        <div className="flex items-center gap-2 text-xs text-zinc-600">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                          <span>
+                            依基準股價 <strong className="text-zinc-900 font-mono">${(parseFloat(calcBasePrice) || stats?.averagePrice || tab?.currentPrice || 0).toFixed(2)}</strong> 一鍵計算並匯入：
+                          </span>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={handleImportBaseToSys1}
+                            className="flex-1 sm:flex-initial text-xs font-bold bg-emerald-50 hover:bg-emerald-100 text-[#0F6E56] border border-emerald-300/80 hover:border-emerald-400 px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-2xs active:scale-95"
+                            title="匯入至系統一 (-2%, -4%, -6%, -8%)"
+                          >
+                            <span className="w-2 h-2 rounded-full bg-[#0F6E56]" />
+                            <span>匯入系統一 (-2%~-8%)</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={handleImportBaseToSys2}
+                            className="flex-1 sm:flex-initial text-xs font-bold bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-300/80 hover:border-blue-400 px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-2xs active:scale-95"
+                            title="匯入至系統二 (-3%, -6%, -9%, -12%)"
+                          >
+                            <span className="w-2 h-2 rounded-full bg-blue-600" />
+                            <span>匯入系統二 (-3%~-12%)</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={handleImportBaseToBoth}
+                            className="w-full sm:w-auto text-xs font-black bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white px-3.5 py-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
+                            title="一鍵將計算結果依各自比例匯入系統一與系統二"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" />
+                            <span>一鍵匯入雙系統欄位</span>
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -2463,7 +2731,7 @@ export default function StockTabDetail() {
                                  exit={{ opacity: 0 }}
                                  className="border-b border-zinc-150 last:border-0 hover:bg-zinc-50/50 transition-colors text-zinc-800 font-semibold bg-white"
                                >
-                                 <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">{t.tradeDate?.toDate() ? format(t.tradeDate.toDate(), 'yyyy/MM/dd') : ''}</td>
+                                 <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">{formatTimestamp(t.tradeDate, 'yyyy/MM/dd')}</td>
                                  <td className="px-3 sm:px-6 py-3 sm:py-4">
                                    <div className="flex flex-col gap-1.5 items-start">
                                      <div className="flex items-center gap-1.5">
@@ -2532,7 +2800,7 @@ export default function StockTabDetail() {
 
       {/* Averaging Calculation & Trading Discipline Help Dialog */}
       <Dialog open={isAveragingHelpOpen} onOpenChange={setIsAveragingHelpOpen}>
-        <DialogContent className="max-w-xl bg-white rounded-2xl p-6 shadow-2xl border border-zinc-200">
+        <DialogContent className="w-[92vw] sm:max-w-xl max-h-[90vh] overflow-y-auto bg-white rounded-2xl p-5 sm:p-6 shadow-2xl border border-zinc-200">
           <DialogHeader className="border-b border-zinc-100 pb-3">
             <DialogTitle className="flex items-center gap-2 text-lg font-bold text-zinc-900">
               <HelpCircle className="h-5 w-5 text-emerald-600 shrink-0" />
@@ -2548,23 +2816,17 @@ export default function StockTabDetail() {
                 股價向下攤平試算運算邏輯
               </h4>
               <p className="text-xs text-zinc-600 leading-normal">
-                點擊預計購買數量的規劃批次標籤（第一批 ~ 第四批）時，會將該批次計算出的股數分成平均的 2 份數量（無條件進位 Roundup），並自動填入「股價向下攤平試算」相對應的欄位：
+                點擊預計購買數量的規劃批次標籤（第一批 ~ 第四批）時，會將該批次計算出的股數分成平均的 2 份數量（無條件進位 Roundup），並分別填入該組「預計購入數量 (股)」的兩個輸入欄位：
               </p>
               
               <div className="space-y-2 text-xs pt-1">
-                <div className="bg-white p-3 rounded-lg border border-zinc-200 shadow-sm space-y-1">
-                  <span className="font-bold text-emerald-700 block">第一批 (15%) / 第二批 (25%) 點擊後：</span>
-                  <div className="text-zinc-600 pl-2 space-y-1">
-                    <div>• <strong>第 1 欄位</strong>：預計購入股價為 <span className="text-zinc-800 font-semibold">平均成本 -3%</span> | 購入數量為 1 份數量 (roundup)</div>
-                    <div>• <strong>第 2 欄位</strong>：預計購入股價為 <span className="text-zinc-800 font-semibold">平均成本 -6%</span> | 購入數量為 1 份數量 (roundup)</div>
-                  </div>
-                </div>
-
-                <div className="bg-white p-3 rounded-lg border border-zinc-200 shadow-sm space-y-1">
-                  <span className="font-bold text-emerald-700 block">第三批 (35%) / 第四批 (25%) 點擊後：</span>
-                  <div className="text-zinc-600 pl-2 space-y-1">
-                    <div>• <strong>第 3 欄位</strong>：預計購入股價為 <span className="text-zinc-800 font-semibold">平均成本 -9%</span> | 購入數量為 1 份數量 (roundup)</div>
-                    <div>• <strong>第 4 欄位</strong>：預計購入股價為 <span className="text-zinc-800 font-semibold">平均成本 -12%</span> | 購入數量為 1 份數量 (roundup)</div>
+                <div className="bg-white p-3 rounded-lg border border-zinc-200 shadow-sm space-y-1.5">
+                  <span className="font-bold text-emerald-700 block">各批次點擊對應規則：</span>
+                  <div className="text-zinc-600 pl-1 space-y-1">
+                    <div>• <strong>第一批 (15%)</strong>：帶入第一欄位 | 系統一 (<strong>-2%</strong>) / 系統二 (<strong>-3%</strong>) | 數量拆分 2 份分別填入雙輸入框</div>
+                    <div>• <strong>第二批 (25%)</strong>：帶入第二欄位 | 系統一 (<strong>-4%</strong>) / 系統二 (<strong>-6%</strong>) | 數量拆分 2 份分別填入雙輸入框</div>
+                    <div>• <strong>第三批 (35%)</strong>：帶入第三欄位 | 系統一 (<strong>-6%</strong>) / 系統二 (<strong>-9%</strong>) | 數量拆分 2 份分別填入雙輸入框</div>
+                    <div>• <strong>第四批 (25%)</strong>：帶入第四欄位 | 系統一 (<strong>-8%</strong>) / 系統二 (<strong>-12%</strong>) | 數量拆分 2 份分別填入雙輸入框</div>
                   </div>
                 </div>
               </div>

@@ -975,16 +975,16 @@ export default function StrategyTab({
                                     <SelectTrigger className="h-[44px] sm:h-8 border border-zinc-200 bg-zinc-50/80 rounded-lg sm:rounded-md focus:ring-0 focus:border-zinc-300 font-medium text-base sm:text-xs text-zinc-800 font-bold">
                                       <SelectValue />
                                     </SelectTrigger>
-                                    <SelectContent className="border border-zinc-200 bg-[#121212]/90 backdrop-blur-md rounded-md">
+                                    <SelectContent className="border border-zinc-200 bg-white/95 backdrop-blur-md rounded-md shadow-lg">
                                       <SelectItem
                                         value="BUY"
-                                        className="font-medium text-base sm:text-xs text-zinc-800 font-bold py-2 sm:py-1"
+                                        className="font-medium text-base sm:text-xs text-zinc-800 font-bold py-2 sm:py-1 cursor-pointer hover:bg-zinc-100"
                                       >
                                         BUY
                                       </SelectItem>
                                       <SelectItem
                                         value="SELL"
-                                        className="font-medium text-base sm:text-xs text-zinc-800 font-bold py-2 sm:py-1"
+                                        className="font-medium text-base sm:text-xs text-zinc-800 font-bold py-2 sm:py-1 cursor-pointer hover:bg-zinc-100"
                                       >
                                         SELL
                                       </SelectItem>

@@ -73,6 +73,14 @@
         "sl": { "type": "number" },
         "slConditions": { "type": "string" },
         "strategyNotes": { "type": "string" },
+        "operationNote": { "type": "string" },
+        "operationFocus": { "type": "string" },
+        "tpChecked": { "type": "boolean" },
+        "slChecked": { "type": "boolean" },
+        "addChecked": { "type": "boolean" },
+        "closeChecked": { "type": "boolean" },
+        "observeChecked": { "type": "boolean" },
+        "notesHighlighted": { "type": "boolean" },
         "updatedAt": { "type": "string", "format": "timestamp" }
       },
       "required": ["updatedAt"]
@@ -105,13 +113,14 @@
     },
     "UserSettings": {
       "title": "User Settings",
-      "description": "Global user settings such as total capital.",
+      "description": "Global user settings such as total capital and virtual capital.",
       "type": "object",
       "properties": {
         "totalCapital": { "type": "number" },
+        "virtualCapital": { "type": "number" },
+        "bankAccountBalance": { "type": "number" },
         "updatedAt": { "type": "string", "format": "timestamp" }
-      },
-      "required": ["totalCapital"]
+      }
     }
   },
   "firestore": {

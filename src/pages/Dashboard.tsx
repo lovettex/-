@@ -26,6 +26,7 @@ import {
 } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import { useAuth } from "../lib/AuthContext";
+import { formatTimestamp, getTimestampDate } from "../lib/dateUtils";
 import { toast } from "sonner";
 import {
   ScrollIn,
@@ -101,6 +102,11 @@ import {
   Settings,
   Layers,
   X,
+  Keyboard,
+  RefreshCw,
+  Globe,
+  Zap,
+  Database,
 } from "lucide-react";
 import { calculateStats } from "../lib/calculations";
 import { safeLocalStorage, safeSessionStorage } from "../lib/utils";
@@ -304,6 +310,12 @@ export default function Dashboard() {
     return saved ? parseFloat(saved) : 1000000;
   });
 
+  const [bankAccountBalance, setBankAccountBalance] = useState<number>(() => {
+    const saved = safeLocalStorage.getItem(`bank-account-balance-${user?.uid || "guest"}`);
+    return saved ? parseFloat(saved) : 1000000;
+  });
+  const [isBankBalanceRevealed, setIsBankBalanceRevealed] = useState(false);
+
   useEffect(() => {
     if (!user) return;
     const fetchSettings = async () => {
@@ -320,6 +332,10 @@ export default function Dashboard() {
             setVirtualCapital(data.virtualCapital);
             safeLocalStorage.setItem(`virtual-capital-${user.uid}`, data.virtualCapital.toString());
           }
+          if (typeof data.bankAccountBalance === "number") {
+            setBankAccountBalance(data.bankAccountBalance);
+            safeLocalStorage.setItem(`bank-account-balance-${user.uid}`, data.bankAccountBalance.toString());
+          }
         }
       } catch (error) {
         console.error("Failed to fetch userSettings:", error);
@@ -328,6 +344,24 @@ export default function Dashboard() {
     };
     fetchSettings();
   }, [user]);
+
+  const handleUpdateBankBalance = async (newVal: number) => {
+    setBankAccountBalance(newVal);
+    const userKey = user ? user.uid : "guest";
+    safeLocalStorage.setItem(`bank-account-balance-${userKey}`, newVal.toString());
+    if (user) {
+      try {
+        await setDoc(
+          doc(db, "userSettings", user.uid),
+          { bankAccountBalance: newVal, updatedAt: serverTimestamp() },
+          { merge: true }
+        );
+      } catch (error) {
+        console.error("Failed to save bankAccountBalance userSettings:", error);
+        handleFirestoreError(error, OperationType.WRITE, `userSettings/${user.uid}`, user);
+      }
+    }
+  };
 
   const handleUpdateTotalCapital = async (newVal: number) => {
     setTotalCapital(newVal);
@@ -366,7 +400,14 @@ export default function Dashboard() {
   };
 
   const [activeTabOrders, setActiveTabOrders] = useState<Record<string, any[]>>(
-    {},
+    () => {
+      try {
+        const cached = user ? safeSessionStorage.getItem(`cached_tab_orders_v3_${user.uid}`) : null;
+        return cached ? JSON.parse(cached) : {};
+      } catch {
+        return {};
+      }
+    },
   );
   
   const [flippedCards, setFlippedCards] = useState<Record<string, boolean>>({});
@@ -653,7 +694,14 @@ export default function Dashboard() {
 
 
   const [activeTabTrades, setActiveTabTrades] = useState<Record<string, any[]>>(
-    {},
+    () => {
+      try {
+        const cached = user ? safeSessionStorage.getItem(`cached_tab_trades_v3_${user.uid}`) : null;
+        return cached ? JSON.parse(cached) : {};
+      } catch {
+        return {};
+      }
+    },
   );
   const [isGeneratingSuggestion, setIsGeneratingSuggestion] = useState(false);
   const [isMobile, setIsMobile] = useState(typeof window !== "undefined" ? window.innerWidth < 640 : false);
@@ -808,9 +856,41 @@ export default function Dashboard() {
   >("觀察中");
   const [groupingTabId, setGroupingTabId] = useState<string | null>(null);
   const [activeTabStrategies, setActiveTabStrategies] = useState<
-
     Record<string, any>
-  >({});
+  >(() => {
+    try {
+      const cached = user ? safeSessionStorage.getItem(`cached_tab_strategies_v3_${user.uid}`) : null;
+      return cached ? JSON.parse(cached) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    // Purge legacy global cached subcollection items
+    safeSessionStorage.removeItem("cached_tab_orders_v2");
+    safeSessionStorage.removeItem("cached_tab_trades_v2");
+    safeSessionStorage.removeItem("cached_tab_strategies_v2");
+
+    if (!user) {
+      setActiveTabOrders({});
+      setActiveTabTrades({});
+      setActiveTabStrategies({});
+      fetchedTabIdsRef.current.clear();
+      return;
+    }
+
+    try {
+      const orders = safeSessionStorage.getItem(`cached_tab_orders_v3_${user.uid}`);
+      if (orders) setActiveTabOrders(JSON.parse(orders));
+      const trades = safeSessionStorage.getItem(`cached_tab_trades_v3_${user.uid}`);
+      if (trades) setActiveTabTrades(JSON.parse(trades));
+      const strategies = safeSessionStorage.getItem(`cached_tab_strategies_v3_${user.uid}`);
+      if (strategies) setActiveTabStrategies(JSON.parse(strategies));
+    } catch (e) {
+      // ignore
+    }
+  }, [user?.uid]);
   const [strategyHighlights, setStrategyHighlights] = useState<Record<string, boolean>>({});
   const [alerts, setAlerts] = useState<any[]>([]);
   const [socratesData, setSocratesData] = useState<
@@ -1469,6 +1549,7 @@ export default function Dashboard() {
   );
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
+  const [helpDialogTab, setHelpDialogTab] = useState<"shortcuts" | "priceImport">("shortcuts");
   const [isManageHiddenOpen, setIsManageHiddenOpen] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [manageTradeType, setManageTradeType] = useState<"simulated" | "real">("simulated");
@@ -1476,6 +1557,8 @@ export default function Dashboard() {
   const [editCapitalVal, setEditCapitalVal] = useState("");
   const [isEditingVirtualCapital, setIsEditingVirtualCapital] = useState(false);
   const [editVirtualCapitalVal, setEditVirtualCapitalVal] = useState("");
+  const [isEditingBankBalance, setIsEditingBankBalance] = useState(false);
+  const [editBankBalanceVal, setEditBankBalanceVal] = useState("");
   const [isDesktopMetricsOpen, setIsDesktopMetricsOpen] = useState(false);
   const [isMobileCinemaSidebarOpen, setIsMobileCinemaSidebarOpen] = useState(false);
 
@@ -1977,7 +2060,7 @@ export default function Dashboard() {
     const fetchTabData = async () => {
       if (!user) return;
 
-      const activeTabs = tabs.filter((t) => t.status === "ACTIVE");
+      const activeTabs = tabs.filter((t) => t.status === "ACTIVE" && (!t.userId || t.userId === user.uid));
       const currentTabIdsStr = activeTabs.map(t => t.id).sort().join(",");
 
       // If the set of active tabs changed, clear our fetched cache to reload fresh
@@ -1999,6 +2082,9 @@ export default function Dashboard() {
       const otherToFetch = otherTabs.filter(t => !fetchedTabIdsRef.current.has(t.id));
 
       const fetchSingleTab = async (tab: any) => {
+        if (!user || (tab.userId && tab.userId !== user.uid)) {
+          return { id: tab.id, orders: [], trades: [], strategy: null };
+        }
         let orders: any[] = [];
         let trades: any[] = [];
         let strategy: any = null;
@@ -2039,14 +2125,12 @@ export default function Dashboard() {
         }
 
         try {
-          // Fetch strategy
-          const qStrategy = query(collection(db, `stockTabs/${tab.id}/strategy`));
-          const snapshotStrategy = await getDocs(qStrategy);
-          const mainStrategy = snapshotStrategy.docs.find((d) => d.id === "main");
-          strategy = mainStrategy ? mainStrategy.data() : null;
+          // Fetch strategy directly via point doc get (much faster than collection list)
+          const docStrategy = await getDoc(doc(db, "stockTabs", tab.id, "strategy", "main"));
+          strategy = docStrategy.exists() ? docStrategy.data() : null;
         } catch (err) {
           try {
-            handleFirestoreError(err, OperationType.GET, `stockTabs/${tab.id}/strategy`, user);
+            handleFirestoreError(err, OperationType.GET, `stockTabs/${tab.id}/strategy/main`, user);
           } catch (e) {
             // handleFirestoreError throws formatted JSON error
           }
@@ -2062,6 +2146,9 @@ export default function Dashboard() {
           results.forEach(res => {
             next[res.id] = res.orders;
           });
+          try {
+            safeSessionStorage.setItem(`cached_tab_orders_v3_${user.uid}`, JSON.stringify(next));
+          } catch (e) {}
           return next;
         });
 
@@ -2070,6 +2157,9 @@ export default function Dashboard() {
           results.forEach(res => {
             next[res.id] = res.trades;
           });
+          try {
+            safeSessionStorage.setItem(`cached_tab_trades_v3_${user.uid}`, JSON.stringify(next));
+          } catch (e) {}
           return next;
         });
 
@@ -2080,6 +2170,9 @@ export default function Dashboard() {
               next[res.id] = res.strategy;
             }
           });
+          try {
+            safeSessionStorage.setItem(`cached_tab_strategies_v3_${user.uid}`, JSON.stringify(next));
+          } catch (e) {}
           return next;
         });
 
@@ -2098,16 +2191,28 @@ export default function Dashboard() {
         }
       }
 
-      // 3. Fetch remaining (other) tabs in the background after priority tabs have updated
+      // 3. Fetch remaining (other) tabs progressively in small background chunks
       if (otherToFetch.length > 0) {
-        setTimeout(async () => {
-          try {
-            const otherResults = await Promise.all(otherToFetch.map(fetchSingleTab));
-            mergeResults(otherResults);
-          } catch (err) {
-            console.error("Error loading background tab data:", err);
-          }
-        }, 150); // small delay to allow active tab cards to draw flawlessly
+        const scheduleBackgroundChunks = (items: any[], chunkSize = 3) => {
+          let index = 0;
+          const processNextChunk = async () => {
+            if (index >= items.length) return;
+            const chunk = items.slice(index, index + chunkSize);
+            index += chunkSize;
+            try {
+              const chunkResults = await Promise.all(chunk.map(fetchSingleTab));
+              mergeResults(chunkResults);
+            } catch (err) {
+              console.error("Error loading background tab chunk:", err);
+            }
+            if (index < items.length) {
+              setTimeout(processNextChunk, 200);
+            }
+          };
+          setTimeout(processNextChunk, 100);
+        };
+
+        scheduleBackgroundChunks(otherToFetch);
       }
     };
 
@@ -2595,8 +2700,8 @@ export default function Dashboard() {
           isFavoriteHighlight: tab.isFavoriteHighlight || false,
           isOperationConfirmed: tab.isOperationConfirmed || false,
           isDeviationConfirmed: tab.isDeviationConfirmed || false,
-          createdAt: tab.createdAt instanceof Timestamp ? tab.createdAt.toDate().toISOString() : (tab.createdAt && (tab.createdAt as any).seconds ? new Date((tab.createdAt as any).seconds * 1000).toISOString() : new Date().toISOString()),
-          updatedAt: tab.updatedAt instanceof Timestamp ? tab.updatedAt.toDate().toISOString() : (tab.updatedAt && (tab.updatedAt as any).seconds ? new Date((tab.updatedAt as any).seconds * 1000).toISOString() : new Date().toISOString()),
+          createdAt: getTimestampDate(tab.createdAt)?.toISOString() || new Date().toISOString(),
+          updatedAt: getTimestampDate(tab.updatedAt)?.toISOString() || new Date().toISOString(),
           trades: [] as any[],
           plannedOrders: [] as any[],
           strategy: null as any,
@@ -2615,10 +2720,10 @@ export default function Dashboard() {
             operator: t.operator || "人",
             price: t.price,
             quantity: t.quantity,
-            tradeDate: t.tradeDate instanceof Timestamp ? t.tradeDate.toDate().toISOString() : (t.tradeDate && (t.tradeDate as any).seconds ? new Date((t.tradeDate as any).seconds * 1000).toISOString() : new Date().toISOString()),
+            tradeDate: getTimestampDate(t.tradeDate)?.toISOString() || new Date().toISOString(),
             fees: t.fees || 0,
             notes: t.notes || "",
-            createdAt: t.createdAt instanceof Timestamp ? t.createdAt.toDate().toISOString() : (t.createdAt && (t.createdAt as any).seconds ? new Date((t.createdAt as any).seconds * 1000).toISOString() : new Date().toISOString()),
+            createdAt: getTimestampDate(t.createdAt)?.toISOString() || new Date().toISOString(),
           };
         });
 
@@ -2637,8 +2742,8 @@ export default function Dashboard() {
             notes: o.notes || "",
             status: o.status || "PENDING",
             category: o.category || "分批進出場規劃",
-            plannedDate: o.plannedDate instanceof Timestamp ? o.plannedDate.toDate().toISOString() : (o.plannedDate && (o.plannedDate as any).seconds ? new Date((o.plannedDate as any).seconds * 1000).toISOString() : null),
-            createdAt: o.createdAt instanceof Timestamp ? o.createdAt.toDate().toISOString() : (o.createdAt && (o.createdAt as any).seconds ? new Date((o.createdAt as any).seconds * 1000).toISOString() : new Date().toISOString()),
+            plannedDate: o.plannedDate ? (getTimestampDate(o.plannedDate)?.toISOString() || null) : null,
+            createdAt: getTimestampDate(o.createdAt)?.toISOString() || new Date().toISOString(),
           };
         });
 
@@ -2658,7 +2763,7 @@ export default function Dashboard() {
             operationNote: s.operationNote || "",
             resistanceZones: s.resistanceZones || [],
             supportZones: s.supportZones || [],
-            updatedAt: s.updatedAt instanceof Timestamp ? s.updatedAt.toDate().toISOString() : (s.updatedAt && (s.updatedAt as any).seconds ? new Date((s.updatedAt as any).seconds * 1000).toISOString() : new Date().toISOString()),
+            updatedAt: getTimestampDate(s.updatedAt)?.toISOString() || new Date().toISOString(),
           };
         }
 
@@ -2673,7 +2778,7 @@ export default function Dashboard() {
             summary: r.summary || "",
             score: r.score || 5,
             notes: r.notes || "",
-            createdAt: r.createdAt instanceof Timestamp ? r.createdAt.toDate().toISOString() : (r.createdAt && (r.createdAt as any).seconds ? new Date((r.createdAt as any).seconds * 1000).toISOString() : new Date().toISOString()),
+            createdAt: getTimestampDate(r.createdAt)?.toISOString() || new Date().toISOString(),
           };
         });
 
@@ -3281,7 +3386,7 @@ export default function Dashboard() {
     const tradesMap = { ...activeTabTrades };
 
     try {
-      const activeTabs = tabs.filter((t) => t.status === "ACTIVE");
+      const activeTabs = tabs.filter((t) => t.status === "ACTIVE" && (!t.userId || t.userId === user.uid));
       const missingTabs = activeTabs.filter((tab) => !tradesMap[tab.id]);
 
       if (missingTabs.length > 0) {
@@ -3670,20 +3775,75 @@ export default function Dashboard() {
     lastActiveCardTabId.current = activeCardTabId;
   }, [activeCardTabId]);
 
+  const handleTabIndicatorClick = useCallback((tabId: string) => {
+    setActiveCardTabId(tabId);
+    isProgrammaticScrollRef.current = true;
+    if (programmaticScrollTimeoutRef.current) {
+      clearTimeout(programmaticScrollTimeoutRef.current);
+    }
+    programmaticScrollTimeoutRef.current = setTimeout(() => {
+      isProgrammaticScrollRef.current = false;
+    }, 800);
+
+    const cardElement = document.getElementById(`stock-card-${tabId}`);
+    if (cardElement && carouselRef.current) {
+      cardElement.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+        inline: "center",
+      });
+    }
+  }, []);
+
   // Keyboard shortcuts handling
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const activeEl = document.activeElement;
       const isInput =
-        activeEl?.tagName === "INPUT" || activeEl?.tagName === "TEXTAREA";
+        activeEl?.tagName === "INPUT" || activeEl?.tagName === "TEXTAREA" || activeEl?.getAttribute("contenteditable") === "true";
         
       if (isInput) return;
 
-      // Shift + H for Fullscreen
+      // 1. Shift + B -> 回到交易總覽頁面
       if (
         e.shiftKey &&
         !e.ctrlKey &&
         !e.metaKey &&
+        !e.altKey &&
+        (e.key === "B" || e.key === "b")
+      ) {
+        e.preventDefault();
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        if (isAiAnalysisOpen) setIsAiAnalysisOpen(false);
+        if (isCinemaModeActive) {
+          setIsCinemaModeActive(false);
+          if (document.fullscreenElement) {
+            document.exitFullscreen().catch(() => {});
+          }
+        }
+        playClickSound();
+        return;
+      }
+
+      // 2. Shift + I -> 匯入最新價格
+      if (
+        e.shiftKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        (e.key === "I" || e.key === "i")
+      ) {
+        e.preventDefault();
+        handleImportLatestPrices();
+        return;
+      }
+
+      // 3. Shift + H -> 全螢幕
+      if (
+        e.shiftKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
         (e.key === "H" || e.key === "h")
       ) {
         e.preventDefault();
@@ -3699,84 +3859,81 @@ export default function Dashboard() {
         return;
       }
 
-      // Shift + F for Search (Only if not Ctrl/Meta)
-      if (e.shiftKey && !e.ctrlKey && !e.metaKey && e.key.toUpperCase() === "F") {
+      // 4. Shift + F -> 搜尋股票
+      if (
+        e.shiftKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        (e.key === "F" || e.key === "f")
+      ) {
         e.preventDefault();
         setIsSearchOpen(true);
         return;
       }
 
-      // Shift + A for Add Stock
-      if (e.shiftKey && !e.ctrlKey && !e.metaKey && e.key.toUpperCase() === "A") {
+      // 5. Shift + M -> 電影觀賞模式
+      if (
+        e.shiftKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        (e.key === "M" || e.key === "m")
+      ) {
+        e.preventDefault();
+        if (isCinemaModeActive) {
+          setIsCinemaModeActive(false);
+          if (document.fullscreenElement) {
+            document.exitFullscreen().catch(() => {});
+          }
+        } else {
+          if (orderedFilteredSubTabVisibleTabs.length > 0) {
+            const isCurrentActiveVisible = orderedFilteredSubTabVisibleTabs.some(t => t.id === activeCardTabId);
+            const targetId = isCurrentActiveVisible ? (activeCardTabId || orderedFilteredSubTabVisibleTabs[0].id) : orderedFilteredSubTabVisibleTabs[0].id;
+            setActiveCinemaCardId(targetId);
+            setIsCinemaModeActive(true);
+            
+            if (document.documentElement.requestFullscreen) {
+              document.documentElement.requestFullscreen().catch((err) => {
+                console.warn("Fullscreen request rejected:", err);
+              });
+            }
+            playClickSound();
+          } else {
+            toast.error("目前無可見的股票卡片可供放大");
+          }
+        }
+        return;
+      }
+
+      // 6. Shift + D -> AI分析回傳
+      if (
+        e.shiftKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        (e.key === "D" || e.key === "d")
+      ) {
+        e.preventDefault();
+        setIsAiAnalysisOpen((prev) => !prev);
+        playClickSound();
+        return;
+      }
+
+      // 7. Shift + A -> 新增股票
+      if (
+        e.shiftKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        (e.key === "A" || e.key === "a")
+      ) {
         e.preventDefault();
         setIsAddOpen(true);
         return;
       }
 
-      // Shift + I for Import Latest Prices
-      if (e.shiftKey && !e.ctrlKey && !e.metaKey && e.key.toUpperCase() === "I") {
-        e.preventDefault();
-        handleImportLatestPrices();
-        return;
-      }
-
-      // Shift + U for managing holding/active stocks
-      if (e.shiftKey && !e.ctrlKey && !e.metaKey && e.key.toUpperCase() === "U") {
-        e.preventDefault();
-        setIsManageHiddenOpen((prev) => !prev);
-        return;
-      }
-
-      // Shift + J for Cinema Focus Mode
-      if (e.shiftKey && !e.ctrlKey && !e.metaKey && e.key.toUpperCase() === "J") {
-        e.preventDefault();
-        if (orderedFilteredSubTabVisibleTabs.length > 0) {
-          const isCurrentActiveVisible = orderedFilteredSubTabVisibleTabs.some(t => t.id === activeCardTabId);
-          const targetId = isCurrentActiveVisible ? (activeCardTabId || orderedFilteredSubTabVisibleTabs[0].id) : orderedFilteredSubTabVisibleTabs[0].id;
-          setActiveCinemaCardId(targetId);
-          setIsCinemaModeActive(true);
-          
-          if (document.documentElement.requestFullscreen) {
-            document.documentElement.requestFullscreen().catch((err) => {
-              console.warn("Fullscreen request rejected:", err);
-            });
-          }
-          playClickSound();
-        } else {
-          toast.error("目前無可見的股票卡片可供放大");
-        }
-        return;
-      }
-
-      // Alt + 1/2/3/4/5/6 for Holding Sub Tabs
-      if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
-        let selectedTab:
-          | "觀察中"
-          | "候選名單"
-          | "買進操作"
-          | "賣出操作"
-          | "平倉操作"
-          | "乖離名單"
-          | null = null;
-        if (e.code === "Digit1") selectedTab = "觀察中";
-        else if (e.code === "Digit2") selectedTab = "候選名單";
-        else if (e.code === "Digit3") selectedTab = "買進操作";
-        else if (e.code === "Digit4") selectedTab = "賣出操作";
-        else if (e.code === "Digit5") selectedTab = "平倉操作";
-        else if (e.code === "Digit6") selectedTab = "乖離名單";
-
-        if (selectedTab) {
-          e.preventDefault();
-          setActiveViewTab("active");
-          setActiveHoldingSubTab(selectedTab);
-          setTimeout(() => {
-            scrollToElement("#active-cards-section", -20);
-          }, 50);
-          return;
-        }
-      }
-
-      // Alt + Z for flipping visible stock cards
+      // 8. Alt + Z -> 全部翻頁
       if (
         e.altKey &&
         !e.ctrlKey &&
@@ -3789,26 +3946,149 @@ export default function Dashboard() {
         return;
       }
 
-      // Shift + 1/2/3/4 for Navigation
-      if (e.shiftKey && !e.ctrlKey && !e.metaKey) {
-        if (e.code === "Digit1") {
+      // 9. Alt + Q -> 顯示數據統計
+      if (
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        (e.key === "Q" || e.key === "q")
+      ) {
+        e.preventDefault();
+        setIsDesktopMetricsOpen((prev) => !prev);
+        playClickSound();
+        return;
+      }
+
+      // 10. Ctrl + Shift + 1/2/3/4 -> 真實交易 Sub Tabs (觀察中 / 候選名單 / 買進操作 / 賣出操作)
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey) {
+        let selectedRealTab: "觀察中" | "候選名單" | "買進操作" | "賣出操作" | null = null;
+        if (e.code === "Digit1" || e.key === "!" || e.key === "1") selectedRealTab = "觀察中";
+        else if (e.code === "Digit2" || e.key === "@" || e.key === "2") selectedRealTab = "候選名單";
+        else if (e.code === "Digit3" || e.key === "#" || e.key === "3") selectedRealTab = "買進操作";
+        else if (e.code === "Digit4" || e.key === "$" || e.key === "4") selectedRealTab = "賣出操作";
+
+        if (selectedRealTab) {
           e.preventDefault();
-          handleViewTabChange("active");
-        } else if (e.code === "Digit2") {
+          setActiveViewTab("real");
+          setActiveHoldingSubTab(selectedRealTab);
+          playClickSound();
+          setTimeout(() => {
+            scrollToElement("#active-cards-section", -20);
+          }, 50);
+          return;
+        }
+      }
+
+      // 11. Alt + 1/2/3/4/5 -> 虛擬交易 (持有中) Sub Tabs
+      if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+        let selectedTab:
+          | "觀察中"
+          | "候選名單"
+          | "買進操作"
+          | "賣出操作"
+          | "平倉操作"
+          | "乖離名單"
+          | null = null;
+        if (e.code === "Digit1" || e.key === "1") selectedTab = "觀察中"; // 虛擬交易
+        else if (e.code === "Digit2" || e.key === "2") selectedTab = "候選名單";
+        else if (e.code === "Digit3" || e.key === "3") selectedTab = "買進操作";
+        else if (e.code === "Digit4" || e.key === "4") selectedTab = "賣出操作";
+        else if (e.code === "Digit5" || e.key === "5") selectedTab = "乖離名單";
+
+        if (selectedTab) {
           e.preventDefault();
-          handleViewTabChange("real");
-        } else if (e.code === "Digit3") {
+          setActiveViewTab("active");
+          setActiveHoldingSubTab(selectedTab);
+          playClickSound();
+          setTimeout(() => {
+            scrollToElement("#active-cards-section", -20);
+          }, 50);
+          return;
+        }
+      }
+
+      // 12. Shift + 1/2/3/4 -> Main Navigation Tabs
+      if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (e.code === "Digit1" || e.key === "!" || e.key === "1") {
+          e.preventDefault();
+          handleViewTabChange("active"); // 持有中tab
+        } else if (e.code === "Digit2" || e.key === "@" || e.key === "2") {
+          e.preventDefault();
+          handleViewTabChange("real"); // 真實交易 tab
+        } else if (e.code === "Digit3" || e.key === "#" || e.key === "3") {
           e.preventDefault();
           handleViewTabChange("completed");
-        } else if (e.code === "Digit4") {
+        } else if (e.code === "Digit4" || e.key === "$" || e.key === "4") {
           e.preventDefault();
           handleViewTabChange("notes");
         }
       }
+
+      // 13. Alt + 左右方向鍵 -> 橫向滾動卡片
+      if (
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        (e.key === "ArrowLeft" || e.key === "ArrowRight")
+      ) {
+        e.preventDefault();
+        if (isCinemaModeActive) {
+          const currentIndex = orderedFilteredSubTabVisibleTabs.findIndex(t => t.id === activeCinemaCardId);
+          if (currentIndex !== -1 && orderedFilteredSubTabVisibleTabs.length > 1) {
+            const newIndex = e.key === "ArrowRight"
+              ? (currentIndex + 1) % orderedFilteredSubTabVisibleTabs.length
+              : (currentIndex - 1 + orderedFilteredSubTabVisibleTabs.length) % orderedFilteredSubTabVisibleTabs.length;
+            setActiveCinemaCardId(orderedFilteredSubTabVisibleTabs[newIndex].id);
+            playSwipeSound();
+          }
+        } else {
+          if (orderedFilteredSubTabVisibleTabs.length > 0) {
+            const currentIndex = orderedFilteredSubTabVisibleTabs.findIndex(t => t.id === activeCardTabId);
+            if (currentIndex !== -1) {
+              const targetIdx = e.key === "ArrowRight"
+                ? Math.min(currentIndex + 1, orderedFilteredSubTabVisibleTabs.length - 1)
+                : Math.max(currentIndex - 1, 0);
+              const targetTab = orderedFilteredSubTabVisibleTabs[targetIdx];
+              if (targetTab) {
+                handleTabIndicatorClick(targetTab.id);
+                playSwipeSound();
+              }
+            } else if (carouselRef.current) {
+              carouselRef.current.scrollBy({
+                left: e.key === "ArrowLeft" ? -380 : 380,
+                behavior: "smooth",
+              });
+              playSwipeSound();
+            }
+          } else if (carouselRef.current) {
+            carouselRef.current.scrollBy({
+              left: e.key === "ArrowLeft" ? -380 : 380,
+              behavior: "smooth",
+            });
+            playSwipeSound();
+          }
+        }
+        return;
+      }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleImportLatestPrices, handleFlipAllCards, orderedFilteredSubTabVisibleTabs, activeCardTabId, setActiveCinemaCardId, setIsCinemaModeActive, handleViewTabChange, scrollToElement]);
+  }, [
+    handleImportLatestPrices,
+    handleFlipAllCards,
+    orderedFilteredSubTabVisibleTabs,
+    activeCardTabId,
+    activeCinemaCardId,
+    setActiveCinemaCardId,
+    setIsCinemaModeActive,
+    isCinemaModeActive,
+    handleViewTabChange,
+    scrollToElement,
+    isAiAnalysisOpen,
+    handleTabIndicatorClick
+  ]);
 
   useEffect(() => {
     const updateIndicator = () => {
@@ -3873,26 +4153,6 @@ export default function Dashboard() {
     
     if (closestTabId && closestTabId !== activeCardTabId) {
       setActiveCardTabId(closestTabId);
-    }
-  };
-
-  const handleTabIndicatorClick = (tabId: string) => {
-    setActiveCardTabId(tabId);
-    isProgrammaticScrollRef.current = true;
-    if (programmaticScrollTimeoutRef.current) {
-      clearTimeout(programmaticScrollTimeoutRef.current);
-    }
-    programmaticScrollTimeoutRef.current = setTimeout(() => {
-      isProgrammaticScrollRef.current = false;
-    }, 800);
-
-    const cardElement = document.getElementById(`stock-card-${tabId}`);
-    if (cardElement && carouselRef.current) {
-      cardElement.scrollIntoView({
-        behavior: "smooth",
-        block: "nearest",
-        inline: "center",
-      });
     }
   };
 
@@ -4066,8 +4326,69 @@ export default function Dashboard() {
 
   if (loading) {
     return (
-      <div className="min-h-[50vh] flex items-center justify-center font-mono">
-        載入中...
+      <div className="w-full max-w-[1680px] mx-auto px-2 sm:px-4 py-3 sm:py-6 space-y-4 sm:space-y-6 select-none pointer-events-none">
+        {/* Top Control Bar Skeleton */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-3.5 sm:p-5 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-zinc-800 animate-pulse"></div>
+            <div className="space-y-1.5">
+              <div className="h-5 w-28 bg-zinc-800 rounded-md animate-pulse"></div>
+              <div className="h-3.5 w-44 bg-zinc-800/60 rounded-md animate-pulse"></div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2.5 w-full sm:w-auto">
+            <div className="h-9 w-24 bg-zinc-800/80 rounded-xl animate-pulse"></div>
+            <div className="h-9 w-24 bg-zinc-800/80 rounded-xl animate-pulse"></div>
+            <div className="h-9 w-28 bg-emerald-950/40 border border-emerald-800/30 rounded-xl animate-pulse"></div>
+          </div>
+        </div>
+
+        {/* Subtabs Skeleton */}
+        <div className="flex items-center gap-2 overflow-x-auto py-1 px-1 no-scrollbar">
+          {["觀察中", "候選名單", "買進操作", "賣出操作", "平倉操作", "乖離名單", "持股監控"].map((name, i) => (
+            <div
+              key={name}
+              className={`h-8 px-4 rounded-xl shrink-0 flex items-center justify-center text-[11px] font-bold ${
+                i === 0
+                  ? "bg-zinc-800 text-zinc-400 border border-zinc-700/50"
+                  : "bg-zinc-900/40 text-zinc-600 border border-zinc-800/30"
+              } animate-pulse`}
+            >
+              {name}
+            </div>
+          ))}
+        </div>
+
+        {/* Stock Cards Skeleton */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
+          {[1, 2, 3, 4].map((idx) => (
+            <div
+              key={idx}
+              className="h-[380px] sm:h-[440px] bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-4 flex flex-col justify-between space-y-4 animate-pulse shadow-sm"
+            >
+              <div className="flex items-center justify-between">
+                <div className="space-y-1.5">
+                  <div className="h-5 w-20 bg-zinc-800 rounded-md"></div>
+                  <div className="h-3.5 w-32 bg-zinc-800/50 rounded-md"></div>
+                </div>
+                <div className="h-6 w-16 bg-emerald-900/30 border border-emerald-700/30 rounded-full"></div>
+              </div>
+              <div className="flex-1 bg-zinc-950/60 rounded-xl border border-zinc-800/40 flex items-center justify-center p-4">
+                <div className="w-full h-full flex items-end justify-between gap-1.5 px-2 opacity-30">
+                  <div className="w-1/6 bg-emerald-500/40 rounded-t h-[40%]"></div>
+                  <div className="w-1/6 bg-emerald-500/40 rounded-t h-[65%]"></div>
+                  <div className="w-1/6 bg-emerald-500/40 rounded-t h-[50%]"></div>
+                  <div className="w-1/6 bg-emerald-500/40 rounded-t h-[80%]"></div>
+                  <div className="w-1/6 bg-emerald-500/40 rounded-t h-[95%]"></div>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div className="h-4 w-full bg-zinc-800/60 rounded-md"></div>
+                <div className="h-3.5 w-2/3 bg-zinc-800/40 rounded-md"></div>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
@@ -4135,12 +4456,12 @@ export default function Dashboard() {
     <div className="w-full pb-12 mt-0 transition-all duration-300">
       {/* 1. Full-width Green Ribbon Header (Desktop: sm and above) */}
       <ScrollIn className="hidden sm:block">
-        <div className="-mx-2 sm:-mx-4 md:-mx-6 bg-[#085041] text-white pt-[18px] pb-[20px] px-5 sm:px-6 md:px-8 flex flex-col gap-4 text-left border-none rounded-none shadow-none relative z-10 select-none">
-          <div className="w-full max-w-7xl mx-auto flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6">
+        <div className="-mx-2 sm:-mx-4 md:-mx-6 bg-[#085041] text-white pt-[16px] pb-[18px] px-4 sm:px-6 md:px-8 flex flex-col gap-4 text-left border-none rounded-none shadow-none relative z-10 select-none">
+          <div className="w-full max-w-[1600px] mx-auto flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 xl:gap-6">
             {/* Left section: Portfolio Overview badge & Title */}
-            <div className="flex flex-col text-left">
+            <div className="flex flex-col text-left shrink-0">
               <div className="flex justify-between items-center w-full lg:w-auto gap-3">
-                <span className="px-2.5 py-1 text-[10px] tracking-[0.07em] font-bold text-[#9FE1CB] bg-white/10 rounded-full uppercase">
+                <span className="px-2.5 py-1 text-[10px] tracking-[0.07em] font-bold text-[#9FE1CB] bg-white/10 rounded-full uppercase whitespace-nowrap">
                   PORTFOLIO OVERVIEW
                 </span>
                 <button
@@ -4152,8 +4473,8 @@ export default function Dashboard() {
                 </button>
               </div>
               
-              <div className="flex items-center gap-1.5 mt-2">
-                <h1 className="text-[20px] sm:text-[24px] font-bold text-white leading-none">
+              <div className="flex items-center gap-1.5 mt-1.5">
+                <h1 className="text-[20px] sm:text-[22px] md:text-[24px] font-bold text-white leading-none whitespace-nowrap">
                   交易總覽
                 </h1>
                 <button
@@ -4167,14 +4488,86 @@ export default function Dashboard() {
             </div>
 
             {/* Middle section: Indicators */}
-            <div className="flex flex-col lg:flex-row lg:items-center gap-4 lg:gap-6 bg-black/10 backdrop-blur-md px-5 py-3 rounded-2xl w-full lg:w-auto">
-              <div className="grid grid-cols-2 md:flex md:items-center gap-4 sm:gap-6 md:gap-8">
+            <div className="flex-1 bg-black/15 backdrop-blur-md px-4 sm:px-5 py-2.5 rounded-2xl w-full">
+              <div className="flex flex-wrap lg:flex-nowrap items-center justify-between gap-x-4 gap-y-3">
+                {/* Metric 0: Bank Account Water Level */}
+                <div className="flex flex-col text-left shrink-0">
+                  <div className="flex items-center gap-1">
+                    <span className="text-[11px] text-[#9FE1CB] font-medium opacity-90 whitespace-nowrap">銀行帳戶水位</span>
+                    <button
+                      onClick={() => setIsBankBalanceRevealed((prev) => !prev)}
+                      className="text-white/40 hover:text-white/80 transition-colors p-0.5"
+                      title={isBankBalanceRevealed ? "隱藏水位" : "雙擊或點擊顯示水位"}
+                    >
+                      {isBankBalanceRevealed ? (
+                        <Eye className="w-3 h-3 text-[#9FE1CB]" />
+                      ) : (
+                        <EyeOff className="w-3 h-3 text-white/50" />
+                      )}
+                    </button>
+                  </div>
+                  {isEditingBankBalance ? (
+                    <div className="flex items-center gap-0.5 mt-1">
+                      <span className="text-[14px] sm:text-[15px] font-semibold text-white">$</span>
+                      <input
+                        type="number"
+                        autoFocus
+                        value={editBankBalanceVal}
+                        onBlur={() => {
+                          const val = editBankBalanceVal === "" ? 0 : parseFloat(editBankBalanceVal);
+                          handleUpdateBankBalance(val);
+                          setIsEditingBankBalance(false);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            const val = editBankBalanceVal === "" ? 0 : parseFloat(editBankBalanceVal);
+                            handleUpdateBankBalance(val);
+                            setIsEditingBankBalance(false);
+                          } else if (e.key === "Escape") {
+                            setIsEditingBankBalance(false);
+                          }
+                        }}
+                        onChange={(e) => setEditBankBalanceVal(e.target.value)}
+                        className="bg-transparent text-white font-semibold text-[14px] sm:text-[15px] focus:outline-none w-24 border-none p-0 focus:ring-0 leading-none h-5"
+                        style={{ caretColor: 'white' }}
+                      />
+                    </div>
+                  ) : isBankBalanceRevealed ? (
+                    <div 
+                      onDoubleClick={() => setIsBankBalanceRevealed(false)}
+                      onClick={() => {
+                        setEditBankBalanceVal(bankAccountBalance.toString());
+                        setIsEditingBankBalance(true);
+                      }}
+                      className="text-[14px] sm:text-[15px] font-semibold text-white cursor-pointer select-none leading-none mt-1 flex items-baseline gap-1 group/bank whitespace-nowrap"
+                      title="點擊修改水位，雙擊馬賽克遮罩"
+                    >
+                      <span>${bankAccountBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      <span className="text-[10px] text-white/40 group-hover/bank:text-white/70 transition-colors font-normal whitespace-nowrap">(修改)</span>
+                    </div>
+                  ) : (
+                    <div
+                      onDoubleClick={() => setIsBankBalanceRevealed(true)}
+                      className="text-[14px] sm:text-[15px] font-semibold text-white cursor-pointer select-none leading-none mt-1 flex items-center gap-1 group/bank-mosaic whitespace-nowrap"
+                      title="雙擊解鎖顯示水位"
+                    >
+                      <span className="tracking-widest font-mono filter blur-[3.5px] select-none text-emerald-100 bg-white/10 px-1.5 py-0.5 rounded transition-all group-hover/bank-mosaic:blur-[2px] whitespace-nowrap">
+                        $8,888,888.88
+                      </span>
+                      <span className="text-[10px] text-white/40 group-hover/bank-mosaic:text-white/70 transition-colors font-normal whitespace-nowrap">(雙擊)</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Vertical divider */}
+                <div className="hidden lg:block h-6 w-[1px] bg-white/15 shrink-0" />
+
                 {/* Metric 1: Total Capital */}
-                <div className="flex flex-col text-left">
-                  <span className="text-[11px] text-[#9FE1CB] font-medium opacity-80">目前的總資金</span>
+                <div className="flex flex-col text-left shrink-0">
+                  <span className="text-[11px] text-[#9FE1CB] font-medium opacity-90 whitespace-nowrap">目前的總資金</span>
                   {isEditingCapital ? (
                     <div className="flex items-center gap-0.5 mt-1">
-                      <span className="text-[15px] sm:text-[16px] font-semibold text-white">$</span>
+                      <span className="text-[14px] sm:text-[15px] font-semibold text-white">$</span>
                       <input
                         type="number"
                         autoFocus
@@ -4192,7 +4585,7 @@ export default function Dashboard() {
                           }
                         }}
                         onChange={(e) => setEditCapitalVal(e.target.value)}
-                        className="bg-transparent text-white font-semibold text-[15px] sm:text-[16px] focus:outline-none w-20 border-none p-0 focus:ring-0 leading-none h-5"
+                        className="bg-transparent text-white font-semibold text-[14px] sm:text-[15px] focus:outline-none w-20 border-none p-0 focus:ring-0 leading-none h-5"
                         style={{ caretColor: 'white' }}
                       />
                     </div>
@@ -4202,24 +4595,24 @@ export default function Dashboard() {
                         setEditCapitalVal(totalCapital.toString());
                         setIsEditingCapital(true);
                       }}
-                      className="text-[15px] sm:text-[16px] font-semibold text-white cursor-pointer select-none leading-none mt-1 flex items-center gap-1 group/cap"
+                      className="text-[14px] sm:text-[15px] font-semibold text-white cursor-pointer select-none leading-none mt-1 flex items-baseline gap-1 group/cap whitespace-nowrap"
                       title="點擊修改總資金"
                     >
                       <span>${totalCapital.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                      <span className="text-[9px] text-white/30 group-hover/cap:text-white/60 transition-colors">(修改)</span>
+                      <span className="text-[10px] text-white/40 group-hover/cap:text-white/70 transition-colors font-normal whitespace-nowrap">(修改)</span>
                     </div>
                   )}
                 </div>
 
                 {/* Vertical divider */}
-                <div className="hidden md:block h-6 w-[0.5px] bg-white/20" />
+                <div className="hidden lg:block h-6 w-[1px] bg-white/15 shrink-0" />
 
                 {/* Metric 1.5: Virtual Total Capital */}
-                <div className="flex flex-col text-left">
-                  <span className="text-[11px] text-[#9FE1CB] font-medium opacity-80">模擬交易總資金</span>
+                <div className="flex flex-col text-left shrink-0">
+                  <span className="text-[11px] text-[#9FE1CB] font-medium opacity-90 whitespace-nowrap">模擬交易總資金</span>
                   {isEditingVirtualCapital ? (
                     <div className="flex items-center gap-0.5 mt-1">
-                      <span className="text-[15px] sm:text-[16px] font-semibold text-white">$</span>
+                      <span className="text-[14px] sm:text-[15px] font-semibold text-white">$</span>
                       <input
                         type="number"
                         autoFocus
@@ -4237,7 +4630,7 @@ export default function Dashboard() {
                           }
                         }}
                         onChange={(e) => setEditVirtualCapitalVal(e.target.value)}
-                        className="bg-transparent text-white font-semibold text-[15px] sm:text-[16px] focus:outline-none w-20 border-none p-0 focus:ring-0 leading-none h-5"
+                        className="bg-transparent text-white font-semibold text-[14px] sm:text-[15px] focus:outline-none w-20 border-none p-0 focus:ring-0 leading-none h-5"
                         style={{ caretColor: 'white' }}
                       />
                     </div>
@@ -4247,44 +4640,44 @@ export default function Dashboard() {
                         setEditVirtualCapitalVal(virtualCapital.toString());
                         setIsEditingVirtualCapital(true);
                       }}
-                      className="text-[15px] sm:text-[16px] font-semibold text-white cursor-pointer select-none leading-none mt-1 flex items-center gap-1 group/vcap"
+                      className="text-[14px] sm:text-[15px] font-semibold text-white cursor-pointer select-none leading-none mt-1 flex items-baseline gap-1 group/vcap whitespace-nowrap"
                       title="點擊修改模擬總資金"
                     >
                       <span>${virtualCapital.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                      <span className="text-[9px] text-white/30 group-hover/vcap:text-white/60 transition-colors">(修改)</span>
+                      <span className="text-[10px] text-white/40 group-hover/vcap:text-white/70 transition-colors font-normal whitespace-nowrap">(修改)</span>
                     </div>
                   )}
                 </div>
 
                 {/* Vertical divider */}
-                <div className="hidden md:block h-6 w-[0.5px] bg-white/20" />
+                <div className="hidden lg:block h-6 w-[1px] bg-white/15 shrink-0" />
 
                 {/* Metric 2: Remaining Balance */}
-                <div className="flex flex-col text-left">
-                  <span className="text-[11px] text-[#9FE1CB] font-medium opacity-80">剩餘額度</span>
-                  <span className="text-[15px] sm:text-[16px] font-semibold font-mono text-white mt-1 leading-none">
+                <div className="flex flex-col text-left shrink-0">
+                  <span className="text-[11px] text-[#9FE1CB] font-medium opacity-90 whitespace-nowrap">剩餘額度</span>
+                  <span className="text-[14px] sm:text-[15px] font-semibold font-mono text-white mt-1 leading-none whitespace-nowrap">
                     ${remainingBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 </div>
 
                 {/* Vertical divider */}
-                <div className="hidden md:block h-6 w-[0.5px] bg-white/20" />
+                <div className="hidden lg:block h-6 w-[1px] bg-white/15 shrink-0" />
 
                 {/* Metric 3: Real Cost */}
-                <div className="flex flex-col text-left">
-                  <span className="text-[11px] text-[#9FE1CB] font-medium opacity-80">真實交易總持有成本</span>
-                  <span className="text-[15px] sm:text-[16px] font-semibold font-mono text-white mt-1 leading-none">
+                <div className="flex flex-col text-left shrink-0">
+                  <span className="text-[11px] text-[#9FE1CB] font-medium opacity-90 whitespace-nowrap">真實交易總持有成本</span>
+                  <span className="text-[14px] sm:text-[15px] font-semibold font-mono text-white mt-1 leading-none whitespace-nowrap">
                     ${totalRealHoldingCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 </div>
 
                 {/* Vertical divider */}
-                <div className="hidden md:block h-6 w-[0.5px] bg-white/20" />
+                <div className="hidden lg:block h-6 w-[1px] bg-white/15 shrink-0" />
 
                 {/* Metric 3.5: Virtual Cost */}
-                <div className="flex flex-col text-left">
-                  <span className="text-[11px] text-[#9FE1CB] font-medium opacity-80">模擬交易總持有成本</span>
-                  <span className="text-[15px] sm:text-[16px] font-semibold font-mono text-white mt-1 leading-none">
+                <div className="flex flex-col text-left shrink-0">
+                  <span className="text-[11px] text-[#9FE1CB] font-medium opacity-90 whitespace-nowrap">模擬交易總持有成本</span>
+                  <span className="text-[14px] sm:text-[15px] font-semibold font-mono text-white mt-1 leading-none whitespace-nowrap">
                     ${totalVirtualHoldingCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 </div>
@@ -4292,10 +4685,10 @@ export default function Dashboard() {
             </div>
 
             {/* Right section: Actions & Logout */}
-            <div className="flex items-center gap-2.5 w-full lg:w-auto justify-end sm:justify-start">
+            <div className="flex items-center gap-2.5 shrink-0 w-full lg:w-auto justify-end sm:justify-start">
               <button
                 onClick={() => setIsAddOpen(true)}
-                className="flex-1 lg:flex-initial px-4 py-2.5 lg:py-2 bg-transparent hover:bg-white/10 text-white border border-white/20 rounded-xl text-[13px] font-medium transition-colors cursor-pointer flex items-center justify-center gap-1"
+                className="whitespace-nowrap px-3.5 py-2 bg-transparent hover:bg-white/10 text-white border border-white/20 rounded-xl text-[13px] font-medium transition-colors cursor-pointer flex items-center justify-center gap-1"
               >
                 <span>＋ 新增股票</span>
               </button>
@@ -4303,14 +4696,14 @@ export default function Dashboard() {
               <button
                 onClick={handleImportLatestPrices}
                 disabled={isImportingPrices || !user}
-                className="flex-1 lg:flex-initial px-4 py-2.5 lg:py-2 bg-transparent hover:bg-white/10 text-white border border-white/20 rounded-xl text-[13px] font-medium transition-colors cursor-pointer flex items-center justify-center gap-1 disabled:opacity-50"
+                className="whitespace-nowrap px-3.5 py-2 bg-transparent hover:bg-white/10 text-white border border-white/20 rounded-xl text-[13px] font-medium transition-colors cursor-pointer flex items-center justify-center gap-1 disabled:opacity-50"
               >
                 <span>↻ 匯入最新現價</span>
               </button>
 
               <button
                 onClick={logout}
-                className="hidden lg:block text-white/60 hover:text-white transition-colors p-2 rounded-lg"
+                className="hidden lg:block text-white/60 hover:text-white transition-colors p-2 rounded-lg shrink-0"
                 title="登出"
               >
                 <LogOut className="w-5 h-5" />
@@ -4351,6 +4744,85 @@ export default function Dashboard() {
               >
                 <HelpCircle className="w-4 h-4" />
               </button>
+            </div>
+
+            {/* Bank Account Water Level (Between 交易總覽 and 目前的總資金) */}
+            <div className="flex flex-col gap-0.5 border-t border-white/15 pt-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-[#9FE1CB] font-bold tracking-wider uppercase opacity-80 flex items-center gap-1.5">
+                  銀行帳戶水位
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsBankBalanceRevealed((prev) => !prev);
+                    }}
+                    className="text-white/40 hover:text-white/80 transition-colors p-0.5"
+                    title={isBankBalanceRevealed ? "隱藏水位" : "顯示水位"}
+                  >
+                    {isBankBalanceRevealed ? (
+                      <Eye className="w-3 h-3 text-[#9FE1CB]" />
+                    ) : (
+                      <EyeOff className="w-3 h-3 text-white/50" />
+                    )}
+                  </button>
+                </span>
+                <span className="text-[9px] text-white/40 font-normal">
+                  {isBankBalanceRevealed ? "(雙擊隱藏)" : "(雙擊顯示)"}
+                </span>
+              </div>
+              <div className="text-[22px] font-semibold text-white tracking-tight leading-none font-sans mt-0.5">
+                {isEditingBankBalance ? (
+                  <div className="flex items-center gap-0.5">
+                    <span className="text-[18px] font-medium text-white">$</span>
+                    <input
+                      type="number"
+                      autoFocus
+                      value={editBankBalanceVal}
+                      onBlur={() => {
+                        const val = editBankBalanceVal === "" ? 0 : parseFloat(editBankBalanceVal);
+                        handleUpdateBankBalance(val);
+                        setIsEditingBankBalance(false);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          const val = editBankBalanceVal === "" ? 0 : parseFloat(editBankBalanceVal);
+                          handleUpdateBankBalance(val);
+                          setIsEditingBankBalance(false);
+                        } else if (e.key === "Escape") {
+                          setIsEditingBankBalance(false);
+                        }
+                      }}
+                      onChange={(e) => setEditBankBalanceVal(e.target.value)}
+                      className="bg-transparent text-white font-semibold text-[22px] focus:outline-none w-full border-none p-0 focus:ring-0 leading-none h-7"
+                      style={{ caretColor: 'white' }}
+                    />
+                  </div>
+                ) : isBankBalanceRevealed ? (
+                  <div 
+                    onDoubleClick={() => setIsBankBalanceRevealed(false)}
+                    onClick={() => {
+                      setEditBankBalanceVal(bankAccountBalance.toString());
+                      setIsEditingBankBalance(true);
+                    }}
+                    className="cursor-pointer flex items-baseline gap-1.5 group/bank"
+                    title="點擊修改水位，雙擊馬賽克遮罩"
+                  >
+                    <span>${bankAccountBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    <span className="text-[11px] text-white/50 group-hover/bank:text-white/80 transition-colors font-normal">(修改)</span>
+                  </div>
+                ) : (
+                  <div
+                    onDoubleClick={() => setIsBankBalanceRevealed(true)}
+                    className="cursor-pointer flex items-center gap-1.5 group/bank-mosaic"
+                    title="雙擊解鎖顯示水位"
+                  >
+                    <span className="tracking-widest font-mono filter blur-[3.5px] select-none text-emerald-100 bg-white/10 px-2 py-0.5 rounded transition-all group-hover/bank-mosaic:blur-[2px]">
+                      $8,888,888.88
+                    </span>
+                    <span className="text-[10px] text-white/40 group-hover/bank-mosaic:text-white/80 transition-colors font-normal">(雙擊)</span>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Below title: hero number (totalCapital) */}
@@ -4594,13 +5066,13 @@ export default function Dashboard() {
       </Dialog>
 
       {/* 2. Main content container, aligned nicely with responsive layout */}
-      <div className={`space-y-4 sm:space-y-6 mx-auto mt-4 sm:mt-6 px-2 sm:px-4 ${activeViewTab === "notes" || activeViewTab === "completed" ? "w-full max-w-full lg:max-w-[98%] xl:max-w-[1920px]" : "max-w-7xl"}`}>
+      <div className={`space-y-4 sm:space-y-6 mx-auto mt-4 sm:mt-6 px-2 sm:px-4 ${activeViewTab === "notes" || activeViewTab === "completed" ? "w-full max-w-full lg:max-w-[98%] xl:max-w-[1920px]" : "max-w-[1600px]"}`}>
 
       {/* Desktop Metrics Collapsible Controller */}
       <div className="hidden sm:flex justify-end mt-2 mb-1">
         <button
           onClick={() => setIsDesktopMetricsOpen(!isDesktopMetricsOpen)}
-          className="flex items-center gap-2 text-xs font-semibold text-[#888780] hover:text-[#2C2C2A] transition-colors py-1.5 px-3 rounded-lg bg-black/[0.03] hover:bg-black/[0.06] cursor-pointer"
+          className="flex items-center gap-1.5 text-xs font-medium text-[#666661] hover:text-[#2C2C2A] transition-colors py-1.5 px-3 rounded-lg bg-black/[0.03] hover:bg-black/[0.06] cursor-pointer"
         >
           <span>{isDesktopMetricsOpen ? "隱藏數據統計" : "顯示數據統計"}</span>
           <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-300 ${isDesktopMetricsOpen ? "rotate-180" : ""}`} />
@@ -4616,89 +5088,91 @@ export default function Dashboard() {
             transition={{ duration: 0.25, ease: "easeInOut" }}
             className="hidden sm:block overflow-hidden"
           >
-            <div className="grid sm:grid-cols-6 gap-y-6 gap-x-0 py-6 select-none border-b border-black/[0.04] mb-2">
-              {[
-                {
-                  title: "總持股數",
-                  rawValue: activeTabs.length,
-                  prefix: "",
-                  suffix: "",
-                  decimals: 0,
-                  pnl: undefined,
-                  showPlus: false,
-                },
-                {
-                  title: "總實現損益",
-                  rawValue: totalCompletedPnL,
-                  prefix: "$",
-                  suffix: "",
-                  decimals: 2,
-                  pnl: totalCompletedPnL,
-                  showPlus: true,
-                },
-                {
-                  title: "模擬實現損益",
-                  rawValue: simulatedCompletedPnL,
-                  prefix: "$",
-                  suffix: "",
-                  decimals: 2,
-                  pnl: simulatedCompletedPnL,
-                  showPlus: true,
-                },
-                {
-                  title: "模擬未實現總損益",
-                  rawValue: simulatedUnrealizedPnL,
-                  prefix: "$",
-                  suffix: "",
-                  decimals: 2,
-                  pnl: simulatedUnrealizedPnL,
-                  showPlus: true,
-                },
-                {
-                  title: "真實交易勝率",
-                  rawValue: realWinRate,
-                  prefix: "",
-                  suffix: "%",
-                  decimals: 0,
-                  pnl: undefined,
-                  showPlus: false,
-                },
-                {
-                  title: "模擬交易勝率",
-                  rawValue: simulatedWinRate,
-                  prefix: "",
-                  suffix: "%",
-                  decimals: 0,
-                  pnl: undefined,
-                  showPlus: false,
-                },
-              ].map((metric: any, i) => {
-                const isPnl = metric.pnl !== undefined;
-                const isPositive = metric.rawValue >= 0;
-                const valueColor = isPnl 
-                  ? (isPositive ? "text-[#085041]" : "text-rose-700") 
-                  : "text-[#2C2C2A]";
+            <div className="bg-white/80 backdrop-blur-sm border border-black/5 shadow-xs rounded-2xl p-4 sm:p-5 select-none mb-3">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-y-4 gap-x-0 divide-x-0 lg:divide-x divide-black/[0.06]">
+                {[
+                  {
+                    title: "總持股數",
+                    rawValue: activeTabs.length,
+                    prefix: "",
+                    suffix: "",
+                    decimals: 0,
+                    pnl: undefined,
+                    showPlus: false,
+                  },
+                  {
+                    title: "總實現損益",
+                    rawValue: totalCompletedPnL,
+                    prefix: "$",
+                    suffix: "",
+                    decimals: 2,
+                    pnl: totalCompletedPnL,
+                    showPlus: true,
+                  },
+                  {
+                    title: "模擬實現損益",
+                    rawValue: simulatedCompletedPnL,
+                    prefix: "$",
+                    suffix: "",
+                    decimals: 2,
+                    pnl: simulatedCompletedPnL,
+                    showPlus: true,
+                  },
+                  {
+                    title: "模擬未實現總損益",
+                    rawValue: simulatedUnrealizedPnL,
+                    prefix: "$",
+                    suffix: "",
+                    decimals: 2,
+                    pnl: simulatedUnrealizedPnL,
+                    showPlus: true,
+                  },
+                  {
+                    title: "真實交易勝率",
+                    rawValue: realWinRate,
+                    prefix: "",
+                    suffix: "%",
+                    decimals: 0,
+                    pnl: undefined,
+                    showPlus: false,
+                  },
+                  {
+                    title: "模擬交易勝率",
+                    rawValue: simulatedWinRate,
+                    prefix: "",
+                    suffix: "%",
+                    decimals: 0,
+                    pnl: undefined,
+                    showPlus: false,
+                  },
+                ].map((metric: any, i) => {
+                  const isPnl = metric.pnl !== undefined;
+                  const isPositive = metric.rawValue >= 0;
+                  const valueColor = isPnl 
+                    ? (isPositive ? "text-[#085041]" : "text-rose-700") 
+                    : "text-[#2C2C2A]";
 
-                return (
-                  <div 
-                    key={i} 
-                    className={`flex flex-col items-center justify-center text-center py-2 px-4 border-r border-black/[0.07] last:border-r-0`}
-                  >
-                    <span className="text-xs text-[#888780] font-medium tracking-wide uppercase">
-                      {metric.title}
-                    </span>
-                    <div className={`text-3xl font-bold tracking-tight mt-1.5 font-mono ${valueColor}`}>
-                      <AnimatedNumber
-                        value={metric.rawValue}
-                        prefix={metric.prefix}
-                        suffix={metric.suffix}
-                        decimals={metric.decimals}
-                        showPlus={metric.showPlus}
-                      />
+                  return (
+                    <div 
+                      key={i} 
+                      className="flex flex-col items-center justify-center text-center py-1.5 px-2 sm:px-3 lg:px-4"
+                    >
+                      <span className="text-[11px] sm:text-[12px] font-semibold text-[#666661] tracking-wide uppercase whitespace-nowrap">
+                        {metric.title}
+                      </span>
+                      <div className={`text-[19px] sm:text-[21px] lg:text-[23px] font-bold tracking-tight mt-1 font-mono whitespace-nowrap ${valueColor}`}>
+                        <AnimatedNumber
+                          value={metric.rawValue}
+                          prefix={metric.prefix}
+                          suffix={metric.suffix}
+                          decimals={metric.decimals}
+                          showPlus={metric.showPlus}
+                        />
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
           </motion.div>
         )}
@@ -5150,60 +5624,211 @@ export default function Dashboard() {
           </DialogContent>
         </Dialog>
 
-        {/* Keyboard Shortcuts Help Dialog */}
+        {/* System Help & Keyboard Shortcuts Dialog */}
         <Dialog open={isHelpOpen} onOpenChange={setIsHelpOpen}>
-          <DialogContent className="border border-white/10 bg-[#0F0F12]/95 backdrop-blur-2xl text-white max-w-md">
-            <DialogHeader>
-              <DialogTitle className="text-xl font-black tracking-tight flex items-center gap-2">
-                <HelpCircle className="w-5 h-5 text-emerald-400" />
-                快捷鍵指南
-              </DialogTitle>
-              <DialogDescription className="text-white/40 font-medium">
-                使用以下快捷鍵更快速地操作系統
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  { key: "Alt + 1", desc: "持有中 - 觀察中" },
-                  { key: "Alt + 2", desc: "持有中 - 候選名單" },
-                  { key: "Alt + 3", desc: "持有中 - 買進操作" },
-                  { key: "Alt + 4", desc: "持有中 - 賣出操作" },
-                  { key: "Alt + 5", desc: "持有中 - 平倉操作" },
-                  { key: "Alt + 6", desc: "持有中 - 乖離名單" },
-                  { key: "Shift + 1", desc: "切換至 持有中 標籤" },
-                  { key: "Shift + 2", desc: "切換至 真實交易 標籤" },
-                  { key: "Shift + 3", desc: "切換至 已完成 標籤" },
-                  { key: "Shift + 4", desc: "切換至 操作備註 標籤" },
-                  { key: "Shift + F", desc: "快速搜尋股票" },
-                  { key: "Shift + H", desc: "切換全螢幕模式" },
-                  { key: "Shift + A", desc: "開啟 新增股票 對話框" },
-                  { key: "Shift + U", desc: "管理持有中股票" },
-                  { key: "Alt + Z", desc: "翻面可見股票卡片" },
-                  { key: "Shift + I", desc: "匯入現價 / AI 智能建議 (詳情頁)" },
-                  { key: "Shift + S", desc: "儲存策略 (詳情頁)" },
-                  { key: "Shift + B", desc: "從詳情頁面 返回主頁" },
-                ].map((item, i) => (
-                  <div
-                    key={i}
-                    className="bg-white/5 border border-white/5 rounded-lg p-3 flex flex-col gap-1"
-                  >
-                    <span className="text-[10px] font-black text-emerald-400 tracking-wider uppercase">
-                      {item.key}
-                    </span>
-                    <span className="text-xs font-bold text-white/70">
-                      {item.desc}
-                    </span>
-                  </div>
-                ))}
+          <DialogContent className="border border-white/10 bg-[#0F0F12]/95 backdrop-blur-2xl text-white w-[92vw] sm:max-w-lg max-h-[90vh] overflow-y-auto p-5 sm:p-6 rounded-2xl shadow-2xl">
+            <DialogHeader className="space-y-3 pb-3 border-b border-white/10">
+              <div className="flex items-center justify-between">
+                <DialogTitle className="text-xl font-black tracking-tight flex items-center gap-2">
+                  <HelpCircle className="w-5 h-5 text-emerald-400" />
+                  系統說明與指南
+                </DialogTitle>
               </div>
-            </div>
-            <DialogFooter>
+
+              {/* Multi-Tab Buttons */}
+              <div className="flex items-center gap-2 bg-white/5 p-1 rounded-xl border border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setHelpDialogTab("shortcuts")}
+                  className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    helpDialogTab === "shortcuts"
+                      ? "bg-emerald-500 text-black shadow-md"
+                      : "text-white/60 hover:text-white hover:bg-white/5"
+                  }`}
+                >
+                  <Keyboard className="w-3.5 h-3.5" />
+                  <span>快捷鍵指南</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHelpDialogTab("priceImport")}
+                  className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    helpDialogTab === "priceImport"
+                      ? "bg-emerald-500 text-black shadow-md"
+                      : "text-white/60 hover:text-white hover:bg-white/5"
+                  }`}
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>股價獲取與匯入</span>
+                </button>
+              </div>
+            </DialogHeader>
+
+            {helpDialogTab === "shortcuts" ? (
+              <div className="space-y-4 py-3 max-h-[60vh] overflow-y-auto pr-1">
+                <p className="text-xs text-white/50 font-medium">
+                  使用以下快捷鍵更快速地操作系統：
+                </p>
+
+                {/* Section 1: 虛擬交易 / 持有中 */}
+                <div className="space-y-1.5">
+                  <span className="text-[11px] font-bold text-emerald-400 tracking-wide flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                    持有中 / 虛擬交易快捷鍵
+                  </span>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { key: "Shift + 1", desc: "持有中 tab" },
+                      { key: "Alt + 1", desc: "虛擬交易" },
+                      { key: "Alt + 2", desc: "候選名單" },
+                      { key: "Alt + 3", desc: "買進操作" },
+                      { key: "Alt + 4", desc: "賣出操作" },
+                      { key: "Alt + 5", desc: "乖離名單" },
+                    ].map((item, i) => (
+                      <div
+                        key={i}
+                        className="bg-white/5 border border-white/5 rounded-lg p-2 flex flex-col gap-0.5"
+                      >
+                        <span className="text-[10px] font-black text-emerald-300 tracking-wider font-mono">
+                          {item.key}
+                        </span>
+                        <span className="text-xs font-bold text-white/80">
+                          {item.desc}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Section 2: 真實交易 */}
+                <div className="space-y-1.5 pt-1">
+                  <span className="text-[11px] font-bold text-teal-400 tracking-wide flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-teal-400"></span>
+                    真實交易快捷鍵
+                  </span>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { key: "Shift + 2", desc: "真實交易 tab" },
+                      { key: "Ctrl + Shift + 1", desc: "觀察中" },
+                      { key: "Ctrl + Shift + 2", desc: "候選名單" },
+                      { key: "Ctrl + Shift + 3", desc: "買進操作" },
+                      { key: "Ctrl + Shift + 4", desc: "賣出操作" },
+                    ].map((item, i) => (
+                      <div
+                        key={i}
+                        className="bg-white/5 border border-white/5 rounded-lg p-2 flex flex-col gap-0.5"
+                      >
+                        <span className="text-[10px] font-black text-teal-300 tracking-wider font-mono">
+                          {item.key}
+                        </span>
+                        <span className="text-xs font-bold text-white/80">
+                          {item.desc}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Section 3: 導覽與操作 */}
+                <div className="space-y-1.5 pt-1">
+                  <span className="text-[11px] font-bold text-cyan-400 tracking-wide flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
+                    總覽、分析與通用工具
+                  </span>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { key: "Shift + B", desc: "回到交易總覽頁面" },
+                      { key: "Shift + I", desc: "匯入最新價格" },
+                      { key: "Shift + H", desc: "全螢幕模式" },
+                      { key: "Shift + F", desc: "搜尋股票" },
+                      { key: "Shift + M", desc: "電影觀賞模式" },
+                      { key: "Shift + D", desc: "AI 分析回傳" },
+                      { key: "Shift + A", desc: "新增股票" },
+                      { key: "Alt + Z", desc: "全部翻頁" },
+                      { key: "Alt + Q", desc: "顯示 / 隱藏數據統計" },
+                      { key: "Alt + ← / →", desc: "橫向滾動卡片" },
+                    ].map((item, i) => (
+                      <div
+                        key={i}
+                        className="bg-white/5 border border-white/5 rounded-lg p-2 flex flex-col gap-0.5"
+                      >
+                        <span className="text-[10px] font-black text-cyan-300 tracking-wider font-mono">
+                          {item.key}
+                        </span>
+                        <span className="text-xs font-bold text-white/80">
+                          {item.desc}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3.5 py-3 text-xs text-white/80 leading-relaxed max-h-[60vh] overflow-y-auto pr-1">
+                {/* Section 1: API & Source */}
+                <div className="bg-white/5 border border-white/10 rounded-xl p-3.5 space-y-2">
+                  <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
+                    <Globe className="w-4 h-4 shrink-0" />
+                    <span>數據來源與 API 串接</span>
+                  </div>
+                  <p className="text-white/70">
+                    本系統透過後端安全的代理服務（Proxy API <code className="text-emerald-300 font-mono bg-black/40 px-1 py-0.5 rounded">/api/stock/:symbol</code>）即時串接 <strong className="text-white">Yahoo Finance 全球金融行情數據</strong>。
+                  </p>
+                  <p className="text-white/70">
+                    支援美股（例如 <span className="text-emerald-300 font-mono font-bold">NVDA</span>、<span className="text-emerald-300 font-mono font-bold">AAPL</span>、<span className="text-emerald-300 font-mono font-bold">TSLA</span>）以及台股（如 <span className="text-emerald-300 font-mono font-bold">2330.TW</span>、<span className="text-emerald-300 font-mono font-bold">2454.TW</span>、<span className="text-emerald-300 font-mono font-bold">0050.TW</span>）與全球主要公開市場標的。
+                  </p>
+                </div>
+
+                {/* Section 2: Import methods */}
+                <div className="bg-white/5 border border-white/10 rounded-xl p-3.5 space-y-2.5">
+                  <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
+                    <RefreshCw className="w-4 h-4 shrink-0" />
+                    <span>獲取與匯入最新股價機制</span>
+                  </div>
+                  <ul className="space-y-2 text-white/70 list-disc list-inside">
+                    <li>
+                      <strong className="text-white">一鍵全批量匯入</strong>：點擊頂部橫幅的 <span className="text-emerald-300 font-bold">「↻ 匯入最新現價」</span> 按鈕（或鍵盤快捷鍵 <code className="text-emerald-300 font-mono bg-black/40 px-1 py-0.5 rounded">Shift + I</code>），系統將自動為目前所有「持有中」的股票抓取最新即時成交價，並更新資料庫。
+                    </li>
+                    <li>
+                      <strong className="text-white">背景自動預載 (Prefetch)</strong>：當您在卡片列表瀏覽或開啟股票詳情頁時，系統會在背景以 Ajax 自動預抓最新現價，隨時同步計算最新未實現損益。
+                    </li>
+                    <li>
+                      <strong className="text-white">個股手動模擬試算</strong>：在個股詳情頁面，您亦可手動輸入目標成交價進行策略與損益動態模擬。
+                    </li>
+                  </ul>
+                </div>
+
+                {/* Section 3: Cache & Market hours */}
+                <div className="bg-white/5 border border-white/10 rounded-xl p-3.5 space-y-2">
+                  <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
+                    <Zap className="w-4 h-4 shrink-0" />
+                    <span>快取保護與休市說明</span>
+                  </div>
+                  <p className="text-white/70">
+                    <strong className="text-white">快取機制</strong>：為維持網頁回應效能並防止過度頻繁請求 API，背景設有 30 秒快取保護。
+                  </p>
+                  <p className="text-white/70">
+                    <strong className="text-white">休市期間</strong>：若於非交易時段（如美股盤後或例假日）執行匯入，系統抓取並顯示的為最近一交易日之常規收盤價 (Regular Market Close Price)。
+                  </p>
+                </div>
+
+                {/* Section 4: Symbol tip */}
+                <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3 text-emerald-200/90 text-xs flex items-start gap-2">
+                  <Database className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="text-emerald-300 block mb-0.5">台股代碼輸入提醒：</strong>
+                    台股請務必在代碼後加上 <code className="text-white font-mono bg-black/40 px-1 rounded">.TW</code>（例如台積電請輸入 <code className="text-white font-mono bg-black/40 px-1 rounded">2330.TW</code>），系統才能正確連結行情數據。
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <DialogFooter className="pt-2 border-t border-white/10">
               <Button
                 onClick={() => setIsHelpOpen(false)}
-                className="w-full bg-white/10 hover:bg-white/20 text-white font-bold rounded-xl"
+                className="w-full bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-xl cursor-pointer transition-colors"
               >
-                了解
+                了解並關閉
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -6297,9 +6922,11 @@ export default function Dashboard() {
 
                                               return (
                                                 <div
+                                                  onTouchStart={(e) => e.stopPropagation()}
                                                   onClick={(e) => {
                                                     e.stopPropagation();
                                                     setSelectedActionTab(tab);
+                                                    setActionActiveTab("general");
                                                     setIsActionDialogOpen(true);
                                                   }}
                                                   style={{ backgroundColor: bannerBgColor }}
@@ -6345,10 +6972,12 @@ export default function Dashboard() {
 
                                             {/* Symbol, Price, Scores Row */}
                                             <div
-                                              className="flex items-center justify-between relative z-10 w-full overflow-hidden rounded-lg p-1.5 hover:bg-zinc-150/40 transition-colors duration-200 shrink-0"
+                                              className="flex items-center justify-between relative z-10 w-full overflow-hidden rounded-lg p-1.5 hover:bg-zinc-150/40 transition-colors duration-200 shrink-0 cursor-pointer"
+                                              onTouchStart={(e) => e.stopPropagation()}
                                               onClick={(e) => {
                                                 e.stopPropagation();
                                                 setSelectedActionTab(tab);
+                                                setActionActiveTab("general");
                                                 setIsActionDialogOpen(true);
                                               }}
                                               title={
@@ -6363,7 +6992,16 @@ export default function Dashboard() {
                                                 <div className="flex items-center justify-between w-full relative z-10 gap-3 mb-2">
                                                   {/* Left part: Symbol & Price */}
                                                   <div className="flex items-baseline gap-2.5 min-w-0">
-                                                    <span className="font-black text-2xl tracking-tighter leading-none text-black shrink-0">
+                                                    <span 
+                                                      className="font-black text-2xl tracking-tighter leading-none text-black shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
+                                                      onTouchStart={(e) => e.stopPropagation()}
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setSelectedActionTab(tab);
+                                                        setActionActiveTab("general");
+                                                        setIsActionDialogOpen(true);
+                                                      }}
+                                                    >
                                                       {tab.symbol}
                                                     </span>
                                                     {typeof tab.currentPrice === "number" && (
@@ -6428,82 +7066,38 @@ export default function Dashboard() {
                                                   </div>
                                                 </div>
 
-                                                {/* Volatility & Rating indicators under price */}
-                                                <div className="flex items-center gap-2 mb-1 flex-nowrap overflow-x-auto scrollbar-hide shrink-0 select-none">
-                                                  <div className="flex items-center border border-zinc-200 rounded-md overflow-hidden h-5 bg-zinc-50">
-                                                    <div className="px-1.5 h-full flex items-center border-r border-zinc-200 bg-zinc-100/50">
-                                                      <span className="text-[10px] font-black text-zinc-600">
-                                                        ★ {tab.rating || 8}
-                                                      </span>
+                                                {/* Strategy target price percentage deviation */}
+                                                {((activeHoldingSubTab === "觀察中" && activeViewTab === "active" && activeCardDefinitionFilter === "operation") || (activeViewTab === "real" && activeHoldingSubTab === "買進操作")) && unrealizedPnL !== 0 && (() => {
+                                                  const isUp = unrealizedPnL > 0;
+                                                  const txt = (isUp ? "+" : "") + unrealizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                                                  const bg = isUp ? "bg-[#E1F5EE]" : "bg-[#FCEBEB]";
+                                                  const fg = isUp ? "#085041" : "#791F1F";
+                                                  const border = isUp ? "#1D9E75" : "#E24B4A";
+                                                  return (
+                                                    <div className="flex items-center gap-2 mb-1 flex-nowrap overflow-x-auto scrollbar-hide shrink-0 select-none">
+                                                      <div
+                                                        className={`inline-flex items-center gap-0.5 px-1.5 rounded-[5px] select-none shrink-0 h-5 border ${bg}`}
+                                                        style={{ borderColor: border, color: fg }}
+                                                      >
+                                                        {isUp ? (
+                                                          <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                                            <line x1="7" y1="17" x2="17" y2="7" />
+                                                            <polyline points="7 7 17 7 17 17" />
+                                                          </svg>
+                                                        ) : (
+                                                          <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                                            <line x1="7" y1="7" x2="17" y2="17" />
+                                                            <polyline points="17 7 17 17 7 17" />
+                                                          </svg>
+                                                        )}
+                                                        <span className="text-[9px] font-medium tabular-nums tracking-tight">
+                                                          {txt}
+                                                        </span>
+                                                      </div>
                                                     </div>
-                                                    <div className="px-1.5 h-full flex items-center border-r border-zinc-200 bg-zinc-100/50">
-                                                      <span className="text-[10px] font-black text-zinc-600">
-                                                        Q {tab.qualityScore || 5}
-                                                      </span>
-                                                    </div>
-                                                    <div className="px-1.5 h-full flex items-center border-r border-zinc-200 bg-zinc-100/50">
-                                                      <span className="text-[10px] font-black text-zinc-600">
-                                                        V {tab.valueScore || 5}
-                                                      </span>
-                                                    </div>
-                                                    <div className="px-1.5 h-full flex items-center border-r border-zinc-200 bg-zinc-100/50">
-                                                      <span className="text-[10px] font-black text-zinc-600">
-                                                        B {tab.buyRate || 5}
-                                                      </span>
-                                                    </div>
-                                                    <div className="px-1.5 h-full flex items-center border-r border-zinc-200 bg-zinc-100/50">
-                                                      <span className="text-[10px] font-black text-zinc-600">
-                                                        S {tab.sellRate || 5}
-                                                      </span>
-                                                    </div>
-                                                    <div className="px-1.5 h-full flex items-center border-r border-zinc-200 bg-zinc-100/50">
-                                                      <span className="text-[10px] font-black text-zinc-600">
-                                                        {tab.volatility || "中"}
-                                                      </span>
-                                                    </div>
-                                                    <div className="px-1.5 h-full flex items-center border-r border-zinc-200 bg-zinc-100/50" title="Positive Value">
-                                                      <span className="text-[10px] font-black text-zinc-600">
-                                                        P+ {calculatePositiveValue(Number(tab.rating || 5), Number(tab.qualityScore || 5), Number(tab.valueScore || 5), Number(tab.buyRate || 5))}
-                                                      </span>
-                                                    </div>
-                                                    <div className="px-1.5 h-full flex items-center bg-zinc-100/50" title="Negative Value">
-                                                      <span className="text-[10px] font-black text-zinc-600">
-                                                        N- {calculateNegativeValue(Number(tab.rating || 5), Number(tab.qualityScore || 5), Number(tab.valueScore || 5), Number(tab.sellRate || 5))}
-                                                      </span>
-                                                    </div>
-                                                  </div>
-
-                                                    {/* Strategy target price percentage deviation */}
-                                                    {((activeHoldingSubTab === "觀察中" && activeViewTab === "active" && activeCardDefinitionFilter === "operation") || (activeViewTab === "real" && activeHoldingSubTab === "買進操作")) && unrealizedPnL !== 0 && (() => {
-                                                      const isUp = unrealizedPnL > 0;
-                                                      const txt = (isUp ? "+" : "") + unrealizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                                                      const bg = isUp ? "bg-[#E1F5EE]" : "bg-[#FCEBEB]";
-                                                      const fg = isUp ? "#085041" : "#791F1F";
-                                                      const border = isUp ? "#1D9E75" : "#E24B4A";
-                                                      return (
-                                                        <div
-                                                          className={`inline-flex items-center gap-0.5 px-1.5 rounded-[5px] select-none shrink-0 h-5 border ${bg}`}
-                                                          style={{ borderColor: border, color: fg }}
-                                                        >
-                                                          {isUp ? (
-                                                            <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                                                              <line x1="7" y1="17" x2="17" y2="7" />
-                                                              <polyline points="7 7 17 7 17 17" />
-                                                            </svg>
-                                                          ) : (
-                                                            <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                                                              <line x1="7" y1="7" x2="17" y2="17" />
-                                                              <polyline points="17 7 17 17 7 17" />
-                                                            </svg>
-                                                          )}
-                                                          <span className="text-[9px] font-medium tabular-nums tracking-tight">
-                                                            {txt}
-                                                          </span>
-                                                        </div>
-                                                      );
-                                                    })()}
-                                                  </div>
-                                                </div>
+                                                  );
+                                                })()}
+                                              </div>
                                               </div>
 
                                             {/* Expanded content */}
@@ -6703,7 +7297,14 @@ export default function Dashboard() {
                                             return (
                                               <div
                                                 style={{ backgroundColor: bgCol }}
-                                                className={`w-full h-[18px] flex items-center justify-between px-3 transition-colors duration-500 shrink-0 border-b ${isSpecialHighlight ? "border-transparent" : "border-white/5"} select-none`}
+                                                className={`w-full h-[18px] flex items-center justify-between px-3 transition-colors duration-500 shrink-0 border-b ${isSpecialHighlight ? "border-transparent" : "border-white/5"} select-none cursor-pointer hover:opacity-90 transition-opacity`}
+                                                onTouchStart={(e) => e.stopPropagation()}
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  setSelectedActionTab(tab);
+                                                  setActionActiveTab("status");
+                                                  setIsActionDialogOpen(true);
+                                                }}
                                               >
                                                 <div className="flex items-center gap-1.5 font-sans">
                                                   <span className="w-1.5 h-1.5 rounded-full inline-block transition-colors duration-500" style={{ backgroundColor: textIndicatorColor }} />
@@ -6711,7 +7312,7 @@ export default function Dashboard() {
                                                 <div className="flex items-center gap-2">
                                                   {tab.updatedAt && (
                                                     <span style={{ color: labelCol }} className="text-[9.5px] font-black tracking-wider opacity-80 transition-colors duration-500 font-bold">
-                                                      {typeof tab.updatedAt.toDate === "function" ? format(tab.updatedAt.toDate(), "yyyy/MM/dd HH:mm") : ""}
+                                                      {formatTimestamp(tab.updatedAt, "yyyy/MM/dd HH:mm")}
                                                     </span>
                                                   )}
                                                   <button
@@ -6734,6 +7335,11 @@ export default function Dashboard() {
                                             <StockCardVisualizer
                                               plannedOrders={plannedOrders}
                                               currentPrice={tab.currentPrice}
+                                              onOpenActionSettings={() => {
+                                                setSelectedActionTab(tab);
+                                                setActionActiveTab("status");
+                                                setIsActionDialogOpen(true);
+                                              }}
                                               onToggleHighlight={(orderId, isManual) => {
                                                 if (orderId.startsWith("tp-") || orderId.startsWith("sl-") || orderId.startsWith("entry-") || orderId.startsWith("res-") || orderId.startsWith("sup-")) {
                                                   setManualHighlight(prev => ({
@@ -7572,7 +8178,7 @@ export default function Dashboard() {
           if (!open) setVisualizerFocusTabId(null);
         }}
       >
-        <DialogContent className="border-zinc-300 shadow-2xl bg-white text-zinc-900 max-w-[420px] p-6 rounded-3xl border">
+        <DialogContent className="border-zinc-300 shadow-2xl bg-white text-zinc-900 w-[92vw] max-w-[420px] max-h-[90vh] overflow-y-auto p-5 sm:p-6 rounded-3xl border">
           <DialogHeader className="mb-4">
             <DialogTitle className="font-extrabold text-xl text-zinc-900 flex items-center justify-center gap-2">
               <span className="text-xl">📊</span>
@@ -7712,7 +8318,7 @@ export default function Dashboard() {
 
       {/* Upload HTML Dialog */}
       <Dialog open={isUploadHtmlOpen} onOpenChange={setIsUploadHtmlOpen}>
-        <DialogContent className="border border-white/10 bg-[#0F0F12]/95 backdrop-blur-2xl text-white max-w-md w-[92vw] !rounded-2xl p-6">
+        <DialogContent className="border border-white/10 bg-[#0F0F12]/95 backdrop-blur-2xl text-white max-w-md w-[92vw] max-h-[90vh] overflow-y-auto !rounded-2xl p-5 sm:p-6">
           <DialogHeader>
             <DialogTitle className="text-xl font-black tracking-tight flex items-center gap-2">
               <Upload className="w-5 h-5 text-red-500" />

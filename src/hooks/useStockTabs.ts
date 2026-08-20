@@ -4,17 +4,47 @@ import { db, OperationType, handleFirestoreError } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
 import { StockTab } from '../types';
 import { toast } from 'sonner';
+import { getTimestampMillis } from '../lib/dateUtils';
+import { safeLocalStorage } from '../lib/utils';
+
+const getCachedTabs = (userId?: string | null): StockTab[] => {
+  if (!userId) return [];
+  try {
+    const raw = safeLocalStorage.getItem(`cached_stock_tabs_v3_${userId}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.filter(t => !t.userId || t.userId === userId) as StockTab[];
+      }
+    }
+  } catch (e) {
+    // ignore json parse error
+  }
+  return [];
+};
 
 export function useStockTabs() {
   const { user } = useAuth();
-  const [tabs, setTabs] = useState<StockTab[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [tabs, setTabs] = useState<StockTab[]>(() => getCachedTabs(user?.uid));
+  const [loading, setLoading] = useState(() => getCachedTabs(user?.uid).length === 0);
 
   useEffect(() => {
+    // Clean legacy un-scoped cache if present
+    safeLocalStorage.removeItem('cached_stock_tabs_v2');
+
     if (!user) {
       setTabs([]);
       setLoading(false);
       return;
+    }
+
+    // Initialize with this specific user's cached tabs
+    const userCached = getCachedTabs(user.uid);
+    if (userCached.length > 0) {
+      setTabs(userCached);
+      setLoading(false);
+    } else {
+      setLoading(true);
     }
 
     const q = query(
@@ -33,17 +63,22 @@ export function useStockTabs() {
         if (orderA !== orderB) {
           return orderA - orderB;
         }
-        return (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0);
+        return getTimestampMillis(b.createdAt) - getTimestampMillis(a.createdAt);
       });
       setTabs(sorted);
       setLoading(false);
+      try {
+        safeLocalStorage.setItem(`cached_stock_tabs_v3_${user.uid}`, JSON.stringify(sorted));
+      } catch (e) {
+        // ignore storage quota error
+      }
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'stockTabs');
       setLoading(false);
     });
 
     return () => unsubscribe();
-  }, [user]);
+  }, [user?.uid]);
 
   const addTab = async (symbol: string, companyName: string, tradeType: 'simulated' | 'real' = 'simulated') => {
     if (!user) return;

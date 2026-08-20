@@ -4,6 +4,7 @@ import { db, OperationType, handleFirestoreError } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
 import { Trade } from '../types';
 import { toast } from 'sonner';
+import { getTimestampMillis } from '../lib/dateUtils';
 
 export function useTrades(tabId: string | undefined) {
   const { user } = useAuth();
@@ -27,7 +28,7 @@ export function useTrades(tabId: string | undefined) {
         ...docSnap.data()
       })) as Trade[];
       // sort by tradeDate desc
-      const sorted = data.sort((a, b) => (b.tradeDate?.toMillis() || 0) - (a.tradeDate?.toMillis() || 0));
+      const sorted = data.sort((a, b) => getTimestampMillis(b.tradeDate) - getTimestampMillis(a.tradeDate));
       setTrades(sorted);
       setLoading(false);
     }, (error) => {
