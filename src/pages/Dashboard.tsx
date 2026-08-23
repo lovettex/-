@@ -107,12 +107,16 @@ import {
   Globe,
   Zap,
   Database,
+  Circle,
 } from "lucide-react";
 import { calculateStats } from "../lib/calculations";
 import { safeLocalStorage, safeSessionStorage } from "../lib/utils";
 import { format } from "date-fns";
 import { StockCardVisualizer, prefetchStockPrice } from "../components/StockCardVisualizer";
 import { CinemaDock } from "../components/CinemaDock";
+import { DynamicVisualLinesModal } from "../components/DynamicVisualLinesModal";
+import { MiniVisualLinesModal } from "../components/MiniVisualLinesModal";
+import { syncSubTabDividersToCanvas } from "../utils/visualLinesSync";
 
 enum OperationType {
   CREATE = "create",
@@ -139,9 +143,22 @@ function handleFirestoreError(
   operationType: OperationType,
   path: string | null,
   user: any,
-): never {
+): void {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  const isOffline =
+    errorMessage.includes("offline") ||
+    errorMessage.includes("client is offline") ||
+    errorMessage.includes("unavailable") ||
+    errorMessage.includes("could not reach") ||
+    errorMessage.includes("backend didn't respond");
+
+  if (isOffline) {
+    console.warn(`[Firestore Offline Cache Active] ${operationType} '${path}': ${errorMessage}`);
+    return;
+  }
+
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: errorMessage,
     authInfo: {
       userId: user?.uid,
       email: user?.email,
@@ -151,7 +168,6 @@ function handleFirestoreError(
     path,
   };
   console.error("Firestore Error: ", JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
 }
 
 const getDisplayHoldingStatus = (
@@ -411,6 +427,48 @@ export default function Dashboard() {
   );
   
   const [flippedCards, setFlippedCards] = useState<Record<string, boolean>>({});
+  const [selectedCardIds, setSelectedCardIds] = useState<Set<string>>(() => {
+    try {
+      const userKey = user ? user.uid : "guest";
+      const saved = safeLocalStorage.getItem(`selected-card-ids-${userKey}`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return new Set(parsed);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load selected card ids from storage:", e);
+    }
+    return new Set<string>();
+  });
+
+  // Sync selected cards when user authenticates or changes
+  useEffect(() => {
+    const userKey = user ? user.uid : "guest";
+    try {
+      const saved = safeLocalStorage.getItem(`selected-card-ids-${userKey}`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          setSelectedCardIds(new Set(parsed));
+          return;
+        }
+      } else if (user) {
+        // Migrate guest selection if user has no saved selection yet
+        const guestSaved = safeLocalStorage.getItem("selected-card-ids-guest");
+        if (guestSaved) {
+          const parsed = JSON.parse(guestSaved);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setSelectedCardIds(new Set(parsed));
+            safeLocalStorage.setItem(`selected-card-ids-${user.uid}`, guestSaved);
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Failed to reload selected card ids on user change:", e);
+    }
+  }, [user?.uid]);
 
   const [isCinemaModeActive, setIsCinemaModeActive] = useState<boolean>(false);
   const [activeCinemaCardId, setActiveCinemaCardId] = useState<string | null>(null);
@@ -438,6 +496,13 @@ export default function Dashboard() {
 
   // AI Analysis Panel States & Helpers
   const [isAiAnalysisOpen, setIsAiAnalysisOpen] = useState(false);
+  const [isVisualLinesBoardOpen, setIsVisualLinesBoardOpen] = useState(false);
+  const [miniVisualLinesStock, setMiniVisualLinesStock] = useState<{
+    stockName: string;
+    currentPrice?: number;
+    holdingStatus?: string;
+    tradeType?: string;
+  } | null>(null);
   const [aiMobileActiveTab, setAiMobileActiveTab] = useState<"controls" | "preview">("controls");
   const [aiSelectedSymbol, setAiSelectedSymbol] = useState("");
   const [aiSelectedPromptId, setAiSelectedPromptId] = useState("fundamental");
@@ -851,6 +916,50 @@ export default function Dashboard() {
     }
   }, [location.state, tabs, loading, scrollToElement, updateTabHidden]);
 
+  // Global listener for jump_to_stock_card CustomEvent
+  useEffect(() => {
+    const handleJumpToCardEvent = (e: Event) => {
+      const customEvent = e as CustomEvent<{ tabId?: string; symbol?: string }>;
+      const { tabId, symbol } = customEvent.detail || {};
+      const targetTab = tabs.find((t) => (tabId ? t.id === tabId : t.symbol === symbol));
+      if (!targetTab) return;
+
+      if (targetTab.status === "COMPLETED") {
+        setActiveViewTab("completed");
+      } else if (targetTab.tradeType === "real") {
+        setActiveViewTab("real");
+        setActiveHoldingSubTab(getDisplayHoldingStatus(targetTab.holdingStatus));
+      } else {
+        setActiveViewTab("active");
+        setActiveHoldingSubTab(getDisplayHoldingStatus(targetTab.holdingStatus));
+      }
+      setActiveCardTabId(targetTab.id);
+      setActiveCardDefinitionFilter("all");
+
+      let attempts = 0;
+      const attemptScroll = () => {
+        const el = document.getElementById(`stock-card-${targetTab.id}`) || document.getElementById(`notes-row-${targetTab.id}`);
+        if (el) {
+          scrollToElement(el, -120);
+          el.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+          el.classList.add("ring-4", "ring-amber-400", "ring-offset-2", "scale-[1.03]", "transition-all", "duration-300");
+          setTimeout(() => {
+            el.classList.remove("ring-4", "ring-amber-400", "ring-offset-2", "scale-[1.03]");
+          }, 2500);
+        } else if (attempts < 25) {
+          attempts++;
+          setTimeout(attemptScroll, 80);
+        }
+      };
+      setTimeout(attemptScroll, 120);
+    };
+
+    window.addEventListener("jump_to_stock_card", handleJumpToCardEvent);
+    return () => {
+      window.removeEventListener("jump_to_stock_card", handleJumpToCardEvent);
+    };
+  }, [tabs, scrollToElement]);
+
   const [activeManageTab, setActiveManageTab] = useState<
     "觀察中" | "候選名單" | "買進操作" | "賣出操作" | "平倉操作" | "乖離名單" | "持股監控"
   >("觀察中");
@@ -891,6 +1000,16 @@ export default function Dashboard() {
       // ignore
     }
   }, [user?.uid]);
+
+  const activeTabStatsMap = useMemo(() => {
+    const map: Record<string, { averagePrice?: number; totalQuantity?: number }> = {};
+    Object.entries(activeTabTrades).forEach(([tabId, trades]) => {
+      const tab = tabs.find((t) => t.id === tabId);
+      const st = calculateStats(trades as any, tab?.currentPrice);
+      map[tabId] = { averagePrice: st.averagePrice, totalQuantity: st.totalQuantity };
+    });
+    return map;
+  }, [activeTabTrades, tabs]);
   const [strategyHighlights, setStrategyHighlights] = useState<Record<string, boolean>>({});
   const [alerts, setAlerts] = useState<any[]>([]);
   const [socratesData, setSocratesData] = useState<
@@ -3527,6 +3646,73 @@ export default function Dashboard() {
     return renderGroups.flatMap((g) => g.tabs);
   }, [renderGroups]);
 
+  const handleToggleCardSelected = useCallback((tabId: string) => {
+    playClickSound();
+    setSelectedCardIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(tabId)) {
+        next.delete(tabId);
+      } else {
+        next.add(tabId);
+      }
+      const userKey = user ? user.uid : "guest";
+      try {
+        safeLocalStorage.setItem(
+          `selected-card-ids-${userKey}`,
+          JSON.stringify(Array.from(next))
+        );
+      } catch (e) {
+        console.error("Failed to persist selected card IDs:", e);
+      }
+      return next;
+    });
+  }, [user]);
+
+  const handleSelectAll = useCallback(() => {
+    playClickSound();
+    setSelectedCardIds((prev) => {
+      const next = new Set(prev);
+      const currentVisibleIds = filteredSubTabVisibleTabs.map((t) => t.id);
+      const allCurrentSelected =
+        currentVisibleIds.length > 0 &&
+        currentVisibleIds.every((id) => next.has(id));
+
+      if (allCurrentSelected) {
+        // If current sub-tab is already all selected, select all cards in all sub-tabs
+        effectiveVisibleActiveTabs.forEach((t) => next.add(t.id));
+        toast.success(`已全選所有子分頁共 ${effectiveVisibleActiveTabs.length} 檔個股`);
+      } else {
+        currentVisibleIds.forEach((id) => next.add(id));
+        toast.success(`已全選目前子分頁 ${currentVisibleIds.length} 檔個股`);
+      }
+      const userKey = user ? user.uid : "guest";
+      try {
+        safeLocalStorage.setItem(
+          `selected-card-ids-${userKey}`,
+          JSON.stringify(Array.from(next))
+        );
+      } catch (e) {
+        console.error("Failed to persist selected card IDs:", e);
+      }
+      return next;
+    });
+  }, [filteredSubTabVisibleTabs, effectiveVisibleActiveTabs, user]);
+
+  const handleDeselectAll = useCallback(() => {
+    playClickSound();
+    setSelectedCardIds(new Set());
+    const userKey = user ? user.uid : "guest";
+    try {
+      safeLocalStorage.setItem(
+        `selected-card-ids-${userKey}`,
+        JSON.stringify([])
+      );
+    } catch (e) {
+      console.error("Failed to clear persisted selected card IDs:", e);
+    }
+    toast.info("已取消全選所有個股");
+  }, [user]);
+
   const fetchUploadedHtmlFiles = async (symbolFilter?: string) => {
     if (!user) return;
     try {
@@ -3815,6 +4001,7 @@ export default function Dashboard() {
         e.preventDefault();
         window.scrollTo({ top: 0, behavior: "smooth" });
         if (isAiAnalysisOpen) setIsAiAnalysisOpen(false);
+        if (isVisualLinesBoardOpen) setIsVisualLinesBoardOpen(false);
         if (isCinemaModeActive) {
           setIsCinemaModeActive(false);
           if (document.fullscreenElement) {
@@ -3952,10 +4139,24 @@ export default function Dashboard() {
         !e.ctrlKey &&
         !e.metaKey &&
         !e.shiftKey &&
-        (e.key === "Q" || e.key === "q")
+        (e.key === "Q" || e.key === "q" || e.code === "KeyQ")
       ) {
         e.preventDefault();
         setIsDesktopMetricsOpen((prev) => !prev);
+        playClickSound();
+        return;
+      }
+
+      // 10. Alt + W -> 進入動態視覺圖示標籤頁面
+      if (
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        (e.key === "W" || e.key === "w" || e.code === "KeyW")
+      ) {
+        e.preventDefault();
+        setIsVisualLinesBoardOpen((prev) => !prev);
         playClickSound();
         return;
       }
@@ -5744,6 +5945,7 @@ export default function Dashboard() {
                       { key: "Shift + M", desc: "電影觀賞模式" },
                       { key: "Shift + D", desc: "AI 分析回傳" },
                       { key: "Shift + A", desc: "新增股票" },
+                      { key: "Alt + W", desc: "動態視覺圖示標籤" },
                       { key: "Alt + Z", desc: "全部翻頁" },
                       { key: "Alt + Q", desc: "顯示 / 隱藏數據統計" },
                       { key: "Alt + ← / →", desc: "橫向滾動卡片" },
@@ -5905,6 +6107,56 @@ export default function Dashboard() {
                         <InteractiveButton
                           noGlow
                           as="button"
+                          onClick={() => {
+                            setIsVisualLinesBoardOpen(true);
+                            playClickSound();
+                          }}
+                          title="動態視覺線標籤 (Alt + W)"
+                          className="p-2 bg-zinc-50 border border-zinc-200 text-zinc-500 hover:text-zinc-850 hover:bg-zinc-100 rounded-md transition-all cursor-pointer flex items-center justify-center"
+                        >
+                          <SlidersHorizontal className="w-4 h-4" />
+                        </InteractiveButton>
+                        <InteractiveButton
+                          noGlow
+                          as="button"
+                          onClick={async () => {
+                            playClickSound();
+                            if (!selectedCardIds || selectedCardIds.size === 0) {
+                              toast.info("請先在卡片列表中勾選要同步的個股卡片（勾選圓形 Tickbox），再點擊一鍵同步");
+                              return;
+                            }
+                            const targetTabs = tabs.filter(
+                              (tab) => tab.status !== "COMPLETED" && selectedCardIds.has(tab.id)
+                            );
+                            if (targetTabs.length === 0) {
+                              toast.error("所勾選的卡片中沒有可同步的有效個股卡片");
+                              return;
+                            }
+                            const res = await syncSubTabDividersToCanvas(
+                              targetTabs,
+                              user?.uid,
+                              activeTabStrategies,
+                              activeTabStatsMap
+                            );
+                            if (res.updatedCount > 0) {
+                              playSuccessSound();
+                              toast.success(
+                                `已成功同步所勾選的 ${res.updatedCount} 檔卡片分隔線現價相對位置至視覺線畫布！(${res.updatedSymbols.join(", ")})`
+                              );
+                            } else {
+                              toast.info(
+                                "所勾選的卡片中尚未包含分隔線（請在視覺圖示化卡片上繪製分隔線後再同步）"
+                              );
+                            }
+                          }}
+                          title="一鍵同步所勾選卡片之分隔線現價相對位置至動態視覺線畫布"
+                          className="p-2 bg-zinc-50 border border-zinc-200 text-zinc-500 hover:text-emerald-700 hover:bg-emerald-50/60 rounded-md transition-all cursor-pointer flex items-center justify-center"
+                        >
+                          <Target className="w-4 h-4 text-emerald-600" />
+                        </InteractiveButton>
+                        <InteractiveButton
+                          noGlow
+                          as="button"
                           onClick={() => setIsManageHiddenOpen(true)}
                           title="管理持有中股票"
                           className="p-2 bg-zinc-50 border border-zinc-200 text-zinc-500 hover:text-zinc-850 hover:bg-zinc-100 rounded-md transition-all cursor-pointer"
@@ -5980,6 +6232,58 @@ export default function Dashboard() {
                           >
                             <Sparkles className="w-3 h-3 text-amber-600 animate-pulse" />
                             Ai分析
+                          </InteractiveButton>
+                          <InteractiveButton
+                            noGlow
+                            as="button"
+                            onClick={() => {
+                              setIsVisualLinesBoardOpen(true);
+                              playClickSound();
+                            }}
+                            className="px-2.5 py-1 bg-zinc-50 border border-zinc-200 text-zinc-650 hover:text-zinc-850 hover:bg-zinc-100 rounded-lg transition-all text-[11px] flex items-center gap-1 font-extrabold cursor-pointer"
+                            title="動態視覺線標籤 (Alt + W)"
+                          >
+                            <SlidersHorizontal className="w-3 h-3" />
+                            視覺線
+                          </InteractiveButton>
+                          <InteractiveButton
+                            noGlow
+                            as="button"
+                            onClick={async () => {
+                              playClickSound();
+                              if (!selectedCardIds || selectedCardIds.size === 0) {
+                                toast.info("請先在卡片列表中勾選要同步的個股卡片（勾選圓形 Tickbox），再點擊一鍵同步");
+                                return;
+                              }
+                              const targetTabs = tabs.filter(
+                                (tab) => tab.status !== "COMPLETED" && selectedCardIds.has(tab.id)
+                              );
+                              if (targetTabs.length === 0) {
+                                toast.error("所勾選的卡片中沒有可同步的有效個股卡片");
+                                return;
+                              }
+                              const res = await syncSubTabDividersToCanvas(
+                                targetTabs,
+                                user?.uid,
+                                activeTabStrategies,
+                                activeTabStatsMap
+                              );
+                              if (res.updatedCount > 0) {
+                                playSuccessSound();
+                                toast.success(
+                                  `已同步所勾選的 ${res.updatedCount} 檔股票分隔線現價 (${res.updatedSymbols.join(", ")})`
+                                );
+                              } else {
+                                toast.info(
+                                  "所勾選的卡片中尚未包含分隔線（請在視覺圖示化卡片上繪製分隔線後再同步）"
+                                );
+                              }
+                            }}
+                            className="px-2.5 py-1 bg-zinc-50 border border-zinc-200 text-zinc-650 hover:text-emerald-700 hover:bg-emerald-50/60 rounded-lg transition-all text-[11px] flex items-center gap-1 font-extrabold cursor-pointer"
+                            title="一鍵同步所勾選卡片之分隔線現價相對位置至動態視覺線畫布"
+                          >
+                            <Target className="w-3 h-3 text-emerald-600" />
+                            同步線
                           </InteractiveButton>
                           <InteractiveButton
                             noGlow
@@ -6433,8 +6737,39 @@ export default function Dashboard() {
                           </span>
                         </div>
 
-                        <div className="hidden sm:block text-[10px] font-bold text-white/30 tracking-wider">
-                          點擊色塊切換卡片屬性分組與篩選
+                        {/* Circular Tickbox Select All / Deselect All Toolbar */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {selectedCardIds.size > 0 && (
+                            <span className="text-[11px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 shadow-xs select-none">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                              已勾選 {selectedCardIds.size} 檔
+                            </span>
+                          )}
+                          <InteractiveButton
+                            noGlow
+                            as="button"
+                            onClick={handleSelectAll}
+                            className="px-2.5 py-1 bg-white hover:bg-emerald-50 border border-zinc-250 hover:border-emerald-300 text-zinc-700 hover:text-emerald-700 rounded-full text-[11px] font-black flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                            title="全選目前子分頁個股卡片 (再次點擊全選所有子分頁)"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                            全選
+                          </InteractiveButton>
+                          <InteractiveButton
+                            noGlow
+                            as="button"
+                            onClick={handleDeselectAll}
+                            disabled={selectedCardIds.size === 0}
+                            className={`px-2.5 py-1 bg-white border border-zinc-250 rounded-full text-[11px] font-black flex items-center gap-1.5 transition-all shadow-xs cursor-pointer ${
+                              selectedCardIds.size === 0
+                                ? "opacity-50 cursor-not-allowed text-zinc-400 bg-zinc-50"
+                                : "hover:bg-rose-50 hover:border-rose-300 text-zinc-700 hover:text-rose-600"
+                            }`}
+                            title="取消勾選所有個股"
+                          >
+                            <Circle className="w-3.5 h-3.5 text-zinc-400" />
+                            取消全選
+                          </InteractiveButton>
                         </div>
                       </div>
                     </div>
@@ -6871,7 +7206,7 @@ export default function Dashboard() {
                                                 ? "none"
                                                 : "auto",
                                             }}
-                                            className={`card-front absolute inset-0 glass-card rounded-2xl flex flex-col group/item w-full h-full ${isCinemaModeActive ? "" : "transition-all duration-500"} overflow-hidden`}
+                                            className={`card-front absolute inset-0 glass-card rounded-2xl flex flex-col group/item w-full h-full ${isCinemaModeActive ? "" : "transition-all duration-500"} overflow-hidden ${selectedCardIds.has(tab.id) ? "ring-2 ring-emerald-500 shadow-md ring-offset-1" : ""}`}
                                           >
                                             {/* Removed old redundant child elements since they are now declared on container level */}
 
@@ -6988,29 +7323,53 @@ export default function Dashboard() {
                                               }
                                             >
                                               <div className="flex flex-col w-full min-w-0">
-                                                {/* Top row: Symbol, Price, Unrealized Pill, SIM/LIVE, Toggle */}
-                                                <div className="flex items-center justify-between w-full relative z-10 gap-3 mb-2">
-                                                  {/* Left part: Symbol & Price */}
-                                                  <div className="flex items-baseline gap-2.5 min-w-0">
-                                                    <span 
-                                                      className="font-black text-2xl tracking-tighter leading-none text-black shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
+                                                {/* Top row: Checkbox, Symbol, Price, Unrealized Pill, SIM/LIVE, Toggle */}
+                                                <div className="flex items-center justify-between w-full relative z-10 gap-2 mb-2">
+                                                  {/* Left part: Circular Tickbox, Symbol & Price */}
+                                                  <div className="flex items-center gap-2.5 min-w-0">
+                                                    <label
+                                                      className="flex items-center justify-center cursor-pointer select-none p-1 rounded-full hover:bg-zinc-200/80 transition-colors z-30 shrink-0"
+                                                      onClick={(e) => e.stopPropagation()}
                                                       onTouchStart={(e) => e.stopPropagation()}
-                                                      onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        setSelectedActionTab(tab);
-                                                        setActionActiveTab("general");
-                                                        setIsActionDialogOpen(true);
-                                                      }}
+                                                      title={selectedCardIds.has(tab.id) ? "取消勾選此個股" : "勾選此個股 (用於一鍵同步)"}
                                                     >
-                                                      {tab.symbol}
-                                                    </span>
-                                                    {typeof tab.currentPrice === "number" && (
-                                                      <div className="flex items-baseline gap-2 shrink-0">
-                                                        <span className="text-xl font-black tabular-nums text-zinc-900 leading-none">
-                                                          ${tab.currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                                        </span>
+                                                      <div
+                                                        onClick={(e) => {
+                                                          e.stopPropagation();
+                                                          handleToggleCardSelected(tab.id);
+                                                        }}
+                                                        className={`w-4 h-4 rounded-full flex items-center justify-center transition-all cursor-pointer ${
+                                                          selectedCardIds.has(tab.id)
+                                                            ? "bg-emerald-600 border border-emerald-600 text-white shadow-xs scale-105"
+                                                            : "border-2 border-zinc-400 hover:border-emerald-600 bg-white"
+                                                        }`}
+                                                      >
+                                                        {selectedCardIds.has(tab.id) && (
+                                                          <Check className="w-2.5 h-2.5 text-white stroke-[3.5]" />
+                                                        )}
                                                       </div>
-                                                    )}
+                                                    </label>
+                                                    <div className="flex items-baseline gap-2 min-w-0">
+                                                      <span 
+                                                        className="font-black text-2xl tracking-tighter leading-none text-black shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
+                                                        onTouchStart={(e) => e.stopPropagation()}
+                                                        onClick={(e) => {
+                                                          e.stopPropagation();
+                                                          setSelectedActionTab(tab);
+                                                          setActionActiveTab("general");
+                                                          setIsActionDialogOpen(true);
+                                                        }}
+                                                      >
+                                                        {tab.symbol}
+                                                      </span>
+                                                      {typeof tab.currentPrice === "number" && (
+                                                        <div className="flex items-baseline gap-1.5 shrink-0">
+                                                          <span className="text-xl font-black tabular-nums text-zinc-900 leading-none">
+                                                            ${tab.currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                          </span>
+                                                        </div>
+                                                      )}
+                                                    </div>
                                                   </div>
 
                                                   {/* Right part: Unrealized PnL Pill, SIM/LIVE, Toggle */}
@@ -7272,7 +7631,7 @@ export default function Dashboard() {
                                             e.stopPropagation();
                                           }}
                                           style={{ pointerEvents: (flippedCards[tab.id] !== false) ? "auto" : "none" }}
-                                          className={`card-back absolute inset-0 glass-card bg-transparent rounded-2xl flex flex-col w-full h-full sm:hover:bg-white/[0.04] transition-all duration-500 overflow-hidden ${
+                                          className={`card-back absolute inset-0 glass-card bg-transparent rounded-2xl flex flex-col w-full h-full sm:hover:bg-white/[0.04] transition-all duration-500 overflow-hidden ${selectedCardIds.has(tab.id) ? "ring-2 ring-emerald-500 shadow-md ring-offset-1" : ""} ${
                                             (activeTabStrategies[tab.id])?.observeChecked ? "card-breathe-observe" : (activeTabStrategies[tab.id])?.closeChecked ? "card-breathe-close" : (activeTabStrategies[tab.id])?.slChecked ? "card-breathe-sl" : (activeTabStrategies[tab.id])?.addChecked ? "card-breathe-add" : (activeTabStrategies[tab.id])?.tpChecked ? "card-breathe-tp" : ""
                                           }`}
                                         >
@@ -7377,6 +7736,12 @@ export default function Dashboard() {
                                               onUpdateCloseChecked={(val) => handleUpdateCloseChecked(tab.id, val)}
                                               onUpdateObserveChecked={(val) => handleUpdateObserveChecked(tab.id, val)}
                                               onUpdateNotesHighlighted={(val) => handleUpdateNotesHighlighted(tab.id, val)}
+                                              userId={user?.uid}
+                                              holdingStatus={tab.holdingStatus}
+                                              tradeType={tab.tradeType}
+                                              isSelected={selectedCardIds.has(tab.id)}
+                                              onToggleSelected={() => handleToggleCardSelected(tab.id)}
+                                              onOpenMiniVisualLinesModal={(info) => setMiniVisualLinesStock(info)}
                                             />
                                           </div>
                                         </div>
@@ -9249,6 +9614,98 @@ export default function Dashboard() {
             </AnimatePresence>
           </motion.div>
         </AnimatePresence>
+      )}
+
+      {/* Dynamic Visual Lines Board Modal */}
+      <DynamicVisualLinesModal
+        isOpen={isVisualLinesBoardOpen}
+        onClose={() => {
+          setIsVisualLinesBoardOpen(false);
+          try {
+            if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
+              document.documentElement.requestFullscreen().catch((err) => {
+                console.warn("Fullscreen request rejected:", err);
+              });
+            }
+          } catch (e) {
+            console.warn("Fullscreen trigger error:", e);
+          }
+        }}
+        allTabs={tabs}
+        selectedCardIds={selectedCardIds}
+        userId={user?.uid}
+        initialTradeType={activeViewTab === "real" ? "real" : activeViewTab === "active" ? "active" : "all"}
+        strategiesMap={activeTabStrategies}
+        statsMap={activeTabStatsMap}
+        onSelectStock={(tabId, symbol) => {
+          setIsVisualLinesBoardOpen(false);
+          try {
+            if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
+              document.documentElement.requestFullscreen().catch((err) => {
+                console.warn("Fullscreen request rejected:", err);
+              });
+            }
+          } catch (e) {
+            console.warn("Fullscreen trigger error:", e);
+          }
+          const cleanSym = symbol ? symbol.trim().toUpperCase() : "";
+          // 優先尋找未結算 (持有中或真實交易) 的股票分頁
+          let targetTab = tabs.find((t) => t.id === tabId);
+          if (!targetTab || targetTab.status === "COMPLETED") {
+            const activeMatch = tabs.find(
+              (t) => t.symbol.trim().toUpperCase() === cleanSym && t.status !== "COMPLETED"
+            );
+            if (activeMatch) {
+              targetTab = activeMatch;
+            }
+          }
+
+          if (targetTab) {
+            // 嚴格跳轉至「持有中」或「真實交易」主分頁，絕不跳轉至「已完成」分頁
+            if (targetTab.tradeType === "real") {
+              setActiveViewTab("real");
+            } else {
+              setActiveViewTab("active");
+            }
+            setActiveHoldingSubTab(getDisplayHoldingStatus(targetTab.holdingStatus));
+            setActiveCardTabId(targetTab.id);
+          } else {
+            setActiveViewTab("active");
+            setActiveCardTabId(tabId);
+          }
+          setActiveCardDefinitionFilter("all");
+
+          const effectiveTabId = targetTab ? targetTab.id : tabId;
+          let attempts = 0;
+          const attemptScroll = () => {
+            const el = document.getElementById(`stock-card-${effectiveTabId}`) || document.getElementById(`notes-row-${effectiveTabId}`);
+            if (el) {
+              scrollToElement(el, -120);
+              el.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+              el.classList.add("ring-4", "ring-amber-400", "ring-offset-2", "scale-[1.03]", "transition-all", "duration-300");
+              setTimeout(() => {
+                el.classList.remove("ring-4", "ring-amber-400", "ring-offset-2", "scale-[1.03]");
+              }, 2500);
+            } else if (attempts < 25) {
+              attempts++;
+              setTimeout(attemptScroll, 80);
+            }
+          };
+          setTimeout(attemptScroll, 120);
+        }}
+      />
+
+      {/* Mini Visual Lines Tag Position Standalone Modal */}
+      {miniVisualLinesStock && (
+        <MiniVisualLinesModal
+          isOpen={!!miniVisualLinesStock}
+          onClose={() => setMiniVisualLinesStock(null)}
+          stockName={miniVisualLinesStock.stockName}
+          currentPrice={miniVisualLinesStock.currentPrice}
+          holdingStatus={miniVisualLinesStock.holdingStatus}
+          tradeType={miniVisualLinesStock.tradeType}
+          userId={user?.uid}
+        />
       )}
 
       {isAiAnalysisOpen && (

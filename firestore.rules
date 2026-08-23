@@ -138,6 +138,12 @@ service cloud.firestore {
         && ( !('updatedAt' in data) || data.updatedAt is timestamp || data.updatedAt == request.time );
     }
 
+    // Validation for VisualLinesBoard
+    function isValidVisualLinesBoard(data) {
+      return ( !('positions' in data) || data.positions is map )
+        && ( !('updatedAt' in data) || data.updatedAt is string || data.updatedAt is timestamp || data.updatedAt == request.time );
+    }
+
     match /userSettings/{userId} {
       allow get: if isSignedIn() && userId == request.auth.uid;
       allow create, update: if isSignedIn() && userId == request.auth.uid && isValidUserSettings(incoming());
@@ -151,104 +157,98 @@ service cloud.firestore {
       allow delete: if isSignedIn() && userId == request.auth.uid && isValidId(dateKey);
     }
 
+    match /users/{userId}/visualLinesBoard/{boardId} {
+      allow list: if isSignedIn() && userId == request.auth.uid;
+      allow get: if isSignedIn() && userId == request.auth.uid;
+      allow create, update: if isSignedIn() && userId == request.auth.uid && isValidId(boardId) && isValidVisualLinesBoard(incoming());
+      allow delete: if isSignedIn() && userId == request.auth.uid && isValidId(boardId);
+    }
+
     match /stockTabs/{tabId} {
-      allow get: if isSignedIn() && isValidId(tabId) && resource.data.userId == request.auth.uid;
-      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow get: if isSignedIn() && isValidId(tabId) && ( !('userId' in resource.data) || resource.data.userId == request.auth.uid );
+      allow list: if isSignedIn() && ( !('userId' in resource.data) || resource.data.userId == request.auth.uid );
       
       allow create: if isSignedIn() && isValidId(tabId) && isValidStockTab(incoming())
         && ( !('createdAt' in incoming()) || incoming().createdAt is timestamp || incoming().createdAt == request.time )
         && ( !('updatedAt' in incoming()) || incoming().updatedAt is timestamp || incoming().updatedAt == request.time );
         
       allow update: if isSignedIn() && isValidId(tabId) && isValidStockTab(incoming())
-        && resource.data.userId == request.auth.uid
-        && incoming().userId == resource.data.userId
+        && ( !('userId' in resource.data) || resource.data.userId == request.auth.uid )
+        && incoming().userId == request.auth.uid
         && (!('createdAt' in resource.data) || incoming().createdAt == resource.data.createdAt)
         && (!('updatedAt' in incoming()) || incoming().updatedAt is timestamp || incoming().updatedAt == request.time );
         
-      allow delete: if isSignedIn() && isValidId(tabId) && resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn() && isValidId(tabId) && ( !('userId' in resource.data) || resource.data.userId == request.auth.uid );
 
       match /trades/{tradeId} {
-        allow get: if isSignedIn() && isValidId(tabId) && isValidId(tradeId) && exists(/databases/$(database)/documents/stockTabs/$(tabId)) && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid;
-        allow list: if isSignedIn() && exists(/databases/$(database)/documents/stockTabs/$(tabId)) && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid;
+        allow get: if isSignedIn() && isValidId(tabId) && isValidId(tradeId) && ( !exists(/databases/$(database)/documents/stockTabs/$(tabId)) || !('userId' in get(/databases/$(database)/documents/stockTabs/$(tabId)).data) || get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid );
+        allow list: if isSignedIn() && ( !exists(/databases/$(database)/documents/stockTabs/$(tabId)) || !('userId' in get(/databases/$(database)/documents/stockTabs/$(tabId)).data) || get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid );
         
         allow create: if isSignedIn() && isValidId(tabId) && isValidId(tradeId) && isValidTrade(incoming())
-          && exists(/databases/$(database)/documents/stockTabs/$(tabId))
-          && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid
+          && ( !exists(/databases/$(database)/documents/stockTabs/$(tabId)) || !('userId' in get(/databases/$(database)/documents/stockTabs/$(tabId)).data) || get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid )
           && ( !('createdAt' in incoming()) || incoming().createdAt is timestamp );
           
         allow update: if isSignedIn() && isValidId(tabId) && isValidId(tradeId) && isValidTrade(incoming())
-          && exists(/databases/$(database)/documents/stockTabs/$(tabId))
-          && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid
+          && ( !exists(/databases/$(database)/documents/stockTabs/$(tabId)) || !('userId' in get(/databases/$(database)/documents/stockTabs/$(tabId)).data) || get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid )
           && (!('createdAt' in resource.data) || incoming().createdAt == resource.data.createdAt);
           
         allow delete: if isSignedIn() && isValidId(tabId) && isValidId(tradeId) 
-          && exists(/databases/$(database)/documents/stockTabs/$(tabId))
-          && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid;
+          && ( !exists(/databases/$(database)/documents/stockTabs/$(tabId)) || !('userId' in get(/databases/$(database)/documents/stockTabs/$(tabId)).data) || get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid );
       }
 
       match /plannedOrders/{orderId} {
-        allow get: if isSignedIn() && isValidId(tabId) && isValidId(orderId) && exists(/databases/$(database)/documents/stockTabs/$(tabId)) && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid;
-        allow list: if isSignedIn() && exists(/databases/$(database)/documents/stockTabs/$(tabId)) && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid;
+        allow get: if isSignedIn() && isValidId(tabId) && isValidId(orderId) && ( !exists(/databases/$(database)/documents/stockTabs/$(tabId)) || !('userId' in get(/databases/$(database)/documents/stockTabs/$(tabId)).data) || get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid );
+        allow list: if isSignedIn() && ( !exists(/databases/$(database)/documents/stockTabs/$(tabId)) || !('userId' in get(/databases/$(database)/documents/stockTabs/$(tabId)).data) || get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid );
         
         allow create: if isSignedIn() && isValidId(tabId) && isValidId(orderId) && isValidPlannedOrder(incoming())
-          && exists(/databases/$(database)/documents/stockTabs/$(tabId))
-          && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid
+          && ( !exists(/databases/$(database)/documents/stockTabs/$(tabId)) || !('userId' in get(/databases/$(database)/documents/stockTabs/$(tabId)).data) || get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid )
           && ( !('createdAt' in incoming()) || incoming().createdAt is timestamp );
           
         allow update: if isSignedIn() && isValidId(tabId) && isValidId(orderId) && isValidPlannedOrder(incoming())
-          && exists(/databases/$(database)/documents/stockTabs/$(tabId))
-          && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid
+          && ( !exists(/databases/$(database)/documents/stockTabs/$(tabId)) || !('userId' in get(/databases/$(database)/documents/stockTabs/$(tabId)).data) || get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid )
           && (!('createdAt' in resource.data) || incoming().createdAt == resource.data.createdAt);
           
         allow delete: if isSignedIn() && isValidId(tabId) && isValidId(orderId) 
-          && exists(/databases/$(database)/documents/stockTabs/$(tabId))
-          && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid;
+          && ( !exists(/databases/$(database)/documents/stockTabs/$(tabId)) || !('userId' in get(/databases/$(database)/documents/stockTabs/$(tabId)).data) || get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid );
       }
 
       match /strategy/{strategyId} {
-        allow get: if isSignedIn() && isValidId(tabId) && isValidId(strategyId) && exists(/databases/$(database)/documents/stockTabs/$(tabId)) && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid;
-        allow list: if isSignedIn() && exists(/databases/$(database)/documents/stockTabs/$(tabId)) && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid;
+        allow get: if isSignedIn() && isValidId(tabId) && isValidId(strategyId) && ( !exists(/databases/$(database)/documents/stockTabs/$(tabId)) || !('userId' in get(/databases/$(database)/documents/stockTabs/$(tabId)).data) || get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid );
+        allow list: if isSignedIn() && ( !exists(/databases/$(database)/documents/stockTabs/$(tabId)) || !('userId' in get(/databases/$(database)/documents/stockTabs/$(tabId)).data) || get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid );
         
         allow create: if isSignedIn() && isValidId(tabId) && isValidId(strategyId) && isValidStrategyConfig(incoming())
-          && exists(/databases/$(database)/documents/stockTabs/$(tabId))
-          && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid
+          && ( !exists(/databases/$(database)/documents/stockTabs/$(tabId)) || !('userId' in get(/databases/$(database)/documents/stockTabs/$(tabId)).data) || get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid )
           && ( !('updatedAt' in incoming()) || incoming().updatedAt is timestamp || incoming().updatedAt == request.time );
           
         allow update: if isSignedIn() && isValidId(tabId) && isValidId(strategyId) && isValidStrategyConfig(incoming())
-          && exists(/databases/$(database)/documents/stockTabs/$(tabId))
-          && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid
+          && ( !exists(/databases/$(database)/documents/stockTabs/$(tabId)) || !('userId' in get(/databases/$(database)/documents/stockTabs/$(tabId)).data) || get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid )
           && (!('updatedAt' in incoming()) || incoming().updatedAt is timestamp || incoming().updatedAt == request.time);
           
         allow delete: if isSignedIn() && isValidId(tabId) && isValidId(strategyId) 
-          && exists(/databases/$(database)/documents/stockTabs/$(tabId))
-          && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid;
+          && ( !exists(/databases/$(database)/documents/stockTabs/$(tabId)) || !('userId' in get(/databases/$(database)/documents/stockTabs/$(tabId)).data) || get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid );
       }
 
       match /dailyReports/{reportId} {
-        allow get: if isSignedIn() && isValidId(tabId) && isValidId(reportId) && exists(/databases/$(database)/documents/stockTabs/$(tabId)) && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid;
-        allow list: if isSignedIn() && exists(/databases/$(database)/documents/stockTabs/$(tabId)) && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid;
+        allow get: if isSignedIn() && isValidId(tabId) && isValidId(reportId) && ( !exists(/databases/$(database)/documents/stockTabs/$(tabId)) || !('userId' in get(/databases/$(database)/documents/stockTabs/$(tabId)).data) || get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid );
+        allow list: if isSignedIn() && ( !exists(/databases/$(database)/documents/stockTabs/$(tabId)) || !('userId' in get(/databases/$(database)/documents/stockTabs/$(tabId)).data) || get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid );
         
         allow create, update: if isSignedIn() && isValidId(tabId) && isValidId(reportId) && isValidDailyReport(incoming())
-          && exists(/databases/$(database)/documents/stockTabs/$(tabId))
-          && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid
+          && ( !exists(/databases/$(database)/documents/stockTabs/$(tabId)) || !('userId' in get(/databases/$(database)/documents/stockTabs/$(tabId)).data) || get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid )
           && ( !('updatedAt' in incoming()) || incoming().updatedAt is timestamp || incoming().updatedAt == request.time );
           
         allow delete: if isSignedIn() && isValidId(tabId) && isValidId(reportId) 
-          && exists(/databases/$(database)/documents/stockTabs/$(tabId))
-          && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid;
+          && ( !exists(/databases/$(database)/documents/stockTabs/$(tabId)) || !('userId' in get(/databases/$(database)/documents/stockTabs/$(tabId)).data) || get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid );
       }
 
       match /chipAnalysis/{analysisId} {
-        allow get: if isSignedIn() && isValidId(tabId) && isValidId(analysisId) && exists(/databases/$(database)/documents/stockTabs/$(tabId)) && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid;
-        allow list: if isSignedIn() && exists(/databases/$(database)/documents/stockTabs/$(tabId)) && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid;
+        allow get: if isSignedIn() && isValidId(tabId) && isValidId(analysisId) && ( !exists(/databases/$(database)/documents/stockTabs/$(tabId)) || !('userId' in get(/databases/$(database)/documents/stockTabs/$(tabId)).data) || get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid );
+        allow list: if isSignedIn() && ( !exists(/databases/$(database)/documents/stockTabs/$(tabId)) || !('userId' in get(/databases/$(database)/documents/stockTabs/$(tabId)).data) || get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid );
         
         allow create, update: if isSignedIn() && isValidId(tabId) && isValidId(analysisId) && isValidChipAnalysis(incoming())
-          && exists(/databases/$(database)/documents/stockTabs/$(tabId))
-          && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid;
+          && ( !exists(/databases/$(database)/documents/stockTabs/$(tabId)) || !('userId' in get(/databases/$(database)/documents/stockTabs/$(tabId)).data) || get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid );
           
         allow delete: if isSignedIn() && isValidId(tabId) && isValidId(analysisId) 
-          && exists(/databases/$(database)/documents/stockTabs/$(tabId))
-          && get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid;
+          && ( !exists(/databases/$(database)/documents/stockTabs/$(tabId)) || !('userId' in get(/databases/$(database)/documents/stockTabs/$(tabId)).data) || get(/databases/$(database)/documents/stockTabs/$(tabId)).data.userId == request.auth.uid );
       }
     }
   }

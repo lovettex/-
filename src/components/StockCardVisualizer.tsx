@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useRef } from "react";
 import { PlannedOrder, ChartAnnotation } from "../types";
-import { MousePointer, Minus, Square, Type, Trash2, Eraser, Undo2, ArrowUpRight, Move, Download, Share2, Camera, Loader2, SeparatorHorizontal } from "lucide-react";
+import { MousePointer, Minus, Square, Type, Trash2, Eraser, Undo2, ArrowUpRight, Move, Download, Share2, Camera, Loader2, SeparatorHorizontal, Check } from "lucide-react";
 import html2canvas from "html2canvas";
 import { toast } from "sonner";
 import {
@@ -79,6 +79,18 @@ interface Props {
   onUpdateCloseChecked?: (checked: boolean) => void;
   onUpdateObserveChecked?: (checked: boolean) => void;
   onUpdateNotesHighlighted?: (checked: boolean) => void;
+  onOpenActionSettings?: () => void;
+  userId?: string;
+  holdingStatus?: string;
+  tradeType?: string;
+  isSelected?: boolean;
+  onToggleSelected?: () => void;
+  onOpenMiniVisualLinesModal?: (info: {
+    stockName: string;
+    currentPrice?: number;
+    holdingStatus?: string;
+    tradeType?: string;
+  }) => void;
 }
 
 function resolveCollisions<T extends { rawY: number; isFixed?: boolean }>(
@@ -358,8 +370,16 @@ export const StockCardVisualizer: React.FC<Props> = ({
   onUpdateObserveChecked,
   onUpdateNotesHighlighted,
   onOpenActionSettings,
+  userId,
+  holdingStatus,
+  tradeType,
+  isSelected,
+  onToggleSelected,
+  onOpenMiniVisualLinesModal,
 }) => {
   const { price: dynamicPrice, isLoading: isCardLoading } = useStockPrice(stockName, currentPrice);
+
+  const lastCpTapTime = useRef<number>(0);
 
   const ratingVal = rating !== undefined ? rating : 5;
   const qualityVal = qualityScore !== undefined ? qualityScore : 5;
@@ -1796,14 +1816,8 @@ export const StockCardVisualizer: React.FC<Props> = ({
         : [])
     ];
 
-    const entryItems = entries.map((en, i) => ({
-      id: `en-${i}`,
-      text: `進場 $${en.price}`,
-      rawY: getYPct(en.price),
-      color: "#57C1D4",
-      isAlert: isAlert(en.price),
-      data: en,
-    }));
+    // 取消顯示進場價格標籤
+    const entryItems: any[] = [];
 
     const tpItems = [
       ...tps.map((tp, i) => ({
@@ -1892,15 +1906,31 @@ export const StockCardVisualizer: React.FC<Props> = ({
       );
     }
 
+    const isCp = l.isCurrentPrice || l.id === "cp";
+
     return (
       <div
         key={l.id}
-        className={`absolute whitespace-nowrap transition-all duration-300 font-extrabold px-1 py-0.5 rounded-sm text-[9.5px] sm:text-[10px] md:text-[10.5px] tracking-tight cursor-help select-none hover:scale-105 hover:z-40 active:scale-95 shadow-sm border border-black/10 leading-none ${extraClass} ${blinkClass} ${alertClass}`}
+        title={isCp ? "現價標籤 - 雙擊開啟動態視覺線定位" : undefined}
+        className={`absolute whitespace-nowrap transition-all duration-300 font-extrabold px-1 py-0.5 rounded-sm text-[9.5px] sm:text-[10px] md:text-[10.5px] tracking-tight ${
+          isCp ? "cursor-pointer hover:ring-2 hover:ring-blue-400" : "cursor-help"
+        } select-none hover:scale-105 hover:z-40 active:scale-95 shadow-sm border border-black/10 leading-none ${extraClass} ${blinkClass} ${alertClass}`}
         style={{
           ...style,
           backgroundColor: finalBgColor,
           color: finalTextColor,
           textShadow: "none",
+        }}
+        onDoubleClick={(e) => {
+          if (isCp) {
+            e.stopPropagation();
+            onOpenMiniVisualLinesModal?.({
+              stockName: stockName || "",
+              currentPrice: dynamicPrice > 0 ? dynamicPrice : currentPrice,
+              holdingStatus,
+              tradeType,
+            });
+          }
         }}
         onMouseEnter={() => setHoveredLabel(l)}
         onMouseLeave={() => {
@@ -1941,6 +1971,18 @@ export const StockCardVisualizer: React.FC<Props> = ({
             clearTimeout(longPressTimers.current[l.id]);
             delete longPressTimers.current[l.id];
           }
+          if (isCp) {
+            const now = Date.now();
+            if (now - lastCpTapTime.current < 350) {
+              onOpenMiniVisualLinesModal?.({
+                stockName: stockName || "",
+                currentPrice: dynamicPrice > 0 ? dynamicPrice : currentPrice,
+                holdingStatus,
+                tradeType,
+              });
+            }
+            lastCpTapTime.current = now;
+          }
         }}
       >
         {l.text}
@@ -1956,38 +1998,51 @@ export const StockCardVisualizer: React.FC<Props> = ({
       style={{ isolation: "isolate" }}
       onClick={(e) => e.stopPropagation()}
     >
-      {/* Absolute Share/Export Button in the Top-Right Corner */}
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          setShowExportModal(true);
-        }}
-        className="absolute top-1.5 right-1.5 z-40 flex items-center justify-center rounded-full bg-zinc-100/90 hover:bg-zinc-200 hover:scale-105 active:scale-95 border border-zinc-200 text-zinc-650 hover:text-zinc-900 transition-all cursor-pointer shadow-sm h-5 w-5 sm:h-7 sm:w-7"
-        title="匯出圖表模式..."
-      >
-        <Share2 className="w-2.5 h-2.5 sm:w-3.5 sm:h-3.5" />
-      </button>
-
       {/* Chart container */}
       <div
         ref={canvasRef}
         className="relative flex-1 bg-transparent rounded-lg overflow-hidden flex flex-col"
       >
         <div className="absolute top-2 left-2.5 right-2 flex items-center justify-between z-20 pointer-events-none select-none">
-          {stockName && (
-            <div 
-              className="font-extrabold text-base sm:text-2xl tracking-tighter leading-none text-zinc-900 shrink-0 pointer-events-auto cursor-pointer hover:opacity-80 transition-opacity"
-              onTouchStart={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpenActionSettings?.();
-              }}
-              title="開啟操作設定對話窗"
-            >
-              {stockName}
-            </div>
-          )}
+          <div className="flex items-center gap-2.5 pointer-events-auto shrink-0 min-w-0">
+            {onToggleSelected && (
+              <label
+                className="flex items-center justify-center cursor-pointer select-none p-1 rounded-full hover:bg-zinc-200/80 transition-colors z-30 shrink-0"
+                onClick={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
+                title={isSelected ? "取消勾選此個股" : "勾選此個股 (用於一鍵同步)"}
+              >
+                <div
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleSelected();
+                  }}
+                  className={`w-4 h-4 rounded-full flex items-center justify-center transition-all cursor-pointer ${
+                    isSelected
+                      ? "bg-emerald-600 border border-emerald-600 text-white shadow-xs scale-105"
+                      : "border-2 border-zinc-400 hover:border-emerald-600 bg-white"
+                  }`}
+                >
+                  {isSelected && (
+                    <Check className="w-2.5 h-2.5 text-white stroke-[3.5]" />
+                  )}
+                </div>
+              </label>
+            )}
+            {stockName && (
+              <div 
+                className="font-extrabold text-base sm:text-2xl tracking-tighter leading-none text-zinc-900 shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
+                onTouchStart={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenActionSettings?.();
+                }}
+                title="開啟操作設定對話窗"
+              >
+                {stockName}
+              </div>
+            )}
+          </div>
           
           <div className="flex items-center gap-1.5 sm:gap-2 pointer-events-auto shrink-0">
             {/* Strategy Checkboxes */}
@@ -2174,11 +2229,11 @@ export const StockCardVisualizer: React.FC<Props> = ({
             />
           )}
 
-          {entries.length > 0 && (
+          {(entries.length > 0 || dynamicPrice > 0) && (
             <g>
               {tps.length > 0 && (
                 <path
-                  d={`M 42 ${getYPct(dynamicPrice > 0 ? dynamicPrice : entries[entries.length - 1]?.price || 0)} C 52.5 ${getYPct(dynamicPrice > 0 ? dynamicPrice : entries[entries.length - 1]?.price || 0)} 52.5 ${getYPct(tps[0]?.price || 0)} 63 ${getYPct(tps[0]?.price || 0)} ${tps.length > 1 ? `L 63 ${getYPct(tps[tps.length - 1].price)}` : ""}`}
+                  d={`M 50 ${getYPct(dynamicPrice > 0 ? dynamicPrice : entries[entries.length - 1]?.price || 0)} L 50 ${getYPct(tps[0]?.price || 0)} ${tps.length > 1 ? `L 50 ${getYPct(tps[tps.length - 1].price)}` : ""}`}
                   stroke="#10b981"
                   fill="none"
                   strokeDasharray="5 5"
@@ -2190,7 +2245,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
               )}
               {sls.length > 0 && (
                 <path
-                  d={`M 42 ${getYPct(dynamicPrice > 0 ? dynamicPrice : entries[0]?.price || 0)} C 31.5 ${getYPct(dynamicPrice > 0 ? dynamicPrice : entries[0]?.price || 0)} 31.5 ${getYPct(sls[0]?.price || 0)} 21 ${getYPct(sls[0]?.price || 0)} ${sls.length > 1 ? `L 21 ${getYPct(sls[sls.length - 1].price)}` : ""}`}
+                  d={`M 50 ${getYPct(dynamicPrice > 0 ? dynamicPrice : entries[0]?.price || 0)} C 35.5 ${getYPct(dynamicPrice > 0 ? dynamicPrice : entries[0]?.price || 0)} 35.5 ${getYPct(sls[0]?.price || 0)} 21 ${getYPct(sls[0]?.price || 0)} ${sls.length > 1 ? `L 21 ${getYPct(sls[sls.length - 1].price)}` : ""}`}
                   stroke="#ef4444"
                   fill="none"
                   strokeDasharray="5 5"
@@ -2224,9 +2279,9 @@ export const StockCardVisualizer: React.FC<Props> = ({
             Math.abs(l.y - l.rawY) > 0.5 ? (
               <line
                 key={`en-conn-${i}`}
-                x1="42"
+                x1="50"
                 y1={l.rawY}
-                x2="44"
+                x2="50"
                 y2={l.y}
                 stroke={l.color}
                 strokeWidth="1"
@@ -2240,9 +2295,9 @@ export const StockCardVisualizer: React.FC<Props> = ({
             Math.abs(l.y - l.rawY) > 0.5 ? (
               <line
                 key={`tp-conn-${i}`}
-                x1="63"
+                x1="50"
                 y1={l.rawY}
-                x2="65"
+                x2="50"
                 y2={l.y}
                 stroke={l.color}
                 strokeWidth="1"
@@ -2575,25 +2630,12 @@ export const StockCardVisualizer: React.FC<Props> = ({
               }}
             />
           ))}
-          {entries.map((en, i) => (
-            <div
-              key={`en-dot-${i}`}
-              className="absolute w-2 h-2 rounded-full bg-[#57C1D4]"
-              style={{
-                left: "42%",
-                top: `${getYPct(en.price)}%`,
-                transform: "translate(-50%, -50%)",
-                opacity: 0.8,
-                boxShadow: "0 0 5px #57C1D4",
-              }}
-            />
-          ))}
           {tps.map((tp, i) => (
             <div
               key={`tp-dot-${i}`}
               className="absolute w-2 h-2 rounded-full bg-[#10b981]"
               style={{
-                left: "63%",
+                left: "50%",
                 top: `${getYPct(tp.price)}%`,
                 transform: "translate(-50%, -50%)",
                 opacity: 0.8,
@@ -2606,7 +2648,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
               key={`res-dot-${i}`}
               className="absolute w-2 h-2 rounded-full bg-[#f87171]"
               style={{
-                left: "63%",
+                left: "50%",
                 top: `${getYPct(r.price)}%`,
                 transform: "translate(-50%, -50%)",
                 opacity: 0.8,
@@ -2648,19 +2690,19 @@ export const StockCardVisualizer: React.FC<Props> = ({
           {/* Entry Labels */}
           <div className="pointer-events-auto">
             {entryLabels.map((l) =>
-              renderLabel(l, "left-[44%]", {
+              renderLabel(l, "left-1/2", {
                 top: `${l.y}%`,
-                transform: "translateY(-50%)",
+                transform: "translate(-50%, -50%)",
               }),
             )}
           </div>
 
-          {/* TP Labels */}
+          {/* TP & Resistance Labels (Centered) */}
           <div className="pointer-events-auto">
             {tpLabels.map((l) =>
-              renderLabel(l, "left-[65%]", {
+              renderLabel(l, "left-1/2", {
                 top: `${l.y}%`,
-                transform: "translateY(-50%)",
+                transform: "translate(-50%, -50%)",
               }),
             )}
           </div>

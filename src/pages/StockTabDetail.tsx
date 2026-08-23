@@ -269,52 +269,55 @@ export default function StockTabDetail() {
 
   const stats = calculateStats(trades, tab?.currentPrice);
   const prevTabIdRef = React.useRef<string | null>(null);
+  const userHasModifiedCalcBasePriceRef = React.useRef<boolean>(false);
 
   // Prefill percentage calculator base price & refPnLPoint when data loaded
   React.useEffect(() => {
-    if (tab && stats) {
-      const avgPrice = stats.averagePrice && stats.averagePrice > 0 ? stats.averagePrice : 0;
-      const curPrice = tab.currentPrice && tab.currentPrice > 0 ? tab.currentPrice : 0;
-      const baseVal = avgPrice > 0 ? avgPrice : curPrice;
+    if (!tab) return;
 
-      const isNewTab = prevTabIdRef.current !== tab.id;
-      if (isNewTab) {
-        prevTabIdRef.current = tab.id;
-        if (baseVal > 0) {
-          setCalcBasePrice(baseVal.toFixed(2));
-          setCalcPercent('3');
-          setCalcType('SUB');
-        } else {
-          setCalcBasePrice('');
-          setCalcPercent('3');
-          setCalcType('SUB');
-        }
-        if (curPrice > 0) {
-          if (!tab.refPnLPoint) {
-            setRefPnLPoint(curPrice.toFixed(2));
-          }
-          if (!tab.refPnLPointSys2) {
-            setRefPnLPointSys2(curPrice.toFixed(2));
-          }
-        } else {
-          if (!tab.refPnLPoint) setRefPnLPoint('');
-          if (!tab.refPnLPointSys2) setRefPnLPointSys2('');
-        }
+    const hasHolding = (stats?.totalQuantity ?? 0) !== 0 && (stats?.averagePrice ?? 0) > 0;
+    const avgPrice = hasHolding ? stats.averagePrice : 0;
+    const curPrice = tab.currentPrice && tab.currentPrice > 0 ? tab.currentPrice : 0;
+    const baseVal = avgPrice > 0 ? avgPrice : curPrice;
+
+    const isNewTab = prevTabIdRef.current !== tab.id;
+    if (isNewTab) {
+      prevTabIdRef.current = tab.id;
+      userHasModifiedCalcBasePriceRef.current = false;
+      if (baseVal > 0) {
+        setCalcBasePrice(baseVal.toFixed(2));
       } else {
-        if (baseVal > 0 && !calcBasePrice) {
-          setCalcBasePrice(baseVal.toFixed(2));
-          setCalcPercent('3');
-          setCalcType('SUB');
-        }
-        if (curPrice > 0 && !refPnLPoint) {
+        setCalcBasePrice('');
+      }
+      setCalcPercent('3');
+      setCalcType('SUB');
+
+      if (curPrice > 0) {
+        if (!tab.refPnLPoint) {
           setRefPnLPoint(curPrice.toFixed(2));
         }
-        if (curPrice > 0 && !refPnLPointSys2) {
+        if (!tab.refPnLPointSys2) {
           setRefPnLPointSys2(curPrice.toFixed(2));
         }
+      } else {
+        if (!tab.refPnLPoint) setRefPnLPoint('');
+        if (!tab.refPnLPointSys2) setRefPnLPointSys2('');
+      }
+    } else {
+      // If user has not manually modified the base price, keep it synced to average cost (if holding) or current price
+      if (!userHasModifiedCalcBasePriceRef.current) {
+        if (baseVal > 0) {
+          setCalcBasePrice(baseVal.toFixed(2));
+        }
+      }
+      if (curPrice > 0 && !refPnLPoint) {
+        setRefPnLPoint(curPrice.toFixed(2));
+      }
+      if (curPrice > 0 && !refPnLPointSys2) {
+        setRefPnLPointSys2(curPrice.toFixed(2));
       }
     }
-  }, [tab?.id, tab?.currentPrice, stats?.averagePrice]);
+  }, [tab?.id, tab?.currentPrice, stats?.averagePrice, stats?.totalQuantity]);
 
   // Keep expression in sync with manual inputs (section 2 -> section 1)
   React.useEffect(() => {
@@ -396,7 +399,8 @@ export default function StockTabDetail() {
   if (!tab) return <div className="text-slate-500">找不到該股票分頁，或已被刪除。</div>;
 
   const handlePresetClick = (p: string) => {
-    const avgPrice = stats?.averagePrice && stats.averagePrice > 0 ? stats.averagePrice : 0;
+    const hasHolding = (stats?.totalQuantity ?? 0) !== 0 && (stats?.averagePrice ?? 0) > 0;
+    const avgPrice = hasHolding ? stats.averagePrice : 0;
     const curPrice = tab?.currentPrice && tab.currentPrice > 0 ? tab.currentPrice : 0;
     const base = parseFloat(calcBasePrice) || avgPrice || curPrice || 0;
     if (base > 0) {
@@ -411,7 +415,9 @@ export default function StockTabDetail() {
 
   // 一鍵根據手動輸入的基準股價 ($) 計算結果並匯入到系統一 (-2%, -4%, -6%, -8%)
   const handleImportBaseToSys1 = () => {
-    const base = parseFloat(calcBasePrice) || stats?.averagePrice || tab?.currentPrice || 0;
+    const hasHolding = (stats?.totalQuantity ?? 0) !== 0 && (stats?.averagePrice ?? 0) > 0;
+    const fallbackPrice = hasHolding ? stats.averagePrice : (tab?.currentPrice || 0);
+    const base = parseFloat(calcBasePrice) || fallbackPrice;
     if (!base || base <= 0) {
       toast.error('請先於下方「基準股價 ($)」欄位輸入或確認有效數值');
       return;
@@ -434,7 +440,9 @@ export default function StockTabDetail() {
 
   // 一鍵根據手動輸入的基準股價 ($) 計算結果並匯入到系統二 (-3%, -6%, -9%, -12%)
   const handleImportBaseToSys2 = () => {
-    const base = parseFloat(calcBasePrice) || stats?.averagePrice || tab?.currentPrice || 0;
+    const hasHolding = (stats?.totalQuantity ?? 0) !== 0 && (stats?.averagePrice ?? 0) > 0;
+    const fallbackPrice = hasHolding ? stats.averagePrice : (tab?.currentPrice || 0);
+    const base = parseFloat(calcBasePrice) || fallbackPrice;
     if (!base || base <= 0) {
       toast.error('請先於下方「基準股價 ($)」欄位輸入或確認有效數值');
       return;
@@ -457,7 +465,9 @@ export default function StockTabDetail() {
 
   // 一鍵同步匯入雙系統欄位
   const handleImportBaseToBoth = () => {
-    const base = parseFloat(calcBasePrice) || stats?.averagePrice || tab?.currentPrice || 0;
+    const hasHolding = (stats?.totalQuantity ?? 0) !== 0 && (stats?.averagePrice ?? 0) > 0;
+    const fallbackPrice = hasHolding ? stats.averagePrice : (tab?.currentPrice || 0);
+    const base = parseFloat(calcBasePrice) || fallbackPrice;
     if (!base || base <= 0) {
       toast.error('請先於下方「基準股價 ($)」欄位輸入或確認有效數值');
       return;
@@ -2419,11 +2429,22 @@ export default function StockTabDetail() {
                             </Label>
                             <div className="grid grid-cols-3 gap-2">
                               <div>
-                                <span className="text-[10px] text-zinc-500 font-bold block mb-1">基準股價 ($)</span>
+                                <div className="flex items-center justify-between mb-1">
+                                  <span className="text-[10px] text-zinc-500 font-bold block">基準股價 ($)</span>
+                                </div>
                                 <Input
                                   type="number"
+                                  step="0.01"
                                   value={calcBasePrice}
-                                  onChange={(e) => setCalcBasePrice(e.target.value)}
+                                  onChange={(e) => {
+                                    userHasModifiedCalcBasePriceRef.current = true;
+                                    setCalcBasePrice(e.target.value);
+                                  }}
+                                  placeholder={
+                                    ((stats?.totalQuantity ?? 0) !== 0 && (stats?.averagePrice ?? 0) > 0)
+                                      ? stats.averagePrice.toFixed(2)
+                                      : ((tab?.currentPrice && tab.currentPrice > 0) ? tab.currentPrice.toFixed(2) : '0.00')
+                                  }
                                   className="h-8 text-xs font-mono font-bold text-zinc-800 bg-zinc-50/50 border-zinc-200 rounded-lg focus-visible:ring-emerald-500"
                                 />
                               </div>
@@ -2487,7 +2508,7 @@ export default function StockTabDetail() {
                         <div className="flex items-center gap-2 text-xs text-zinc-600">
                           <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
                           <span>
-                            依基準股價 <strong className="text-zinc-900 font-mono">${(parseFloat(calcBasePrice) || stats?.averagePrice || tab?.currentPrice || 0).toFixed(2)}</strong> 一鍵計算並匯入：
+                            依基準股價 <strong className="text-zinc-900 font-mono">${(parseFloat(calcBasePrice) || ((stats?.totalQuantity ?? 0) !== 0 && (stats?.averagePrice ?? 0) > 0 ? stats.averagePrice : tab?.currentPrice) || 0).toFixed(2)}</strong> 一鍵計算並匯入：
                           </span>
                         </div>
 

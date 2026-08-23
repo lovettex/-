@@ -7,11 +7,35 @@ import {
   inMemoryPersistence,
   browserPopupRedirectResolver
 } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { 
+  getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager
+} from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 export const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+
+// Initialize Firestore with robust multi-tab persistent IndexedDB cache & long polling auto-detect
+let firestoreInstance;
+try {
+  firestoreInstance = initializeFirestore(
+    app,
+    {
+      localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager(),
+      }),
+      experimentalAutoDetectLongPolling: true,
+    },
+    firebaseConfig.firestoreDatabaseId
+  );
+} catch (e) {
+  console.warn("initializeFirestore with persistentLocalCache fallback:", e);
+  firestoreInstance = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+}
+
+export const db = firestoreInstance;
 
 // Initialize Firebase Auth with multiple persistence targets to prevent WKWebView/Chrome iOS sandboxed storage crashes.
 let authInstance;
@@ -53,9 +77,30 @@ export interface FirestoreErrorInfo {
   }
 }
 
+export function isFirestoreOfflineError(error: unknown): boolean {
+  if (!error) return false;
+  const msg = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return (
+    msg.includes('offline') ||
+    msg.includes('client is offline') ||
+    msg.includes('unavailable') ||
+    msg.includes('could not reach') ||
+    msg.includes('backend didn\'t respond') ||
+    msg.includes('failed-precondition')
+  );
+}
+
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  
+  // Gracefully handle transient offline / connection latency without throwing unhandled exceptions
+  if (isFirestoreOfflineError(error)) {
+    console.warn(`[Firestore Offline Cache Active] Operation ${operationType} on path '${path}': ${errorMessage}`);
+    return;
+  }
+
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: errorMessage,
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,

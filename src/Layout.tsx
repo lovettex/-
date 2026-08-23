@@ -147,11 +147,7 @@ export default function Layout() {
       <Premium3DGrid />
       
       {/* Top right auth corner */}
-      <div className="fixed top-4 right-6 z-[100] flex items-center gap-3">
-        <div className="hidden sm:block text-right">
-          <p className="text-xs font-bold text-zinc-500 uppercase tracking-widest">{user.displayName}</p>
-        </div>
-      </div>
+      {/* User name hidden as requested */}
 
       {/* Main Content */}
       <main className="flex-1 relative z-0 focus:outline-none w-full">

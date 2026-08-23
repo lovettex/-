@@ -121,6 +121,15 @@
         "bankAccountBalance": { "type": "number" },
         "updatedAt": { "type": "string", "format": "timestamp" }
       }
+    },
+    "VisualLinesBoard": {
+      "title": "Visual Lines Board",
+      "description": "Draggable stock symbol positions on the dynamic visual lines board.",
+      "type": "object",
+      "properties": {
+        "positions": { "type": "object" },
+        "updatedAt": { "type": "string" }
+      }
     }
   },
   "firestore": {
@@ -131,6 +140,10 @@
     "/users/{userId}/socratesData/{dateKey}": {
       "schema": "SocratesData",
       "description": "User-specific market signal data by date."
+    },
+    "/users/{userId}/visualLinesBoard/{boardId}": {
+      "schema": "VisualLinesBoard",
+      "description": "Saved positions of stock tags on the visual lines board for a user."
     },
     "/stockTabs/{tabId}": {
       "schema": "StockTab",
