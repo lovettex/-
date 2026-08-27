@@ -109,7 +109,7 @@ import {
   Database,
   Circle,
 } from "lucide-react";
-import { calculateStats } from "../lib/calculations";
+import { calculateStats, generateAveragingDownRows, shouldUpdateAveragingRows } from "../lib/calculations";
 import { safeLocalStorage, safeSessionStorage } from "../lib/utils";
 import { format } from "date-fns";
 import { StockCardVisualizer, prefetchStockPrice } from "../components/StockCardVisualizer";
@@ -117,6 +117,9 @@ import { CinemaDock } from "../components/CinemaDock";
 import { DynamicVisualLinesModal } from "../components/DynamicVisualLinesModal";
 import { MiniVisualLinesModal } from "../components/MiniVisualLinesModal";
 import { syncSubTabDividersToCanvas } from "../utils/visualLinesSync";
+import { ChartAnnotation } from "../types";
+
+const EMPTY_CHART_ANNOTATIONS: ChartAnnotation[] = [];
 
 enum OperationType {
   CREATE = "create",
@@ -1010,6 +1013,35 @@ export default function Dashboard() {
     });
     return map;
   }, [activeTabTrades, tabs]);
+
+  // 自動檢查所有非已完成且籌碼管理有持有數量的個股，自動計算系統一與系統二組別 1~4 的預計購入股價 ($) 並同步儲存
+  const syncAveragingRowsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!user || tabs.length === 0) return;
+
+    tabs.forEach((tab) => {
+      if (tab.status === "COMPLETED") return;
+      const trades = activeTabTrades[tab.id];
+      if (!trades || trades.length === 0) return;
+
+      const st = calculateStats(trades as any, tab.currentPrice);
+      if (st.totalQuantity <= 0 || st.averagePrice <= 0) return;
+
+      const check = shouldUpdateAveragingRows(tab, st);
+      if (check.needsUpdate) {
+        const updateKey = `${tab.id}_${st.averagePrice.toFixed(2)}`;
+        if (syncAveragingRowsRef.current.has(updateKey)) return;
+        syncAveragingRowsRef.current.add(updateKey);
+
+        updateTab(tab.id, {
+          averagingRows: check.sys1,
+          averagingRowsSys2: check.sys2,
+        }).catch((err) => {
+          console.error("Auto update averaging down rows error for tab", tab.symbol, err);
+        });
+      }
+    });
+  }, [tabs, activeTabTrades, user?.uid, updateTab]);
   const [strategyHighlights, setStrategyHighlights] = useState<Record<string, boolean>>({});
   const [alerts, setAlerts] = useState<any[]>([]);
   const [socratesData, setSocratesData] = useState<
@@ -2494,61 +2526,56 @@ export default function Dashboard() {
       return;
     }
 
-    const currentActiveTabs = tabs.filter((t) => t.status === "ACTIVE");
-    if (currentActiveTabs.length === 0) {
-      toast.info("尚無持有中的股票");
+    const currentActiveTabs = tabs.filter((t) => t.status !== "COMPLETED");
+    const targetTabs = currentActiveTabs.length > 0 ? currentActiveTabs : tabs;
+
+    if (targetTabs.length === 0) {
+      toast.info("尚無股票資料可更新");
       return;
     }
 
     setIsImportingPrices(true);
     toast.loading("正在抓取最新現價...", { id: "importPrices" });
 
-    let updatedCount = 0;
     try {
-      for (const tab of currentActiveTabs) {
-        if (!tab.symbol) continue;
+      const results = await Promise.allSettled(
+        targetTabs.map(async (tab) => {
+          if (!tab.symbol || !tab.symbol.trim()) return null;
 
-        try {
-          const targetUrl = `/api/stock/${tab.symbol}`;
+          const targetUrl = `/api/stock/${encodeURIComponent(tab.symbol.trim())}`;
+          const response = await fetch(targetUrl);
+          if (!response.ok) return null;
 
-          let price = null;
+          const data = await response.json();
+          const fetchedPrice =
+            typeof data?.price === "number" && data.price > 0
+              ? data.price
+              : data?.chart?.result?.[0]?.meta?.regularMarketPrice;
 
-          try {
-            const response = await fetch(targetUrl);
-            if (!response.ok) continue;
-
-            const data = await response.json();
-            const fetchedPrice =
-              data?.chart?.result?.[0]?.meta?.regularMarketPrice;
-
-            if (fetchedPrice && typeof fetchedPrice === "number") {
-              price = fetchedPrice;
-            }
-          } catch (err) {
-            console.warn(`Local API failed for ${tab.symbol}`, err);
-          }
-
-          if (price && typeof price === "number") {
+          if (fetchedPrice && typeof fetchedPrice === "number" && fetchedPrice > 0) {
             await updateDoc(doc(db, "stockTabs", tab.id), {
-              currentPrice: price,
+              currentPrice: fetchedPrice,
             });
-            updatedCount++;
+            return { id: tab.id, symbol: tab.symbol, price: fetchedPrice };
           }
-        } catch (err) {
-          console.error(`Failed to handle fetch for ${tab.symbol}`, err);
-        }
-      }
+          return null;
+        })
+      );
 
-      if (updatedCount > 0) {
+      const successfulUpdates = results
+        .filter((r): r is PromiseFulfilledResult<{ id: string; symbol: string; price: number } | null> => r.status === "fulfilled" && !!r.value)
+        .map((r) => r.value!);
+
+      if (successfulUpdates.length > 0) {
         playPriceImportSound();
-        toast.success(`成功更新 ${updatedCount} 筆股票現價！`, {
+        toast.success(`成功更新 ${successfulUpdates.length} 筆股票最新現價！`, {
           id: "importPrices",
         });
       } else {
-        toast.error("無法取得任何最新股票報價", { id: "importPrices" });
+        toast.error("無法取得任何最新股票報價，請確認股票代號是否正確", { id: "importPrices" });
       }
     } catch (error) {
-      console.error(error);
+      console.error("Price import error:", error);
       toast.error("抓取現價時發生錯誤", { id: "importPrices" });
     } finally {
       setIsImportingPrices(false);
@@ -3981,6 +4008,8 @@ export default function Dashboard() {
     }
   }, []);
 
+  const lastHKeyPressTimeRef = useRef<number>(0);
+
   // Keyboard shortcuts handling
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -3989,6 +4018,39 @@ export default function Dashboard() {
         activeEl?.tagName === "INPUT" || activeEl?.tagName === "TEXTAREA" || activeEl?.getAttribute("contenteditable") === "true";
         
       if (isInput) return;
+
+      // 0. Double-tap 'h' / 'H' (or Shift + H) -> 進入/切換預覽模式 / 全螢幕模式
+      const isPureH = (e.key === "h" || e.key === "H") && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
+      if (isPureH) {
+        const now = Date.now();
+        if (now - lastHKeyPressTimeRef.current <= 500) {
+          e.preventDefault();
+          lastHKeyPressTimeRef.current = 0;
+          if (!document.fullscreenElement) {
+            if (document.documentElement.requestFullscreen) {
+              document.documentElement.requestFullscreen().then(() => {
+                toast.success("已進入全螢幕 / 預覽模式", { id: "fullscreen-mode", duration: 1500 });
+              }).catch((err) => {
+                console.error(
+                  `Error attempting to enable full-screen mode: ${err.message}`,
+                );
+                toast.success("已切換預覽模式", { id: "fullscreen-mode", duration: 1500 });
+              });
+            } else {
+              toast.success("已切換預覽模式", { id: "fullscreen-mode", duration: 1500 });
+            }
+          } else {
+            if (document.exitFullscreen) {
+              document.exitFullscreen().then(() => {
+                toast.info("已退出全螢幕 / 預覽模式", { id: "fullscreen-mode", duration: 1500 });
+              }).catch(() => {});
+            }
+          }
+          return;
+        } else {
+          lastHKeyPressTimeRef.current = now;
+        }
+      }
 
       // 1. Shift + B -> 回到交易總覽頁面
       if (
@@ -5577,12 +5639,101 @@ export default function Dashboard() {
             setActionActiveTab("general");
           }
         }}>
-          <DialogContent className="border border-zinc-200 shadow-2xl bg-white text-zinc-800 max-w-[350px] p-6 rounded-2xl">
-            <DialogHeader className="mb-4">
+          <DialogContent className="border border-zinc-200 shadow-2xl bg-white text-zinc-800 w-[92vw] max-w-[380px] p-5 sm:p-6 rounded-2xl">
+            <DialogHeader className="mb-3">
               <DialogTitle className="font-black text-xl text-zinc-900 flex items-center justify-center gap-2">
                 <span className="bg-zinc-105 text-zinc-800 px-2 py-0.5 rounded text-sm font-black border border-zinc-200">{selectedActionTab?.symbol}</span> 操作
               </DialogTitle>
             </DialogHeader>
+
+            {/* Strategy Tickboxes Row: 選取 | 止盈 | 止損 | 加碼 | 平倉 | 觀察 */}
+            {selectedActionTab && (
+              <div className="flex items-center justify-between gap-1 bg-zinc-100/90 border border-zinc-200/90 p-1.5 sm:p-2 rounded-2xl mb-4 shadow-xs">
+                {/* 選取 */}
+                <label className="flex-1 flex flex-col items-center justify-center py-1.5 px-0.5 rounded-xl transition-all cursor-pointer group hover:bg-white/80 select-none">
+                  <input
+                    type="checkbox"
+                    checked={!!activeTabStrategies[selectedActionTab.id]?.notesHighlighted}
+                    onChange={(e) => handleUpdateNotesHighlighted(selectedActionTab.id, e.target.checked)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="h-3.5 w-3.5 rounded border border-zinc-300 bg-white checked:bg-amber-500 checked:border-amber-500 text-amber-600 focus:ring-0 cursor-pointer accent-amber-500 transition-all shrink-0 mb-1"
+                  />
+                  <span className={`text-[11px] font-bold select-none transition-colors ${activeTabStrategies[selectedActionTab.id]?.notesHighlighted ? "text-amber-600 font-black" : "text-zinc-500 group-hover:text-zinc-800"}`}>
+                    選取
+                  </span>
+                </label>
+
+                {/* 止盈 */}
+                <label className="flex-1 flex flex-col items-center justify-center py-1.5 px-0.5 rounded-xl transition-all cursor-pointer group hover:bg-white/80 select-none">
+                  <input
+                    type="checkbox"
+                    checked={!!activeTabStrategies[selectedActionTab.id]?.tpChecked}
+                    onChange={(e) => handleUpdateTPChecked(selectedActionTab.id, e.target.checked)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="h-3.5 w-3.5 rounded border border-zinc-300 bg-white checked:bg-emerald-500 checked:border-emerald-500 text-emerald-600 focus:ring-0 cursor-pointer accent-emerald-500 transition-all shrink-0 mb-1"
+                  />
+                  <span className={`text-[11px] font-bold select-none transition-colors ${activeTabStrategies[selectedActionTab.id]?.tpChecked ? "text-emerald-600 font-black" : "text-zinc-500 group-hover:text-zinc-800"}`}>
+                    止盈
+                  </span>
+                </label>
+
+                {/* 止損 */}
+                <label className="flex-1 flex flex-col items-center justify-center py-1.5 px-0.5 rounded-xl transition-all cursor-pointer group hover:bg-white/80 select-none">
+                  <input
+                    type="checkbox"
+                    checked={!!activeTabStrategies[selectedActionTab.id]?.slChecked}
+                    onChange={(e) => handleUpdateSLChecked(selectedActionTab.id, e.target.checked)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="h-3.5 w-3.5 rounded border border-zinc-300 bg-white checked:bg-rose-500 checked:border-rose-500 text-rose-600 focus:ring-0 cursor-pointer accent-rose-500 transition-all shrink-0 mb-1"
+                  />
+                  <span className={`text-[11px] font-bold select-none transition-colors ${activeTabStrategies[selectedActionTab.id]?.slChecked ? "text-rose-600 font-black" : "text-zinc-500 group-hover:text-zinc-800"}`}>
+                    止損
+                  </span>
+                </label>
+
+                {/* 加碼 */}
+                <label className="flex-1 flex flex-col items-center justify-center py-1.5 px-0.5 rounded-xl transition-all cursor-pointer group hover:bg-white/80 select-none">
+                  <input
+                    type="checkbox"
+                    checked={!!activeTabStrategies[selectedActionTab.id]?.addChecked}
+                    onChange={(e) => handleUpdateAddChecked(selectedActionTab.id, e.target.checked)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="h-3.5 w-3.5 rounded border border-zinc-300 bg-white checked:bg-sky-500 checked:border-sky-500 text-sky-600 focus:ring-0 cursor-pointer accent-sky-500 transition-all shrink-0 mb-1"
+                  />
+                  <span className={`text-[11px] font-bold select-none transition-colors ${activeTabStrategies[selectedActionTab.id]?.addChecked ? "text-sky-600 font-black" : "text-zinc-500 group-hover:text-zinc-800"}`}>
+                    加碼
+                  </span>
+                </label>
+
+                {/* 平倉 */}
+                <label className="flex-1 flex flex-col items-center justify-center py-1.5 px-0.5 rounded-xl transition-all cursor-pointer group hover:bg-white/80 select-none">
+                  <input
+                    type="checkbox"
+                    checked={!!activeTabStrategies[selectedActionTab.id]?.closeChecked}
+                    onChange={(e) => handleUpdateCloseChecked(selectedActionTab.id, e.target.checked)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="h-3.5 w-3.5 rounded border border-zinc-300 bg-white checked:bg-violet-500 checked:border-violet-500 text-violet-600 focus:ring-0 cursor-pointer accent-violet-500 transition-all shrink-0 mb-1"
+                  />
+                  <span className={`text-[11px] font-bold select-none transition-colors ${activeTabStrategies[selectedActionTab.id]?.closeChecked ? "text-violet-600 font-black" : "text-zinc-500 group-hover:text-zinc-800"}`}>
+                    平倉
+                  </span>
+                </label>
+
+                {/* 觀察 */}
+                <label className="flex-1 flex flex-col items-center justify-center py-1.5 px-0.5 rounded-xl transition-all cursor-pointer group hover:bg-white/80 select-none">
+                  <input
+                    type="checkbox"
+                    checked={!!activeTabStrategies[selectedActionTab.id]?.observeChecked}
+                    onChange={(e) => handleUpdateObserveChecked(selectedActionTab.id, e.target.checked)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="h-3.5 w-3.5 rounded border border-zinc-300 bg-white checked:bg-[#929292] checked:border-[#929292] text-[#929292] focus:ring-0 cursor-pointer accent-[#929292] transition-all shrink-0 mb-1"
+                  />
+                  <span className={`text-[11px] font-bold select-none transition-colors ${activeTabStrategies[selectedActionTab.id]?.observeChecked ? "text-zinc-700 font-black" : "text-zinc-500 group-hover:text-zinc-800"}`}>
+                    觀察
+                  </span>
+                </label>
+              </div>
+            )}
 
             {/* Tab Switched Header buttons */}
             <div className="flex bg-zinc-100 p-1 rounded-xl border border-zinc-200/80 mb-4 shadow-inner">
@@ -5827,8 +5978,8 @@ export default function Dashboard() {
 
         {/* System Help & Keyboard Shortcuts Dialog */}
         <Dialog open={isHelpOpen} onOpenChange={setIsHelpOpen}>
-          <DialogContent className="border border-white/10 bg-[#0F0F12]/95 backdrop-blur-2xl text-white w-[92vw] sm:max-w-lg max-h-[90vh] overflow-y-auto p-5 sm:p-6 rounded-2xl shadow-2xl">
-            <DialogHeader className="space-y-3 pb-3 border-b border-white/10">
+          <DialogContent className="border border-white/10 bg-[#0F0F12]/95 backdrop-blur-2xl text-white w-[92vw] sm:max-w-lg max-h-[90vh] flex flex-col p-5 sm:p-6 rounded-2xl shadow-2xl overflow-hidden scrollbar-hide [&::-webkit-scrollbar]:hidden [scrollbar-width:none] [-ms-overflow-style:none]">
+            <DialogHeader className="space-y-3 pb-3 border-b border-white/10 shrink-0">
               <div className="flex items-center justify-between">
                 <DialogTitle className="text-xl font-black tracking-tight flex items-center gap-2">
                   <HelpCircle className="w-5 h-5 text-emerald-400" />
@@ -5866,7 +6017,7 @@ export default function Dashboard() {
             </DialogHeader>
 
             {helpDialogTab === "shortcuts" ? (
-              <div className="space-y-4 py-3 max-h-[60vh] overflow-y-auto pr-1">
+              <div className="space-y-4 py-3 flex-1 overflow-y-auto pr-1 scrollbar-hide [&::-webkit-scrollbar]:hidden [scrollbar-width:none] [-ms-overflow-style:none]">
                 <p className="text-xs text-white/50 font-medium">
                   使用以下快捷鍵更快速地操作系統：
                 </p>
@@ -5940,7 +6091,7 @@ export default function Dashboard() {
                     {[
                       { key: "Shift + B", desc: "回到交易總覽頁面" },
                       { key: "Shift + I", desc: "匯入最新價格" },
-                      { key: "Shift + H", desc: "全螢幕模式" },
+                      { key: "快速連按 H H / Shift + H", desc: "預覽模式 / 全螢幕" },
                       { key: "Shift + F", desc: "搜尋股票" },
                       { key: "Shift + M", desc: "電影觀賞模式" },
                       { key: "Shift + D", desc: "AI 分析回傳" },
@@ -5966,7 +6117,7 @@ export default function Dashboard() {
                 </div>
               </div>
             ) : (
-              <div className="space-y-3.5 py-3 text-xs text-white/80 leading-relaxed max-h-[60vh] overflow-y-auto pr-1">
+              <div className="space-y-3.5 py-3 text-xs text-white/80 leading-relaxed flex-1 overflow-y-auto pr-1 scrollbar-hide [&::-webkit-scrollbar]:hidden [scrollbar-width:none] [-ms-overflow-style:none]">
                 {/* Section 1: API & Source */}
                 <div className="bg-white/5 border border-white/10 rounded-xl p-3.5 space-y-2">
                   <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
@@ -6025,7 +6176,7 @@ export default function Dashboard() {
               </div>
             )}
 
-            <DialogFooter className="pt-2 border-t border-white/10">
+            <DialogFooter className="pt-2 border-t border-white/10 shrink-0">
               <Button
                 onClick={() => setIsHelpOpen(false)}
                 className="w-full bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-xl cursor-pointer transition-colors"
@@ -7710,10 +7861,12 @@ export default function Dashboard() {
                                                 }
                                               }}
                                               tabId={tab.id}
-                                              annotations={tab.chartAnnotations || []}
+                                              annotations={tab.chartAnnotations || EMPTY_CHART_ANNOTATIONS}
                                               onUpdateAnnotations={(annots) => updateTab(tab.id, { chartAnnotations: annots })}
                                               averageCost={stats.totalQuantity !== 0 ? stats.averagePrice : undefined}
                                               averageCostQuantity={stats.totalQuantity !== 0 ? stats.totalQuantity : undefined}
+                                              averagingRowsSys2={tab.averagingRowsSys2}
+                                              holdingQuantity={tab.status !== "COMPLETED" ? stats.totalQuantity : 0}
                                               stockName={tab.symbol}
                                               rating={tab.rating}
                                               qualityScore={tab.qualityScore}

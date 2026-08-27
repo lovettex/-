@@ -105,3 +105,88 @@ export function calculateStats(trades: Trade[], currentPrice?: number) {
     unrealizedPnL
   };
 }
+
+export type AveragingRow = {
+  price: string;
+  quantity: string;
+  quantity2?: string;
+  bought?: boolean;
+  riskFlag?: boolean;
+};
+
+/**
+ * 依據平均成本自動計算向下攤平試算的預計購入股價 ($)
+ * 系統一 (2% 階梯遞減):
+ *   組別 1: -2% (avg * 0.98)
+ *   組別 2: -4% (avg * 0.96)
+ *   組別 3: -6% (avg * 0.94)
+ *   組別 4: -8% (avg * 0.92)
+ * 系統二 (3% 階梯遞減):
+ *   組別 1: -3% (avg * 0.97)
+ *   組別 2: -6% (avg * 0.94)
+ *   組別 3: -9% (avg * 0.91)
+ *   組別 4: -12% (avg * 0.88)
+ */
+export function generateAveragingDownRows(
+  averagePrice: number,
+  prevRowsSys1?: AveragingRow[],
+  prevRowsSys2?: AveragingRow[]
+): { sys1: AveragingRow[]; sys2: AveragingRow[] } {
+  const sys1Ratios = [0.98, 0.96, 0.94, 0.92];
+  const sys2Ratios = [0.97, 0.94, 0.91, 0.88];
+
+  const sys1: AveragingRow[] = [0, 1, 2, 3].map((i) => {
+    const prev = prevRowsSys1?.[i];
+    const calcPrice = averagePrice > 0 ? (averagePrice * sys1Ratios[i]).toFixed(2) : (prev?.price ?? '');
+    return {
+      price: calcPrice,
+      quantity: prev?.quantity ?? '',
+      quantity2: prev?.quantity2 ?? '',
+      bought: !!prev?.bought,
+      riskFlag: !!prev?.riskFlag,
+    };
+  });
+
+  const sys2: AveragingRow[] = [0, 1, 2, 3].map((i) => {
+    const prev = prevRowsSys2?.[i];
+    const calcPrice = averagePrice > 0 ? (averagePrice * sys2Ratios[i]).toFixed(2) : (prev?.price ?? '');
+    return {
+      price: calcPrice,
+      quantity: prev?.quantity ?? '',
+      quantity2: prev?.quantity2 ?? '',
+      bought: !!prev?.bought,
+      riskFlag: !!prev?.riskFlag,
+    };
+  });
+
+  return { sys1, sys2 };
+}
+
+/**
+ * 判斷是否需要自動更新並儲存向下攤平試算設定
+ * 條件：非已完成 tab，且籌碼管理區塊有持有數量 (totalQuantity > 0 且 averagePrice > 0)
+ */
+export function shouldUpdateAveragingRows(
+  tab: { status?: string; holdingStatus?: string; averagingRows?: AveragingRow[]; averagingRowsSys2?: AveragingRow[] },
+  stats: { totalQuantity?: number; averagePrice?: number }
+): { needsUpdate: boolean; sys1: AveragingRow[]; sys2: AveragingRow[] } {
+  if (tab.status === 'COMPLETED') {
+    return { needsUpdate: false, sys1: [], sys2: [] };
+  }
+  const qty = stats.totalQuantity ?? 0;
+  const avg = stats.averagePrice ?? 0;
+  if (qty === 0 || avg <= 0) {
+    return { needsUpdate: false, sys1: [], sys2: [] };
+  }
+
+  const { sys1, sys2 } = generateAveragingDownRows(avg, tab.averagingRows, tab.averagingRowsSys2);
+
+  const sys1Changed = sys1.some((r, i) => r.price !== (tab.averagingRows?.[i]?.price ?? ''));
+  const sys2Changed = sys2.some((r, i) => r.price !== (tab.averagingRowsSys2?.[i]?.price ?? ''));
+
+  return {
+    needsUpdate: sys1Changed || sys2Changed,
+    sys1,
+    sys2,
+  };
+}

@@ -325,32 +325,149 @@ async function startServer() {
     }
   });
 
-  // Add a proxy route for Yahoo Finance
+  // Proxy route for stock quotes & historical charts (Yahoo Finance & TWSE/TPEx fallback)
   app.get("/api/stock/:symbol", async (req, res) => {
     try {
       const { symbol } = req.params;
       const { range, interval } = req.query;
-      
-      const targetInterval = interval || "1d";
-      const targetRange = range ? `&range=${range}` : "";
-      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=${targetInterval}${targetRange}`;
-      
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'application/json'
-        }
-      });
-      
-      if (!response.ok) {
-         return res.status(response.status).json({ error: 'Failed to fetch data' });
+
+      if (!symbol || !symbol.trim()) {
+        return res.status(400).json({ error: "股票代號不可為空" });
       }
-      
-      const data = await response.json();
-      res.json(data);
+
+      const targetInterval = (interval as string) || "1d";
+      const targetRange = range ? `&range=${range}` : "";
+      const rawSymbol = decodeURIComponent(symbol).trim();
+
+      // Build candidate tickers
+      const candidates: string[] = [];
+      candidates.push(rawSymbol);
+
+      // Extract 4-6 digit Taiwan stock code if present (e.g. "2330", "2330 台積電", "台積電(2330)", "0050")
+      const digitMatch = rawSymbol.match(/(\d{4,6})/);
+      let twCode: string | null = null;
+      if (digitMatch) {
+        twCode = digitMatch[1];
+        candidates.push(`${twCode}.TW`);
+        candidates.push(`${twCode}.TWO`);
+        candidates.push(twCode);
+      }
+
+      // If symbol has letters e.g. "NVDA", "AAPL"
+      const alphaMatch = rawSymbol.match(/^([A-Za-z.\-^=]{1,10})$/);
+      if (alphaMatch) {
+        candidates.push(alphaMatch[1].toUpperCase());
+      }
+
+      const uniqueCandidates = [...new Set(candidates)];
+      let foundData: any = null;
+      let resolvedPrice: number | null = null;
+      let resolvedSymbol: string = rawSymbol;
+
+      // 1. Try Yahoo Finance with candidate symbols across query1 & query2
+      for (const cand of uniqueCandidates) {
+        for (const host of ["query1.finance.yahoo.com", "query2.finance.yahoo.com"]) {
+          try {
+            const url = `https://${host}/v8/finance/chart/${encodeURIComponent(cand)}?interval=${targetInterval}${targetRange}`;
+            const response = await fetch(url, {
+              headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                Accept: "application/json",
+              },
+            });
+
+            if (!response.ok) continue;
+            const data = await response.json();
+            const result = data?.chart?.result?.[0];
+            if (result) {
+              const metaPrice = result.meta?.regularMarketPrice;
+              const prevClose = result.meta?.chartPreviousClose;
+              const closes = result.indicators?.quote?.[0]?.close?.filter((p: any) => p !== null && !isNaN(p));
+              const lastClose = closes && closes.length > 0 ? closes[closes.length - 1] : undefined;
+
+              const price = typeof metaPrice === "number" && !isNaN(metaPrice) && metaPrice > 0
+                ? metaPrice
+                : (typeof lastClose === "number" && !isNaN(lastClose) && lastClose > 0
+                  ? lastClose
+                  : (typeof prevClose === "number" && !isNaN(prevClose) && prevClose > 0 ? prevClose : null));
+
+              if (price) {
+                foundData = data;
+                resolvedPrice = price;
+                resolvedSymbol = cand;
+                break;
+              }
+            }
+          } catch {
+            // continue to next host/cand
+          }
+        }
+        if (foundData && resolvedPrice) break;
+      }
+
+      // 2. If price still not resolved and we have a Taiwan stock code, query official TWSE MIS API as fallback
+      if (!resolvedPrice && twCode) {
+        try {
+          const tseUrl = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_${twCode}.tw|otc_${twCode}.tw&json=1&delay=0`;
+          const resp = await fetch(tseUrl, {
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+              Accept: "application/json",
+            },
+          });
+          if (resp.ok) {
+            const data = await resp.json();
+            const msgList = data?.msgArray || [];
+            for (const item of msgList) {
+              const tradePrice = parseFloat(item.z);
+              const yesterdayClose = parseFloat(item.y);
+              const price = !isNaN(tradePrice) && tradePrice > 0
+                ? tradePrice
+                : (!isNaN(yesterdayClose) && yesterdayClose > 0 ? yesterdayClose : null);
+
+              if (price) {
+                resolvedPrice = price;
+                resolvedSymbol = `${twCode}.TW`;
+                // Construct a mock Yahoo-compatible chart object if none was found
+                foundData = {
+                  chart: {
+                    result: [
+                      {
+                        meta: {
+                          currency: "TWD",
+                          symbol: resolvedSymbol,
+                          regularMarketPrice: price,
+                          chartPreviousClose: !isNaN(yesterdayClose) ? yesterdayClose : price,
+                        },
+                        indicators: {
+                          quote: [{ close: [price] }],
+                        },
+                      },
+                    ],
+                  },
+                };
+                break;
+              }
+            }
+          }
+        } catch (twErr) {
+          console.warn("TWSE MIS fallback error:", twErr);
+        }
+      }
+
+      if (foundData) {
+        // Ensure price & symbol are also top-level for convenience
+        return res.json({
+          ...foundData,
+          price: resolvedPrice,
+          resolvedSymbol,
+        });
+      }
+
+      return res.status(404).json({ error: `找不到股票代號 ${rawSymbol} 的報價資料` });
     } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: 'Internal Server Error' });
+      console.error("Stock price API error:", error);
+      res.status(500).json({ error: "取得股票報價時發生伺服器內部錯誤" });
     }
   });
 

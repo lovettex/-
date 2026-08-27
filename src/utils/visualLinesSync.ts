@@ -541,7 +541,10 @@ export async function syncSubTabDividersToCanvas(
       x: finalX,
       y: canvasY,
       shape: "circle",
+      sizeOffset: newPositions[sym]?.sizeOffset ?? 0,
       color: newPositions[sym]?.color || undefined,
+      hidden: Boolean(newPositions[sym]?.hidden),
+      dcaProgress: newPositions[sym]?.dcaProgress || undefined,
       updatedAt: nowIso,
     };
 

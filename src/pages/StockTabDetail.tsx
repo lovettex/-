@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useStockTabs } from '../hooks/useStockTabs';
 import { playClickSound, playSuccessSound, playPriceImportSound } from '../lib/audio';
 import { useTrades } from '../hooks/useTrades';
-import { calculateStats } from '../lib/calculations';
+import { calculateStats, generateAveragingDownRows, shouldUpdateAveragingRows } from '../lib/calculations';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -67,6 +67,7 @@ export default function StockTabDetail() {
   const [takeProfitInput, setTakeProfitInput] = useState<string>('');
   const [isEditingPrice, setIsEditingPrice] = useState(false);
   const [tempPrice, setTempPrice] = useState('');
+  const [isFetchingPrice, setIsFetchingPrice] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const tradesJsonFileInputRef = React.useRef<HTMLInputElement>(null);
   const { user } = useAuth();
@@ -239,13 +240,45 @@ export default function StockTabDetail() {
     }
   }, [id, tab?.holdingStatus]);
 
-  // Keyboard shortcut handle (Shift + B to go back, Shift + H for fullscreen)
+  const lastDetailHKeyPressTimeRef = React.useRef<number>(0);
+
+  // Keyboard shortcut handle (Shift + B to go back, Double H / Shift + H for fullscreen)
   React.useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       const activeEl = document.activeElement;
       const isInput = activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA' || activeEl?.getAttribute('contenteditable') === 'true';
       
       if (isInput) return;
+
+      // Double-tap 'h' / 'H' -> 進入/切換預覽模式 / 全螢幕
+      const isPureH = (e.key === 'h' || e.key === 'H') && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
+      if (isPureH) {
+        const now = Date.now();
+        if (now - lastDetailHKeyPressTimeRef.current <= 500) {
+          e.preventDefault();
+          lastDetailHKeyPressTimeRef.current = 0;
+          if (!document.fullscreenElement) {
+            if (document.documentElement.requestFullscreen) {
+              document.documentElement.requestFullscreen().then(() => {
+                toast.success('已進入全螢幕 / 預覽模式', { id: 'fullscreen-mode', duration: 1500 });
+              }).catch(() => {
+                toast.success('已切換預覽模式', { id: 'fullscreen-mode', duration: 1500 });
+              });
+            } else {
+              toast.success('已切換預覽模式', { id: 'fullscreen-mode', duration: 1500 });
+            }
+          } else {
+            if (document.exitFullscreen) {
+              document.exitFullscreen().then(() => {
+                toast.info('已退出全螢幕 / 預覽模式', { id: 'fullscreen-mode', duration: 1500 });
+              }).catch(() => {});
+            }
+          }
+          return;
+        } else {
+          lastDetailHKeyPressTimeRef.current = now;
+        }
+      }
 
       if (e.shiftKey && e.key.toUpperCase() === 'B' && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
@@ -256,9 +289,17 @@ export default function StockTabDetail() {
       if (e.shiftKey && e.key.toUpperCase() === 'H' && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         if (!document.fullscreenElement) {
-          document.documentElement.requestFullscreen().catch(() => {});
+          if (document.documentElement.requestFullscreen) {
+            document.documentElement.requestFullscreen().then(() => {
+              toast.success('已進入全螢幕 / 預覽模式', { id: 'fullscreen-mode', duration: 1500 });
+            }).catch(() => {});
+          }
         } else {
-          document.exitFullscreen().catch(() => {});
+          if (document.exitFullscreen) {
+            document.exitFullscreen().then(() => {
+              toast.info('已退出全螢幕 / 預覽模式', { id: 'fullscreen-mode', duration: 1500 });
+            }).catch(() => {});
+          }
         }
         return;
       }
@@ -377,8 +418,39 @@ export default function StockTabDetail() {
 
   const parsedCalc = parseAndCalculatePercentage(calcExpression);
 
-  // Automatically fill calculation result into averagingRows[0].price and averagingRowsSys2[0].price
+  // 當個股在籌碼管理區塊有持有數量數據且非已完成狀態時，自動依平均成本計算系統一與系統二組別1~4的預計購入股價 ($) 並且自動儲存設定
   React.useEffect(() => {
+    if (!tab) return;
+    if (tab.status === 'COMPLETED') return;
+
+    const hasHolding = (stats?.totalQuantity ?? 0) !== 0 && (stats?.averagePrice ?? 0) > 0;
+    if (!hasHolding) return;
+
+    const avgPrice = stats.averagePrice;
+    const { sys1, sys2 } = generateAveragingDownRows(avgPrice, averagingRows, averagingRowsSys2);
+
+    const isSys1Changed = sys1.some((r, i) => r.price !== averagingRows[i]?.price);
+    const isSys2Changed = sys2.some((r, i) => r.price !== averagingRowsSys2[i]?.price);
+
+    if (isSys1Changed || isSys2Changed) {
+      if (isSys1Changed) setAveragingRows(sys1);
+      if (isSys2Changed) setAveragingRowsSys2(sys2);
+
+      // 自動將向下攤平試算設定儲存至 Firestore
+      updateTab(tab.id, {
+        averagingRows: sys1,
+        averagingRowsSys2: sys2,
+      }).catch((err) => {
+        console.error('Failed to auto-save averaging rows:', err);
+      });
+    }
+  }, [tab?.id, tab?.status, tab?.holdingStatus, stats?.averagePrice, stats?.totalQuantity]);
+
+  // 若無持有數量時，依計算機算式填入首列股價
+  React.useEffect(() => {
+    const hasHolding = (stats?.totalQuantity ?? 0) !== 0 && (stats?.averagePrice ?? 0) > 0;
+    if (hasHolding) return; // 有持有數量時由上方自動計算接管
+
     if (parsedCalc.success && typeof parsedCalc.result === 'number' && !isNaN(parsedCalc.result) && parsedCalc.result > 0) {
       const formattedResult = parsedCalc.result.toFixed(2);
       setAveragingRows((prevRows) => {
@@ -394,7 +466,7 @@ export default function StockTabDetail() {
         return newRows;
       });
     }
-  }, [parsedCalc.success, parsedCalc.result]);
+  }, [parsedCalc.success, parsedCalc.result, stats?.totalQuantity, stats?.averagePrice]);
 
   if (!tab) return <div className="text-slate-500">找不到該股票分頁，或已被刪除。</div>;
 
@@ -931,9 +1003,48 @@ export default function StockTabDetail() {
 
   const handlePriceUpdate = (e: React.FormEvent) => {
     e.preventDefault();
-    if (currentPriceInput && !isNaN(Number(currentPriceInput))) {
+    if (tab && currentPriceInput && !isNaN(Number(currentPriceInput))) {
       updateCurrentPrice(tab.id, Number(currentPriceInput));
       playPriceImportSound();
+    }
+  };
+
+  const handleFetchLivePrice = async (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!tab) return;
+    const sym = tab.symbol || tab.companyName;
+    if (!sym || !sym.trim()) {
+      toast.error("此標的未設定股票代號");
+      return;
+    }
+    setIsFetchingPrice(true);
+    toast.loading("正在抓取最新現價...", { id: "fetchSinglePrice" });
+    try {
+      const res = await fetch(`/api/stock/${encodeURIComponent(sym.trim())}`);
+      if (!res.ok) {
+        toast.error("無法取得即時股票報價，請確認代號格式", { id: "fetchSinglePrice" });
+        return;
+      }
+      const data = await res.json();
+      const price =
+        typeof data?.price === "number" && data.price > 0
+          ? data.price
+          : data?.chart?.result?.[0]?.meta?.regularMarketPrice;
+
+      if (price && typeof price === "number" && price > 0) {
+        await updateCurrentPrice(tab.id, price);
+        playPriceImportSound();
+        toast.success(`已成功更新現價為 $${price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, {
+          id: "fetchSinglePrice",
+        });
+      } else {
+        toast.error("無法解析最新股票報價", { id: "fetchSinglePrice" });
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("抓取現價時發生錯誤", { id: "fetchSinglePrice" });
+    } finally {
+      setIsFetchingPrice(false);
     }
   };
 
@@ -1128,15 +1239,26 @@ export default function StockTabDetail() {
                     />
                   </div>
                 ) : (
-                  <div 
-                    className="flex flex-col cursor-pointer"
-                    onClick={() => {
-                      setTempPrice(tab.currentPrice?.toString() || '');
-                      setIsEditingPrice(true);
-                    }}
-                  >
-                    <span className="text-[9px] font-semibold text-zinc-400 uppercase tracking-widest leading-tight">現在價格</span>
-                    <span className="text-base font-bold text-emerald-700 tracking-tight leading-none mt-0.5">${(tab.currentPrice || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  <div className="flex items-center gap-1">
+                    <div 
+                      className="flex flex-col cursor-pointer text-right"
+                      onClick={() => {
+                        setTempPrice(tab.currentPrice?.toString() || '');
+                        setIsEditingPrice(true);
+                      }}
+                    >
+                      <span className="text-[9px] font-semibold text-zinc-400 uppercase tracking-widest leading-tight">現在價格</span>
+                      <span className="text-base font-bold text-emerald-700 tracking-tight leading-none mt-0.5">${(tab.currentPrice || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleFetchLivePrice}
+                      disabled={isFetchingPrice}
+                      title="抓取最新即時現價"
+                      className="p-1 text-zinc-400 hover:text-emerald-600 hover:bg-emerald-50 rounded transition-colors disabled:opacity-50 mt-2"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isFetchingPrice ? 'animate-spin text-emerald-600' : ''}`} />
+                    </button>
                   </div>
                 )}
                 <div className="flex flex-col">
@@ -1185,18 +1307,29 @@ export default function StockTabDetail() {
                     />
                   </div>
                 ) : (
-                  <div 
-                    className="flex flex-col group cursor-pointer"
-                    onClick={() => {
-                      setTempPrice(tab.currentPrice?.toString() || '');
-                      setIsEditingPrice(true);
-                    }}
-                    title="點擊修改現在價格"
-                  >
-                    <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-widest leading-tight flex items-center gap-1">
-                      現在價格 <span className="opacity-0 group-hover:opacity-100 text-[9px] text-emerald-600 transition-opacity">✏️</span>
-                    </span>
-                    <span className="text-lg font-bold text-emerald-700 tracking-tight leading-none mt-0.5">${(tab.currentPrice || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  <div className="flex items-center gap-1.5">
+                    <div 
+                      className="flex flex-col group cursor-pointer"
+                      onClick={() => {
+                        setTempPrice(tab.currentPrice?.toString() || '');
+                        setIsEditingPrice(true);
+                      }}
+                      title="點擊修改現在價格"
+                    >
+                      <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-widest leading-tight flex items-center gap-1">
+                        現在價格 <span className="opacity-0 group-hover:opacity-100 text-[9px] text-emerald-600 transition-opacity">✏️</span>
+                      </span>
+                      <span className="text-lg font-bold text-emerald-700 tracking-tight leading-none mt-0.5">${(tab.currentPrice || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleFetchLivePrice}
+                      disabled={isFetchingPrice}
+                      title="抓取最新即時現價"
+                      className="p-1.5 text-zinc-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors disabled:opacity-50 mt-1"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isFetchingPrice ? 'animate-spin text-emerald-600' : ''}`} />
+                    </button>
                   </div>
                 )}
                 <div className="flex flex-col">
@@ -1739,14 +1872,20 @@ export default function StockTabDetail() {
                     {/* Header for 股價向下攤平試算區塊 */}
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-zinc-150">
                       <div>
-                        <div className="flex items-center space-x-2">
+                        <div className="flex items-center space-x-2 flex-wrap gap-y-1">
                           <div className="p-1 bg-emerald-50 text-emerald-700 rounded-md">
                             <span className="text-xs">📉</span>
                           </div>
                           <h4 className="font-bold text-base tracking-wide text-zinc-800">股價向下攤平試算 (雙系統對比)</h4>
+                          {tab.status !== 'COMPLETED' && stats.totalQuantity > 0 && stats.averagePrice > 0 && (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200/80 px-2 py-0.5 rounded-md">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                              已依平均成本 (${stats.averagePrice.toFixed(2)}) 自動試算組別 1~4 股價並儲存
+                            </span>
+                          )}
                         </div>
                         <p className="text-[11px] text-zinc-500 mt-0.5">
-                          系統一採用 2% 遞減策略；系統二採用 3% 遞減策略。輸入股價與數量可即時對比兩組攤平結果。
+                          系統一採用 2% 遞減策略；系統二採用 3% 遞減策略。當有持有數量時，系統會自動隨平均成本變動計算並匯入組別 1~4 預計購入股價 ($) 且即時儲存。
                         </p>
                       </div>
 

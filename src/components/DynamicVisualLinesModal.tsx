@@ -47,6 +47,7 @@ export interface PositionMap {
     shape?: "circle"; // tag shape (always 'circle')
     color?: string; // custom circle background color hex
     hidden?: boolean; // whether tag is hidden on visual board
+    dcaProgress?: "#1" | "#2" | "#3" | "#4" | string; // 攤平進度 #1, #2, #3, #4
     updatedAt?: string;
   };
 }
@@ -387,13 +388,14 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
       }
     }
 
-    // 確保所有載入的標籤都帶有 shape: "circle" 與正確的 hidden 狀態
+    // 確保所有載入的標籤都帶有 shape: "circle" 與正確的 hidden 狀態與攤平進度
     const sanitizedLoadedPos: PositionMap = {};
     Object.entries(loadedPos).forEach(([sym, pos]) => {
       sanitizedLoadedPos[sym] = {
         ...pos,
         shape: "circle",
         hidden: Boolean(pos.hidden),
+        dcaProgress: pos.dcaProgress || undefined,
       };
     });
 
@@ -417,6 +419,7 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
         setPositions((prev) => ({
           ...prev,
           [customEvent.detail.symbol]: {
+            ...prev[customEvent.detail.symbol],
             ...customEvent.detail.position,
             updatedAt: new Date().toISOString(),
           },
@@ -631,10 +634,11 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     setPositions((prev) => ({
       ...prev,
       [sym]: {
+        ...prev[sym],
         x: parseFloat(targetXPercent.toFixed(2)),
         y: parseFloat(targetYPercent.toFixed(2)),
         shape: "circle",
-        sizeOffset: 0,
+        sizeOffset: prev[sym]?.sizeOffset ?? 0,
         updatedAt: new Date().toISOString(),
       },
     }));
@@ -971,6 +975,130 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     }
   };
 
+  // 直接儲存位置資料庫並廣播更新
+  const savePositionsDirectly = useCallback(
+    async (targetPositions: PositionMap, currentTagSizeOffset: number = tagSizeOffset) => {
+      const storageKey = `visual_lines_board_positions_${userId || "guest"}`;
+
+      // 確保每檔股票標籤都有完整的 shape: 'circle'、sizeOffset、color、dcaProgress 等設定，且無 undefined 欄位以符合 Firestore 要求
+      const sanitizedPositions: PositionMap = {};
+      Object.entries(targetPositions).forEach(([sym, pos]) => {
+        const entry: {
+          x: number;
+          y: number;
+          shape?: "circle";
+          sizeOffset?: number;
+          color?: string;
+          hidden?: boolean;
+          dcaProgress?: string;
+          updatedAt?: string;
+        } = {
+          x: typeof pos.x === "number" ? pos.x : 50,
+          y: typeof pos.y === "number" ? pos.y : 50,
+          shape: "circle",
+          sizeOffset: typeof pos.sizeOffset === "number" ? pos.sizeOffset : 0,
+          updatedAt: pos.updatedAt || new Date().toISOString(),
+        };
+        if (pos.color && typeof pos.color === "string" && pos.color.trim() !== "" && pos.color !== "#09090b") {
+          entry.color = pos.color;
+        }
+        if (pos.hidden) {
+          entry.hidden = true;
+        }
+        if (pos.dcaProgress && typeof pos.dcaProgress === "string") {
+          entry.dcaProgress = pos.dcaProgress;
+        }
+        sanitizedPositions[sym] = entry;
+      });
+
+      try {
+        // 1. LocalStorage
+        localStorage.setItem(storageKey, JSON.stringify(sanitizedPositions));
+        localStorage.setItem("visualLines_tagSizeOffset", String(currentTagSizeOffset));
+        localStorage.setItem("visualLines_tagShape", "circle");
+
+        // 2. Firestore
+        if (userId) {
+          const docRef = doc(db, "users", userId, "visualLinesBoard", "positions");
+          try {
+            await setDoc(
+              docRef,
+              {
+                positions: sanitizedPositions,
+                tagSizeOffset: currentTagSizeOffset,
+                defaultShape: "circle",
+                updatedAt: new Date().toISOString(),
+              },
+              { merge: true }
+            );
+          } catch (dbErr) {
+            handleFirestoreError(dbErr, OperationType.WRITE, `users/${userId}/visualLinesBoard/positions`);
+          }
+        }
+
+        // 3. 發送全域自訂廣播事件
+        window.dispatchEvent(
+          new CustomEvent("visual_lines_positions_updated", {
+            detail: {
+              allPositions: sanitizedPositions,
+              tagSizeOffset: currentTagSizeOffset,
+            },
+          })
+        );
+
+        setPositions(sanitizedPositions);
+        setHasUnsavedChanges(false);
+        return sanitizedPositions;
+      } catch (err: any) {
+        console.error("Auto save positions error:", err);
+        throw err;
+      }
+    },
+    [userId, tagSizeOffset]
+  );
+
+  // 設定/切換勾選股票標籤的攤平進度 (#1, #2, #3, #4) 並自動儲存
+  const handleSetDcaProgress = async (step?: "#1" | "#2" | "#3" | "#4") => {
+    if (selectedTagSymbols.length === 0) {
+      toast.info("請先勾選欲設定攤平進度的股票標籤");
+      return;
+    }
+    playClickSound();
+
+    // 若全部已是該進度，點擊再次切換為清除 (undefined)；若有指定則設定為該進度
+    const isAllSame = step !== undefined && selectedTagSymbols.every((s) => positions[s]?.dcaProgress === step);
+    const targetStep = isAllSame || step === undefined ? undefined : step;
+
+    const nextPositions: PositionMap = { ...positions };
+    selectedTagSymbols.forEach((sym) => {
+      if (nextPositions[sym]) {
+        nextPositions[sym] = {
+          ...nextPositions[sym],
+          dcaProgress: targetStep,
+          updatedAt: new Date().toISOString(),
+        };
+      }
+    });
+
+    setPositions(nextPositions);
+
+    try {
+      await savePositionsDirectly(nextPositions);
+      if (targetStep) {
+        playSuccessSound();
+        toast.success(`已將勾選的 ${selectedTagSymbols.length} 檔標籤設定為攤平進度 ${targetStep}（已自動儲存）`, {
+          id: "dca-progress-save",
+        });
+      } else {
+        toast.info(`已清除勾選的 ${selectedTagSymbols.length} 檔標籤之攤平進度（已自動儲存）`, {
+          id: "dca-progress-save",
+        });
+      }
+    } catch (e: any) {
+      toast.error("自動儲存失敗：" + (e?.message || "請手動點擊儲存"));
+    }
+  };
+
   // 隱藏 / 解除隱藏勾選的股票標籤
   const handleToggleHideSelected = () => {
     if (selectedTagSymbols.length === 0) {
@@ -1114,6 +1242,7 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
           sizeOffset: typeof pos.sizeOffset === "number" ? pos.sizeOffset : 0,
           color: pos.color && pos.color !== "#000000" ? pos.color : undefined,
           hidden: Boolean(pos.hidden),
+          dcaProgress: pos.dcaProgress || undefined,
           updatedAt: pos.updatedAt || new Date().toISOString(),
         };
       });
@@ -1314,72 +1443,9 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     setIsSaving(true);
     playSuccessSound();
 
-    const storageKey = `visual_lines_board_positions_${userId || "guest"}`;
-
-    // 確保每檔股票標籤都有完整的 shape: 'circle'、sizeOffset 與 color 等設定，且無 undefined 欄位以符合 Firestore 要求
-    const sanitizedPositions: PositionMap = {};
-    Object.entries(positions).forEach(([sym, pos]) => {
-      const entry: {
-        x: number;
-        y: number;
-        shape?: "circle";
-        sizeOffset?: number;
-        color?: string;
-        hidden?: boolean;
-        updatedAt?: string;
-      } = {
-        x: typeof pos.x === "number" ? pos.x : 50,
-        y: typeof pos.y === "number" ? pos.y : 50,
-        shape: "circle",
-        sizeOffset: typeof pos.sizeOffset === "number" ? pos.sizeOffset : 0,
-        updatedAt: pos.updatedAt || new Date().toISOString(),
-      };
-      if (pos.color && typeof pos.color === "string" && pos.color.trim() !== "" && pos.color !== "#09090b") {
-        entry.color = pos.color;
-      }
-      if (pos.hidden) {
-        entry.hidden = true;
-      }
-      sanitizedPositions[sym] = entry;
-    });
-
     try {
-      // 1. LocalStorage
-      localStorage.setItem(storageKey, JSON.stringify(sanitizedPositions));
-      localStorage.setItem("visualLines_tagSizeOffset", String(tagSizeOffset));
-      localStorage.setItem("visualLines_tagShape", "circle");
-
-      // 2. Firestore (完整儲存文檔：位置、個別尺寸、形狀與全域設定)
-      if (userId) {
-        const docRef = doc(db, "users", userId, "visualLinesBoard", "positions");
-        try {
-          await setDoc(
-            docRef,
-            {
-              positions: sanitizedPositions,
-              tagSizeOffset,
-              defaultShape: "circle",
-              updatedAt: new Date().toISOString(),
-            }
-          );
-        } catch (dbErr) {
-          handleFirestoreError(dbErr, OperationType.WRITE, `users/${userId}/visualLinesBoard/positions`);
-        }
-      }
-
-      // 3. 發送全域自訂廣播事件，讓其他開啟中的畫布組件即時同步
-      window.dispatchEvent(
-        new CustomEvent("visual_lines_positions_updated", {
-          detail: {
-            allPositions: sanitizedPositions,
-            tagSizeOffset,
-          },
-        })
-      );
-
-      setPositions(sanitizedPositions);
-      setHasUnsavedChanges(false);
-      toast.success(`圖表標籤位置、形狀與尺寸已成功儲存！(共 ${Object.keys(sanitizedPositions).length} 檔)`, {
+      const saved = await savePositionsDirectly(positions, tagSizeOffset);
+      toast.success(`圖表標籤位置、形狀與尺寸已成功儲存！(共 ${Object.keys(saved).length} 檔)`, {
         id: "visual-lines-save",
         duration: 2500,
       });
@@ -1389,13 +1455,68 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     } finally {
       setIsSaving(false);
     }
-  }, [positions, tagSizeOffset, userId]);
+  }, [positions, tagSizeOffset, savePositionsDirectly]);
 
-  // 鍵盤快速鍵 (Shift + S, Alt + W, Escape)
+  const lastHKeyPressTimeRef = useRef<number>(0);
+
+  // 鍵盤快速鍵 (Shift + S, Alt + W, Escape, Double H / Shift + H)
   useEffect(() => {
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const isInput =
+        activeEl?.tagName === "INPUT" || activeEl?.tagName === "TEXTAREA" || activeEl?.getAttribute("contenteditable") === "true";
+      if (isInput) return;
+
+      // 0. 快速連按兩次 H H 或 Shift + H -> 切換全螢幕 / 預覽模式
+      const isPureH = (e.key === "h" || e.key === "H") && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
+      if (isPureH) {
+        const now = Date.now();
+        if (now - lastHKeyPressTimeRef.current <= 500) {
+          e.preventDefault();
+          lastHKeyPressTimeRef.current = 0;
+          if (!document.fullscreenElement) {
+            if (document.documentElement.requestFullscreen) {
+              document.documentElement.requestFullscreen().then(() => {
+                toast.success("已進入全螢幕 / 預覽模式", { id: "fullscreen-mode", duration: 1500 });
+              }).catch(() => {
+                toast.success("已切換預覽模式", { id: "fullscreen-mode", duration: 1500 });
+              });
+            } else {
+              toast.success("已切換預覽模式", { id: "fullscreen-mode", duration: 1500 });
+            }
+          } else {
+            if (document.exitFullscreen) {
+              document.exitFullscreen().then(() => {
+                toast.info("已退出全螢幕 / 預覽模式", { id: "fullscreen-mode", duration: 1500 });
+              }).catch(() => {});
+            }
+          }
+          return;
+        } else {
+          lastHKeyPressTimeRef.current = now;
+        }
+      }
+
+      if (e.shiftKey && (e.key === "H" || e.key === "h") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        if (!document.fullscreenElement) {
+          if (document.documentElement.requestFullscreen) {
+            document.documentElement.requestFullscreen().then(() => {
+              toast.success("已進入全螢幕 / 預覽模式", { id: "fullscreen-mode", duration: 1500 });
+            }).catch(() => {});
+          }
+        } else {
+          if (document.exitFullscreen) {
+            document.exitFullscreen().then(() => {
+              toast.info("已退出全螢幕 / 預覽模式", { id: "fullscreen-mode", duration: 1500 });
+            }).catch(() => {});
+          }
+        }
+        return;
+      }
+
       if (e.shiftKey && (e.key === "S" || e.key === "s") && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         e.stopPropagation();
@@ -2343,7 +2464,7 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
             {selectedTagSymbols.length > 0 && (
               <div className="flex items-center gap-1.5 bg-zinc-950 border border-zinc-700 rounded-full px-2 py-0.5 shadow-sm animate-in fade-in zoom-in-95 duration-150">
                 <span className="text-[10px] font-black text-zinc-400 mr-0.5 select-none hidden sm:inline uppercase tracking-wider">
-                  邊框顏色:
+                  邊框:
                 </span>
                 <div className="flex items-center gap-1">
                   {TAG_COLOR_OPTIONS.map((c) => {
@@ -2369,6 +2490,52 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
                       />
                     );
                   })}
+                </div>
+              </div>
+            )}
+
+            {/* 攤平進度選擇組 (#1, #2, #3, #4) (當股票處於勾選狀態時顯示，點擊自動儲存) */}
+            {selectedTagSymbols.length > 0 && (
+              <div className="flex items-center gap-1 bg-zinc-950 border border-amber-500/50 rounded-full px-2 py-0.5 shadow-sm animate-in fade-in zoom-in-95 duration-150">
+                <span className="text-[10px] font-black text-amber-400 mr-0.5 select-none hidden sm:inline uppercase tracking-wider flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                  攤平:
+                </span>
+                <div className="flex items-center gap-0.5">
+                  {(["#1", "#2", "#3", "#4"] as const).map((step) => {
+                    const isAllThisStep = selectedTagSymbols.every((s) => positions[s]?.dcaProgress === step);
+                    const hasSomeThisStep = selectedTagSymbols.some((s) => positions[s]?.dcaProgress === step);
+
+                    return (
+                      <button
+                        key={step}
+                        type="button"
+                        onClick={() => handleSetDcaProgress(step)}
+                        title={`將勾選的 ${selectedTagSymbols.length} 檔股票標籤設定為攤平進度 ${step} (再次點擊可取消，已支援自動儲存)`}
+                        className={`px-1.5 py-0.5 rounded-full text-[10.5px] font-mono font-black transition-all cursor-pointer select-none active:scale-90 ${
+                          isAllThisStep
+                            ? "bg-[#D2F800] text-black shadow-xs ring-1 ring-white scale-105"
+                            : hasSomeThisStep
+                            ? "bg-zinc-800 text-[#D2F800] border border-[#D2F800]/50"
+                            : "bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white"
+                        }`}
+                      >
+                        {step}
+                      </button>
+                    );
+                  })}
+
+                  {/* 清除進度按鈕 (如果有選中的股票有設定進度) */}
+                  {selectedTagSymbols.some((s) => !!positions[s]?.dcaProgress) && (
+                    <button
+                      type="button"
+                      onClick={() => handleSetDcaProgress(undefined)}
+                      title="清除所選股票之攤平進度 (自動儲存)"
+                      className="p-1 rounded-full text-zinc-400 hover:text-rose-400 hover:bg-zinc-800 transition-colors ml-0.5 cursor-pointer"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
                 </div>
               </div>
             )}
@@ -2788,34 +2955,19 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
                 </button>
               </div>
 
-              {/* 更新時間與日期顯示在標籤下方 (Android Flat Pill Design) */}
-              {pos.updatedAt ? (
+              {/* 攤平進度顯示在標籤下方 (已取消時間戳章，僅在有設定進度時顯示) */}
+              {pos.dcaProgress && (
                 <div
-                  className="mt-1 px-1.5 py-0.5 rounded-full bg-white border border-zinc-200 pointer-events-none flex items-center justify-center gap-0.5 select-none transition-all shadow-xs"
-                  title={`更新時間與日期: ${new Date(pos.updatedAt).toLocaleString()}`}
+                  className="mt-1 px-2 py-0.5 rounded-full bg-zinc-950 border border-[#D2F800]/90 pointer-events-none flex items-center justify-center gap-0.5 select-none transition-all shadow-[0_0_8px_rgba(210,248,0,0.35)] z-10"
+                  title={`攤平進度: ${pos.dcaProgress}`}
                 >
                   <span
-                    className="font-mono font-bold text-black tracking-tight leading-none whitespace-nowrap"
+                    className="font-mono font-black text-[#D2F800] tracking-tight leading-none whitespace-nowrap"
                     style={{
-                      fontSize: `${Math.max(7.5, Math.min(10, 8.5 + Math.round(effectiveSizeOffset * 0.2)))}px`,
-                      color: "#000000",
+                      fontSize: `${Math.max(8, Math.min(11, 9 + Math.round(effectiveSizeOffset * 0.2)))}px`,
                     }}
                   >
-                    {formatTagDate(pos.updatedAt)}
-                  </span>
-                </div>
-              ) : (
-                <div
-                  className="mt-1 px-1.5 py-0.5 rounded-full bg-white border border-zinc-200 pointer-events-none flex items-center justify-center gap-0.5 select-none transition-all shadow-xs"
-                >
-                  <span
-                    className="font-mono font-bold text-black tracking-tight leading-none whitespace-nowrap"
-                    style={{
-                      fontSize: `${Math.max(7.5, Math.min(10, 8.5 + Math.round(effectiveSizeOffset * 0.2)))}px`,
-                      color: "#000000",
-                    }}
-                  >
-                    {formatTagDate(new Date().toISOString())}
+                    {pos.dcaProgress}
                   </span>
                 </div>
               )}

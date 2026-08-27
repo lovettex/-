@@ -196,6 +196,7 @@ export const MiniVisualLinesModal: React.FC<MiniVisualLinesModalProps> = ({
       sizeOffset?: number;
       color?: string;
       hidden?: boolean;
+      dcaProgress?: string;
       updatedAt?: string;
     } = {
       x: position.x,
@@ -208,6 +209,9 @@ export const MiniVisualLinesModal: React.FC<MiniVisualLinesModalProps> = ({
     if (prevConfig?.color && typeof prevConfig.color === "string" && prevConfig.color.trim() !== "" && prevConfig.color !== "#09090b") {
       newEntry.color = prevConfig.color;
     }
+    if (prevConfig?.dcaProgress) {
+      newEntry.dcaProgress = prevConfig.dcaProgress;
+    }
 
     const updatedPositions: PositionMap = {};
     Object.entries(allPositions).forEach(([sym, pos]) => {
@@ -218,6 +222,7 @@ export const MiniVisualLinesModal: React.FC<MiniVisualLinesModalProps> = ({
         sizeOffset?: number;
         color?: string;
         hidden?: boolean;
+        dcaProgress?: string;
         updatedAt?: string;
       } = {
         x: typeof pos.x === "number" ? pos.x : 50,
@@ -231,6 +236,9 @@ export const MiniVisualLinesModal: React.FC<MiniVisualLinesModalProps> = ({
       }
       if (pos.hidden) {
         entry.hidden = true;
+      }
+      if (pos.dcaProgress) {
+        entry.dcaProgress = pos.dcaProgress;
       }
       updatedPositions[sym] = entry;
     });
@@ -581,22 +589,14 @@ export const MiniVisualLinesModal: React.FC<MiniVisualLinesModalProps> = ({
                     )}
                   </div>
 
-                  {/* 更新時間與日期顯示在標籤下方 (Android Flat Pill) */}
-                  {allPositions[cleanSymbol]?.updatedAt ? (
+                  {/* 攤平進度顯示在標籤下方 (已取消時間戳章，僅在有設定進度時顯示) */}
+                  {allPositions[cleanSymbol]?.dcaProgress && (
                     <div
-                      className="mt-1 px-1.5 py-0.5 rounded-full bg-white border border-zinc-200 pointer-events-none flex items-center justify-center gap-0.5 select-none transition-all shadow-xs"
-                      title={`更新時間與日期: ${new Date(allPositions[cleanSymbol].updatedAt!).toLocaleString()}`}
+                      className="mt-1 px-2 py-0.5 rounded-full bg-zinc-950 border border-[#D2F800]/90 pointer-events-none flex items-center justify-center gap-0.5 select-none transition-all shadow-[0_0_8px_rgba(210,248,0,0.35)] z-10"
+                      title={`攤平進度: ${allPositions[cleanSymbol]?.dcaProgress}`}
                     >
-                      <span className="text-[7.5px] sm:text-[8.5px] font-mono font-bold text-black tracking-tight leading-none whitespace-nowrap" style={{ color: "#000000" }}>
-                        {formatTagDate(allPositions[cleanSymbol].updatedAt)}
-                      </span>
-                    </div>
-                  ) : (
-                    <div
-                      className="mt-1 px-1.5 py-0.5 rounded-full bg-white border border-zinc-200 pointer-events-none flex items-center justify-center gap-0.5 select-none transition-all shadow-xs"
-                    >
-                      <span className="text-[7.5px] sm:text-[8.5px] font-mono font-bold text-black tracking-tight leading-none whitespace-nowrap" style={{ color: "#000000" }}>
-                        {formatTagDate(new Date().toISOString())}
+                      <span className="text-[7.5px] sm:text-[8.5px] font-mono font-black text-[#D2F800] tracking-tight leading-none whitespace-nowrap">
+                        {allPositions[cleanSymbol]?.dcaProgress}
                       </span>
                     </div>
                   )}

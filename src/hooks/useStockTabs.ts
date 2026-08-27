@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { collection, query, where, onSnapshot, addDoc, serverTimestamp, doc, updateDoc, deleteDoc, Timestamp } from 'firebase/firestore';
 import { db, OperationType, handleFirestoreError } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
@@ -80,7 +80,7 @@ export function useStockTabs() {
     return () => unsubscribe();
   }, [user?.uid]);
 
-  const addTab = async (symbol: string, companyName: string, tradeType: 'simulated' | 'real' = 'simulated') => {
+  const addTab = useCallback(async (symbol: string, companyName: string, tradeType: 'simulated' | 'real' = 'simulated') => {
     if (!user) return;
     try {
       await addDoc(collection(db, 'stockTabs'), {
@@ -97,9 +97,9 @@ export function useStockTabs() {
       toast.error('新增失敗');
       handleFirestoreError(error, OperationType.CREATE, 'stockTabs');
     }
-  };
+  }, [user]);
 
-  const updateTradeType = async (id: string, tradeType: 'simulated' | 'real') => {
+  const updateTradeType = useCallback(async (id: string, tradeType: 'simulated' | 'real') => {
     try {
       await updateDoc(doc(db, 'stockTabs', id), {
         tradeType,
@@ -109,9 +109,9 @@ export function useStockTabs() {
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `stockTabs/${id}`);
     }
-  };
+  }, []);
 
-  const updateTabStatus = async (id: string, status: 'ACTIVE' | 'COMPLETED', finalPnL?: number) => {
+  const updateTabStatus = useCallback(async (id: string, status: 'ACTIVE' | 'COMPLETED', finalPnL?: number) => {
     try {
       const data: any = {
         status,
@@ -125,9 +125,9 @@ export function useStockTabs() {
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `stockTabs/${id}`);
     }
-  };
+  }, []);
 
-  const updateCurrentPrice = async (id: string, price: number) => {
+  const updateCurrentPrice = useCallback(async (id: string, price: number) => {
     try {
       await updateDoc(doc(db, 'stockTabs', id), {
         currentPrice: price
@@ -136,9 +136,9 @@ export function useStockTabs() {
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `stockTabs/${id}`);
     }
-  };
+  }, []);
 
-  const updateTabHidden = async (id: string, isHidden: boolean) => {
+  const updateTabHidden = useCallback(async (id: string, isHidden: boolean) => {
     try {
       await updateDoc(doc(db, 'stockTabs', id), {
         isHidden,
@@ -148,9 +148,9 @@ export function useStockTabs() {
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `stockTabs/${id}`);
     }
-  };
+  }, []);
 
-  const updateTabOrder = async (updates: { id: string, sortOrder: number }[]) => {
+  const updateTabOrder = useCallback(async (updates: { id: string, sortOrder: number }[]) => {
     try {
       const promises = updates.map(update => 
         updateDoc(doc(db, 'stockTabs', update.id), {
@@ -162,9 +162,11 @@ export function useStockTabs() {
       toast.error('排序更新失敗');
       handleFirestoreError(error, OperationType.UPDATE, 'stockTabs/sortOrder');
     }
-  };
+  }, []);
 
-  const updateTab = async (id: string, data: Partial<StockTab>) => {
+  const updateTab = useCallback(async (id: string, data: Partial<StockTab>) => {
+    // Optimistically update local tabs state immediately for zero-latency response
+    setTabs(prev => prev.map(t => t.id === id ? { ...t, ...data } : t));
     try {
       await updateDoc(doc(db, 'stockTabs', id), {
         ...data,
@@ -173,21 +175,16 @@ export function useStockTabs() {
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `stockTabs/${id}`);
     }
-  };
+  }, []);
 
-  const deleteTab = async (id: string) => {
-    // Note: Due to limitations of client SDK, we cannot easily recursively delete all subcollections.
-    // In a prod app, we'd use a Cloud Function. As a functional workaround here, we delete the parent.
-    // The subdocuments will be "orphaned" but secure since master gate prevents them from being read
-    // or they aren't queries without tabId anyway. 
-    // Ideally we query them and delete them first.
+  const deleteTab = useCallback(async (id: string) => {
     try {
       await deleteDoc(doc(db, 'stockTabs', id));
       toast.success('股票分頁已刪除');
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `stockTabs/${id}`);
     }
-  };
+  }, []);
 
   return { tabs, loading, addTab, updateTabStatus, updateCurrentPrice, updateTradeType, updateTabHidden, updateTabOrder, updateTab, deleteTab };
 }

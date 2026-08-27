@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useRef } from "react";
+import { createPortal } from "react-dom";
 import { PlannedOrder, ChartAnnotation } from "../types";
 import { MousePointer, Minus, Square, Type, Trash2, Eraser, Undo2, ArrowUpRight, Move, Download, Share2, Camera, Loader2, SeparatorHorizontal, Check } from "lucide-react";
 import html2canvas from "html2canvas";
@@ -38,6 +39,8 @@ interface Props {
   onUpdateAnnotations?: (annotations: ChartAnnotation[]) => void;
   averageCost?: number;
   averageCostQuantity?: number;
+  averagingRowsSys2?: { price: string; quantity: string; quantity2?: string; bought?: boolean; riskFlag?: boolean }[];
+  holdingQuantity?: number;
   stockName?: string;
   rating?: number;
   qualityScore?: number;
@@ -103,8 +106,8 @@ function resolveCollisions<T extends { rawY: number; isFixed?: boolean }>(
     .sort((a, b) => a.rawY - b.rawY)
     .map((item) => ({ ...item, y: item.rawY }));
 
-  const minY = 14;
-  const maxY = 97;
+  const minY = 6;
+  const maxY = 94;
 
   // 100 rounds of relaxation
   for (let iter = 0; iter < 100; iter++) {
@@ -342,15 +345,35 @@ const computeMACD = (bars: StockBar[]) => {
   return { dif, dea, histogram };
 };
 
+const DRAWING_COLORS = [
+  { hex: '#ef4444', name: '止損紅' },
+  { hex: '#f97316', name: '強勢橘' },
+  { hex: '#eab308', name: '關鍵黃' },
+  { hex: '#10b981', name: '止盈綠' },
+  { hex: '#14b8a6', name: '薄荷綠' },
+  { hex: '#06b6d4', name: '天空青' },
+  { hex: '#3b82f6', name: '系統藍' },
+  { hex: '#6366f1', name: '靛青藍' },
+  { hex: '#a855f7', name: '神秘紫' },
+  { hex: '#ec4899', name: '玫瑰粉' },
+  { hex: '#64748b', name: '質感灰' },
+  { hex: '#000000', name: '經典黑' },
+  { hex: '#ffffff', name: '純白色' },
+];
+
+const EMPTY_ANNOTATIONS: ChartAnnotation[] = [];
+
 export const StockCardVisualizer: React.FC<Props> = ({
   plannedOrders,
   currentPrice = 0,
   onToggleHighlight,
   tabId,
-  annotations = [],
+  annotations = EMPTY_ANNOTATIONS,
   onUpdateAnnotations,
   averageCost,
   averageCostQuantity,
+  averagingRowsSys2,
+  holdingQuantity,
   stockName,
   rating,
   qualityScore,
@@ -394,10 +417,47 @@ export const StockCardVisualizer: React.FC<Props> = ({
   const [hoveredLabel, setHoveredLabel] = useState<any>(null);
   const longPressTimers = useRef<{ [key: string]: NodeJS.Timeout }>({});
 
+  // Local optimistic annotations state for instant (0ms) canvas response
+  const [localAnnotations, setLocalAnnotations] = useState<ChartAnnotation[]>(annotations || EMPTY_ANNOTATIONS);
+  const localAnnotationsRef = useRef<ChartAnnotation[]>(localAnnotations);
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const draggingIdRef = useRef<string | null>(null);
+
+  React.useEffect(() => {
+    // Only synchronize from props if we do not have an active pending debounce or active user interaction
+    if (!saveTimeoutRef.current && !isDrawingRef.current && !isErasingRef.current && !draggingIdRef.current) {
+      const incoming = annotations || EMPTY_ANNOTATIONS;
+      const current = localAnnotationsRef.current || EMPTY_ANNOTATIONS;
+
+      // Avoid infinite update loop: check if incoming equals current
+      if (incoming === current) return;
+      if (incoming.length === 0 && current.length === 0) return;
+      if (incoming.length === current.length && JSON.stringify(incoming) === JSON.stringify(current)) {
+        return;
+      }
+
+      setLocalAnnotations(incoming);
+      localAnnotationsRef.current = incoming;
+    }
+  }, [annotations]);
+
+  React.useEffect(() => {
+    return () => {
+      // Flush any pending debounced annotation save when the component unmounts
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+        onUpdateAnnotationsRef.current?.(localAnnotationsRef.current);
+      }
+    };
+  }, []);
+
   // Annotations State
   const [mode, setMode] = useState<'cursor' | 'line' | 'box' | 'text' | 'eraser' | 'arrow' | 'move' | 'divider'>('cursor');
   const [activeColor, setActiveColor] = useState<string>('#000000');
-  const [isMobileColorOpen, setIsMobileColorOpen] = useState<boolean>(false);
+  const [isColorPickerOpen, setIsColorPickerOpen] = useState<boolean>(false);
+  const colorButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [pickerPos, setPickerPos] = useState<{ top: number; left: number } | null>(null);
   const [openSubField, setOpenSubField] = useState<string | null>(null);
   const [activeThickness, setActiveThickness] = useState<number>(8);
   const [activeFontSize, setActiveFontSize] = useState<number>(24);
@@ -405,8 +465,105 @@ export const StockCardVisualizer: React.FC<Props> = ({
   const [startPoint, setStartPoint] = useState<{ x: number, y: number } | null>(null);
   const [activePoint, setActivePoint] = useState<{ x: number, y: number } | null>(null);
   const [hoverPoint, setHoverPoint] = useState<{ x: number, y: number } | null>(null);
+  const [eraserHoverPoint, setEraserHoverPoint] = useState<{ x: number, y: number } | null>(null);
+  const isErasingRef = useRef<boolean>(false);
   const [inputCoords, setInputCoords] = useState<{ x: number, y: number } | null>(null);
   const [inputText, setInputText] = useState<string>('');
+
+  const modeRef = useRef(mode);
+  const activeColorRef = useRef(activeColor);
+  const activeThicknessRef = useRef(activeThickness);
+  const activeFontSizeRef = useRef(activeFontSize);
+  const isDrawingRef = useRef(isDrawing);
+  const startPointRef = useRef<{ x: number, y: number } | null>(null);
+  const activePointRef = useRef<{ x: number, y: number } | null>(null);
+  const lastTouchTimeRef = useRef<number>(0);
+  const activeNewDividerIdRef = useRef<string | null>(null);
+
+  // Synchronously update current values to avoid race conditions when switching tools
+  modeRef.current = mode;
+  activeColorRef.current = activeColor;
+  activeThicknessRef.current = activeThickness;
+  activeFontSizeRef.current = activeFontSize;
+  isDrawingRef.current = isDrawing;
+
+  React.useEffect(() => {
+    modeRef.current = mode;
+    activeColorRef.current = activeColor;
+    activeThicknessRef.current = activeThickness;
+    activeFontSizeRef.current = activeFontSize;
+    isDrawingRef.current = isDrawing;
+  }, [mode, activeColor, activeThickness, activeFontSize, isDrawing]);
+
+  const updatePickerPosition = () => {
+    if (!colorButtonRef.current) return;
+    const rect = colorButtonRef.current.getBoundingClientRect();
+    const pickerWidth = 240;
+    const pickerHeight = 265;
+
+    let left = rect.left + rect.width / 2 - pickerWidth / 2;
+    if (left + pickerWidth > window.innerWidth - 12) {
+      left = window.innerWidth - pickerWidth - 12;
+    }
+    if (left < 12) left = 12;
+
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    let top: number;
+    if (spaceBelow < pickerHeight && spaceAbove >= pickerHeight) {
+      top = rect.top - pickerHeight - 8;
+    } else {
+      top = rect.bottom + 8;
+    }
+    setPickerPos({ top, left });
+  };
+
+  const toggleColorPicker = () => {
+    if (isColorPickerOpen) {
+      setIsColorPickerOpen(false);
+    } else {
+      updatePickerPosition();
+      setIsColorPickerOpen(true);
+    }
+  };
+
+  const handleSelectColor = (hex: string) => {
+    setActiveColor(hex);
+    activeColorRef.current = hex;
+    setIsColorPickerOpen(false);
+  };
+
+  const arrowColorList = useMemo(() => {
+    const map = new Map<string, string>();
+    DRAWING_COLORS.forEach((m) => {
+      const hex = m.hex.startsWith('#') ? m.hex : `#${m.hex}`;
+      map.set(hex.replace('#', '').toLowerCase(), hex);
+    });
+    if (activeColor) {
+      const hex = activeColor.startsWith('#') ? activeColor : `#${activeColor}`;
+      map.set(hex.replace('#', '').toLowerCase(), hex);
+    }
+    localAnnotations.forEach((ann) => {
+      if (ann.color) {
+        const hex = ann.color.startsWith('#') ? ann.color : `#${ann.color}`;
+        map.set(hex.replace('#', '').toLowerCase(), hex);
+      }
+    });
+    return Array.from(map.entries());
+  }, [activeColor, localAnnotations]);
+
+  React.useEffect(() => {
+    if (!isColorPickerOpen) return;
+    const handleReposition = () => {
+      updatePickerPosition();
+    };
+    window.addEventListener('resize', handleReposition);
+    window.addEventListener('scroll', handleReposition, true);
+    return () => {
+      window.removeEventListener('resize', handleReposition);
+      window.removeEventListener('scroll', handleReposition, true);
+    };
+  }, [isColorPickerOpen]);
 
   // Export states
   const [showExportModal, setShowExportModal] = useState<boolean>(false);
@@ -490,16 +647,43 @@ export const StockCardVisualizer: React.FC<Props> = ({
   // Local undo history for visual annotations
   const [history, setHistory] = useState<ChartAnnotation[][]>([]);
 
-  const pushToHistoryAndSave = (nextAnnotations: ChartAnnotation[]) => {
-    setHistory((prev) => [...prev, annotationsRef.current]);
-    onUpdateAnnotations?.(nextAnnotations);
+  const commitAnnotations = (nextAnnotations: ChartAnnotation[], immediate = false) => {
+    setLocalAnnotations(nextAnnotations);
+    localAnnotationsRef.current = nextAnnotations;
+
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
+
+    if (immediate) {
+      onUpdateAnnotationsRef.current?.(nextAnnotations);
+    } else {
+      saveTimeoutRef.current = setTimeout(() => {
+        onUpdateAnnotationsRef.current?.(localAnnotationsRef.current);
+        saveTimeoutRef.current = null;
+      }, 250);
+    }
+  };
+
+  const pushToHistoryAndSave = (nextAnnotations: ChartAnnotation[], immediate = true) => {
+    setHistory((prev) => [...prev, localAnnotationsRef.current]);
+    commitAnnotations(nextAnnotations, immediate);
+  };
+
+  const flushPendingSave = () => {
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+      onUpdateAnnotationsRef.current?.(localAnnotationsRef.current);
+    }
   };
 
   const handleUndo = () => {
     if (history.length === 0) return;
     const prevState = history[history.length - 1];
     setHistory((prev) => prev.slice(0, -1));
-    onUpdateAnnotations?.(prevState);
+    commitAnnotations(prevState, true);
   };
 
   // 1. Export Screenshot of the current Visualizer
@@ -1229,34 +1413,33 @@ export const StockCardVisualizer: React.FC<Props> = ({
   const dragStartCoords = useRef<{ x: number; y: number } | null>(null);
   const dragInitialAnn = useRef<ChartAnnotation | null>(null);
 
-  const annotationsRef = useRef(annotations);
   const onUpdateAnnotationsRef = useRef(onUpdateAnnotations);
   React.useEffect(() => {
-    annotationsRef.current = annotations;
     onUpdateAnnotationsRef.current = onUpdateAnnotations;
-  }, [annotations, onUpdateAnnotations]);
+  }, [onUpdateAnnotations]);
 
   const canvasRef = useRef<HTMLDivElement>(null);
 
   const getRelativeCoords = (clientX: number, clientY: number) => {
     if (!canvasRef.current) return { x: 0, y: 0 };
     const rect = canvasRef.current.getBoundingClientRect();
-    const x = ((clientX - rect.left) / rect.width) * 100;
-    const y = ((clientY - rect.top) / rect.height) * 100;
-    return {
-      x: Math.max(0, Math.min(100, x)),
-      y: Math.max(0, Math.min(100, y)),
-    };
+    if (!rect.width || !rect.height) return { x: 0, y: 0 };
+    const rawX = ((clientX - rect.left) / rect.width) * 100;
+    const rawY = ((clientY - rect.top) / rect.height) * 100;
+    const x = Number.isFinite(rawX) ? Math.max(0, Math.min(100, rawX)) : 0;
+    const y = Number.isFinite(rawY) ? Math.max(0, Math.min(100, rawY)) : 0;
+    return { x, y };
   };
 
   const handleDragStart = (ann: ChartAnnotation, clientX: number, clientY: number) => {
     // 1. Push current states to undo history before starting the drag
-    setHistory((prev) => [...prev, annotationsRef.current]);
+    setHistory((prev) => [...prev, localAnnotationsRef.current]);
 
     // 2. Set coordinate offsets
     const coords = getRelativeCoords(clientX, clientY);
     dragStartCoords.current = coords;
     dragInitialAnn.current = ann;
+    draggingIdRef.current = ann.id;
     setDraggingId(ann.id);
   };
 
@@ -1266,7 +1449,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
     const dx = currCoords.x - dragStartCoords.current.x;
     const dy = currCoords.y - dragStartCoords.current.y;
 
-    const nextAnns = annotationsRef.current.map((ann) => {
+    const nextAnns = localAnnotationsRef.current.map((ann) => {
       if (ann.id !== draggingId) return ann;
       const initial = dragInitialAnn.current!;
       if (initial.type === 'text' || initial.type === 'box') {
@@ -1297,10 +1480,15 @@ export const StockCardVisualizer: React.FC<Props> = ({
       return ann;
     });
 
-    onUpdateAnnotationsRef.current?.(nextAnns);
+    setLocalAnnotations(nextAnns);
+    localAnnotationsRef.current = nextAnns;
   };
 
   const handleDragEnd = () => {
+    if (draggingId) {
+      onUpdateAnnotationsRef.current?.(localAnnotationsRef.current);
+    }
+    draggingIdRef.current = null;
     setDraggingId(null);
     dragStartCoords.current = null;
     dragInitialAnn.current = null;
@@ -1349,14 +1537,68 @@ export const StockCardVisualizer: React.FC<Props> = ({
     });
   };
 
-  const handleClearAll = () => {
-    if (window.confirm("確定要清除所有繪圖備註與標記嗎？")) {
-      pushToHistoryAndSave([]);
+  const isPointNearAnnotation = (coords: { x: number; y: number }, ann: ChartAnnotation): boolean => {
+    if (ann.type === 'divider') {
+      const dy = Math.abs(coords.y - (ann.y ?? ann.y1 ?? 0));
+      return dy <= 4.0;
     }
+    if (ann.type === 'line' || ann.type === 'arrow') {
+      const x1 = ann.x1 ?? 0;
+      const y1 = ann.y1 ?? 0;
+      const x2 = ann.x2 ?? 0;
+      const y2 = ann.y2 ?? 0;
+      const l2 = (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1);
+      if (l2 === 0) {
+        return Math.hypot(coords.x - x1, coords.y - y1) <= 5.0;
+      }
+      let t = ((coords.x - x1) * (x2 - x1) + (coords.y - y1) * (y2 - y1)) / l2;
+      t = Math.max(0, Math.min(1, t));
+      const projX = x1 + t * (x2 - x1);
+      const projY = y1 + t * (y2 - y1);
+      return Math.hypot(coords.x - projX, coords.y - projY) <= 5.0;
+    }
+    if (ann.type === 'box') {
+      const bx = ann.x ?? 0;
+      const by = ann.y ?? 0;
+      const bw = ann.width ?? 0;
+      const bh = ann.height ?? 0;
+      const minX = Math.min(bx, bx + bw) - 3.5;
+      const maxX = Math.max(bx, bx + bw) + 3.5;
+      const minY = Math.min(by, by + bh) - 3.5;
+      const maxY = Math.max(by, by + bh) + 3.5;
+      return coords.x >= minX && coords.x <= maxX && coords.y >= minY && coords.y <= maxY;
+    }
+    if (ann.type === 'text') {
+      const tx = ann.x ?? 0;
+      const ty = ann.y ?? 0;
+      return Math.hypot(coords.x - tx, coords.y - ty) <= 7.0;
+    }
+    return false;
+  };
+
+  const eraseAnnotationsAt = (coords: { x: number; y: number }, isContinuous = false) => {
+    const currentList = localAnnotationsRef.current;
+    if (!currentList || currentList.length === 0) return false;
+    const remaining = currentList.filter(ann => !isPointNearAnnotation(coords, ann));
+    if (remaining.length !== currentList.length) {
+      pushToHistoryAndSave(remaining, !isContinuous);
+      return true;
+    }
+    return false;
+  };
+
+  const handleClearAll = () => {
+    if (!localAnnotationsRef.current || localAnnotationsRef.current.length === 0) {
+      toast("目前尚無任何繪圖標記", { icon: 'ℹ️' });
+      return;
+    }
+    pushToHistoryAndSave([], true);
+    toast.success("已一鍵刪除所有繪圖標記 (可點選上一步還原)");
   };
 
   const handleDeleteAnnotation = (idToDelete: string) => {
-    pushToHistoryAndSave(annotationsRef.current.filter((ann) => ann.id !== idToDelete));
+    pushToHistoryAndSave(localAnnotationsRef.current.filter((ann) => ann.id !== idToDelete), true);
+    toast.success("已刪除該繪圖標記", { duration: 1200 });
   };
 
   const getCenterCoords = (ann: ChartAnnotation) => {
@@ -1388,139 +1630,224 @@ export const StockCardVisualizer: React.FC<Props> = ({
     if (e) e.preventDefault();
     if (inputText.trim() && inputCoords) {
       const newAnn: ChartAnnotation = {
-        id: Date.now().toString(),
+        id: `ann-text-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         type: 'text',
-        color: activeColor,
-        strokeWidth: activeThickness,
-        fontSize: activeFontSize,
+        color: activeColorRef.current,
+        strokeWidth: activeThicknessRef.current,
+        fontSize: activeFontSizeRef.current,
         x: inputCoords.x,
         y: inputCoords.y,
         text: inputText,
       };
-      pushToHistoryAndSave([...annotationsRef.current, newAnn]);
+      pushToHistoryAndSave([...localAnnotationsRef.current, newAnn], true);
     }
     setInputCoords(null);
     setInputText('');
   };
 
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    // Avoid double trigger on hybrid touch devices that fire simulated mouse events
+    if (Date.now() - lastTouchTimeRef.current < 500) {
+      return;
+    }
     e.stopPropagation();
     e.preventDefault();
     const coords = getRelativeCoords(e.clientX, e.clientY);
-    if (mode === 'divider') {
+    const currentMode = modeRef.current;
+
+    if (currentMode === 'eraser') {
+      isErasingRef.current = true;
+      setEraserHoverPoint(coords);
+      eraseAnnotationsAt(coords, false);
+    } else if (currentMode === 'divider') {
+      const newId = `div-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      activeNewDividerIdRef.current = newId;
       const newAnn: ChartAnnotation = {
-        id: Date.now().toString(),
+        id: newId,
         type: 'divider',
-        color: activeColor,
-        strokeWidth: activeThickness,
+        color: activeColorRef.current,
+        strokeWidth: activeThicknessRef.current,
         x1: 0,
         x2: 100,
         y1: coords.y,
         y2: coords.y,
         y: coords.y,
       };
-      pushToHistoryAndSave([...annotationsRef.current, newAnn]);
-      toast.success("已新增水平線 (Divider)");
-    } else if (mode === 'text') {
+      pushToHistoryAndSave([...localAnnotationsRef.current, newAnn], true);
+      toast.success("已新增水平線 (Divider)", { duration: 1000 });
+    } else if (currentMode === 'text') {
       setInputCoords(coords);
       setInputText('');
-    } else if (mode === 'line' || mode === 'box' || mode === 'arrow') {
+    } else if (currentMode === 'line' || currentMode === 'box' || currentMode === 'arrow') {
       setIsDrawing(true);
+      isDrawingRef.current = true;
       setStartPoint(coords);
+      startPointRef.current = coords;
       setActivePoint(coords);
+      activePointRef.current = coords;
     }
   };
 
   const handleCanvasMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     e.stopPropagation();
     const coords = getRelativeCoords(e.clientX, e.clientY);
-    if (mode === 'divider') {
+    const currentMode = modeRef.current;
+
+    if (currentMode === 'eraser') {
+      setEraserHoverPoint(coords);
+      if (isErasingRef.current) {
+        eraseAnnotationsAt(coords, true);
+      }
+    } else if (currentMode === 'divider') {
       setHoverPoint(coords);
+      // Real-time drag support when mouse is held down right after divider creation
+      if (activeNewDividerIdRef.current) {
+        const activeId = activeNewDividerIdRef.current;
+        const updated = localAnnotationsRef.current.map((ann) => {
+          if (ann.id === activeId) {
+            return {
+              ...ann,
+              y: coords.y,
+              y1: coords.y,
+              y2: coords.y,
+            };
+          }
+          return ann;
+        });
+        setLocalAnnotations(updated);
+        localAnnotationsRef.current = updated;
+      }
     }
-    if (!isDrawing || !startPoint) return;
+
+    if (!isDrawingRef.current || !startPointRef.current) return;
     setActivePoint(coords);
+    activePointRef.current = coords;
+  };
+
+  const finishDrawing = () => {
+    if (activeNewDividerIdRef.current) {
+      activeNewDividerIdRef.current = null;
+      onUpdateAnnotationsRef.current?.(localAnnotationsRef.current);
+    }
+
+    if (!isDrawingRef.current || !startPointRef.current || !activePointRef.current) {
+      setIsDrawing(false);
+      isDrawingRef.current = false;
+      setStartPoint(null);
+      startPointRef.current = null;
+      setActivePoint(null);
+      activePointRef.current = null;
+      return;
+    }
+
+    const currentMode = modeRef.current;
+    const sp = startPointRef.current;
+    const ap = activePointRef.current;
+    const color = activeColorRef.current;
+    const thickness = activeThicknessRef.current;
+
+    setIsDrawing(false);
+    isDrawingRef.current = false;
+
+    const dx = Math.abs(ap.x - sp.x);
+    const dy = Math.abs(ap.y - sp.y);
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist > 1) {
+      let newAnn: ChartAnnotation | null = null;
+      if (currentMode === 'line') {
+        newAnn = {
+          id: `ann-line-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          type: 'line',
+          color,
+          strokeWidth: thickness,
+          x1: sp.x,
+          y1: sp.y,
+          x2: ap.x,
+          y2: ap.y,
+        };
+      } else if (currentMode === 'arrow') {
+        newAnn = {
+          id: `ann-arrow-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          type: 'arrow',
+          color,
+          strokeWidth: thickness,
+          x1: sp.x,
+          y1: sp.y,
+          x2: ap.x,
+          y2: ap.y,
+        };
+      } else if (currentMode === 'box') {
+        newAnn = {
+          id: `ann-box-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          type: 'box',
+          color,
+          strokeWidth: thickness,
+          x: Math.min(sp.x, ap.x),
+          y: Math.min(sp.y, ap.y),
+          width: Math.abs(ap.x - sp.x),
+          height: Math.abs(ap.y - sp.y),
+        };
+      }
+      if (newAnn) {
+        pushToHistoryAndSave([...localAnnotationsRef.current, newAnn], true);
+      }
+    }
+
+    setStartPoint(null);
+    startPointRef.current = null;
+    setActivePoint(null);
+    activePointRef.current = null;
   };
 
   const handleCanvasMouseUp = (e: React.MouseEvent<HTMLDivElement>) => {
     e.stopPropagation();
-    if (!isDrawing || !startPoint || !activePoint) return;
-    setIsDrawing(false);
-    
-    const dx = Math.abs(activePoint.x - startPoint.x);
-    const dy = Math.abs(activePoint.y - startPoint.y);
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    
-    if (dist > 1) { 
-      let newAnn: ChartAnnotation | null = null;
-      if (mode === 'line') {
-        newAnn = {
-          id: Date.now().toString(),
-          type: 'line',
-          color: activeColor,
-          strokeWidth: activeThickness,
-          x1: startPoint.x,
-          y1: startPoint.y,
-          x2: activePoint.x,
-          y2: activePoint.y,
-        };
-      } else if (mode === 'arrow') {
-        newAnn = {
-          id: Date.now().toString(),
-          type: 'arrow',
-          color: activeColor,
-          strokeWidth: activeThickness,
-          x1: startPoint.x,
-          y1: startPoint.y,
-          x2: activePoint.x,
-          y2: activePoint.y,
-        };
-      } else if (mode === 'box') {
-        newAnn = {
-          id: Date.now().toString(),
-          type: 'box',
-          color: activeColor,
-          strokeWidth: activeThickness,
-          x: Math.min(startPoint.x, activePoint.x),
-          y: Math.min(startPoint.y, activePoint.y),
-          width: Math.abs(activePoint.x - startPoint.x),
-          height: Math.abs(activePoint.y - startPoint.y),
-        };
-      }
-      if (newAnn) {
-        pushToHistoryAndSave([...annotationsRef.current, newAnn]);
-      }
+    if (modeRef.current === 'eraser') {
+      isErasingRef.current = false;
+      flushPendingSave();
     }
-    setStartPoint(null);
-    setActivePoint(null);
+    finishDrawing();
   };
 
   const handleCanvasTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    lastTouchTimeRef.current = Date.now();
     e.stopPropagation();
     if (e.cancelable) e.preventDefault();
     if (e.touches.length === 0) return;
     const touch = e.touches[0];
     const coords = getRelativeCoords(touch.clientX, touch.clientY);
-    if (mode === 'divider') {
+    const currentMode = modeRef.current;
+
+    if (currentMode === 'eraser') {
+      isErasingRef.current = true;
+      setEraserHoverPoint(coords);
+      eraseAnnotationsAt(coords, false);
+    } else if (currentMode === 'divider') {
+      const newId = `div-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      activeNewDividerIdRef.current = newId;
       const newAnn: ChartAnnotation = {
-        id: Date.now().toString(),
+        id: newId,
         type: 'divider',
-        color: activeColor,
-        strokeWidth: activeThickness,
+        color: activeColorRef.current,
+        strokeWidth: activeThicknessRef.current,
         x1: 0,
         x2: 100,
         y1: coords.y,
         y2: coords.y,
         y: coords.y,
       };
-      pushToHistoryAndSave([...annotationsRef.current, newAnn]);
-      toast.success("已新增水平線 (Divider)");
-    } else if (mode === 'text') {
+      pushToHistoryAndSave([...localAnnotationsRef.current, newAnn], true);
+      toast.success("已新增水平線 (Divider)", { duration: 1000 });
+    } else if (currentMode === 'text') {
       setInputCoords(coords);
       setInputText('');
-    } else if (mode === 'line' || mode === 'box' || mode === 'arrow') {
+    } else if (currentMode === 'line' || currentMode === 'box' || currentMode === 'arrow') {
       setIsDrawing(true);
+      isDrawingRef.current = true;
       setStartPoint(coords);
+      startPointRef.current = coords;
       setActivePoint(coords);
+      activePointRef.current = coords;
     }
   };
 
@@ -1530,11 +1857,36 @@ export const StockCardVisualizer: React.FC<Props> = ({
     if (e.touches.length === 0) return;
     const touch = e.touches[0];
     const coords = getRelativeCoords(touch.clientX, touch.clientY);
-    if (mode === 'divider') {
+    const currentMode = modeRef.current;
+
+    if (currentMode === 'eraser') {
+      setEraserHoverPoint(coords);
+      if (isErasingRef.current) {
+        eraseAnnotationsAt(coords, true);
+      }
+    } else if (currentMode === 'divider') {
       setHoverPoint(coords);
+      if (activeNewDividerIdRef.current) {
+        const activeId = activeNewDividerIdRef.current;
+        const updated = localAnnotationsRef.current.map((ann) => {
+          if (ann.id === activeId) {
+            return {
+              ...ann,
+              y: coords.y,
+              y1: coords.y,
+              y2: coords.y,
+            };
+          }
+          return ann;
+        });
+        setLocalAnnotations(updated);
+        localAnnotationsRef.current = updated;
+      }
     }
-    if (!isDrawing || !startPoint) return;
+
+    if (!isDrawingRef.current || !startPointRef.current) return;
     setActivePoint(coords);
+    activePointRef.current = coords;
   };
 
   const handleCanvasTouchEnd = (e?: React.TouchEvent<HTMLDivElement>) => {
@@ -1542,132 +1894,63 @@ export const StockCardVisualizer: React.FC<Props> = ({
       e.stopPropagation();
       if (e.cancelable) e.preventDefault();
     }
-    if (!isDrawing || !startPoint || !activePoint) return;
-    setIsDrawing(false);
-    const dx = Math.abs(activePoint.x - startPoint.x);
-    const dy = Math.abs(activePoint.y - startPoint.y);
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    
-    if (dist > 1) {
-      let newAnn: ChartAnnotation | null = null;
-      if (mode === 'line') {
-        newAnn = {
-          id: Date.now().toString(),
-          type: 'line',
-          color: activeColor,
-          strokeWidth: activeThickness,
-          x1: startPoint.x,
-          y1: startPoint.y,
-          x2: activePoint.x,
-          y2: activePoint.y,
-        };
-      } else if (mode === 'arrow') {
-        newAnn = {
-          id: Date.now().toString(),
-          type: 'arrow',
-          color: activeColor,
-          strokeWidth: activeThickness,
-          x1: startPoint.x,
-          y1: startPoint.y,
-          x2: activePoint.x,
-          y2: activePoint.y,
-        };
-      } else if (mode === 'box') {
-        newAnn = {
-          id: Date.now().toString(),
-          type: 'box',
-          color: activeColor,
-          strokeWidth: activeThickness,
-          x: Math.min(startPoint.x, activePoint.x),
-          y: Math.min(startPoint.y, activePoint.y),
-          width: Math.abs(activePoint.x - startPoint.x),
-          height: Math.abs(activePoint.y - startPoint.y),
-        };
-      }
-      if (newAnn) {
-        pushToHistoryAndSave([...annotationsRef.current, newAnn]);
-      }
+    if (modeRef.current === 'eraser') {
+      isErasingRef.current = false;
+      flushPendingSave();
     }
-    setStartPoint(null);
-    setActivePoint(null);
+    finishDrawing();
   };
 
   React.useEffect(() => {
-    if (!isDrawing) return;
+    if (!isDrawing && mode !== 'eraser') return;
 
     const handleWindowMouseMove = (e: MouseEvent) => {
-      if (!startPoint) return;
+      if (modeRef.current === 'eraser') {
+        if (isErasingRef.current) {
+          const coords = getRelativeCoords(e.clientX, e.clientY);
+          setEraserHoverPoint(coords);
+          eraseAnnotationsAt(coords, true);
+        }
+        return;
+      }
+      if (!startPointRef.current) return;
       const coords = getRelativeCoords(e.clientX, e.clientY);
       setActivePoint(coords);
+      activePointRef.current = coords;
     };
 
     const handleWindowTouchMove = (e: TouchEvent) => {
-      if (!startPoint) return;
       if (e.touches.length === 0) return;
-      if (e.cancelable) e.preventDefault();
       const touch = e.touches[0];
       const coords = getRelativeCoords(touch.clientX, touch.clientY);
+      if (modeRef.current === 'eraser') {
+        if (isErasingRef.current) {
+          if (e.cancelable) e.preventDefault();
+          setEraserHoverPoint(coords);
+          eraseAnnotationsAt(coords, true);
+        }
+        return;
+      }
+      if (!startPointRef.current) return;
+      if (e.cancelable) e.preventDefault();
       setActivePoint(coords);
+      activePointRef.current = coords;
     };
 
     const handleWindowMouseUp = () => {
-      if (!startPoint || !activePoint) {
-        setIsDrawing(false);
-        setStartPoint(null);
-        setActivePoint(null);
-        return;
+      if (modeRef.current === 'eraser') {
+        isErasingRef.current = false;
+        flushPendingSave();
       }
-      setIsDrawing(false);
-      const dx = Math.abs(activePoint.x - startPoint.x);
-      const dy = Math.abs(activePoint.y - startPoint.y);
-      const dist = Math.sqrt(dx * dx + dy * dy);
-
-      if (dist > 1) {
-        let newAnn: ChartAnnotation | null = null;
-        if (mode === 'line') {
-          newAnn = {
-            id: Date.now().toString(),
-            type: 'line',
-            color: activeColor,
-            strokeWidth: activeThickness,
-            x1: startPoint.x,
-            y1: startPoint.y,
-            x2: activePoint.x,
-            y2: activePoint.y,
-          };
-        } else if (mode === 'arrow') {
-          newAnn = {
-            id: Date.now().toString(),
-            type: 'arrow',
-            color: activeColor,
-            strokeWidth: activeThickness,
-            x1: startPoint.x,
-            y1: startPoint.y,
-            x2: activePoint.x,
-            y2: activePoint.y,
-          };
-        } else if (mode === 'box') {
-          newAnn = {
-            id: Date.now().toString(),
-            type: 'box',
-            color: activeColor,
-            strokeWidth: activeThickness,
-            x: Math.min(startPoint.x, activePoint.x),
-            y: Math.min(startPoint.y, activePoint.y),
-            width: Math.abs(activePoint.x - startPoint.x),
-            height: Math.abs(activePoint.y - startPoint.y),
-          };
-        }
-        if (newAnn) {
-          pushToHistoryAndSave([...annotationsRef.current, newAnn]);
-        }
-      }
-      setStartPoint(null);
-      setActivePoint(null);
+      finishDrawing();
     };
 
     const handleWindowTouchEnd = () => {
-      handleWindowMouseUp();
+      if (modeRef.current === 'eraser') {
+        isErasingRef.current = false;
+        flushPendingSave();
+      }
+      finishDrawing();
     };
 
     window.addEventListener('mousemove', handleWindowMouseMove, { passive: false });
@@ -1681,7 +1964,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
       window.removeEventListener('touchmove', handleWindowTouchMove);
       window.removeEventListener('touchend', handleWindowTouchEnd);
     };
-  }, [isDrawing, startPoint, activePoint, mode, activeColor, activeThickness]);
+  }, [isDrawing, mode]);
 
   const data = useMemo(() => {
     const validOrders = plannedOrders
@@ -1731,31 +2014,65 @@ export const StockCardVisualizer: React.FC<Props> = ({
       .filter((o) => o.category?.includes("進出"))
       .sort((a, b) => a.price - b.price);
 
+    // 提取系統二 股價向下攤平試算 組別 1~4 的預計購入股價 (持有數量 > 0 時)
+    const validAvgSys2Items: any[] = [];
+    const avgSys2Prices: number[] = [];
+    const hasHoldings = (holdingQuantity !== undefined ? holdingQuantity > 0 : (averageCostQuantity !== undefined && averageCostQuantity > 0));
+
+    if (hasHoldings && averagingRowsSys2 && averagingRowsSys2.length > 0) {
+      averagingRowsSys2.slice(0, 4).forEach((row, idx) => {
+        const parsedPrice = parseFloat(row.price);
+        if (!isNaN(parsedPrice) && parsedPrice > 0) {
+          avgSys2Prices.push(parsedPrice);
+          const discountPct = (idx + 1) * 3; // -3%, -6%, -9%, -12%
+          validAvgSys2Items.push({
+            id: `avg2-${idx + 1}`,
+            price: parsedPrice,
+            text: `攤平#${idx + 1} $${parsedPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (-${discountPct}%)`,
+            color: "#3b82f6",
+            isBold: true,
+            isAlert: false,
+            isAveragingSys2: true,
+            groupIndex: idx + 1,
+            discountPct,
+            isFixed: false,
+          });
+        }
+      });
+    }
+
     const allPrices = [
       dynamicPrice,
       ...(averageCost && averageCost > 0 ? [averageCost] : []),
-      ...validOrders.map((o) => o.price)
-    ].filter(
-      (p) => p > 0,
-    );
+      ...validOrders.map((o) => o.price),
+      ...avgSys2Prices,
+    ].filter((p) => typeof p === "number" && !isNaN(p) && p > 0);
 
     if (allPrices.length === 0) return null;
 
-    let maxP = Math.max(...allPrices);
-    let minP = Math.min(...allPrices);
+    const uniqueSortedPrices = Array.from(new Set(allPrices)).sort((a, b) => a - b);
 
-    if (maxP === minP) {
-      maxP *= 1.1;
-      minP *= 0.9;
-    } else {
-      const padding = (maxP - minP) * 0.15;
-      maxP += padding;
-      minP -= padding;
-    }
+    const topY = 7;
+    const bottomY = 93;
 
     const getYPct = (p: number) => {
-      const pct = ((p - minP) / (maxP - minP)) * 78;
-      return 96 - pct;
+      if (uniqueSortedPrices.length <= 1) return 50;
+      const n = uniqueSortedPrices.length;
+      if (p <= uniqueSortedPrices[0]) return bottomY;
+      if (p >= uniqueSortedPrices[n - 1]) return topY;
+
+      for (let i = 0; i < n - 1; i++) {
+        const pLow = uniqueSortedPrices[i];
+        const pHigh = uniqueSortedPrices[i + 1];
+        if (p >= pLow && p <= pHigh) {
+          const yLow = bottomY - (i / (n - 1)) * (bottomY - topY);
+          const yHigh = bottomY - ((i + 1) / (n - 1)) * (bottomY - topY);
+          if (pHigh === pLow) return yLow;
+          const ratio = (p - pLow) / (pHigh - pLow);
+          return yLow + ratio * (yHigh - yLow);
+        }
+      }
+      return 50;
     };
 
     const isAlert = (p: number) => {
@@ -1766,30 +2083,33 @@ export const StockCardVisualizer: React.FC<Props> = ({
       ...supports.map((s, i) => ({
         id: `s-${i}`,
         text: `支撐 $${s.price}`,
+        price: s.price,
         rawY: getYPct(s.price),
         color: "#facc15",
         isAlert: isAlert(s.price),
         data: s,
       })),
-    ];
+    ].sort((a, b) => (b.price ?? 0) - (a.price ?? 0));
 
     const slItems = sls.map((sl, i) => ({
       id: `sl-${i}`,
       text: `止損 $${sl.price}`,
+      price: sl.price,
       rawY: getYPct(sl.price),
       color: "#ef4444",
       isAlert: isAlert(sl.price),
       data: sl,
-    }));
+    })).sort((a, b) => (b.price ?? 0) - (a.price ?? 0));
 
-    const rightItems = [
+    const rightItemsRaw = [
       ...(dynamicPrice > 0 || isCardLoading
         ? [
             {
               id: "cp",
+              price: dynamicPrice > 0 ? dynamicPrice : uniqueSortedPrices[Math.floor(uniqueSortedPrices.length / 2)],
               text: isCardLoading ? "Loading..." : `現價 $${dynamicPrice}`,
-              rawY: getYPct(dynamicPrice > 0 ? dynamicPrice : minP + (maxP - minP) / 2),
-              color: "#60a5fa",
+              rawY: getYPct(dynamicPrice > 0 ? dynamicPrice : uniqueSortedPrices[Math.floor(uniqueSortedPrices.length / 2)]),
+              color: "#c084fc",
               isBold: true,
               isAlert: false,
               isCurrentPrice: true,
@@ -1801,6 +2121,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
         ? [
             {
               id: "ac",
+              price: averageCost,
               text: `均本 $${averageCost.toLocaleString(undefined, {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2,
@@ -1813,8 +2134,15 @@ export const StockCardVisualizer: React.FC<Props> = ({
               isFixed: false,
             },
           ]
-        : [])
+        : []),
+      ...validAvgSys2Items.map((item) => ({
+        ...item,
+        rawY: getYPct(item.price),
+      })),
     ];
+
+    // 右側所有標籤無論種類，一律依照數字 (價格) 從大排到小
+    const rightItems = rightItemsRaw.sort((a, b) => (b.price ?? 0) - (a.price ?? 0));
 
     // 取消顯示進場價格標籤
     const entryItems: any[] = [];
@@ -1823,6 +2151,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
       ...tps.map((tp, i) => ({
         id: `tp-${i}`,
         text: `止盈 $${tp.price}`,
+        price: tp.price,
         rawY: getYPct(tp.price),
         color: "#10b981",
         isAlert: isAlert(tp.price),
@@ -1831,18 +2160,19 @@ export const StockCardVisualizer: React.FC<Props> = ({
       ...resistances.map((r, i) => ({
         id: `r-${i}`,
         text: `壓力 $${r.price}`,
+        price: r.price,
         rawY: getYPct(r.price),
         color: "#f87171",
         isAlert: isAlert(r.price),
         data: r,
       })),
-    ];
+    ].sort((a, b) => (b.price ?? 0) - (a.price ?? 0));
 
-    const leftLabels = resolveCollisions(leftItems, 4.8);
-    const slLabels = resolveCollisions(slItems, 4.8);
-    const entryLabels = resolveCollisions(entryItems, 4.8);
-    const tpLabels = resolveCollisions(tpItems, 4.8);
-    const rightLabels = resolveCollisions(rightItems, 4.8);
+    const leftLabels = resolveCollisions(leftItems, 4.5);
+    const slLabels = resolveCollisions(slItems, 4.5);
+    const entryLabels = resolveCollisions(entryItems, 4.5);
+    const tpLabels = resolveCollisions(tpItems, 4.5);
+    const rightLabels = resolveCollisions(rightItems, 4.5);
 
     return {
       supports,
@@ -1857,7 +2187,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
       slLabels,
       tpLabels,
     };
-  }, [plannedOrders, dynamicPrice, averageCost]);
+  }, [plannedOrders, dynamicPrice, averageCost, averageCostQuantity, averagingRowsSys2, holdingQuantity]);
 
   if (!data)
     return (
@@ -1884,12 +2214,15 @@ export const StockCardVisualizer: React.FC<Props> = ({
     const isHighlighted = l.data?.isManualHighlight || false;
     const blinkClass = isHighlighted ? "animate-pulse ring-2 ring-[#F28D35] shadow-[0_0_15px_rgba(242,141,53,0.9)] z-30" : "";
     const alertClass = l.isAlert && !isHighlighted ? "ring-2 ring-[#c084fc] animate-pulse z-20 shadow-[0_0_15px_rgba(192,132,252,0.9)]" : (!isHighlighted ? "z-10" : "");
+    const isCp = l.isCurrentPrice || l.id === "cp";
     const finalBgColor = isHighlighted ? "#F28D35" : (l.isAlert ? "#f3e8ff" : l.color);
     const finalTextColor = isHighlighted 
       ? "#ffffff"
-      : l.isAlert
-        ? "#7e22ce"
-        : (l.color === "#ef4444" || l.color === "#60a5fa" || l.color === "#f97316" ? "#ffffff" : "#000000");
+      : isCp
+        ? "#000000"
+        : l.isAlert
+          ? "#7e22ce"
+          : (l.color === "#ef4444" || l.color === "#f97316" || l.color === "#3b82f6" ? "#ffffff" : "#000000");
 
     if (isCardLoading && l.id === "cp") {
       return (
@@ -1905,8 +2238,6 @@ export const StockCardVisualizer: React.FC<Props> = ({
          </div>
       );
     }
-
-    const isCp = l.isCurrentPrice || l.id === "cp";
 
     return (
       <div
@@ -2043,92 +2374,6 @@ export const StockCardVisualizer: React.FC<Props> = ({
               </div>
             )}
           </div>
-          
-          <div className="flex items-center gap-1.5 sm:gap-2 pointer-events-auto shrink-0">
-            {/* Strategy Checkboxes */}
-            {strategy && (
-              <div className="flex items-center gap-0.5 sm:gap-2.5 bg-zinc-100 hover:bg-zinc-200/90 backdrop-blur-md px-1.5 py-0.5 sm:px-2.5 sm:py-1 rounded-full border border-zinc-200 transition-all duration-300 scale-[0.82] sm:scale-100 origin-top-right">
-                <label className="flex items-center gap-0.5 sm:gap-1 cursor-pointer group whitespace-nowrap flex-nowrap shrink-0">
-                  <input
-                    type="checkbox"
-                    checked={!!strategy.notesHighlighted}
-                    onChange={(e) => onUpdateNotesHighlighted?.(e.target.checked)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="h-2.5 w-2.5 sm:h-3 sm:w-3 rounded border border-zinc-300 bg-white checked:bg-amber-500 checked:border-amber-500 text-amber-600 focus:ring-0 cursor-pointer accent-amber-500 transition-all shrink-0"
-                  />
-                  <span className={`text-[8.5px] font-bold sm:font-black sm:text-[10px] select-none transition-colors ${strategy.notesHighlighted ? "text-amber-600" : "text-zinc-500 hover:text-zinc-800"}`}>
-                    選取
-                  </span>
-                </label>
-                
-                <label className="flex items-center gap-0.5 sm:gap-1 cursor-pointer group whitespace-nowrap flex-nowrap shrink-0">
-                  <input
-                    type="checkbox"
-                    checked={!!strategy.tpChecked}
-                    onChange={(e) => onUpdateTPChecked?.(e.target.checked)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="h-2.5 w-2.5 sm:h-3 sm:w-3 rounded border border-zinc-300 bg-white checked:bg-emerald-500 checked:border-emerald-500 text-emerald-600 focus:ring-0 cursor-pointer accent-emerald-500 transition-all shrink-0"
-                  />
-                  <span className={`text-[8.5px] font-bold sm:font-black sm:text-[10px] select-none transition-colors ${strategy.tpChecked ? "text-emerald-600" : "text-zinc-500 hover:text-zinc-800"}`}>
-                    止盈
-                  </span>
-                </label>
-                
-                <label className="flex items-center gap-0.5 sm:gap-1 cursor-pointer group whitespace-nowrap flex-nowrap shrink-0">
-                  <input
-                    type="checkbox"
-                    checked={!!strategy.slChecked}
-                    onChange={(e) => onUpdateSLChecked?.(e.target.checked)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="h-2.5 w-2.5 sm:h-3 sm:w-3 rounded border border-zinc-300 bg-white checked:bg-rose-500 checked:border-rose-500 text-rose-600 focus:ring-0 cursor-pointer accent-rose-500 transition-all shrink-0"
-                  />
-                  <span className={`text-[8.5px] font-bold sm:font-black sm:text-[10px] select-none transition-colors ${strategy.slChecked ? "text-rose-600" : "text-zinc-500 hover:text-zinc-800"}`}>
-                    止損
-                  </span>
-                </label>
-                
-                <label className="flex items-center gap-0.5 sm:gap-1 cursor-pointer group whitespace-nowrap flex-nowrap shrink-0">
-                  <input
-                    type="checkbox"
-                    checked={!!strategy.addChecked}
-                    onChange={(e) => onUpdateAddChecked?.(e.target.checked)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="h-2.5 w-2.5 sm:h-3 sm:w-3 rounded border border-zinc-300 bg-white checked:bg-sky-500 checked:border-sky-500 text-sky-600 focus:ring-0 cursor-pointer accent-sky-500 transition-all shrink-0"
-                  />
-                  <span className={`text-[8.5px] font-bold sm:font-black sm:text-[10px] select-none transition-colors ${strategy.addChecked ? "text-sky-600" : "text-zinc-500 hover:text-zinc-800"}`}>
-                    加碼
-                  </span>
-                </label>
-                
-                <label className="flex items-center gap-0.5 sm:gap-1 cursor-pointer group whitespace-nowrap flex-nowrap shrink-0">
-                  <input
-                    type="checkbox"
-                    checked={!!strategy.closeChecked}
-                    onChange={(e) => onUpdateCloseChecked?.(e.target.checked)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="h-2.5 w-2.5 sm:h-3 sm:w-3 rounded border border-zinc-300 bg-white checked:bg-violet-500 checked:border-violet-500 text-violet-600 focus:ring-0 cursor-pointer accent-violet-500 transition-all shrink-0"
-                  />
-                  <span className={`text-[8.5px] font-bold sm:font-black sm:text-[10px] select-none transition-colors ${strategy.closeChecked ? "text-violet-600" : "text-zinc-500 hover:text-zinc-800"}`}>
-                    平倉
-                  </span>
-                </label>
-                
-                <label className="flex items-center gap-0.5 sm:gap-1 cursor-pointer group whitespace-nowrap flex-nowrap shrink-0" id="tickbox-observe-label">
-                  <input
-                    id="tickbox-observe-input"
-                    type="checkbox"
-                    checked={!!strategy.observeChecked}
-                    onChange={(e) => onUpdateObserveChecked?.(e.target.checked)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="h-2.5 w-2.5 sm:h-3 sm:w-3 rounded border border-zinc-300 bg-white checked:bg-[#929292] checked:border-[#929292] text-[#929292] focus:ring-0 cursor-pointer accent-[#929292] transition-all shrink-0"
-                  />
-                  <span className={`text-[8.5px] font-bold sm:font-black sm:text-[10px] select-none transition-colors ${strategy.observeChecked ? "text-zinc-650" : "text-zinc-500 hover:text-zinc-800"}`}>
-                    觀察
-                  </span>
-                </label>
-              </div>
-            )}
-          </div>
         </div>
 
         {/* SVG layer for lines and curves - viewport scales 0-100 to full w/h */}
@@ -2147,17 +2392,10 @@ export const StockCardVisualizer: React.FC<Props> = ({
               <feComposite in="SourceGraphic" in2="blur" operator="over" />
             </filter>
             {/* Color-Specific Arrowhead Markers */}
-            {[
-              { hex: '#ef4444', id: 'arrow-ef4444' },
-              { hex: '#10b981', id: 'arrow-10b981' },
-              { hex: '#facc15', id: 'arrow-facc15' },
-              { hex: '#3b82f6', id: 'arrow-3b82f6' },
-              { hex: '#000000', id: 'arrow-000000' },
-              { hex: '#ffffff', id: 'arrow-ffffff' }
-            ].map((m) => (
+            {arrowColorList.map(([cleanHex, fullHex]) => (
               <marker
-                key={m.id}
-                id={m.id}
+                key={`arrow-${cleanHex}`}
+                id={`arrow-${cleanHex}`}
                 viewBox="0 0 10 10"
                 refX="8"
                 refY="5"
@@ -2165,9 +2403,21 @@ export const StockCardVisualizer: React.FC<Props> = ({
                 markerHeight="6"
                 orient="auto-start-reverse"
               >
-                <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill={m.hex} />
+                <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill={fullHex} />
               </marker>
             ))}
+            {/* Fallback arrow marker in case of any custom color */}
+            <marker
+              id="arrow-default"
+              viewBox="0 0 10 10"
+              refX="8"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#000000" />
+            </marker>
           </defs>
 
           {supports.map((s, i) => (
@@ -2209,10 +2459,10 @@ export const StockCardVisualizer: React.FC<Props> = ({
               x2="100"
               y2={getYPct(dynamicPrice)}
               vectorEffect="non-scaling-stroke"
-              stroke="#60a5fa"
+              stroke="#c084fc"
               strokeWidth="1.5"
               strokeDasharray="2 2"
-              opacity="0.5"
+              opacity="0.6"
             />
           )}
 
@@ -2229,34 +2479,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
             />
           )}
 
-          {(entries.length > 0 || dynamicPrice > 0) && (
-            <g>
-              {tps.length > 0 && (
-                <path
-                  d={`M 50 ${getYPct(dynamicPrice > 0 ? dynamicPrice : entries[entries.length - 1]?.price || 0)} L 50 ${getYPct(tps[0]?.price || 0)} ${tps.length > 1 ? `L 50 ${getYPct(tps[tps.length - 1].price)}` : ""}`}
-                  stroke="#10b981"
-                  fill="none"
-                  strokeDasharray="5 5"
-                  opacity="0.8"
-                  vectorEffect="non-scaling-stroke"
-                  strokeWidth="3"
-                  filter="url(#glowGreen)"
-                />
-              )}
-              {sls.length > 0 && (
-                <path
-                  d={`M 50 ${getYPct(dynamicPrice > 0 ? dynamicPrice : entries[0]?.price || 0)} C 35.5 ${getYPct(dynamicPrice > 0 ? dynamicPrice : entries[0]?.price || 0)} 35.5 ${getYPct(sls[0]?.price || 0)} 21 ${getYPct(sls[0]?.price || 0)} ${sls.length > 1 ? `L 21 ${getYPct(sls[sls.length - 1].price)}` : ""}`}
-                  stroke="#ef4444"
-                  fill="none"
-                  strokeDasharray="5 5"
-                  opacity="0.8"
-                  vectorEffect="non-scaling-stroke"
-                  strokeWidth="3"
-                  filter="url(#glowRed)"
-                />
-              )}
-            </g>
-          )}
+          {/* Optional trade paths omitted to maintain clear visualization without curve clutter */}
 
           {/* Connector lines for collision-adjusted labels */}
           {slLabels.map((l, i) =>
@@ -2341,163 +2564,281 @@ export const StockCardVisualizer: React.FC<Props> = ({
           )}
 
           {/* Render Vector-Scalable Drawing Annotations */}
-          {annotations.map((ann) => {
+          {localAnnotations.map((ann) => {
             if (ann.type === 'line' || ann.type === 'arrow') {
               const hexClean = (ann.color || '#000000').replace('#', '').toLowerCase();
               const markerId = ann.type === 'arrow' ? `arrow-${hexClean}` : undefined;
               return (
-                <line
-                  key={ann.id}
-                  x1={ann.x1}
-                  y1={ann.y1}
-                  x2={ann.x2}
-                  y2={ann.y2}
-                  stroke={ann.color}
-                  strokeWidth={ann.strokeWidth}
-                  markerEnd={markerId ? `url(#${markerId})` : undefined}
-                  vectorEffect="non-scaling-stroke"
-                  opacity={mode === 'eraser' || mode === 'move' ? "0.75" : "0.85"}
-                  className={`pointer-events-auto transition-all ${
-                    mode === 'eraser'
-                      ? 'cursor-pointer hover:stroke-red-500 hover:opacity-100 transition-all duration-150 [stroke-dasharray:none]'
-                      : mode === 'move'
-                      ? 'cursor-move hover:stroke-amber-400 hover:opacity-100 transition-all duration-150'
-                      : ''
-                  }`}
-                  style={
-                    mode === 'eraser' || mode === 'move'
-                      ? { strokeWidth: Math.max(ann.strokeWidth * 3, 16), cursor: mode === 'move' ? 'move' : 'pointer', touchAction: 'none' }
-                      : { touchAction: 'none' }
-                  }
-                  onClick={(e) => {
-                    if (mode === 'eraser') {
-                      e.stopPropagation();
-                      handleDeleteAnnotation(ann.id);
+                <g key={ann.id} className="pointer-events-auto">
+                  {/* Invisible wide hit target for easier touch/click in eraser or move mode */}
+                  {(mode === 'eraser' || mode === 'move') && (
+                    <line
+                      x1={ann.x1}
+                      y1={ann.y1}
+                      x2={ann.x2}
+                      y2={ann.y2}
+                      stroke="transparent"
+                      strokeWidth="24"
+                      vectorEffect="non-scaling-stroke"
+                      className={mode === 'move' ? 'cursor-move' : 'cursor-pointer'}
+                      style={{ touchAction: 'none' }}
+                      onClick={(e) => {
+                        if (mode === 'eraser') {
+                          e.stopPropagation();
+                          handleDeleteAnnotation(ann.id);
+                        }
+                      }}
+                      onMouseDown={(e) => {
+                        if (mode === 'move') {
+                          e.stopPropagation();
+                          handleDragStart(ann, e.clientX, e.clientY);
+                        }
+                      }}
+                      onTouchStart={(e) => {
+                        if (mode === 'move') {
+                          e.stopPropagation();
+                          if (e.cancelable) e.preventDefault();
+                          const touch = e.touches[0];
+                          handleDragStart(ann, touch.clientX, touch.clientY);
+                        } else if (mode === 'eraser') {
+                          e.stopPropagation();
+                          if (e.cancelable) e.preventDefault();
+                          handleDeleteAnnotation(ann.id);
+                        }
+                      }}
+                    />
+                  )}
+                  <line
+                    x1={ann.x1}
+                    y1={ann.y1}
+                    x2={ann.x2}
+                    y2={ann.y2}
+                    stroke={ann.color}
+                    strokeWidth={ann.strokeWidth}
+                    markerEnd={markerId ? `url(#${markerId})` : undefined}
+                    vectorEffect="non-scaling-stroke"
+                    opacity={mode === 'eraser' || mode === 'move' ? "0.75" : "0.85"}
+                    className={`transition-all ${
+                      mode === 'eraser'
+                        ? 'cursor-pointer hover:stroke-red-500 hover:opacity-100 transition-all duration-150 [stroke-dasharray:none]'
+                        : mode === 'move'
+                        ? 'cursor-move hover:stroke-amber-400 hover:opacity-100 transition-all duration-150'
+                        : ''
+                    }`}
+                    style={
+                      mode === 'eraser' || mode === 'move'
+                        ? { cursor: mode === 'move' ? 'move' : 'pointer', touchAction: 'none' }
+                        : { touchAction: 'none' }
                     }
-                  }}
-                  onMouseDown={(e) => {
-                    if (mode === 'move') {
-                      e.stopPropagation();
-                      handleDragStart(ann, e.clientX, e.clientY);
-                    }
-                  }}
-                  onTouchStart={(e) => {
-                    if (mode === 'move') {
-                      e.stopPropagation();
-                      if (e.cancelable) e.preventDefault();
-                      const touch = e.touches[0];
-                      handleDragStart(ann, touch.clientX, touch.clientY);
-                    } else if (mode === 'eraser') {
-                      e.stopPropagation();
-                      if (e.cancelable) e.preventDefault();
-                      handleDeleteAnnotation(ann.id);
-                    }
-                  }}
-                />
+                    onClick={(e) => {
+                      if (mode === 'eraser') {
+                        e.stopPropagation();
+                        handleDeleteAnnotation(ann.id);
+                      }
+                    }}
+                    onMouseDown={(e) => {
+                      if (mode === 'move') {
+                        e.stopPropagation();
+                        handleDragStart(ann, e.clientX, e.clientY);
+                      }
+                    }}
+                    onTouchStart={(e) => {
+                      if (mode === 'move') {
+                        e.stopPropagation();
+                        if (e.cancelable) e.preventDefault();
+                        const touch = e.touches[0];
+                        handleDragStart(ann, touch.clientX, touch.clientY);
+                      } else if (mode === 'eraser') {
+                        e.stopPropagation();
+                        if (e.cancelable) e.preventDefault();
+                        handleDeleteAnnotation(ann.id);
+                      }
+                    }}
+                  />
+                </g>
               );
             }
             if (ann.type === 'divider') {
               const dividerY = ann.y ?? ann.y1 ?? 0;
               return (
-                <line
-                  key={ann.id}
-                  x1="0"
-                  y1={dividerY}
-                  x2="100"
-                  y2={dividerY}
-                  stroke={ann.color}
-                  strokeWidth={ann.strokeWidth}
-                  vectorEffect="non-scaling-stroke"
-                  opacity={mode === 'eraser' || mode === 'move' ? "0.75" : "0.85"}
-                  className={`pointer-events-auto transition-all ${
-                    mode === 'eraser'
-                      ? 'cursor-pointer hover:stroke-red-500 hover:opacity-100 transition-all duration-150 [stroke-dasharray:none]'
-                      : mode === 'move'
-                      ? 'cursor-move hover:stroke-amber-400 hover:opacity-100 transition-all duration-150'
-                      : ''
-                  }`}
-                  style={
-                    mode === 'eraser' || mode === 'move'
-                      ? { strokeWidth: Math.max(ann.strokeWidth * 3, 16), cursor: mode === 'move' ? 'move' : 'pointer', touchAction: 'none' }
-                      : { touchAction: 'none' }
-                  }
-                  onClick={(e) => {
-                    if (mode === 'eraser') {
-                      e.stopPropagation();
-                      handleDeleteAnnotation(ann.id);
+                <g key={ann.id} className="pointer-events-auto">
+                  {/* Invisible wide hit target for divider */}
+                  {(mode === 'eraser' || mode === 'move') && (
+                    <line
+                      x1="0"
+                      y1={dividerY}
+                      x2="100"
+                      y2={dividerY}
+                      stroke="transparent"
+                      strokeWidth="24"
+                      vectorEffect="non-scaling-stroke"
+                      className={mode === 'move' ? 'cursor-move' : 'cursor-pointer'}
+                      style={{ touchAction: 'none' }}
+                      onClick={(e) => {
+                        if (mode === 'eraser') {
+                          e.stopPropagation();
+                          handleDeleteAnnotation(ann.id);
+                        }
+                      }}
+                      onMouseDown={(e) => {
+                        if (mode === 'move') {
+                          e.stopPropagation();
+                          handleDragStart(ann, e.clientX, e.clientY);
+                        }
+                      }}
+                      onTouchStart={(e) => {
+                        if (mode === 'move') {
+                          e.stopPropagation();
+                          if (e.cancelable) e.preventDefault();
+                          const touch = e.touches[0];
+                          handleDragStart(ann, touch.clientX, touch.clientY);
+                        } else if (mode === 'eraser') {
+                          e.stopPropagation();
+                          if (e.cancelable) e.preventDefault();
+                          handleDeleteAnnotation(ann.id);
+                        }
+                      }}
+                    />
+                  )}
+                  <line
+                    x1="0"
+                    y1={dividerY}
+                    x2="100"
+                    y2={dividerY}
+                    stroke={ann.color}
+                    strokeWidth={ann.strokeWidth}
+                    vectorEffect="non-scaling-stroke"
+                    opacity={mode === 'eraser' || mode === 'move' ? "0.75" : "0.85"}
+                    className={`transition-all ${
+                      mode === 'eraser'
+                        ? 'cursor-pointer hover:stroke-red-500 hover:opacity-100 transition-all duration-150 [stroke-dasharray:none]'
+                        : mode === 'move'
+                        ? 'cursor-move hover:stroke-amber-400 hover:opacity-100 transition-all duration-150'
+                        : ''
+                    }`}
+                    style={
+                      mode === 'eraser' || mode === 'move'
+                        ? { cursor: mode === 'move' ? 'move' : 'pointer', touchAction: 'none' }
+                        : { touchAction: 'none' }
                     }
-                  }}
-                  onMouseDown={(e) => {
-                    if (mode === 'move') {
-                      e.stopPropagation();
-                      handleDragStart(ann, e.clientX, e.clientY);
-                    }
-                  }}
-                  onTouchStart={(e) => {
-                    if (mode === 'move') {
-                      e.stopPropagation();
-                      if (e.cancelable) e.preventDefault();
-                      const touch = e.touches[0];
-                      handleDragStart(ann, touch.clientX, touch.clientY);
-                    } else if (mode === 'eraser') {
-                      e.stopPropagation();
-                      if (e.cancelable) e.preventDefault();
-                      handleDeleteAnnotation(ann.id);
-                    }
-                  }}
-                />
+                    onClick={(e) => {
+                      if (mode === 'eraser') {
+                        e.stopPropagation();
+                        handleDeleteAnnotation(ann.id);
+                      }
+                    }}
+                    onMouseDown={(e) => {
+                      if (mode === 'move') {
+                        e.stopPropagation();
+                        handleDragStart(ann, e.clientX, e.clientY);
+                      }
+                    }}
+                    onTouchStart={(e) => {
+                      if (mode === 'move') {
+                        e.stopPropagation();
+                        if (e.cancelable) e.preventDefault();
+                        const touch = e.touches[0];
+                        handleDragStart(ann, touch.clientX, touch.clientY);
+                      } else if (mode === 'eraser') {
+                        e.stopPropagation();
+                        if (e.cancelable) e.preventDefault();
+                        handleDeleteAnnotation(ann.id);
+                      }
+                    }}
+                  />
+                </g>
               );
             }
             if (ann.type === 'box') {
               return (
-                <rect
-                  key={ann.id}
-                  x={ann.x}
-                  y={ann.y}
-                  width={ann.width}
-                  height={ann.height}
-                  stroke={ann.color}
-                  strokeWidth={ann.strokeWidth}
-                  fill="none"
-                  vectorEffect="non-scaling-stroke"
-                  opacity={mode === 'eraser' || mode === 'move' ? "0.75" : "0.85"}
-                  className={`pointer-events-auto transition-all ${
-                    mode === 'eraser'
-                      ? 'cursor-pointer hover:stroke-red-500 hover:opacity-100 transition-all duration-150'
-                      : mode === 'move'
-                      ? 'cursor-move hover:stroke-amber-400 hover:opacity-100 transition-all duration-150'
-                      : ''
-                  }`}
-                  style={
-                    mode === 'eraser' || mode === 'move'
-                      ? { strokeWidth: Math.max(ann.strokeWidth * 3, 16), cursor: mode === 'move' ? 'move' : 'pointer', touchAction: 'none' }
-                      : { touchAction: 'none' }
-                  }
-                  onClick={(e) => {
-                    if (mode === 'eraser') {
-                      e.stopPropagation();
-                      handleDeleteAnnotation(ann.id);
+                <g key={ann.id} className="pointer-events-auto">
+                  {/* Invisible wide hit target for box border and interior */}
+                  {(mode === 'eraser' || mode === 'move') && (
+                    <rect
+                      x={ann.x}
+                      y={ann.y}
+                      width={ann.width}
+                      height={ann.height}
+                      stroke="transparent"
+                      strokeWidth="20"
+                      fill="rgba(0,0,0,0.01)"
+                      vectorEffect="non-scaling-stroke"
+                      className={mode === 'move' ? 'cursor-move' : 'cursor-pointer'}
+                      style={{ touchAction: 'none' }}
+                      onClick={(e) => {
+                        if (mode === 'eraser') {
+                          e.stopPropagation();
+                          handleDeleteAnnotation(ann.id);
+                        }
+                      }}
+                      onMouseDown={(e) => {
+                        if (mode === 'move') {
+                          e.stopPropagation();
+                          handleDragStart(ann, e.clientX, e.clientY);
+                        }
+                      }}
+                      onTouchStart={(e) => {
+                        if (mode === 'move') {
+                          e.stopPropagation();
+                          if (e.cancelable) e.preventDefault();
+                          const touch = e.touches[0];
+                          handleDragStart(ann, touch.clientX, touch.clientY);
+                        } else if (mode === 'eraser') {
+                          e.stopPropagation();
+                          if (e.cancelable) e.preventDefault();
+                          handleDeleteAnnotation(ann.id);
+                        }
+                      }}
+                    />
+                  )}
+                  <rect
+                    x={ann.x}
+                    y={ann.y}
+                    width={ann.width}
+                    height={ann.height}
+                    stroke={ann.color}
+                    strokeWidth={ann.strokeWidth}
+                    fill="none"
+                    vectorEffect="non-scaling-stroke"
+                    opacity={mode === 'eraser' || mode === 'move' ? "0.75" : "0.85"}
+                    className={`transition-all ${
+                      mode === 'eraser'
+                        ? 'cursor-pointer hover:stroke-red-500 hover:opacity-100 transition-all duration-150'
+                        : mode === 'move'
+                        ? 'cursor-move hover:stroke-amber-400 hover:opacity-100 transition-all duration-150'
+                        : ''
+                    }`}
+                    style={
+                      mode === 'eraser' || mode === 'move'
+                        ? { cursor: mode === 'move' ? 'move' : 'pointer', touchAction: 'none' }
+                        : { touchAction: 'none' }
                     }
-                  }}
-                  onMouseDown={(e) => {
-                    if (mode === 'move') {
-                      e.stopPropagation();
-                      handleDragStart(ann, e.clientX, e.clientY);
-                    }
-                  }}
-                  onTouchStart={(e) => {
-                    if (mode === 'move') {
-                      e.stopPropagation();
-                      if (e.cancelable) e.preventDefault();
-                      const touch = e.touches[0];
-                      handleDragStart(ann, touch.clientX, touch.clientY);
-                    } else if (mode === 'eraser') {
-                      e.stopPropagation();
-                      if (e.cancelable) e.preventDefault();
-                      handleDeleteAnnotation(ann.id);
-                    }
-                  }}
-                />
+                    onClick={(e) => {
+                      if (mode === 'eraser') {
+                        e.stopPropagation();
+                        handleDeleteAnnotation(ann.id);
+                      }
+                    }}
+                    onMouseDown={(e) => {
+                      if (mode === 'move') {
+                        e.stopPropagation();
+                        handleDragStart(ann, e.clientX, e.clientY);
+                      }
+                    }}
+                    onTouchStart={(e) => {
+                      if (mode === 'move') {
+                        e.stopPropagation();
+                        if (e.cancelable) e.preventDefault();
+                        const touch = e.touches[0];
+                        handleDragStart(ann, touch.clientX, touch.clientY);
+                      } else if (mode === 'eraser') {
+                        e.stopPropagation();
+                        if (e.cancelable) e.preventDefault();
+                        handleDeleteAnnotation(ann.id);
+                      }
+                    }}
+                  />
+                </g>
               );
             }
             return null;
@@ -2561,23 +2902,58 @@ export const StockCardVisualizer: React.FC<Props> = ({
               className="pointer-events-none"
             />
           )}
+
+          {/* Visual eraser pointer indicator */}
+          {mode === 'eraser' && eraserHoverPoint && (
+            <g className="pointer-events-none">
+              <circle
+                cx={eraserHoverPoint.x}
+                cy={eraserHoverPoint.y}
+                r="3.5"
+                fill="rgba(239, 68, 68, 0.25)"
+                stroke="#ef4444"
+                strokeWidth="1.5"
+                vectorEffect="non-scaling-stroke"
+              />
+              <line
+                x1={eraserHoverPoint.x - 2}
+                y1={eraserHoverPoint.y - 2}
+                x2={eraserHoverPoint.x + 2}
+                y2={eraserHoverPoint.y + 2}
+                stroke="#ef4444"
+                strokeWidth="1"
+                vectorEffect="non-scaling-stroke"
+              />
+              <line
+                x1={eraserHoverPoint.x + 2}
+                y1={eraserHoverPoint.y - 2}
+                x2={eraserHoverPoint.x - 2}
+                y2={eraserHoverPoint.y + 2}
+                stroke="#ef4444"
+                strokeWidth="1"
+                vectorEffect="non-scaling-stroke"
+              />
+            </g>
+          )}
         </svg>
 
-        {/* Floating Drawing interaction canvas handler overlay */}
-        {mode !== 'cursor' && mode !== 'eraser' && mode !== 'move' && (
+        {/* Floating Drawing & Eraser interaction canvas handler overlay */}
+        {mode !== 'cursor' && mode !== 'move' && (
           <div
-            className="absolute inset-0 z-30 touch-none select-none cursor-crosshair pb-8"
+            className="absolute inset-0 z-40 touch-none select-none cursor-crosshair"
             onMouseDown={handleCanvasMouseDown}
             onMouseMove={handleCanvasMouseMove}
             onMouseUp={handleCanvasMouseUp}
-            onMouseLeave={() => setHoverPoint(null)}
+            onMouseLeave={() => {
+              setHoverPoint(null);
+              setEraserHoverPoint(null);
+              isErasingRef.current = false;
+            }}
             onTouchStart={handleCanvasTouchStart}
             onTouchMove={handleCanvasTouchMove}
             onTouchEnd={handleCanvasTouchEnd}
           />
         )}
-
-
 
         {/* Overlay Inline text form editor when active */}
         {inputCoords && (
@@ -2613,7 +2989,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
 
         {/* Clean, Non-scaled HTML Overlay for Dots & Text Layer */}
         <div
-          className="absolute inset-0 pointer-events-none text-[10px] leading-none"
+          className="absolute inset-0 pointer-events-none text-[10px] leading-none z-20"
           style={{ textShadow: "0 1px 2px rgba(0,0,0,0.8)" }}
         >
           {/* Decorative Dots strictly at RAW positions */}
@@ -2658,7 +3034,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
           ))}
 
           {/* Left Labels (S/R) */}
-          <div className="pointer-events-auto">
+          <div className={mode === 'cursor' ? "pointer-events-auto" : "pointer-events-none"}>
             {leftLabels.map((l) =>
               renderLabel(l, "left-1", {
                 top: `${l.y}%`,
@@ -2668,7 +3044,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
           </div>
 
           {/* Current Price */}
-          <div className="pointer-events-auto">
+          <div className={mode === 'cursor' ? "pointer-events-auto" : "pointer-events-none"}>
             {rightLabels.map((l) =>
               renderLabel(l, "right-1", {
                 top: `${l.y}%`,
@@ -2678,7 +3054,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
           </div>
 
           {/* SL Labels */}
-          <div className="pointer-events-auto">
+          <div className={mode === 'cursor' ? "pointer-events-auto" : "pointer-events-none"}>
             {slLabels.map((l) =>
               renderLabel(l, "left-[23%]", {
                 top: `${l.y}%`,
@@ -2688,7 +3064,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
           </div>
 
           {/* Entry Labels */}
-          <div className="pointer-events-auto">
+          <div className={mode === 'cursor' ? "pointer-events-auto" : "pointer-events-none"}>
             {entryLabels.map((l) =>
               renderLabel(l, "left-1/2", {
                 top: `${l.y}%`,
@@ -2698,7 +3074,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
           </div>
 
           {/* TP & Resistance Labels (Centered) */}
-          <div className="pointer-events-auto">
+          <div className={mode === 'cursor' ? "pointer-events-auto" : "pointer-events-none"}>
             {tpLabels.map((l) =>
               renderLabel(l, "left-1/2", {
                 top: `${l.y}%`,
@@ -2708,7 +3084,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
           </div>
 
           {/* Render Vector-Correct Text Annotations in HTML Space */}
-          {annotations.map((ann) => {
+          {localAnnotations.map((ann) => {
             if (ann.type === 'text') {
               return (
                 <div
@@ -2761,7 +3137,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
           })}
 
           {/* Visual indicator deletion dots & close icons during Interactive cursor mode */}
-          {mode === 'cursor' && annotations.map((ann) => {
+          {mode === 'cursor' && localAnnotations.map((ann) => {
             const center = getCenterCoords(ann);
             return (
               <div
@@ -2833,11 +3209,16 @@ export const StockCardVisualizer: React.FC<Props> = ({
             {hoveredLabel.isCurrentPrice && (
               <span className="text-[10px] text-blue-300 mt-1">最新報價</span>
             )}
+            {hoveredLabel.isAveragingSys2 && (
+              <span className="text-[10px] text-blue-300 mt-1">
+                系統二向下攤平 (組別 #{hoveredLabel.groupIndex}, -{hoveredLabel.discountPct}%)
+              </span>
+            )}
           </div>
         )}
       </div>
 
-      {/* COMPACT BAR AT THE BOTTOM OF CARD (Signal checkboxes in first row, Drawing toolbar in second row) */}
+      {/* COMPACT BAR AT THE BOTTOM OF CARD (Drawing toolbar) */}
       <div 
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
@@ -2845,189 +3226,9 @@ export const StockCardVisualizer: React.FC<Props> = ({
         onPointerDown={(e) => e.stopPropagation()}
         onMouseMove={(e) => e.stopPropagation()}
         onTouchMove={(e) => e.stopPropagation()}
-        className="flex flex-col gap-1.5 mt-1 shrink-0 z-50 pointer-events-auto select-none w-full px-1 animate-fadeIn"
+        className="flex flex-col gap-1 mt-0.5 shrink-0 z-50 pointer-events-auto select-none w-full px-1 animate-fadeIn"
       >
-        {/* Row 1: Main Path (主力路徑) Phase Tickboxes with Dynamic Stage Selection (前期, 中期, 後期) */}
-        <div className="flex justify-center w-full my-1">
-          <div className="flex flex-row flex-wrap sm:flex-nowrap items-center justify-center gap-1 sm:gap-1.5 p-1 px-1.5 sm:px-2.5 bg-white/40 backdrop-blur-md border border-zinc-200/80 rounded-2xl sm:rounded-full shadow-none shrink-0 overflow-visible max-w-full select-none">
-            {/* Permanent Label "主力路徑" */}
-            <div className="flex items-center justify-center bg-zinc-900/10 px-1.5 sm:px-2 py-0.5 rounded-full shrink-0">
-              <span className="text-[8px] sm:text-[9px] font-black text-zinc-900 select-none tracking-wider whitespace-nowrap">
-                主力路徑
-              </span>
-            </div>
-
-            {[
-              {
-                key: "accumulation",
-                label: "吸籌",
-                checkedKey: "pathAccumulationChecked",
-                stageKey: "pathAccumulationStage",
-                theme: {
-                  activeBg: "rgba(217, 119, 6, 0.15)",
-                  activeBorder: "#D97706",
-                  activeText: "#000000",
-                }
-              },
-              {
-                key: "wash",
-                label: "洗盤",
-                checkedKey: "pathWashChecked",
-                stageKey: "pathWashStage",
-                theme: {
-                  activeBg: "rgba(217, 119, 6, 0.15)",
-                  activeBorder: "#D97706",
-                  activeText: "#000000",
-                }
-              },
-              {
-                key: "test",
-                label: "試升",
-                checkedKey: "pathTestChecked",
-                stageKey: "pathTestStage",
-                theme: {
-                  activeBg: "rgba(217, 119, 6, 0.15)",
-                  activeBorder: "#D97706",
-                  activeText: "#000000",
-                }
-              },
-              {
-                key: "rally",
-                label: "拉升",
-                checkedKey: "pathRallyChecked",
-                stageKey: "pathRallyStage",
-                theme: {
-                  activeBg: "rgba(22, 163, 74, 0.15)",
-                  activeBorder: "#16A34A",
-                  activeText: "#000000",
-                }
-              },
-              {
-                key: "distribution",
-                label: "出貨",
-                checkedKey: "pathDistributionChecked",
-                stageKey: "pathDistributionStage",
-                theme: {
-                  activeBg: "rgba(220, 38, 38, 0.15)",
-                  activeBorder: "#DC2626",
-                  activeText: "#000000",
-                }
-              }
-            ].map((phase) => {
-              const isChecked = !!strategy?.[phase.checkedKey as keyof typeof strategy];
-              const currentStage = (strategy?.[phase.stageKey as keyof typeof strategy] as string) || "前期";
-              
-              const activeBg = isChecked ? phase.theme.activeBg : "transparent";
-              const activeBorder = isChecked ? phase.theme.activeBorder : "rgba(9, 9, 11, 0.12)";
-              const activeText = isChecked ? "#000000" : "#4b5563";
-
-              const handleDotClick = (e: React.MouseEvent) => {
-                e.stopPropagation();
-                const nextChecked = !isChecked;
-                onUpdateStrategyField?.(phase.checkedKey, nextChecked);
-                if (nextChecked) {
-                  if (!strategy?.[phase.stageKey as keyof typeof strategy]) {
-                    onUpdateStrategyField?.(phase.stageKey, "前期");
-                  }
-                  setOpenSubField(phase.key);
-                } else {
-                  if (openSubField === phase.key) {
-                    setOpenSubField(null);
-                  }
-                }
-              };
-
-              const handleLabelClick = (e: React.MouseEvent) => {
-                e.stopPropagation();
-                if (isChecked) {
-                  setOpenSubField(openSubField === phase.key ? null : phase.key);
-                } else {
-                  onUpdateStrategyField?.(phase.checkedKey, true);
-                  if (!strategy?.[phase.stageKey as keyof typeof strategy]) {
-                    onUpdateStrategyField?.(phase.stageKey, "前期");
-                  }
-                  setOpenSubField(phase.key);
-                }
-              };
-
-              return (
-                <div key={phase.key} className="relative flex items-center shrink-0">
-                  <div
-                    onClick={handleLabelClick}
-                    style={{
-                      backgroundColor: activeBg,
-                      borderColor: activeBorder,
-                    }}
-                    className="flex items-center px-1 sm:px-2 py-0.5 border rounded-full transition-all duration-300 select-none shrink-0 cursor-pointer hover:brightness-110"
-                  >
-                    {/* Circle Dot Zone */}
-                    {isChecked ? (
-                      <span
-                        onClick={handleDotClick}
-                        className="w-1 h-1 sm:w-1.5 sm:h-1.5 rounded-full mr-1 sm:mr-1.5 flex-shrink-0 cursor-pointer transition-transform hover:scale-125 bg-black"
-                      />
-                    ) : (
-                      <span
-                        onClick={handleDotClick}
-                        className="w-1 h-1 sm:w-1.5 sm:h-1.5 rounded-full border border-zinc-400 mr-1 sm:mr-1.5 flex-shrink-0 cursor-pointer hover:border-zinc-800 transition-colors"
-                      />
-                    )}
-
-                    {/* Text / Dropdown Zone */}
-                    <div
-                      style={{ color: activeText }}
-                      className="flex items-center gap-0.5 text-[7.5px] sm:text-[8.5px] font-black whitespace-nowrap select-none"
-                    >
-                      <span>{phase.label}</span>
-                      {isChecked && (
-                        <span className="text-[6.8px] sm:text-[7.5px] font-black opacity-90">
-                          ({currentStage})
-                        </span>
-                      )}
-                      {isChecked && (
-                        <span className="text-[6.8px] sm:text-[7.5px] ml-0.5 opacity-90 select-none">▾</span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Dropdown Popover */}
-                  {openSubField === phase.key && (
-                    <div
-                      onClick={(e) => e.stopPropagation()}
-                      className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 p-0.5 bg-white border border-zinc-200 rounded-full shadow-lg flex flex-row items-center gap-0.5 z-[100] animate-fadeIn whitespace-nowrap"
-                    >
-                      {/* Triangle Pointer */}
-                      <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-[1px] border-4 border-transparent border-t-white" />
-                      {["前期", "中期", "後期"].map((stg) => {
-                        const isActive = currentStage === stg;
-                        return (
-                          <button
-                            key={stg}
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onUpdateStrategyField?.(phase.stageKey, stg);
-                              setOpenSubField(null);
-                            }}
-                            className={`px-3 py-1 text-[8px] sm:text-[8.5px] font-black rounded-full transition-all cursor-pointer whitespace-nowrap ${
-                              isActive
-                                ? "bg-zinc-900 text-white shadow-md font-black"
-                                : "text-zinc-500 hover:text-zinc-900 bg-transparent"
-                            }`}
-                          >
-                            {stg}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Row 2: Drawing Toolbar */}
+        {/* Drawing Toolbar */}
         <div className="flex justify-start sm:justify-center w-full mt-0.5 overflow-x-auto max-w-full [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] py-0.5 px-0.5">
           <div className="flex items-center gap-0 sm:gap-0.5 p-[2px] px-1 sm:px-1 bg-white/60 border border-zinc-200/90 backdrop-blur-md rounded-lg sm:rounded-md shadow-none shrink-0">
             {/* Cursor Interactive Mode Button */}
@@ -3159,93 +3360,146 @@ export const StockCardVisualizer: React.FC<Props> = ({
             
             <div className="w-[1px] h-2.5 bg-zinc-300/80 mx-0 sm:mx-0.5 shrink-0" />
 
-            {/* Rich Color Selection */}
-            <div className="flex items-center gap-[3px] px-0.5 shrink-0 relative">
-              {/* PC version (always visible) */}
-              <div className="hidden sm:flex items-center gap-[3px]">
-                {[
-                  { hex: '#ef4444', name: '止損紅' },
-                  { hex: '#10b981', name: '止盈綠' },
-                  { hex: '#facc15', name: '關鍵黃' },
-                  { hex: '#3b82f6', name: '系統藍' },
-                  { hex: '#000000', name: '亮色黑' }
-                ].map((col) => (
-                  <button
-                    key={col.hex}
-                    type="button"
-                    title={col.name}
-                    onClick={() => setActiveColor(col.hex)}
-                    style={{ backgroundColor: col.hex }}
-                    className={`w-2 h-2 rounded-full border border-black/30 transition-transform ${activeColor === col.hex ? 'scale-110 ring-1 ring-zinc-400' : 'opacity-65 hover:opacity-100 hover:scale-105'}`}
-                  />
-                ))}
-              </div>
-
-              {/* Mobile version (compact, click to expand) */}
-              <div className="flex sm:hidden items-center relative">
-                <button
-                  type="button"
-                  className="w-3.5 h-3.5 rounded-full border border-zinc-400 shadow-sm p-0.5 flex items-center justify-center cursor-pointer"
+            {/* Dynamic Color Selection Popover */}
+            <div className="flex items-center relative shrink-0">
+              <button
+                ref={colorButtonRef}
+                type="button"
+                title="選擇繪圖與備註顏色"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleColorPicker();
+                }}
+                className={`p-0.5 px-1 rounded flex items-center gap-1 hover:bg-zinc-900/5 transition-colors cursor-pointer ${
+                  isColorPickerOpen ? 'bg-zinc-900/15 ring-1 ring-zinc-400 font-bold' : ''
+                }`}
+              >
+                <div
+                  className="w-3.5 h-3.5 rounded-full border border-black/30 shadow-xs shrink-0 transition-transform hover:scale-105"
                   style={{ backgroundColor: activeColor }}
+                />
+                <span className="text-[7.5px] text-zinc-500 font-bold leading-none select-none">▾</span>
+              </button>
+
+              {isColorPickerOpen && pickerPos && createPortal(
+                <div
+                  className="fixed inset-0 z-[999999] pointer-events-auto"
                   onClick={(e) => {
                     e.stopPropagation();
-                    setIsMobileColorOpen(!isMobileColorOpen);
+                    setIsColorPickerOpen(false);
                   }}
-                />
-                
-                {isMobileColorOpen && (
-                  <>
-                    <div 
-                      className="fixed inset-0 z-[99]" 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setIsMobileColorOpen(false);
-                      }} 
-                    />
-                    <div 
-                      onClick={(e) => e.stopPropagation()}
-                      className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-white/95 backdrop-blur-md border border-zinc-200 rounded-xl p-1.5 shadow-2xl flex flex-row items-center gap-2 z-[100]"
-                    >
-                      {[
-                        { hex: '#ef4444', name: '止損紅' },
-                        { hex: '#10b981', name: '止盈綠' },
-                        { hex: '#facc15', name: '關鍵黃' },
-                        { hex: '#3b82f6', name: '系統藍' },
-                        { hex: '#000000', name: '亮色黑' }
-                      ].map((col) => (
-                        <button
-                          key={col.hex}
-                          type="button"
-                          title={col.name}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setActiveColor(col.hex);
-                            setIsMobileColorOpen(false);
-                          }}
-                          style={{ backgroundColor: col.hex }}
-                          className={`w-5 h-5 rounded-full border border-black/30 transition-transform ${activeColor === col.hex ? 'scale-110 ring-2 ring-zinc-400' : 'opacity-85'}`}
+                  onTouchStart={(e) => {
+                    e.stopPropagation();
+                    setIsColorPickerOpen(false);
+                  }}
+                >
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onTouchStart={(e) => e.stopPropagation()}
+                    style={{
+                      position: 'fixed',
+                      top: `${pickerPos.top}px`,
+                      left: `${pickerPos.left}px`,
+                      width: '240px',
+                    }}
+                    className="bg-white/98 backdrop-blur-xl border border-zinc-300/80 rounded-xl p-2.5 shadow-2xl z-[1000000] flex flex-col gap-2 pointer-events-auto select-none animate-in fade-in zoom-in-95 duration-100"
+                  >
+                    <div className="flex items-center justify-between px-0.5 pb-1 border-b border-zinc-100">
+                      <span className="text-[10px] font-black text-zinc-700 tracking-wider">選擇顏色</span>
+                      <div className="flex items-center gap-1">
+                        <span
+                          className="w-3 h-3 rounded-full border border-black/20 shrink-0"
+                          style={{ backgroundColor: activeColor }}
                         />
-                      ))}
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-700 font-mono">
+                          {DRAWING_COLORS.find(c => c.hex.toLowerCase() === activeColor.toLowerCase())?.name || activeColor}
+                        </span>
+                      </div>
                     </div>
-                  </>
-                )}
-              </div>
+
+                    {/* Preset color swatches */}
+                    <div className="grid grid-cols-4 sm:grid-cols-5 gap-1.5 p-0.5 max-h-[160px] overflow-y-auto">
+                      {DRAWING_COLORS.map((col) => {
+                        const isSelected = activeColor.toLowerCase() === col.hex.toLowerCase();
+                        return (
+                          <button
+                            key={col.hex}
+                            type="button"
+                            title={`${col.name} (${col.hex})`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSelectColor(col.hex);
+                            }}
+                            className={`group relative flex flex-col items-center justify-center p-1 rounded-lg hover:bg-zinc-100 transition-all cursor-pointer ${
+                              isSelected ? 'bg-zinc-100 ring-2 ring-blue-500' : 'border border-transparent'
+                            }`}
+                          >
+                            <span
+                              className={`w-5 h-5 rounded-full border border-black/25 shadow-xs transition-transform group-hover:scale-110 ${
+                                isSelected ? 'scale-105 ring-2 ring-offset-1 ring-blue-500' : ''
+                              }`}
+                              style={{ backgroundColor: col.hex }}
+                            />
+                            <span className="text-[7.5px] text-zinc-600 font-medium mt-0.5 truncate max-w-full text-center">
+                              {col.name}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Custom Color Input */}
+                    <div className="flex items-center justify-between pt-1.5 border-t border-zinc-100 px-0.5 gap-2">
+                      <label className="text-[9px] font-bold text-zinc-500 shrink-0">自訂色票</label>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="color"
+                          value={activeColor.startsWith('#') && activeColor.length === 7 ? activeColor : '#000000'}
+                          onChange={(e) => {
+                            const newCol = e.target.value;
+                            setActiveColor(newCol);
+                            activeColorRef.current = newCol;
+                          }}
+                          className="w-5 h-5 rounded border border-zinc-300 cursor-pointer p-0 bg-transparent shrink-0"
+                          title="點選自訂色盤"
+                        />
+                        <input
+                          type="text"
+                          value={activeColor}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setActiveColor(val);
+                            if (/^#[0-9A-Fa-f]{6}$/.test(val) || /^#[0-9A-Fa-f]{3}$/.test(val)) {
+                              activeColorRef.current = val;
+                            }
+                          }}
+                          className="w-16 text-[9px] font-mono px-1.5 py-0.5 border border-zinc-200 rounded text-zinc-800 uppercase focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          placeholder="#000000"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>,
+                document.body
+              )}
             </div>
 
-            {annotations.length > 0 && (
-              <>
-                <div className="w-[1px] h-2.5 bg-zinc-300/80 mx-0.5 shrink-0" />
-                {/* Clear All Button */}
-                <button
-                  type="button"
-                  title="清除此圖表所有備註"
-                  onClick={handleClearAll}
-                  className="p-0.5 rounded text-red-600 hover:text-red-800 hover:bg-red-500/10 transition-colors shrink-0"
-                >
-                  <Trash2 className="w-3 h-3" />
-                </button>
-              </>
-            )}
+            <div className="w-[1px] h-2.5 bg-zinc-300/80 mx-0.5 shrink-0" />
+            
+            {/* 一鍵刪除視覺圖示化的所有繪圖按鈕 */}
+            <button
+              type="button"
+              title={localAnnotations.length > 0 ? `一鍵刪除所有繪圖 (${localAnnotations.length} 個標記)` : "一鍵刪除所有繪圖 (目前無繪圖)"}
+              onClick={handleClearAll}
+              className={`p-1 sm:p-0.5 rounded transition-all shrink-0 flex items-center gap-0.5 cursor-pointer ${
+                localAnnotations.length > 0
+                  ? 'text-red-600 hover:text-red-800 hover:bg-red-500/15 active:scale-90 font-bold'
+                  : 'text-zinc-400 hover:text-red-500 hover:bg-zinc-100 opacity-60'
+              }`}
+            >
+              <Trash2 className="w-3 h-3" />
+            </button>
           </div>
         </div>
       </div>
