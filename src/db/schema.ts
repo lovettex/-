@@ -40,6 +40,7 @@ export const stockTabs = pgTable('stock_tabs', {
   isNew: boolean('is_new').default(true),
   chartAnnotations: jsonb('chart_annotations'), // JSON array of annotations
   plannedBuyQty: doublePrecision('planned_buy_qty'),
+  plannedBuyPercent: doublePrecision('planned_buy_percent'),
   stopLossPrice: doublePrecision('stop_loss_price'),
   takeProfitPrice: doublePrecision('take_profit_price'),
   createdAt: timestamp('created_at').defaultNow(),

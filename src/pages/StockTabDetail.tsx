@@ -20,9 +20,10 @@ import { toast } from "sonner";
 import { motion, AnimatePresence } from 'motion/react';
 import { db } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
-import { safeSessionStorage } from '../lib/utils';
+import { safeSessionStorage, safeLocalStorage } from '../lib/utils';
 import { ScrollIn, InteractiveButton, Magnetic } from '../components/MotionWrappers';
 import StrategyTab from '../components/StrategyTab';
+import { BatchMultiSelect } from '../components/BatchMultiSelect';
 import { formatTimestamp, getTimestampMillis, getTimestampDate } from '../lib/dateUtils';
 import ChipAnalysisTab from '../components/ChipAnalysisTab';
 
@@ -30,13 +31,14 @@ export default function StockTabDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { tabs, updateTabStatus, updateCurrentPrice, updateTradeType, updateTab, deleteTab } = useStockTabs();
-  const { trades, addTrade, deleteTrade } = useTrades(id);
+  const { trades, addTrade, updateTrade, deleteTrade } = useTrades(id);
 
   const tab = tabs.find(t => t.id === id);
 
   const [tradeForm, setTradeForm] = useState({
     type: 'BUY',
     purpose: '加碼',
+    batch: '',
     operator: '人',
     price: '',
     quantity: '',
@@ -62,7 +64,7 @@ export default function StockTabDetail() {
     }
   }, [activeTab]);
   const [currentPriceInput, setCurrentPriceInput] = useState('');
-  const [plannedBuyQtyInput, setPlannedBuyQtyInput] = useState<string>('');
+  const [plannedBuyPercentInput, setPlannedBuyPercentInput] = useState<string>('');
   const [stopLossInput, setStopLossInput] = useState<string>('');
   const [takeProfitInput, setTakeProfitInput] = useState<string>('');
   const [isEditingPrice, setIsEditingPrice] = useState(false);
@@ -71,6 +73,39 @@ export default function StockTabDetail() {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const tradesJsonFileInputRef = React.useRef<HTMLInputElement>(null);
   const { user } = useAuth();
+
+  const [totalCapital, setTotalCapital] = useState<number>(() => {
+    const saved = safeLocalStorage.getItem(`total-capital-${user?.uid || "guest"}`);
+    return saved ? parseFloat(saved) : 1000000;
+  });
+  const [virtualCapital, setVirtualCapital] = useState<number>(() => {
+    const saved = safeLocalStorage.getItem(`virtual-capital-${user?.uid || "guest"}`);
+    return saved ? parseFloat(saved) : 1000000;
+  });
+
+  React.useEffect(() => {
+    if (!user) return;
+    const fetchSettings = async () => {
+      try {
+        const docRef = doc(db, "userSettings", user.uid);
+        const snapshot = await getDoc(docRef);
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          if (typeof data.totalCapital === "number") {
+            setTotalCapital(data.totalCapital);
+            safeLocalStorage.setItem(`total-capital-${user.uid}`, data.totalCapital.toString());
+          }
+          if (typeof data.virtualCapital === "number") {
+            setVirtualCapital(data.virtualCapital);
+            safeLocalStorage.setItem(`virtual-capital-${user.uid}`, data.virtualCapital.toString());
+          }
+        }
+      } catch (error) {
+        console.error("Failed to fetch userSettings in StockTabDetail:", error);
+      }
+    };
+    fetchSettings();
+  }, [user]);
 
   // 4 rows for stock averaging (System 1: -2%, -4%, -6%, -8%)
   const [averagingRows, setAveragingRows] = useState<{ price: string; quantity: string; quantity2?: string; bought?: boolean; riskFlag?: boolean }[]>([
@@ -103,14 +138,51 @@ export default function StockTabDetail() {
     }
   }, [tab?.id, tab?.currentPrice]);
 
-  // Update plannedBuyQtyInput when tab data loads or changes
+  const effectiveCapital = (tab?.tradeType === 'simulated' ? virtualCapital : totalCapital) || totalCapital || 1000000;
+  const maxStrategyRiskPool60 = (effectiveCapital * 2) * 0.6;
+
+  // 輔助計算各批次股票數 (第一批~第四批 與 拆分子批)
+  const computeBatchSizes = (totalQty: number) => {
+    const s1 = Math.ceil(totalQty * 0.15);
+    const s1_a = Math.round(totalQty * 0.07);
+    const s1_b = Math.max(0, s1 - s1_a);
+
+    const s2 = Math.ceil(totalQty * 0.25);
+    const s2_a = Math.round(totalQty * 0.10);
+    const s2_b = Math.max(0, s2 - s2_a);
+
+    const s3 = Math.ceil(totalQty * 0.35);
+    const s3_a = Math.round(totalQty * 0.15);
+    const s3_b = Math.max(0, s3 - s3_a);
+
+    const s4 = Math.ceil(totalQty * 0.25);
+    const s4_a = Math.round(totalQty * 0.10);
+    const s4_b = Math.max(0, s4 - s4_a);
+
+    return [
+      { split1: s1_a, split2: s1_b, total: s1 },
+      { split1: s2_a, split2: s2_b, total: s2 },
+      { split1: s3_a, split2: s3_b, total: s3 },
+      { split1: s4_a, split2: s4_b, total: s4 },
+    ];
+  };
+
+  // Update plannedBuyPercentInput when tab data loads or changes
   React.useEffect(() => {
-    if (tab?.plannedBuyQty !== undefined) {
-      setPlannedBuyQtyInput(tab.plannedBuyQty.toString());
+    if (tab?.plannedBuyPercent !== undefined && tab?.plannedBuyPercent !== null) {
+      setPlannedBuyPercentInput(tab.plannedBuyPercent.toString());
+    } else if (tab?.plannedBuyQty !== undefined && tab.plannedBuyQty > 0) {
+      const price = (tab.currentPrice && tab.currentPrice > 0) ? tab.currentPrice : (parseFloat(currentPriceInput) || 0);
+      if (price > 0 && maxStrategyRiskPool60 > 0) {
+        const impliedPercent = ((tab.plannedBuyQty * price) / maxStrategyRiskPool60) * 100;
+        setPlannedBuyPercentInput(Number(impliedPercent.toFixed(2)).toString());
+      } else {
+        setPlannedBuyPercentInput('');
+      }
     } else {
-      setPlannedBuyQtyInput('');
+      setPlannedBuyPercentInput('');
     }
-  }, [tab?.id, tab?.plannedBuyQty]);
+  }, [tab?.id, tab?.plannedBuyPercent, tab?.plannedBuyQty, maxStrategyRiskPool60, tab?.currentPrice]);
 
   // Update stopLossInput when tab data loads or changes
   React.useEffect(() => {
@@ -130,35 +202,73 @@ export default function StockTabDetail() {
     }
   }, [tab?.id, tab?.takeProfitPrice]);
 
-  // Update averaging rows & settings when tab loads
+  // Update averaging rows & settings when tab loads (自動帶入預估佔比之批次股數)
   React.useEffect(() => {
     if (tab) {
+      const basePrice = (stats?.averagePrice && stats.averagePrice > 0)
+        ? stats.averagePrice
+        : (tab?.currentPrice && tab.currentPrice > 0 ? tab.currentPrice : 0);
+      const sys1Ratios = [0.98, 0.96, 0.94, 0.92];
+      const sys2Ratios = [0.97, 0.94, 0.91, 0.88];
+      const tabPlannedQty = tab.plannedBuyQty || (basePrice > 0 && maxStrategyRiskPool60 > 0 && tab.plannedBuyPercent ? Math.floor((maxStrategyRiskPool60 * (tab.plannedBuyPercent / 100)) / basePrice) : 0);
+      const batchSizes = computeBatchSizes(tabPlannedQty);
+
       if (tab.averagingRows && Array.isArray(tab.averagingRows)) {
+        const hasAnyQty = tab.averagingRows.some(r => (r?.quantity !== undefined && r?.quantity !== '') || (r?.quantity2 !== undefined && r?.quantity2 !== ''));
         const normalized = [0, 1, 2, 3].map(i => {
           const row = tab.averagingRows?.[i];
+          const priceSys1 = basePrice > 0 ? (basePrice * sys1Ratios[i]).toFixed(2) : '';
           return {
-            price: row?.price ?? '',
-            quantity: row?.quantity ?? '',
-            quantity2: row?.quantity2 ?? '',
+            price: row?.price || (priceSys1 ? priceSys1 : ''),
+            quantity: hasAnyQty ? (row?.quantity ?? '') : (tabPlannedQty > 0 ? batchSizes[i].split1.toString() : ''),
+            quantity2: hasAnyQty ? (row?.quantity2 ?? '') : (tabPlannedQty > 0 ? batchSizes[i].split2.toString() : ''),
             bought: !!row?.bought,
             riskFlag: !!row?.riskFlag
           };
         });
         setAveragingRows(normalized);
+      } else if (tabPlannedQty > 0) {
+        const defaultRows = [0, 1, 2, 3].map(i => {
+          const priceSys1 = basePrice > 0 ? (basePrice * sys1Ratios[i]).toFixed(2) : '';
+          return {
+            price: priceSys1,
+            quantity: batchSizes[i].split1.toString(),
+            quantity2: batchSizes[i].split2.toString(),
+            bought: false,
+            riskFlag: false
+          };
+        });
+        setAveragingRows(defaultRows);
       }
+
       if (tab.averagingRowsSys2 && Array.isArray(tab.averagingRowsSys2)) {
+        const hasAnyQty2 = tab.averagingRowsSys2.some(r => (r?.quantity !== undefined && r?.quantity !== '') || (r?.quantity2 !== undefined && r?.quantity2 !== ''));
         const normalized2 = [0, 1, 2, 3].map(i => {
           const row = tab.averagingRowsSys2?.[i];
+          const priceSys2 = basePrice > 0 ? (basePrice * sys2Ratios[i]).toFixed(2) : '';
           return {
-            price: row?.price ?? '',
-            quantity: row?.quantity ?? '',
-            quantity2: row?.quantity2 ?? '',
+            price: row?.price || (priceSys2 ? priceSys2 : ''),
+            quantity: hasAnyQty2 ? (row?.quantity ?? '') : (tabPlannedQty > 0 ? batchSizes[i].split1.toString() : ''),
+            quantity2: hasAnyQty2 ? (row?.quantity2 ?? '') : (tabPlannedQty > 0 ? batchSizes[i].split2.toString() : ''),
             bought: !!row?.bought,
             riskFlag: !!row?.riskFlag
           };
         });
         setAveragingRowsSys2(normalized2);
+      } else if (tabPlannedQty > 0) {
+        const defaultRows2 = [0, 1, 2, 3].map(i => {
+          const priceSys2 = basePrice > 0 ? (basePrice * sys2Ratios[i]).toFixed(2) : '';
+          return {
+            price: priceSys2,
+            quantity: batchSizes[i].split1.toString(),
+            quantity2: batchSizes[i].split2.toString(),
+            bought: false,
+            riskFlag: false
+          };
+        });
+        setAveragingRowsSys2(defaultRows2);
       }
+
       if (tab.refPnLPoint !== undefined) {
         setRefPnLPoint(tab.refPnLPoint ? tab.refPnLPoint.toString() : '');
       }
@@ -193,14 +303,58 @@ export default function StockTabDetail() {
     }
   };
 
-  const handlePlannedBuyQtyChange = async (val: string) => {
-    setPlannedBuyQtyInput(val);
+  const handlePlannedBuyPercentChange = async (val: string) => {
+    setPlannedBuyPercentInput(val);
     const parsed = parseFloat(val);
     if (tab) {
       if (!isNaN(parsed) && parsed >= 0) {
-        await updateTab(tab.id, { plannedBuyQty: parsed });
+        const cap = maxStrategyRiskPool60 * (parsed / 100);
+        const price = (tab?.currentPrice && tab.currentPrice > 0) ? tab.currentPrice : (parseFloat(currentPriceInput) || 0);
+        const qty = price > 0 ? Math.floor(cap / price) : 0;
+        
+        const batchSizes = computeBatchSizes(qty);
+        const basePrice = (stats?.averagePrice && stats.averagePrice > 0)
+          ? stats.averagePrice
+          : (price > 0 ? price : 0);
+        const sys1Ratios = [0.98, 0.96, 0.94, 0.92];
+        const sys2Ratios = [0.97, 0.94, 0.91, 0.88];
+
+        const newRowsSys1 = [0, 1, 2, 3].map(i => {
+          const existing = averagingRows[i] || { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false };
+          const priceSys1 = basePrice > 0 ? (basePrice * sys1Ratios[i]).toFixed(2) : existing.price;
+          return {
+            ...existing,
+            price: existing.price || priceSys1,
+            quantity: qty > 0 ? batchSizes[i].split1.toString() : '',
+            quantity2: qty > 0 ? batchSizes[i].split2.toString() : '',
+          };
+        });
+
+        const newRowsSys2 = [0, 1, 2, 3].map(i => {
+          const existing = averagingRowsSys2[i] || { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false };
+          const priceSys2 = basePrice > 0 ? (basePrice * sys2Ratios[i]).toFixed(2) : existing.price;
+          return {
+            ...existing,
+            price: existing.price || priceSys2,
+            quantity: qty > 0 ? batchSizes[i].split1.toString() : '',
+            quantity2: qty > 0 ? batchSizes[i].split2.toString() : '',
+          };
+        });
+
+        setAveragingRows(newRowsSys1);
+        setAveragingRowsSys2(newRowsSys2);
+
+        await updateTab(tab.id, {
+          plannedBuyPercent: parsed,
+          plannedBuyQty: qty,
+          averagingRows: newRowsSys1,
+          averagingRowsSys2: newRowsSys2,
+        });
       } else if (val === '') {
-        await updateTab(tab.id, { plannedBuyQty: 0 });
+        await updateTab(tab.id, {
+          plannedBuyPercent: 0,
+          plannedBuyQty: 0
+        });
       }
     }
   };
@@ -671,25 +825,84 @@ export default function StockTabDetail() {
   const currentHoldingQty = Math.max(0, stats?.totalQuantity || 0);
   const totalBought = currentHoldingQty > 0 ? currentHoldingQty : 0;
 
-  const plannedQty = parseFloat(plannedBuyQtyInput) || tab?.plannedBuyQty || 0;
-  const size1 = Math.ceil(plannedQty * 0.15);
-  const size2 = Math.ceil(plannedQty * 0.25);
-  const size3 = Math.ceil(plannedQty * 0.35);
-  const size4 = Math.ceil(plannedQty * 0.25);
+  const parsedPercent = parseFloat(plannedBuyPercentInput);
+  const plannedPercent = (!isNaN(parsedPercent) && parsedPercent >= 0)
+    ? parsedPercent
+    : (tab?.plannedBuyPercent !== undefined && tab.plannedBuyPercent !== null ? tab.plannedBuyPercent : 0);
 
-  const bought1 = Math.min(totalBought, size1);
+  // 可使用資金 = 最大策略風險池 * (百分比 / 100)
+  const usableCapital = maxStrategyRiskPool60 * (plannedPercent / 100);
+
+  // 當前股價
+  const stockPrice = (tab?.currentPrice && tab.currentPrice > 0)
+    ? tab.currentPrice
+    : (parseFloat(currentPriceInput) || 0);
+
+  // 可購買總數量 = 可使用資金 / 當前股價 (無條件捨去取整數股)
+  const calculatedPlannedQty = stockPrice > 0 && usableCapital > 0
+    ? Math.floor(usableCapital / stockPrice)
+    : (plannedPercent === 0 ? 0 : (tab?.plannedBuyQty || 0));
+
+  const plannedQty = calculatedPlannedQty;
+
+  // 1. 第一批 (15%) -> 第一批拆分交易(7%) + 第一批交易(8%)
+  const size1 = Math.ceil(plannedQty * 0.15);
+  const size1_a = Math.round(plannedQty * 0.07);
+  const size1_b = Math.max(0, size1 - size1_a);
+
+  // 2. 第二批 (25%) -> 第二批拆分交易(10%) + 第二批拆分交易(15%)
+  const size2 = Math.ceil(plannedQty * 0.25);
+  const size2_a = Math.round(plannedQty * 0.10);
+  const size2_b = Math.max(0, size2 - size2_a);
+
+  // 3. 第三批 (35%) -> 第三批拆分交易(15%) + 第三批拆分交易(20%)
+  const size3 = Math.ceil(plannedQty * 0.35);
+  const size3_a = Math.round(plannedQty * 0.15);
+  const size3_b = Math.max(0, size3 - size3_a);
+
+  // 4. 第四批 (25%) -> 第四批拆分交易 (10%) + 第四批拆分交易 (15%)
+  const size4 = Math.ceil(plannedQty * 0.25);
+  const size4_a = Math.round(plannedQty * 0.10);
+  const size4_b = Math.max(0, size4 - size4_a);
+
+  // 計算各批與拆分子批已購與餘額 (累進階梯計算)
+  // 第一批拆分
+  const bought1_a = Math.min(totalBought, size1_a);
+  const remaining1_a = Math.max(0, size1_a - bought1_a);
+  const remAfter1_a = Math.max(0, totalBought - size1_a);
+  const bought1_b = Math.min(remAfter1_a, size1_b);
+  const remaining1_b = Math.max(0, size1_b - bought1_b);
+  const bought1 = bought1_a + bought1_b;
   const remaining1 = Math.max(0, size1 - bought1);
 
-  const temp2 = Math.max(0, totalBought - size1);
-  const bought2 = Math.min(temp2, size2);
+  // 第二批拆分
+  const remAfter1 = Math.max(0, totalBought - size1);
+  const bought2_a = Math.min(remAfter1, size2_a);
+  const remaining2_a = Math.max(0, size2_a - bought2_a);
+  const remAfter2_a = Math.max(0, remAfter1 - size2_a);
+  const bought2_b = Math.min(remAfter2_a, size2_b);
+  const remaining2_b = Math.max(0, size2_b - bought2_b);
+  const bought2 = bought2_a + bought2_b;
   const remaining2 = Math.max(0, size2 - bought2);
 
-  const temp3 = Math.max(0, temp2 - size2);
-  const bought3 = Math.min(temp3, size3);
+  // 第三批拆分
+  const remAfter2 = Math.max(0, totalBought - size1 - size2);
+  const bought3_a = Math.min(remAfter2, size3_a);
+  const remaining3_a = Math.max(0, size3_a - bought3_a);
+  const remAfter3_a = Math.max(0, remAfter2 - size3_a);
+  const bought3_b = Math.min(remAfter3_a, size3_b);
+  const remaining3_b = Math.max(0, size3_b - bought3_b);
+  const bought3 = bought3_a + bought3_b;
   const remaining3 = Math.max(0, size3 - bought3);
 
-  const temp4 = Math.max(0, temp3 - size3);
-  const bought4 = Math.min(temp4, size4);
+  // 第四批拆分
+  const remAfter3 = Math.max(0, totalBought - size1 - size2 - size3);
+  const bought4_a = Math.min(remAfter3, size4_a);
+  const remaining4_a = Math.max(0, size4_a - bought4_a);
+  const remAfter4_a = Math.max(0, remAfter3 - size4_a);
+  const bought4_b = Math.min(remAfter4_a, size4_b);
+  const remaining4_b = Math.max(0, size4_b - bought4_b);
+  const bought4 = bought4_a + bought4_b;
   const remaining4 = Math.max(0, size4 - bought4);
 
   const remainingToBuy = Math.max(0, plannedQty - totalBought);
@@ -703,26 +916,46 @@ export default function StockTabDetail() {
     currentBatchOrderText = "無";
     currentBatchBought = 0;
     currentBatchRemaining = 0;
+  } else if (totalBought < size1_a) {
+    currentBatchText = "第 1 批 (7%) 進場中";
+    currentBatchOrderText = "第一批(7%)";
+    currentBatchBought = bought1_a;
+    currentBatchRemaining = remaining1_a;
   } else if (totalBought < size1) {
-    currentBatchText = "第 1 批進場中";
-    currentBatchOrderText = "第一批";
-    currentBatchBought = bought1;
-    currentBatchRemaining = remaining1;
+    currentBatchText = "第 1 批 (8%) 進場中";
+    currentBatchOrderText = "第一批(8%)";
+    currentBatchBought = bought1_b;
+    currentBatchRemaining = remaining1_b;
+  } else if (totalBought < (size1 + size2_a)) {
+    currentBatchText = "第 2 批 (10%) 進場中";
+    currentBatchOrderText = "第二批(10%)";
+    currentBatchBought = bought2_a;
+    currentBatchRemaining = remaining2_a;
   } else if (totalBought < (size1 + size2)) {
-    currentBatchText = "第 2 批進場中";
-    currentBatchOrderText = "第二批";
-    currentBatchBought = bought2;
-    currentBatchRemaining = remaining2;
+    currentBatchText = "第 2 批 (15%) 進場中";
+    currentBatchOrderText = "第二批(15%)";
+    currentBatchBought = bought2_b;
+    currentBatchRemaining = remaining2_b;
+  } else if (totalBought < (size1 + size2 + size3_a)) {
+    currentBatchText = "第 3 批 (15%) 進場中";
+    currentBatchOrderText = "第三批(15%)";
+    currentBatchBought = bought3_a;
+    currentBatchRemaining = remaining3_a;
   } else if (totalBought < (size1 + size2 + size3)) {
-    currentBatchText = "第 3 批進場中";
-    currentBatchOrderText = "第三批";
-    currentBatchBought = bought3;
-    currentBatchRemaining = remaining3;
+    currentBatchText = "第 3 批 (20%) 進場中";
+    currentBatchOrderText = "第三批(20%)";
+    currentBatchBought = bought3_b;
+    currentBatchRemaining = remaining3_b;
+  } else if (totalBought < (size1 + size2 + size3 + size4_a)) {
+    currentBatchText = "第 4 批 (10%) 進場中";
+    currentBatchOrderText = "第四批(10%)";
+    currentBatchBought = bought4_a;
+    currentBatchRemaining = remaining4_a;
   } else if (totalBought < (size1 + size2 + size3 + size4)) {
-    currentBatchText = "第 4 批進場中";
-    currentBatchOrderText = "第四批";
-    currentBatchBought = bought4;
-    currentBatchRemaining = remaining4;
+    currentBatchText = "第 4 批 (15%) 進場中";
+    currentBatchOrderText = "第四批(15%)";
+    currentBatchBought = bought4_b;
+    currentBatchRemaining = remaining4_b;
   } else {
     currentBatchText = "已滿批進場 (已完成)";
     currentBatchOrderText = "已滿批";
@@ -730,13 +963,113 @@ export default function StockTabDetail() {
     currentBatchRemaining = 0;
   }
 
-  const handleBatchClick = (batchIndex: number, batchName: string, batchSize: number) => {
-    if (!batchSize || batchSize <= 0) {
-      toast.error('請先輸入有效的預計購買數量');
+  const batchConfigList = [
+    {
+      index: 0,
+      name: "第一批 (15%)",
+      size: size1,
+      bought: bought1,
+      remaining: remaining1,
+      split1: {
+        name: "第一批拆分交易(7%)",
+        shortLabel: "拆分 7%",
+        size: size1_a,
+        bought: bought1_a,
+        remaining: remaining1_a,
+        percent: "7%",
+      },
+      split2: {
+        name: "第一批交易(8%)",
+        shortLabel: "拆分 8%",
+        size: size1_b,
+        bought: bought1_b,
+        remaining: remaining1_b,
+        percent: "8%",
+      },
+    },
+    {
+      index: 1,
+      name: "第二批 (25%)",
+      size: size2,
+      bought: bought2,
+      remaining: remaining2,
+      split1: {
+        name: "第二批拆分交易(10%)",
+        shortLabel: "拆分 10%",
+        size: size2_a,
+        bought: bought2_a,
+        remaining: remaining2_a,
+        percent: "10%",
+      },
+      split2: {
+        name: "第二批拆分交易(15%)",
+        shortLabel: "拆分 15%",
+        size: size2_b,
+        bought: bought2_b,
+        remaining: remaining2_b,
+        percent: "15%",
+      },
+    },
+    {
+      index: 2,
+      name: "第三批 (35%)",
+      size: size3,
+      bought: bought3,
+      remaining: remaining3,
+      split1: {
+        name: "第三批拆分交易(15%)",
+        shortLabel: "拆分 15%",
+        size: size3_a,
+        bought: bought3_a,
+        remaining: remaining3_a,
+        percent: "15%",
+      },
+      split2: {
+        name: "第三批拆分交易(20%)",
+        shortLabel: "拆分 20%",
+        size: size3_b,
+        bought: bought3_b,
+        remaining: remaining3_b,
+        percent: "20%",
+      },
+    },
+    {
+      index: 3,
+      name: "第四批 (25%)",
+      size: size4,
+      bought: bought4,
+      remaining: remaining4,
+      split1: {
+        name: "第四批拆分交易 (10%)",
+        shortLabel: "拆分 10%",
+        size: size4_a,
+        bought: bought4_a,
+        remaining: remaining4_a,
+        percent: "10%",
+      },
+      split2: {
+        name: "第四批拆分交易 (15%)",
+        shortLabel: "拆分 15%",
+        size: size4_b,
+        bought: bought4_b,
+        remaining: remaining4_b,
+        percent: "15%",
+      },
+    },
+  ];
+
+  const handleBatchClick = (
+    batchIndex: number,
+    batchName: string,
+    split1Qty: number,
+    split2Qty: number,
+    targetSplit?: 1 | 2
+  ) => {
+    if ((!split1Qty && !split2Qty) || (split1Qty <= 0 && split2Qty <= 0)) {
+      toast.error('請先設定有效的預計購買佔比');
       return;
     }
     playClickSound();
-    const halfQty = Math.ceil(batchSize / 2);
     const basePrice = (stats?.averagePrice && stats.averagePrice > 0)
       ? stats.averagePrice
       : (tab?.currentPrice && tab.currentPrice > 0 ? tab.currentPrice : 0);
@@ -754,27 +1087,63 @@ export default function StockTabDetail() {
 
       setAveragingRows(prev => {
         const next = [...prev];
-        next[batchIndex] = {
-          ...next[batchIndex],
-          price: priceSys1,
-          quantity: halfQty.toString(),
-          quantity2: halfQty.toString()
-        };
+        const currentRow = next[batchIndex] || { price: '', quantity: '', quantity2: '' };
+        if (targetSplit === 1) {
+          next[batchIndex] = {
+            ...currentRow,
+            price: currentRow.price || priceSys1,
+            quantity: split1Qty.toString(),
+          };
+        } else if (targetSplit === 2) {
+          next[batchIndex] = {
+            ...currentRow,
+            price: currentRow.price || priceSys1,
+            quantity2: split2Qty.toString(),
+          };
+        } else {
+          next[batchIndex] = {
+            ...currentRow,
+            price: currentRow.price || priceSys1,
+            quantity: split1Qty.toString(),
+            quantity2: split2Qty.toString(),
+          };
+        }
         return next;
       });
 
       setAveragingRowsSys2(prev => {
         const next = [...prev];
-        next[batchIndex] = {
-          ...next[batchIndex],
-          price: priceSys2,
-          quantity: halfQty.toString(),
-          quantity2: halfQty.toString()
-        };
+        const currentRow = next[batchIndex] || { price: '', quantity: '', quantity2: '' };
+        if (targetSplit === 1) {
+          next[batchIndex] = {
+            ...currentRow,
+            price: currentRow.price || priceSys2,
+            quantity: split1Qty.toString(),
+          };
+        } else if (targetSplit === 2) {
+          next[batchIndex] = {
+            ...currentRow,
+            price: currentRow.price || priceSys2,
+            quantity2: split2Qty.toString(),
+          };
+        } else {
+          next[batchIndex] = {
+            ...currentRow,
+            price: currentRow.price || priceSys2,
+            quantity: split1Qty.toString(),
+            quantity2: split2Qty.toString(),
+          };
+        }
         return next;
       });
 
-      toast.success(`已將 ${batchName} (${batchSize}股) 平分為 2 份 (${halfQty} + ${halfQty} 股)，帶入第 ${batchIndex + 1} 欄位：系統一 (${sys1PercentTexts[batchIndex]}) 與系統二 (${sys2PercentTexts[batchIndex]})`);
+      if (targetSplit === 1) {
+        toast.success(`已將 ${batchName} (${split1Qty}股) 帶入第 ${batchIndex + 1} 組系統一與系統二第一預計購入數量`);
+      } else if (targetSplit === 2) {
+        toast.success(`已將 ${batchName} (${split2Qty}股) 帶入第 ${batchIndex + 1} 組系統一與系統二第二預計購入數量`);
+      } else {
+        toast.success(`已將 ${batchName} 拆分雙數量 (${split1Qty} + ${split2Qty} 股) 分別帶入第 ${batchIndex + 1} 組：系統一 (${sys1PercentTexts[batchIndex]}) 與系統二 (${sys2PercentTexts[batchIndex]}) 的預計購入數量`);
+      }
     }
   };
 
@@ -977,6 +1346,7 @@ export default function StockTabDetail() {
           batch.set(newDocRef, {
             type: item.type as 'BUY' | 'SELL',
             purpose: (item.purpose || '加碼') as '加碼' | '平倉',
+            batch: item.batch || '',
             operator: (item.operator || '人') as '機器' | '人',
             price: Number(item.price) || 0,
             quantity: Number(item.quantity) || 0,
@@ -1053,6 +1423,7 @@ export default function StockTabDetail() {
     addTrade({
       type: tradeForm.type as 'BUY' | 'SELL',
       purpose: tradeForm.purpose as '加碼' | '平倉',
+      batch: tradeForm.batch || undefined,
       operator: tradeForm.operator as '機器' | '人',
       price: Number(tradeForm.price),
       quantity: Number(tradeForm.quantity),
@@ -1061,7 +1432,7 @@ export default function StockTabDetail() {
       notes: tradeForm.notes
     });
     playSuccessSound();
-    setTradeForm({ ...tradeForm, price: '', quantity: '', fees: '', notes: '' });
+    setTradeForm({ ...tradeForm, price: '', quantity: '', fees: '', notes: '', batch: '' });
     setIsTradeOpen(false);
   };
 
@@ -1720,14 +2091,14 @@ export default function StockTabDetail() {
                     <TabsList className="flex w-full bg-zinc-100 border border-zinc-200 p-1 rounded-xl gap-1 shadow-2xs">
                       <TabsTrigger 
                         value="calc" 
-                        className="flex-1 py-2 text-xs font-black rounded-lg data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm text-zinc-600 hover:text-zinc-900 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                        className="flex-1 py-2 text-xs font-black rounded-lg data-[state=active]:bg-emerald-800 data-[state=active]:text-white data-[state=active]:shadow-sm text-zinc-600 hover:text-zinc-900 transition-all cursor-pointer flex items-center justify-center gap-1.5"
                       >
                         <Calculator className="h-3.5 w-3.5" />
                         <span>籌碼與攤平試算</span>
                       </TabsTrigger>
                       <TabsTrigger 
                         value="trades" 
-                        className="flex-1 py-2 text-xs font-black rounded-lg data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm text-zinc-600 hover:text-zinc-900 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                        className="flex-1 py-2 text-xs font-black rounded-lg data-[state=active]:bg-emerald-800 data-[state=active]:text-white data-[state=active]:shadow-sm text-zinc-600 hover:text-zinc-900 transition-all cursor-pointer flex items-center justify-center gap-1.5"
                       >
                         <History className="h-3.5 w-3.5" />
                         <span>交易紀錄 ({trades.length} 筆)</span>
@@ -1743,45 +2114,30 @@ export default function StockTabDetail() {
                       {/* Input box for plannedBuyQty, stopLoss, takeProfit */}
                       <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 bg-zinc-50 border border-zinc-200 px-3.5 py-2 rounded-2xl shadow-2xs w-full lg:w-auto">
                         <div className="flex items-center gap-1.5">
-                          <label className="text-xs font-bold text-zinc-600 whitespace-nowrap">預計購買數量:</label>
-                          <Input
-                            type="number"
-                            min="0"
-                            placeholder="請輸入數量"
-                            className="w-20 sm:w-24 h-8 bg-white border border-zinc-250 text-zinc-800 font-mono font-bold text-center text-xs focus-visible:ring-emerald-500/55 rounded-xl p-1 shadow-inner"
-                            value={plannedBuyQtyInput}
-                            onChange={(e) => handlePlannedBuyQtyChange(e.target.value)}
-                          />
+                          <label className="text-xs font-bold text-zinc-700 whitespace-nowrap">預計佔比:</label>
+                          <div className="relative flex items-center">
+                            <Input
+                              type="number"
+                              min="0"
+                              step="any"
+                              placeholder="數值"
+                              className="w-16 sm:w-20 h-8 bg-white border border-zinc-300 text-zinc-900 font-mono font-bold text-center text-xs focus-visible:ring-emerald-500/55 rounded-xl pr-5 p-1 shadow-2xs"
+                              value={plannedBuyPercentInput}
+                              onChange={(e) => handlePlannedBuyPercentChange(e.target.value)}
+                            />
+                            <span className="absolute right-2 text-xs font-bold text-zinc-400 pointer-events-none">%</span>
+                          </div>
                         </div>
 
-                        <div className="h-4 w-[1px] bg-zinc-250 hidden sm:block" />
-
-                        <div className="flex items-center gap-1.5">
-                          <label className="text-xs font-bold text-rose-600 whitespace-nowrap">停損價位:</label>
-                          <Input
-                            type="number"
-                            step="any"
-                            min="0"
-                            placeholder="停損價"
-                            className="w-20 sm:w-24 h-8 bg-white border border-zinc-250 text-rose-700 font-mono font-bold text-center text-xs focus-visible:ring-rose-500/55 rounded-xl p-1 shadow-inner"
-                            value={stopLossInput}
-                            onChange={(e) => handleStopLossChange(e.target.value)}
-                          />
-                        </div>
-
-                        <div className="h-4 w-[1px] bg-zinc-250 hidden sm:block" />
-
-                        <div className="flex items-center gap-1.5">
-                          <label className="text-xs font-bold text-emerald-600 whitespace-nowrap">止盈價位:</label>
-                          <Input
-                            type="number"
-                            step="any"
-                            min="0"
-                            placeholder="止盈價"
-                            className="w-20 sm:w-24 h-8 bg-white border border-zinc-250 text-emerald-700 font-mono font-bold text-center text-xs focus-visible:ring-emerald-500/55 rounded-xl p-1 shadow-inner"
-                            value={takeProfitInput}
-                            onChange={(e) => handleTakeProfitChange(e.target.value)}
-                          />
+                        {/* 即時計算顯示: 可使用資金 與 可購買總數量 */}
+                        <div className="flex flex-wrap sm:flex-nowrap items-center gap-1.5 sm:gap-2 px-2.5 py-1 bg-emerald-50/90 border border-emerald-200/90 rounded-xl text-xs shadow-2xs">
+                          <span className="text-zinc-600 font-medium whitespace-nowrap text-[11px] sm:text-xs">
+                            可使用資金: <span className="font-mono font-bold text-emerald-700">${usableCapital.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                          </span>
+                          <span className="h-3 w-[1px] bg-emerald-300 hidden sm:block" />
+                          <span className="text-zinc-600 font-medium whitespace-nowrap text-[11px] sm:text-xs">
+                            可購買總數量: <span className="font-mono font-black text-emerald-800">{plannedQty}</span> 股
+                          </span>
                         </div>
                       </div>
 
@@ -1803,60 +2159,99 @@ export default function StockTabDetail() {
                       )}
                     </div>
 
-                    {/* Batch Planning Cards */}
+                    {/* Batch Planning Cards (支援拆分子批交易與個別點擊) */}
                     {plannedQty > 0 && (
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 w-full lg:max-w-xl">
-                        {[
-                          { 
-                            name: "第一批 (15%)", 
-                            size: size1, 
-                            bought: bought1, 
-                            remaining: remaining1, 
-                          },
-                          { 
-                            name: "第二批 (25%)", 
-                            size: size2, 
-                            bought: bought2, 
-                            remaining: remaining2, 
-                          },
-                          { 
-                            name: "第三批 (35%)", 
-                            size: size3, 
-                            bought: bought3, 
-                            remaining: remaining3, 
-                          },
-                          { 
-                            name: "第四批 (25%)", 
-                            size: size4, 
-                            bought: bought4, 
-                            remaining: remaining4, 
-                          },
-                        ].map((b, idx) => {
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 w-full lg:max-w-4xl">
+                        {batchConfigList.map((b) => {
                           const isFinished = b.remaining === 0;
+                          const isSplit1Finished = b.split1.remaining === 0;
+                          const isSplit2Finished = b.split2.remaining === 0;
+
                           return (
                             <div 
-                              key={idx} 
-                              onClick={() => handleBatchClick(idx, b.name, b.size)}
-                              title="點擊將此批股數平分帶入雙系統攤平試算"
-                              className={`p-2 border rounded-xl flex flex-col justify-between text-center relative transition-all duration-300 hover:scale-[1.03] active:scale-95 cursor-pointer select-none ${
+                              key={b.index} 
+                              className={`p-3 border rounded-2xl flex flex-col justify-between relative transition-all duration-200 shadow-2xs ${
                                 isFinished 
-                                  ? 'bg-emerald-100/90 border-emerald-300 hover:bg-emerald-200/80 text-black shadow-2xs' 
-                                  : 'bg-zinc-100/90 border-zinc-200 hover:bg-zinc-200/80 text-black shadow-2xs'
+                                  ? 'bg-emerald-50/90 border-emerald-300 text-zinc-900' 
+                                  : 'bg-white border-zinc-200/90 text-zinc-900 hover:border-emerald-300'
                               }`}
                             >
-                              <span className="text-[10px] font-bold text-black uppercase tracking-wider leading-none mb-1 whitespace-nowrap">{b.name}</span>
-                              <span className="text-[13px] font-black font-mono text-black leading-tight my-0.5">{b.size} 股</span>
-                              <div className="flex items-center justify-around text-[10px] mt-1 pt-1.5 border-t border-zinc-300/70 font-medium font-sans text-black">
-                                <div className="flex flex-col items-center">
-                                  <span className="text-black font-bold text-[10px] leading-none opacity-80">已購</span>
-                                  <span className="font-mono font-bold mt-1 text-black text-[10px]">{b.bought}</span>
+                              {/* Card Header (點擊整批帶入雙系統) */}
+                              <div 
+                                onClick={() => handleBatchClick(b.index, b.name, b.split1.size, b.split2.size)}
+                                className="cursor-pointer group flex flex-col items-center text-center pb-2 border-b border-zinc-100 transition-colors hover:bg-zinc-50/80 -mx-1 -mt-1 p-1 rounded-xl"
+                                title="點擊將此批整組 (拆分一 + 拆分二) 同步帶入雙系統攤平試算"
+                              >
+                                <div className="flex items-center justify-between w-full">
+                                  <span className="text-[11px] font-black text-zinc-700 tracking-tight group-hover:text-emerald-700 transition-colors">
+                                    {b.name}
+                                  </span>
+                                  <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100/80 px-1.5 py-0.2 rounded-md">
+                                    帶入全部 ↵
+                                  </span>
                                 </div>
-                                <div className="bg-zinc-400/50 w-[1px] h-4 self-center" />
-                                <div className="flex flex-col items-center">
-                                  <span className="text-black font-bold text-[10px] leading-none opacity-80">餘額</span>
-                                  <span className="font-mono font-bold mt-1 text-black text-[10px]">{b.remaining}</span>
+                                <div className="flex items-baseline gap-1 my-1">
+                                  <span className="text-base font-black font-mono text-zinc-900 leading-tight">{b.size}</span>
+                                  <span className="text-[11px] font-bold text-zinc-500">股 (總計)</span>
+                                </div>
+                                <div className="flex items-center justify-center gap-2 text-[10px] font-semibold text-zinc-600 w-full">
+                                  <span>已購: <strong className="font-mono font-bold text-emerald-800">{b.bought}</strong> 股</span>
+                                  <span className="text-zinc-300">|</span>
+                                  <span>餘額: <strong className="font-mono font-bold text-zinc-700">{b.remaining}</strong> 股</span>
                                 </div>
                               </div>
+
+                              {/* 拆分子批按鈕 (可獨立點擊帶入系統一與系統二個別欄位) */}
+                              <div className="grid grid-cols-2 gap-1.5 mt-2.5">
+                                {/* 拆分一 */}
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleBatchClick(b.index, b.split1.name, b.split1.size, b.split2.size, 1);
+                                  }}
+                                  title={`點擊僅將 ${b.split1.name} (${b.split1.size}股) 帶入雙系統第 1 數量`}
+                                  className={`p-1.5 rounded-xl border text-left flex flex-col justify-between transition-all hover:scale-[1.02] active:scale-95 cursor-pointer select-none ${
+                                    isSplit1Finished
+                                      ? 'bg-emerald-100/80 border-emerald-300 text-emerald-950'
+                                      : 'bg-zinc-50 hover:bg-emerald-50/70 border-zinc-200 hover:border-emerald-300 text-zinc-800'
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[10px] font-black">{b.split1.shortLabel}</span>
+                                    {isSplit1Finished && <span className="text-[9px] font-bold text-emerald-700">滿</span>}
+                                  </div>
+                                  <span className="text-xs font-black font-mono text-zinc-900 my-0.5">{b.split1.size} 股</span>
+                                  <div className="text-[9px] text-zinc-500 font-medium">
+                                    已購: <span className="font-mono font-bold text-zinc-800">{b.split1.bought}</span>
+                                  </div>
+                                </button>
+
+                                {/* 拆分二 */}
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleBatchClick(b.index, b.split2.name, b.split1.size, b.split2.size, 2);
+                                  }}
+                                  title={`點擊僅將 ${b.split2.name} (${b.split2.size}股) 帶入雙系統第 2 數量`}
+                                  className={`p-1.5 rounded-xl border text-left flex flex-col justify-between transition-all hover:scale-[1.02] active:scale-95 cursor-pointer select-none ${
+                                    isSplit2Finished
+                                      ? 'bg-emerald-100/80 border-emerald-300 text-emerald-950'
+                                      : 'bg-zinc-50 hover:bg-emerald-50/70 border-zinc-200 hover:border-emerald-300 text-zinc-800'
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[10px] font-black">{b.split2.shortLabel}</span>
+                                    {isSplit2Finished && <span className="text-[9px] font-bold text-emerald-700">滿</span>}
+                                  </div>
+                                  <span className="text-xs font-black font-mono text-zinc-900 my-0.5">{b.split2.size} 股</span>
+                                  <div className="text-[9px] text-zinc-500 font-medium">
+                                    已購: <span className="font-mono font-bold text-zinc-800">{b.split2.bought}</span>
+                                  </div>
+                                </button>
+                              </div>
+
                               {isFinished && (
                                 <span className="absolute -top-1.5 -right-1.5 bg-red-600 text-white rounded-full text-[10px] px-1.5 py-0.5 font-bold shadow-md border border-white animate-pulse leading-none">滿</span>
                               )}
@@ -1971,55 +2366,88 @@ export default function StockTabDetail() {
                             {averagingRows.map((row, idx) => {
                               const discountLabels = ['-2%', '-4%', '-6%', '-8%'];
                               const discountLabel = discountLabels[idx];
+                              const isBasePosition = idx === 2; // 系統一第三欄位 (-6%) 為基準倉位(下注終局)
+                              const isHighlightedRow = isBasePosition;
                               const riskMessages: Record<number, string> = {
-                                1: '(進入平倉籌碼倉位)',
-                                2: '(進入負籌碼博弈倉位)',
+                                1: '(進入觀察倉位)',
+                                2: '(進入基準倉位(下注終局))',
                                 3: '(進入強制關閉倉位)',
                               };
 
                               return (
-                                <div key={idx} className="grid grid-cols-12 gap-1.5 items-center">
+                                <div
+                                  key={idx}
+                                  className={`grid grid-cols-12 gap-1.5 items-center p-1 rounded-xl transition-all ${
+                                    isHighlightedRow
+                                      ? 'bg-rose-50/80 border border-rose-300/90 ring-1 ring-rose-200 shadow-2xs'
+                                      : 'border border-transparent'
+                                  }`}
+                                >
                                   {/* 組別 */}
-                                  <div className="col-span-3 flex items-center gap-1 min-w-0 flex-wrap">
-                                    <input
-                                      type="checkbox"
-                                      checked={!!row.bought}
-                                      onChange={(e) => {
-                                        const newRows = [...averagingRows];
-                                        newRows[idx] = { ...newRows[idx], bought: e.target.checked };
-                                        setAveragingRows(newRows);
-                                      }}
-                                      className="rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500 h-3.5 w-3.5 cursor-pointer shrink-0"
-                                      title={row.bought ? "已購入" : "勾選標記為已購入"}
-                                    />
-                                    <span className="text-xs text-zinc-500 font-bold shrink-0">#{idx + 1}</span>
-                                    {discountLabel && (
-                                      <span className="text-[11px] font-black text-red-600 shrink-0">{discountLabel}</span>
-                                    )}
+                                  <div className="col-span-3 flex flex-col justify-center min-w-0">
+                                    <div className="flex items-center gap-1 min-w-0 flex-wrap">
+                                      <input
+                                        type="checkbox"
+                                        checked={!!row.bought}
+                                        onChange={(e) => {
+                                          const newRows = [...averagingRows];
+                                          newRows[idx] = { ...newRows[idx], bought: e.target.checked };
+                                          setAveragingRows(newRows);
+                                        }}
+                                        className="rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500 h-3.5 w-3.5 cursor-pointer shrink-0"
+                                        title={row.bought ? "已購入" : "勾選標記為已購入"}
+                                      />
+                                      <span className={`text-xs font-bold shrink-0 ${isHighlightedRow ? 'text-rose-700 font-black' : 'text-zinc-500'}`}>
+                                        #{idx + 1}
+                                      </span>
+                                      {discountLabel && (
+                                        <span
+                                          className={`text-[11px] font-black shrink-0 ${
+                                            isHighlightedRow
+                                              ? 'text-rose-700 bg-rose-200/90 px-1 py-0.5 rounded border border-rose-300 shadow-2xs flex items-center gap-0.5'
+                                              : 'text-red-600'
+                                          }`}
+                                        >
+                                          {discountLabel}
+                                          {isBasePosition && <span className="text-[10px] font-bold text-rose-800">(基準倉位)</span>}
+                                        </span>
+                                      )}
 
-                                    {idx >= 1 && (
-                                      <label
-                                        className="inline-flex items-center cursor-pointer ml-0.5 shrink-0"
-                                        title="點擊勾選切換風險倉位提示"
-                                      >
-                                        <input
-                                          type="checkbox"
-                                          checked={!!row.riskFlag}
-                                          onChange={(e) => {
-                                            const newRows = [...averagingRows];
-                                            newRows[idx] = { ...newRows[idx], riskFlag: e.target.checked };
-                                            setAveragingRows(newRows);
-                                          }}
-                                          className="sr-only"
-                                        />
-                                        <div className={`p-0.5 rounded transition-all flex items-center justify-center ${
-                                          row.riskFlag
-                                            ? 'bg-rose-100 text-rose-600 ring-1 ring-rose-400'
-                                            : 'text-zinc-400 hover:text-rose-500 hover:bg-rose-50'
-                                        }`}>
-                                          <AlertTriangle className="h-3 w-3 fill-current" />
-                                        </div>
-                                      </label>
+                                      {idx >= 1 && (
+                                        <label
+                                          className="inline-flex items-center cursor-pointer ml-0.5 shrink-0"
+                                          title="點擊勾選切換風險倉位提示"
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            checked={row.riskFlag !== undefined ? !!row.riskFlag : isHighlightedRow}
+                                            onChange={(e) => {
+                                              const newRows = [...averagingRows];
+                                              newRows[idx] = { ...newRows[idx], riskFlag: e.target.checked };
+                                              setAveragingRows(newRows);
+                                            }}
+                                            className="sr-only"
+                                          />
+                                          <div className={`p-0.5 rounded transition-all flex items-center justify-center ${
+                                            (row.riskFlag ?? isHighlightedRow)
+                                              ? 'bg-rose-100 text-rose-600 ring-1 ring-rose-400'
+                                              : 'text-zinc-400 hover:text-rose-500 hover:bg-rose-50'
+                                          }`}>
+                                            <AlertTriangle className="h-3 w-3 fill-current" />
+                                          </div>
+                                        </label>
+                                      )}
+                                    </div>
+
+                                    {/* 組別已購數量註明與拆分佔比 */}
+                                    {batchConfigList[idx] && plannedQty > 0 && (
+                                      <div className="text-[10px] text-zinc-600 font-medium mt-0.5 flex items-center gap-1 flex-wrap">
+                                        <span className="text-zinc-500 font-bold">已購:</span>
+                                        <span className="font-mono font-bold text-emerald-800">{batchConfigList[idx].bought}</span>
+                                        <span className="text-zinc-400">/</span>
+                                        <span className="font-mono text-zinc-700">{batchConfigList[idx].size}股</span>
+                                        <span className="text-[9px] text-zinc-400 font-semibold">({batchConfigList[idx].split1.percent}+{batchConfigList[idx].split2.percent})</span>
+                                      </div>
                                     )}
                                   </div>
 
@@ -2035,51 +2463,69 @@ export default function StockTabDetail() {
                                         newRows[idx] = { ...newRows[idx], price: e.target.value };
                                         setAveragingRows(newRows);
                                       }}
-                                      className="h-8 pl-5 pr-1 text-xs text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500"
+                                      className={`h-8 pl-5 pr-1 text-xs font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 ${
+                                        isHighlightedRow ? 'border-rose-300 font-bold text-rose-900 bg-rose-50/30' : ''
+                                      }`}
                                     />
                                   </div>
 
-                                  {/* 預計購入數量 (拆分為兩個輸入框，總和為該列預計購入總數量) + 清除按鈕 */}
-                                  <div className="col-span-4 flex items-center gap-1">
-                                    <div className="flex-1 flex items-center gap-0.5 min-w-0">
-                                      <Input
-                                        type="number"
-                                        placeholder="數量"
-                                        value={row.quantity}
-                                        onChange={(e) => {
+                                  {/* 預計購入數量 (拆分為兩個輸入框，分別為拆分一與拆分二預計購入數量) + 清除按鈕 */}
+                                  <div className="col-span-4 flex flex-col justify-center">
+                                    <div className="flex items-center gap-1">
+                                      <div className="flex-1 flex items-center gap-0.5 min-w-0">
+                                        <Input
+                                          type="number"
+                                          placeholder={batchConfigList[idx] ? `${batchConfigList[idx].split1.size}` : "股數"}
+                                          value={row.quantity}
+                                          onChange={(e) => {
+                                            const newRows = [...averagingRows];
+                                            newRows[idx] = { ...newRows[idx], quantity: e.target.value };
+                                            setAveragingRows(newRows);
+                                          }}
+                                          className="h-8 px-1 text-center text-xs font-mono font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 rounded-lg min-w-0"
+                                          title={`第一拆分股數: ${batchConfigList[idx]?.split1.size || 0} 股 (${batchConfigList[idx]?.split1.percent || ''})`}
+                                        />
+                                        <span className="text-[10px] font-bold text-zinc-400 shrink-0 select-none">+</span>
+                                        <Input
+                                          type="number"
+                                          placeholder={batchConfigList[idx] ? `${batchConfigList[idx].split2.size}` : "股數"}
+                                          value={row.quantity2 ?? ''}
+                                          onChange={(e) => {
+                                            const newRows = [...averagingRows];
+                                            newRows[idx] = { ...newRows[idx], quantity2: e.target.value };
+                                            setAveragingRows(newRows);
+                                          }}
+                                          className="h-8 px-1 text-center text-xs font-mono font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 rounded-lg min-w-0"
+                                          title={`第二拆分股數: ${batchConfigList[idx]?.split2.size || 0} 股 (${batchConfigList[idx]?.split2.percent || ''})`}
+                                        />
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
                                           const newRows = [...averagingRows];
-                                          newRows[idx] = { ...newRows[idx], quantity: e.target.value };
+                                          newRows[idx] = { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false };
                                           setAveragingRows(newRows);
                                         }}
-                                        className="h-8 px-1 text-center text-xs font-mono font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 rounded-lg min-w-0"
-                                        title="第一數量"
-                                      />
-                                      <span className="text-[10px] font-bold text-zinc-400 shrink-0 select-none">+</span>
-                                      <Input
-                                        type="number"
-                                        placeholder="數量"
-                                        value={row.quantity2 ?? ''}
-                                        onChange={(e) => {
-                                          const newRows = [...averagingRows];
-                                          newRows[idx] = { ...newRows[idx], quantity2: e.target.value };
-                                          setAveragingRows(newRows);
-                                        }}
-                                        className="h-8 px-1 text-center text-xs font-mono font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 rounded-lg min-w-0"
-                                        title="第二數量"
-                                      />
+                                        className="h-8 w-5 text-zinc-400 hover:text-red-600 hover:bg-zinc-100 rounded-md shrink-0 transition-colors flex items-center justify-center font-bold text-xs cursor-pointer"
+                                        title="清除這組"
+                                      >
+                                        ✕
+                                      </button>
                                     </div>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const newRows = [...averagingRows];
-                                        newRows[idx] = { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false };
-                                        setAveragingRows(newRows);
-                                      }}
-                                      className="h-8 w-5 text-zinc-400 hover:text-red-600 hover:bg-zinc-100 rounded-md shrink-0 transition-colors flex items-center justify-center font-bold text-xs cursor-pointer"
-                                      title="清除這組"
-                                    >
-                                      ✕
-                                    </button>
+
+                                    {/* 若有已購的數量順便反映在此下方註明 (綠色字體) */}
+                                    {batchConfigList[idx] && plannedQty > 0 && (
+                                      <div className="text-[10px] text-emerald-600 font-bold mt-1 flex items-center justify-between px-1">
+                                        <span className="flex items-center gap-1">
+                                          <span className="text-emerald-700">已購:</span>
+                                          <span className="font-mono text-emerald-800 font-black">{batchConfigList[idx].bought}</span>
+                                          <span className="text-emerald-700">股</span>
+                                        </span>
+                                        <span className="text-zinc-400 font-medium text-[9px]">
+                                          餘額: <span className="font-mono text-zinc-600 font-semibold">{batchConfigList[idx].remaining}</span> 股
+                                        </span>
+                                      </div>
+                                    )}
                                   </div>
 
                                   {/* 狀態 */}
@@ -2095,7 +2541,7 @@ export default function StockTabDetail() {
                                         </span>
                                       )}
                                     </div>
-                                    {idx >= 1 && row.riskFlag && riskMessages[idx] && (
+                                    {idx >= 1 && (row.riskFlag ?? isHighlightedRow) && riskMessages[idx] && (
                                       <span className="text-[9px] font-bold text-red-600 leading-tight whitespace-nowrap">
                                         {riskMessages[idx]}
                                       </span>
@@ -2227,55 +2673,90 @@ export default function StockTabDetail() {
                             {averagingRowsSys2.map((row, idx) => {
                               const discountLabels = ['-3%', '-6%', '-9%', '-12%'];
                               const discountLabel = discountLabels[idx];
+                              const isBasePosition = idx === 1; // 系統二第二欄位 (-6%) 為基準倉位
+                              const isForceClosePosition = idx === 3; // 系統二第四欄位 (-12%) 為強制平倉
+                              const isHighlightedRow = isBasePosition || isForceClosePosition;
                               const riskMessages: Record<number, string> = {
-                                1: '(進入平倉籌碼倉位)',
+                                1: '(進入基準倉位(下注終局))',
                                 2: '(進入負籌碼博弈倉位)',
-                                3: '(進入強制關閉倉位)',
+                                3: '(進入強制平倉)',
                               };
 
                               return (
-                                <div key={idx} className="grid grid-cols-12 gap-1.5 items-center">
+                                <div
+                                  key={idx}
+                                  className={`grid grid-cols-12 gap-1.5 items-center p-1 rounded-xl transition-all ${
+                                    isHighlightedRow
+                                      ? 'bg-rose-50/80 border border-rose-300/90 ring-1 ring-rose-200 shadow-2xs'
+                                      : 'border border-transparent'
+                                  }`}
+                                >
                                   {/* 組別 */}
-                                  <div className="col-span-3 flex items-center gap-1 min-w-0 flex-wrap">
-                                    <input
-                                      type="checkbox"
-                                      checked={!!row.bought}
-                                      onChange={(e) => {
-                                        const newRows = [...averagingRowsSys2];
-                                        newRows[idx] = { ...newRows[idx], bought: e.target.checked };
-                                        setAveragingRowsSys2(newRows);
-                                      }}
-                                      className="rounded border-zinc-300 text-blue-600 focus:ring-blue-500 h-3.5 w-3.5 cursor-pointer shrink-0"
-                                      title={row.bought ? "已購入" : "勾選標記為已購入"}
-                                    />
-                                    <span className="text-xs text-zinc-500 font-bold shrink-0">#{idx + 1}</span>
-                                    {discountLabel && (
-                                      <span className="text-[11px] font-black text-red-600 shrink-0">{discountLabel}</span>
-                                    )}
+                                  <div className="col-span-3 flex flex-col justify-center min-w-0">
+                                    <div className="flex items-center gap-1 min-w-0 flex-wrap">
+                                      <input
+                                        type="checkbox"
+                                        checked={!!row.bought}
+                                        onChange={(e) => {
+                                          const newRows = [...averagingRowsSys2];
+                                          newRows[idx] = { ...newRows[idx], bought: e.target.checked };
+                                          setAveragingRowsSys2(newRows);
+                                        }}
+                                        className="rounded border-zinc-300 text-blue-600 focus:ring-blue-500 h-3.5 w-3.5 cursor-pointer shrink-0"
+                                        title={row.bought ? "已購入" : "勾選標記為已購入"}
+                                      />
+                                      <span className={`text-xs font-bold shrink-0 ${isHighlightedRow ? 'text-rose-700 font-black' : 'text-zinc-500'}`}>
+                                        #{idx + 1}
+                                      </span>
+                                      {discountLabel && (
+                                        <span
+                                          className={`text-[11px] font-black shrink-0 ${
+                                            isHighlightedRow
+                                              ? 'text-rose-700 bg-rose-200/90 px-1 py-0.5 rounded border border-rose-300 shadow-2xs flex items-center gap-0.5'
+                                              : 'text-red-600'
+                                          }`}
+                                        >
+                                          {discountLabel}
+                                          {isBasePosition && <span className="text-[10px] font-bold text-rose-800">(基準倉位)</span>}
+                                          {isForceClosePosition && <span className="text-[10px] font-bold text-rose-800">(強制平倉)</span>}
+                                        </span>
+                                      )}
 
-                                    {idx >= 1 && (
-                                      <label
-                                        className="inline-flex items-center cursor-pointer ml-0.5 shrink-0"
-                                        title="點擊勾選切換風險倉位提示"
-                                      >
-                                        <input
-                                          type="checkbox"
-                                          checked={!!row.riskFlag}
-                                          onChange={(e) => {
-                                            const newRows = [...averagingRowsSys2];
-                                            newRows[idx] = { ...newRows[idx], riskFlag: e.target.checked };
-                                            setAveragingRowsSys2(newRows);
-                                          }}
-                                          className="sr-only"
-                                        />
-                                        <div className={`p-0.5 rounded transition-all flex items-center justify-center ${
-                                          row.riskFlag
-                                            ? 'bg-rose-100 text-rose-600 ring-1 ring-rose-400'
-                                            : 'text-zinc-400 hover:text-rose-500 hover:bg-rose-50'
-                                        }`}>
-                                          <AlertTriangle className="h-3 w-3 fill-current" />
-                                        </div>
-                                      </label>
+                                      {idx >= 1 && (
+                                        <label
+                                          className="inline-flex items-center cursor-pointer ml-0.5 shrink-0"
+                                          title="點擊勾選切換風險倉位提示"
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            checked={row.riskFlag !== undefined ? !!row.riskFlag : isHighlightedRow}
+                                            onChange={(e) => {
+                                              const newRows = [...averagingRowsSys2];
+                                              newRows[idx] = { ...newRows[idx], riskFlag: e.target.checked };
+                                              setAveragingRowsSys2(newRows);
+                                            }}
+                                            className="sr-only"
+                                          />
+                                          <div className={`p-0.5 rounded transition-all flex items-center justify-center ${
+                                            (row.riskFlag ?? isHighlightedRow)
+                                              ? 'bg-rose-100 text-rose-600 ring-1 ring-rose-400'
+                                              : 'text-zinc-400 hover:text-rose-500 hover:bg-rose-50'
+                                          }`}>
+                                            <AlertTriangle className="h-3 w-3 fill-current" />
+                                          </div>
+                                        </label>
+                                      )}
+                                    </div>
+
+                                    {/* 組別已購數量註明與拆分佔比 */}
+                                    {batchConfigList[idx] && plannedQty > 0 && (
+                                      <div className="text-[10px] text-zinc-600 font-medium mt-0.5 flex items-center gap-1 flex-wrap">
+                                        <span className="text-zinc-500 font-bold">已購:</span>
+                                        <span className="font-mono font-bold text-blue-800">{batchConfigList[idx].bought}</span>
+                                        <span className="text-zinc-400">/</span>
+                                        <span className="font-mono text-zinc-700">{batchConfigList[idx].size}股</span>
+                                        <span className="text-[9px] text-zinc-400 font-semibold">({batchConfigList[idx].split1.percent}+{batchConfigList[idx].split2.percent})</span>
+                                      </div>
                                     )}
                                   </div>
 
@@ -2291,58 +2772,76 @@ export default function StockTabDetail() {
                                         newRows[idx] = { ...newRows[idx], price: e.target.value };
                                         setAveragingRowsSys2(newRows);
                                       }}
-                                      className="h-8 pl-5 pr-1 text-xs text-zinc-800 bg-white border-zinc-200 focus-visible:ring-blue-500"
+                                      className={`h-8 pl-5 pr-1 text-xs font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 ${
+                                        isHighlightedRow ? 'border-rose-300 font-bold text-rose-900 bg-rose-50/30' : ''
+                                      }`}
                                     />
                                   </div>
 
-                                  {/* 預計購入數量 (拆分為兩個輸入框，總和為該列預計購入總數量) + 清除按鈕 */}
-                                  <div className="col-span-4 flex items-center gap-1">
-                                    <div className="flex-1 flex items-center gap-0.5 min-w-0">
-                                      <Input
-                                        type="number"
-                                        placeholder="數量"
-                                        value={row.quantity}
-                                        onChange={(e) => {
+                                  {/* 預計購入數量 (拆分為兩個輸入框，分別為拆分一與拆分二預計購入數量) + 清除按鈕 */}
+                                  <div className="col-span-4 flex flex-col justify-center">
+                                    <div className="flex items-center gap-1">
+                                      <div className="flex-1 flex items-center gap-0.5 min-w-0">
+                                        <Input
+                                          type="number"
+                                          placeholder={batchConfigList[idx] ? `${batchConfigList[idx].split1.size}` : "股數"}
+                                          value={row.quantity}
+                                          onChange={(e) => {
+                                            const newRows = [...averagingRowsSys2];
+                                            newRows[idx] = { ...newRows[idx], quantity: e.target.value };
+                                            setAveragingRowsSys2(newRows);
+                                          }}
+                                          className="h-8 px-1 text-center text-xs font-mono font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 rounded-lg min-w-0"
+                                          title={`第一拆分股數: ${batchConfigList[idx]?.split1.size || 0} 股 (${batchConfigList[idx]?.split1.percent || ''})`}
+                                        />
+                                        <span className="text-[10px] font-bold text-zinc-400 shrink-0 select-none">+</span>
+                                        <Input
+                                          type="number"
+                                          placeholder={batchConfigList[idx] ? `${batchConfigList[idx].split2.size}` : "股數"}
+                                          value={row.quantity2 ?? ''}
+                                          onChange={(e) => {
+                                            const newRows = [...averagingRowsSys2];
+                                            newRows[idx] = { ...newRows[idx], quantity2: e.target.value };
+                                            setAveragingRowsSys2(newRows);
+                                          }}
+                                          className="h-8 px-1 text-center text-xs font-mono font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 rounded-lg min-w-0"
+                                          title={`第二拆分股數: ${batchConfigList[idx]?.split2.size || 0} 股 (${batchConfigList[idx]?.split2.percent || ''})`}
+                                        />
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
                                           const newRows = [...averagingRowsSys2];
-                                          newRows[idx] = { ...newRows[idx], quantity: e.target.value };
+                                          newRows[idx] = { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false };
                                           setAveragingRowsSys2(newRows);
                                         }}
-                                        className="h-8 px-1 text-center text-xs font-mono font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-blue-500 rounded-lg min-w-0"
-                                        title="第一數量"
-                                      />
-                                      <span className="text-[10px] font-bold text-zinc-400 shrink-0 select-none">+</span>
-                                      <Input
-                                        type="number"
-                                        placeholder="數量"
-                                        value={row.quantity2 ?? ''}
-                                        onChange={(e) => {
-                                          const newRows = [...averagingRowsSys2];
-                                          newRows[idx] = { ...newRows[idx], quantity2: e.target.value };
-                                          setAveragingRowsSys2(newRows);
-                                        }}
-                                        className="h-8 px-1 text-center text-xs font-mono font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-blue-500 rounded-lg min-w-0"
-                                        title="第二數量"
-                                      />
+                                        className="h-8 w-5 text-zinc-400 hover:text-red-600 hover:bg-zinc-100 rounded-md shrink-0 transition-colors flex items-center justify-center font-bold text-xs cursor-pointer"
+                                        title="清除這組"
+                                      >
+                                        ✕
+                                      </button>
                                     </div>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const newRows = [...averagingRowsSys2];
-                                        newRows[idx] = { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false };
-                                        setAveragingRowsSys2(newRows);
-                                      }}
-                                      className="h-8 w-5 text-zinc-400 hover:text-red-600 hover:bg-zinc-100 rounded-md shrink-0 transition-colors flex items-center justify-center font-bold text-xs cursor-pointer"
-                                      title="清除這組"
-                                    >
-                                      ✕
-                                    </button>
+
+                                    {/* 若有已購的數量順便反映在此下方註明 (綠色字體) */}
+                                    {batchConfigList[idx] && plannedQty > 0 && (
+                                      <div className="text-[10px] text-emerald-600 font-bold mt-1 flex items-center justify-between px-1">
+                                        <span className="flex items-center gap-1">
+                                          <span className="text-emerald-700">已購:</span>
+                                          <span className="font-mono text-emerald-800 font-black">{batchConfigList[idx].bought}</span>
+                                          <span className="text-emerald-700">股</span>
+                                        </span>
+                                        <span className="text-zinc-400 font-medium text-[9px]">
+                                          餘額: <span className="font-mono text-zinc-600 font-semibold">{batchConfigList[idx].remaining}</span> 股
+                                        </span>
+                                      </div>
+                                    )}
                                   </div>
 
                                   {/* 狀態 */}
                                   <div className="col-span-2 text-right pr-0.5 flex flex-col items-end justify-center gap-0.5">
                                     <div>
                                       {row.bought ? (
-                                        <span className="text-[11px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200/80 inline-block whitespace-nowrap">
+                                        <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/80 inline-block whitespace-nowrap">
                                           已購入
                                         </span>
                                       ) : (
@@ -2351,7 +2850,7 @@ export default function StockTabDetail() {
                                         </span>
                                       )}
                                     </div>
-                                    {idx >= 1 && row.riskFlag && riskMessages[idx] && (
+                                    {idx >= 1 && (row.riskFlag ?? isHighlightedRow) && riskMessages[idx] && (
                                       <span className="text-[9px] font-bold text-red-600 leading-tight whitespace-nowrap">
                                         {riskMessages[idx]}
                                       </span>
@@ -2784,6 +3283,15 @@ export default function StockTabDetail() {
                        </div>
                      </div>
                      <div className="space-y-2">
+                        <Label className="font-bold text-zinc-500">交易批次 (可複選)</Label>
+                        <BatchMultiSelect
+                          variant="form"
+                          value={tradeForm.batch}
+                          onChange={(val) => setTradeForm({ ...tradeForm, batch: val })}
+                          placeholder="請選擇交易批次 (可複選)"
+                        />
+                      </div>
+                     <div className="space-y-2">
                        <Label className="font-bold text-zinc-500">日期</Label>
                        <Input type="date" className="bg-white border-zinc-200 text-zinc-800 focus-visible:ring-emerald-500/55" required value={tradeForm.tradeDate} onChange={e => setTradeForm({...tradeForm, tradeDate: e.target.value})} />
                      </div>
@@ -2868,66 +3376,78 @@ export default function StockTabDetail() {
                    >
                      <div className="p-0 bg-transparent overflow-x-auto">
                        <table className="w-full text-sm text-left">
-                         <thead className="text-[11px] sm:text-xs text-zinc-500 bg-zinc-100 uppercase tracking-wider sm:tracking-widest border-b border-zinc-200 font-bold">
-                           <tr>
-                             <th className="px-3 sm:px-6 py-3 sm:py-4 font-semibold">日期</th>
-                             <th className="px-3 sm:px-6 py-3 sm:py-4 font-semibold">方向</th>
-                             <th className="px-3 sm:px-6 py-3 sm:py-4 font-semibold">價格</th>
-                             <th className="px-3 sm:px-6 py-3 sm:py-4 font-semibold">數量</th>
-                             <th className="px-3 sm:px-6 py-3 sm:py-4 font-semibold">總計</th>
-                             <th className="px-3 sm:px-6 py-3 sm:py-4 text-right font-semibold">操作</th>
-                           </tr>
-                         </thead>
-                         <motion.tbody layout>
-                           {trades.length === 0 ? (
-                             <tr><td colSpan={6} className="px-6 py-12 text-center text-zinc-400 font-medium bg-white">暫無交易紀錄</td></tr>
-                           ) : (
-                             trades.map(t => (
-                               <motion.tr 
-                                 key={t.id} 
-                                 layout
-                                 initial={{ opacity: 0 }}
-                                 animate={{ opacity: 1 }}
-                                 exit={{ opacity: 0 }}
-                                 className="border-b border-zinc-150 last:border-0 hover:bg-zinc-50/50 transition-colors text-zinc-800 font-semibold bg-white"
-                               >
-                                 <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">{formatTimestamp(t.tradeDate, 'yyyy/MM/dd')}</td>
-                                 <td className="px-3 sm:px-6 py-3 sm:py-4">
-                                   <div className="flex flex-col gap-1.5 items-start">
-                                     <div className="flex items-center gap-1.5">
-                                       <span className={`px-2 py-0.5 text-[10px] tracking-wider rounded-md font-bold ${t.type === 'BUY' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30'}`}>
-                                         {t.type}
-                                       </span>
-                                       {t.operator === '機器' && (
-                                         <span className="text-[10px] font-bold text-red-500 px-1 py-0.5 rounded border border-red-500/20 bg-red-500/10">機器</span>
-                                       )}
-                                       {t.operator === '人' && (
-                                         <span className="text-[10px] font-bold text-zinc-500 px-1 py-0.5 rounded border border-zinc-200 bg-zinc-50">人</span>
-                                       )}
-                                     </div>
-                                     {t.purpose && (
-                                       <span className="text-[10px] text-center font-semibold text-zinc-650 bg-zinc-50 border border-zinc-200 px-1.5 py-0.5 rounded-sm">
-                                         {t.purpose}
-                                       </span>
-                                     )}
-                                   </div>
-                                 </td>
-                                 <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">${t.price}</td>
-                                 <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">{t.quantity}</td>
-                                 <td className="px-6 py-4 whitespace-nowrap text-zinc-700">${(t.price * t.quantity).toFixed(2)}</td>
-                                 <td className="px-3 sm:px-6 py-3 sm:py-4 text-right">
-                                   <button 
-                                      onClick={() => deleteTrade(t.id)} 
-                                      className="text-rose-650 hover:text-rose-700 py-1.5 px-3 font-semibold rounded-lg hover:bg-rose-500/10 transition-colors"
-                                    >
-                                     刪除
-                                   </button>
-                                 </td>
-                               </motion.tr>
-                             ))
-                           )}
-                         </motion.tbody>
-                       </table>
+                          <thead className="text-[11px] sm:text-xs text-zinc-500 bg-zinc-100 uppercase tracking-wider sm:tracking-widest border-b border-zinc-200 font-bold">
+                            <tr>
+                              <th className="px-3 sm:px-6 py-3 sm:py-4 font-semibold">日期</th>
+                              <th className="px-3 sm:px-6 py-3 sm:py-4 font-semibold">方向</th>
+                              <th className="px-3 sm:px-6 py-3 sm:py-4 font-semibold">交易批次</th>
+                              <th className="px-3 sm:px-6 py-3 sm:py-4 font-semibold">價格</th>
+                              <th className="px-3 sm:px-6 py-3 sm:py-4 font-semibold">數量</th>
+                              <th className="px-3 sm:px-6 py-3 sm:py-4 font-semibold">總計</th>
+                              <th className="px-3 sm:px-6 py-3 sm:py-4 text-right font-semibold">操作</th>
+                            </tr>
+                          </thead>
+                          <motion.tbody layout>
+                            {trades.length === 0 ? (
+                              <tr><td colSpan={7} className="px-6 py-12 text-center text-zinc-400 font-medium bg-white">暫無交易紀錄</td></tr>
+                            ) : (
+                              trades.map(t => (
+                                <motion.tr 
+                                  key={t.id} 
+                                  layout
+                                  initial={{ opacity: 0 }}
+                                  animate={{ opacity: 1 }}
+                                  exit={{ opacity: 0 }}
+                                  className="border-b border-zinc-150 last:border-0 hover:bg-zinc-50/50 transition-colors text-zinc-800 font-semibold bg-white"
+                                >
+                                  <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">{formatTimestamp(t.tradeDate, 'yyyy/MM/dd')}</td>
+                                  <td className="px-3 sm:px-6 py-3 sm:py-4">
+                                    <div className="flex flex-col gap-1.5 items-start">
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        <span className={`px-2 py-0.5 text-[10px] tracking-wider rounded-md font-bold ${t.type === 'BUY' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30'}`}>
+                                          {t.type}
+                                        </span>
+                                        {t.operator === '機器' && (
+                                          <span className="text-[10px] font-bold text-red-500 px-1 py-0.5 rounded border border-red-500/20 bg-red-500/10">機器</span>
+                                        )}
+                                        {t.operator === '人' && (
+                                          <span className="text-[10px] font-bold text-zinc-500 px-1 py-0.5 rounded border border-zinc-200 bg-zinc-50">人</span>
+                                        )}
+                                      </div>
+                                      {t.purpose && (
+                                        <span className="text-[10px] text-center font-semibold text-zinc-650 bg-zinc-50 border border-zinc-200 px-1.5 py-0.5 rounded-sm">
+                                          {t.purpose}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">
+                                     <BatchMultiSelect
+                                       variant="table"
+                                       value={t.batch}
+                                       onChange={(newBatch) => {
+                                         updateTrade(t.id, { batch: newBatch });
+                                         toast.success(newBatch ? `交易批次已更新為「${newBatch}」` : '已清除交易批次');
+                                       }}
+                                       placeholder="選擇批次"
+                                     />
+                                   </td>
+                                  <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">${t.price}</td>
+                                  <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">{t.quantity}</td>
+                                  <td className="px-6 py-4 whitespace-nowrap text-zinc-700">${(t.price * t.quantity).toFixed(2)}</td>
+                                  <td className="px-3 sm:px-6 py-3 sm:py-4 text-right">
+                                    <button 
+                                       onClick={() => deleteTrade(t.id)} 
+                                       className="text-rose-650 hover:text-rose-700 py-1.5 px-3 font-semibold rounded-lg hover:bg-rose-500/10 transition-colors"
+                                     >
+                                      刪除
+                                    </button>
+                                  </td>
+                                </motion.tr>
+                              ))
+                            )}
+                          </motion.tbody>
+                        </table>
                      </div>
                    </motion.div>
                  )}
@@ -2976,17 +3496,17 @@ export default function StockTabDetail() {
                 股價向下攤平試算運算邏輯
               </h4>
               <p className="text-xs text-zinc-600 leading-normal">
-                點擊預計購買數量的規劃批次標籤（第一批 ~ 第四批）時，會將該批次計算出的股數分成平均的 2 份數量（無條件進位 Roundup），並分別填入該組「預計購入數量 (股)」的兩個輸入欄位：
+                點擊預計購買數量的規劃批次標籤（第一批 ~ 第四批）或個別拆分子批時，會將計算出的股數分別填入該組系統一與系統二「預計購入數量 (股)」的兩個輸入欄位：
               </p>
               
               <div className="space-y-2 text-xs pt-1">
                 <div className="bg-white p-3 rounded-lg border border-zinc-200 shadow-sm space-y-1.5">
-                  <span className="font-bold text-emerald-700 block">各批次點擊對應規則：</span>
-                  <div className="text-zinc-600 pl-1 space-y-1">
-                    <div>• <strong>第一批 (15%)</strong>：帶入第一欄位 | 系統一 (<strong>-2%</strong>) / 系統二 (<strong>-3%</strong>) | 數量拆分 2 份分別填入雙輸入框</div>
-                    <div>• <strong>第二批 (25%)</strong>：帶入第二欄位 | 系統一 (<strong>-4%</strong>) / 系統二 (<strong>-6%</strong>) | 數量拆分 2 份分別填入雙輸入框</div>
-                    <div>• <strong>第三批 (35%)</strong>：帶入第三欄位 | 系統一 (<strong>-6%</strong>) / 系統二 (<strong>-9%</strong>) | 數量拆分 2 份分別填入雙輸入框</div>
-                    <div>• <strong>第四批 (25%)</strong>：帶入第四欄位 | 系統一 (<strong>-8%</strong>) / 系統二 (<strong>-12%</strong>) | 數量拆分 2 份分別填入雙輸入框</div>
+                  <span className="font-bold text-emerald-700 block">各批次拆分點擊對應規則：</span>
+                  <div className="text-zinc-600 pl-1 space-y-1.5">
+                    <div>• <strong>第一批 (15%)</strong>：可拆分為 <strong>第一批拆分交易(7%)</strong> + <strong>第一批交易(8%)</strong>，點擊分別帶入第 1 組系統一 (-2%) 與系統二 (-3%) 之預計購入數量</div>
+                    <div>• <strong>第二批 (25%)</strong>：可拆分為 <strong>第二批拆分交易(10%)</strong> + <strong>第二批拆分交易(15%)</strong>，點擊分別帶入第 2 組系統一 (-4%) 與系統二 (-6%) 之預計購入數量</div>
+                    <div>• <strong>第三批 (35%)</strong>：可拆分為 <strong>第三批拆分交易(15%)</strong> + <strong>第三批拆分交易(20%)</strong>，點擊分別帶入第 3 組系統一 (-6%) 與系統二 (-9%) 之預計購入數量</div>
+                    <div>• <strong>第四批 (25%)</strong>：可拆分為 <strong>第四批拆分交易 (10%)</strong> + <strong>第四批拆分交易 (15%)</strong>，點擊分別帶入第 4 組系統一 (-8%) 與系統二 (-12%) 之預計購入數量</div>
                   </div>
                 </div>
               </div>

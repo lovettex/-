@@ -32,6 +32,7 @@ export interface StockTab {
   isNew?: boolean;
   chartAnnotations?: ChartAnnotation[];
   plannedBuyQty?: number;
+  plannedBuyPercent?: number;
   stopLossPrice?: number;
   takeProfitPrice?: number;
   averagingRows?: { price: string; quantity: string; quantity2?: string; bought?: boolean; riskFlag?: boolean }[];
@@ -62,6 +63,7 @@ export interface Trade {
   id: string;
   type: 'BUY' | 'SELL';
   purpose?: '加碼' | '平倉';
+  batch?: string;
   operator?: '機器' | '人';
   price: number;
   quantity: number;

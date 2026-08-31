@@ -4,6 +4,7 @@ import { PlannedOrder, ChartAnnotation } from "../types";
 import { MousePointer, Minus, Square, Type, Trash2, Eraser, Undo2, ArrowUpRight, Move, Download, Share2, Camera, Loader2, SeparatorHorizontal, Check } from "lucide-react";
 import html2canvas from "html2canvas";
 import { toast } from "sonner";
+import { getAxisLetterForColor } from "../utils/visualLinesSync";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -39,7 +40,10 @@ interface Props {
   onUpdateAnnotations?: (annotations: ChartAnnotation[]) => void;
   averageCost?: number;
   averageCostQuantity?: number;
+  averagingRows?: { price: string; quantity: string; quantity2?: string; bought?: boolean; riskFlag?: boolean }[];
   averagingRowsSys2?: { price: string; quantity: string; quantity2?: string; bought?: boolean; riskFlag?: boolean }[];
+  plannedBuyQty?: number;
+  plannedBuyPercent?: number;
   holdingQuantity?: number;
   stockName?: string;
   rating?: number;
@@ -101,13 +105,18 @@ function resolveCollisions<T extends { rawY: number; isFixed?: boolean }>(
   minDisp: number,
 ): (T & { y: number })[] {
   if (items.length === 0) return [];
+  if (items.length === 1) {
+    return [{ ...items[0], y: items[0].isFixed ? items[0].rawY : Math.max(7, Math.min(93, items[0].rawY)) }];
+  }
   
   let sorted = [...items]
     .sort((a, b) => a.rawY - b.rawY)
     .map((item) => ({ ...item, y: item.rawY }));
 
-  const minY = 6;
-  const maxY = 94;
+  const minY = 7;
+  const maxY = 93;
+  // Adaptive minDisp so large numbers of targets don't push beyond container bounds
+  const effectiveMinDisp = Math.min(minDisp, (maxY - minY) / Math.max(1, sorted.length - 1));
 
   // 100 rounds of relaxation
   for (let iter = 0; iter < 100; iter++) {
@@ -116,8 +125,8 @@ function resolveCollisions<T extends { rawY: number; isFixed?: boolean }>(
     // Standard push-apart
     for (let i = 0; i < sorted.length - 1; i++) {
       const diff = sorted[i + 1].y - sorted[i].y;
-      if (diff < minDisp) {
-        const overlap = minDisp - diff;
+      if (diff < effectiveMinDisp) {
+        const overlap = effectiveMinDisp - diff;
         if (sorted[i].isFixed && !sorted[i + 1].isFixed) {
           sorted[i + 1].y += overlap;
           changed = true;
@@ -163,9 +172,9 @@ function resolveCollisions<T extends { rawY: number; isFixed?: boolean }>(
   // Forward sweep guarantee
   for (let i = 0; i < sorted.length - 1; i++) {
     const diff = sorted[i + 1].y - sorted[i].y;
-    if (diff < minDisp * 0.95) {
+    if (diff < effectiveMinDisp * 0.95) {
       if (!sorted[i + 1].isFixed) {
-        sorted[i + 1].y = Math.min(maxY, sorted[i].y + minDisp * 0.95);
+        sorted[i + 1].y = Math.min(maxY, sorted[i].y + effectiveMinDisp * 0.95);
       }
     }
   }
@@ -173,9 +182,9 @@ function resolveCollisions<T extends { rawY: number; isFixed?: boolean }>(
   // Backward sweep guarantee to balance space distribution
   for (let i = sorted.length - 1; i > 0; i--) {
     const diff = sorted[i].y - sorted[i - 1].y;
-    if (diff < minDisp * 0.95) {
+    if (diff < effectiveMinDisp * 0.95) {
       if (!sorted[i - 1].isFixed) {
-        sorted[i - 1].y = Math.max(minY, sorted[i].y - minDisp * 0.95);
+        sorted[i - 1].y = Math.max(minY, sorted[i].y - effectiveMinDisp * 0.95);
       }
     }
   }
@@ -372,7 +381,10 @@ export const StockCardVisualizer: React.FC<Props> = ({
   onUpdateAnnotations,
   averageCost,
   averageCostQuantity,
+  averagingRows,
   averagingRowsSys2,
+  plannedBuyQty,
+  plannedBuyPercent,
   holdingQuantity,
   stockName,
   rating,
@@ -2018,24 +2030,64 @@ export const StockCardVisualizer: React.FC<Props> = ({
     const validAvgSys2Items: any[] = [];
     const avgSys2Prices: number[] = [];
     const hasHoldings = (holdingQuantity !== undefined ? holdingQuantity > 0 : (averageCostQuantity !== undefined && averageCostQuantity > 0));
+    const totalBought = holdingQuantity !== undefined ? holdingQuantity : (averageCostQuantity || 0);
 
     if (hasHoldings && averagingRowsSys2 && averagingRowsSys2.length > 0) {
+      const batchPlannedSizes: number[] = [0, 1, 2, 3].map(i => {
+        const row = averagingRowsSys2[i];
+        const q1 = parseFloat(row?.quantity || '') || 0;
+        const q2 = parseFloat(row?.quantity2 || '') || 0;
+        if (q1 + q2 > 0) return q1 + q2;
+        if (plannedBuyQty && plannedBuyQty > 0) {
+          const pcts = [0.15, 0.25, 0.35, 0.25];
+          return Math.ceil(plannedBuyQty * pcts[i]);
+        }
+        return 0;
+      });
+
       averagingRowsSys2.slice(0, 4).forEach((row, idx) => {
         const parsedPrice = parseFloat(row.price);
         if (!isNaN(parsedPrice) && parsedPrice > 0) {
           avgSys2Prices.push(parsedPrice);
           const discountPct = (idx + 1) * 3; // -3%, -6%, -9%, -12%
+          const isBasePosition = discountPct === 6; // 系統二第 2 欄位 6% 為基準倉位
+          const isForceClosePosition = discountPct === 12; // 系統二第 4 欄位 12% 為強制平倉
+          const isSpecialPosition = isBasePosition || isForceClosePosition;
+          const formattedPrice = parsedPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          
+          const rowPlannedQty = batchPlannedSizes[idx];
+          const priorBatchesSum = batchPlannedSizes.slice(0, idx).reduce((a, b) => a + b, 0);
+          const rowBoughtQty = rowPlannedQty > 0 ? Math.max(0, Math.min(rowPlannedQty, totalBought - priorBatchesSum)) : 0;
+
+          let noteText = "";
+          if (isBasePosition) {
+            noteText = " (基準倉位)";
+          } else if (isForceClosePosition) {
+            noteText = " (強制平倉)";
+          }
+
+          let qtyText = "";
+          if (rowPlannedQty > 0 || rowBoughtQty > 0) {
+            qtyText = ` (預計 ${rowPlannedQty}股 · 已購 ${rowBoughtQty}股)`;
+          }
+
           validAvgSys2Items.push({
             id: `avg2-${idx + 1}`,
             price: parsedPrice,
-            text: `攤平#${idx + 1} $${parsedPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (-${discountPct}%)`,
-            color: "#3b82f6",
+            text: `攤平#${idx + 1} $${formattedPrice} (-${discountPct}%)${noteText}${qtyText}`,
+            color: isSpecialPosition ? "#F7554D" : "#3b82f6",
             isBold: true,
             isAlert: false,
             isAveragingSys2: true,
+            isBasePosition,
+            isForceClosePosition,
+            isSpecialPosition,
+            isClosePosition: isBasePosition,
             groupIndex: idx + 1,
             discountPct,
             isFixed: false,
+            plannedQty: rowPlannedQty,
+            boughtQty: rowBoughtQty,
           });
         }
       });
@@ -2168,11 +2220,11 @@ export const StockCardVisualizer: React.FC<Props> = ({
       })),
     ].sort((a, b) => (b.price ?? 0) - (a.price ?? 0));
 
-    const leftLabels = resolveCollisions(leftItems, 4.5);
-    const slLabels = resolveCollisions(slItems, 4.5);
-    const entryLabels = resolveCollisions(entryItems, 4.5);
-    const tpLabels = resolveCollisions(tpItems, 4.5);
-    const rightLabels = resolveCollisions(rightItems, 4.5);
+    const leftLabels = resolveCollisions(leftItems, 4.8);
+    const slLabels = resolveCollisions(slItems, 4.8);
+    const entryLabels = resolveCollisions(entryItems, 4.8);
+    const tpLabels = resolveCollisions(tpItems, 5.0);
+    const rightLabels = resolveCollisions(rightItems, 5.0);
 
     return {
       supports,
@@ -2187,7 +2239,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
       slLabels,
       tpLabels,
     };
-  }, [plannedOrders, dynamicPrice, averageCost, averageCostQuantity, averagingRowsSys2, holdingQuantity]);
+  }, [plannedOrders, dynamicPrice, averageCost, averageCostQuantity, averagingRows, averagingRowsSys2, plannedBuyQty, holdingQuantity]);
 
   if (!data)
     return (
@@ -2215,14 +2267,22 @@ export const StockCardVisualizer: React.FC<Props> = ({
     const blinkClass = isHighlighted ? "animate-pulse ring-2 ring-[#F28D35] shadow-[0_0_15px_rgba(242,141,53,0.9)] z-30" : "";
     const alertClass = l.isAlert && !isHighlighted ? "ring-2 ring-[#c084fc] animate-pulse z-20 shadow-[0_0_15px_rgba(192,132,252,0.9)]" : (!isHighlighted ? "z-10" : "");
     const isCp = l.isCurrentPrice || l.id === "cp";
-    const finalBgColor = isHighlighted ? "#F28D35" : (l.isAlert ? "#f3e8ff" : l.color);
+    const isSpecialPos = l.isSpecialPosition || l.isBasePosition || l.isForceClosePosition || l.discountPct === 6 || l.discountPct === 12;
+    const isClosePos = isSpecialPos;
+    const finalBgColor = isHighlighted
+      ? "#F28D35"
+      : isSpecialPos
+        ? "#F7554D"
+        : (l.isAlert ? "#f3e8ff" : l.color);
     const finalTextColor = isHighlighted 
       ? "#ffffff"
       : isCp
-        ? "#000000"
-        : l.isAlert
-          ? "#7e22ce"
-          : (l.color === "#ef4444" || l.color === "#f97316" || l.color === "#3b82f6" ? "#ffffff" : "#000000");
+        ? "#ffffff"
+        : isSpecialPos
+          ? "#ffffff"
+          : l.isAlert
+            ? "#7e22ce"
+            : (l.color === "#ef4444" || l.color === "#F7554D" || l.color === "#f97316" || l.color === "#3b82f6" || l.color === "#10b981" || l.color === "#c084fc" ? "#ffffff" : "#451a03");
 
     if (isCardLoading && l.id === "cp") {
       return (
@@ -2239,11 +2299,111 @@ export const StockCardVisualizer: React.FC<Props> = ({
       );
     }
 
+    const renderLabelContent = () => {
+      if (isSpecialPos) {
+        return (
+          <span className="inline-flex items-center gap-1 font-black text-white">
+            <span className="font-bold text-white">攤平#{l.groupIndex}</span>
+            <span className="bg-white text-[#F7554D] px-1 py-0.5 rounded font-mono font-black shadow-2xs leading-none">
+              ${l.price?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </span>
+            <span className="font-mono font-black text-white">(-{l.discountPct}%)</span>
+            <span className="font-black text-white/95">
+              {l.discountPct === 6 || l.isBasePosition ? "(基準倉位)" : "(強制平倉)"}
+            </span>
+            {(l.plannedQty > 0 || (l.boughtQty !== undefined && l.boughtQty > 0)) && (
+              <span className="font-mono text-[10.5px] font-bold text-white/95 bg-black/25 px-1.5 py-0.5 rounded ml-0.5 inline-flex items-center gap-1 leading-none shadow-2xs">
+                {l.plannedQty > 0 && <span>預計 {l.plannedQty}股</span>}
+                {l.plannedQty > 0 && <span>·</span>}
+                <span className="text-emerald-300 font-black">已購 {l.boughtQty || 0}股</span>
+              </span>
+            )}
+          </span>
+        );
+      }
+
+      if (l.isAveragingSys2) {
+        return (
+          <span className="inline-flex items-center gap-1 font-black text-white">
+            <span className="font-bold text-white">攤平#{l.groupIndex}</span>
+            <span className="bg-white text-blue-700 px-1 py-0.5 rounded font-mono font-black shadow-2xs leading-none">
+              ${l.price?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </span>
+            <span className="font-mono font-black text-white">(-{l.discountPct}%)</span>
+            {(l.plannedQty > 0 || (l.boughtQty !== undefined && l.boughtQty > 0)) && (
+              <span className="font-mono text-[10.5px] font-bold text-white/95 bg-black/25 px-1.5 py-0.5 rounded ml-0.5 inline-flex items-center gap-1 leading-none shadow-2xs">
+                {l.plannedQty > 0 && <span>預計 {l.plannedQty}股</span>}
+                {l.plannedQty > 0 && <span>·</span>}
+                <span className="text-emerald-300 font-black">已購 {l.boughtQty || 0}股</span>
+              </span>
+            )}
+          </span>
+        );
+      }
+
+      if (isCp) {
+        return (
+          <span className="inline-flex items-center gap-1 font-black text-white">
+            <span className="font-bold text-white">現價</span>
+            <span className="bg-white text-purple-900 px-1 py-0.5 rounded font-mono font-black shadow-2xs leading-none">
+              ${typeof l.price === "number" ? l.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : l.price}
+            </span>
+          </span>
+        );
+      }
+
+      if (l.isAverageCost || l.id === "ac") {
+        return (
+          <span className="inline-flex items-center gap-1 font-black text-white">
+            <span className="font-bold text-white">均本</span>
+            <span className="bg-white text-orange-700 px-1 py-0.5 rounded font-mono font-black shadow-2xs leading-none">
+              ${typeof l.price === "number" ? l.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : l.price}
+            </span>
+            {averageCostQuantity && averageCostQuantity !== 0 && (
+              <span className="font-mono font-bold text-white/95">
+                ({Math.abs(averageCostQuantity).toLocaleString(undefined, { maximumFractionDigits: 4 })}股)
+              </span>
+            )}
+          </span>
+        );
+      }
+
+      // Check text prefixes for 支撐, 壓力, 止盈, 止損
+      if (typeof l.text === "string") {
+        const prefixes = ["支撐", "壓力", "止盈", "止損"];
+        for (const prefix of prefixes) {
+          if (l.text.startsWith(prefix)) {
+            let numColor = "text-zinc-900";
+            if (prefix === "支撐") numColor = "text-amber-950";
+            else if (prefix === "壓力" || prefix === "止損") numColor = "text-red-700";
+            else if (prefix === "止盈") numColor = "text-emerald-800";
+
+            const priceFormatted = l.price !== undefined && !isNaN(l.price)
+              ? `$${typeof l.price === "number" ? l.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : l.price}`
+              : l.text.replace(prefix, "").trim();
+
+            return (
+              <span className="inline-flex items-center gap-1 font-black">
+                <span className="font-bold">{prefix}</span>
+                <span className={`bg-white ${numColor} px-1 py-0.5 rounded font-mono font-black shadow-2xs leading-none`}>
+                  {priceFormatted}
+                </span>
+              </span>
+            );
+          }
+        }
+      }
+
+      return l.text;
+    };
+
     return (
       <div
         key={l.id}
         title={isCp ? "現價標籤 - 雙擊開啟動態視覺線定位" : undefined}
-        className={`absolute whitespace-nowrap transition-all duration-300 font-extrabold px-1 py-0.5 rounded-sm text-[9.5px] sm:text-[10px] md:text-[10.5px] tracking-tight ${
+        className={`absolute whitespace-nowrap transition-all duration-300 font-extrabold px-1 py-0.5 rounded-sm ${
+          isSpecialPos ? "text-[10.5px] sm:text-[11.0px] md:text-[11.5px]" : "text-[10.2px] sm:text-[10.7px] md:text-[11.2px]"
+        } tracking-tight ${
           isCp ? "cursor-pointer hover:ring-2 hover:ring-blue-400" : "cursor-help"
         } select-none hover:scale-105 hover:z-40 active:scale-95 shadow-sm border border-black/10 leading-none ${extraClass} ${blinkClass} ${alertClass}`}
         style={{
@@ -2316,7 +2476,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
           }
         }}
       >
-        {l.text}
+        {renderLabelContent()}
       </div>
     );
   };
@@ -2362,7 +2522,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
             )}
             {stockName && (
               <div 
-                className="font-extrabold text-base sm:text-2xl tracking-tighter leading-none text-zinc-900 shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
+                className="font-extrabold text-base sm:text-2xl tracking-tighter leading-none text-zinc-900 shrink-0 cursor-pointer hover:opacity-80 transition-opacity flex items-baseline gap-1.5"
                 onTouchStart={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -2370,7 +2530,12 @@ export const StockCardVisualizer: React.FC<Props> = ({
                 }}
                 title="開啟操作設定對話窗"
               >
-                {stockName}
+                <span>{stockName}</span>
+                {(!plannedBuyPercent || plannedBuyPercent <= 0) && (
+                  <span className="text-[11px] sm:text-xs font-semibold text-zinc-400 select-none tracking-normal font-sans">
+                    (Not ready)
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -2568,6 +2733,8 @@ export const StockCardVisualizer: React.FC<Props> = ({
             if (ann.type === 'line' || ann.type === 'arrow') {
               const hexClean = (ann.color || '#000000').replace('#', '').toLowerCase();
               const markerId = ann.type === 'arrow' ? `arrow-${hexClean}` : undefined;
+              const isHorizontal = ann.type === 'line' && Math.abs((ann.y2 ?? ann.y1 ?? 0) - (ann.y1 ?? 0)) < 8 && Math.abs((ann.x2 ?? 100) - (ann.x1 ?? 0)) >= 10;
+              const axisLetter = isHorizontal ? getAxisLetterForColor(ann.color) : "";
               return (
                 <g key={ann.id} className="pointer-events-auto">
                   {/* Invisible wide hit target for easier touch/click in eraser or move mode */}
@@ -2655,11 +2822,25 @@ export const StockCardVisualizer: React.FC<Props> = ({
                       }
                     }}
                   />
+                  {axisLetter && (
+                    <text
+                      x={Math.max(ann.x1, ann.x2) - 1.5}
+                      y={((ann.y1 + ann.y2) / 2) - 1.2}
+                      textAnchor="end"
+                      fill="#9ca3af"
+                      fontSize="3.8"
+                      fontWeight="800"
+                      className="select-none pointer-events-none font-mono tracking-wider opacity-85"
+                    >
+                      {axisLetter}
+                    </text>
+                  )}
                 </g>
               );
             }
             if (ann.type === 'divider') {
               const dividerY = ann.y ?? ann.y1 ?? 0;
+              const axisLetter = getAxisLetterForColor(ann.color);
               return (
                 <g key={ann.id} className="pointer-events-auto">
                   {/* Invisible wide hit target for divider */}
@@ -2746,6 +2927,19 @@ export const StockCardVisualizer: React.FC<Props> = ({
                       }
                     }}
                   />
+                  {axisLetter && (
+                    <text
+                      x="98.5"
+                      y={dividerY - 1.2}
+                      textAnchor="end"
+                      fill="#9ca3af"
+                      fontSize="3.8"
+                      fontWeight="800"
+                      className="select-none pointer-events-none font-mono tracking-wider opacity-85"
+                    >
+                      {axisLetter}
+                    </text>
+                  )}
                 </g>
               );
             }
@@ -2889,18 +3083,32 @@ export const StockCardVisualizer: React.FC<Props> = ({
           )}
 
           {mode === 'divider' && hoverPoint && (
-            <line
-              x1="0"
-              y1={hoverPoint.y}
-              x2="100"
-              y2={hoverPoint.y}
-              stroke={activeColor}
-              strokeWidth={activeThickness}
-              strokeDasharray="4 4"
-              vectorEffect="non-scaling-stroke"
-              opacity="0.8"
-              className="pointer-events-none"
-            />
+            <g className="pointer-events-none">
+              <line
+                x1="0"
+                y1={hoverPoint.y}
+                x2="100"
+                y2={hoverPoint.y}
+                stroke={activeColor}
+                strokeWidth={activeThickness}
+                strokeDasharray="4 4"
+                vectorEffect="non-scaling-stroke"
+                opacity="0.8"
+              />
+              {getAxisLetterForColor(activeColor) && (
+                <text
+                  x="98.5"
+                  y={hoverPoint.y - 1.2}
+                  textAnchor="end"
+                  fill="#9ca3af"
+                  fontSize="3.8"
+                  fontWeight="800"
+                  className="select-none pointer-events-none font-mono tracking-wider opacity-85"
+                >
+                  {getAxisLetterForColor(activeColor)}
+                </text>
+              )}
+            </g>
           )}
 
           {/* Visual eraser pointer indicator */}
@@ -3133,6 +3341,50 @@ export const StockCardVisualizer: React.FC<Props> = ({
                 </div>
               );
             }
+            if (ann.type === 'divider') {
+              const dividerY = ann.y ?? ann.y1 ?? 0;
+              const axisLetter = getAxisLetterForColor(ann.color);
+              if (!axisLetter) return null;
+              return (
+                <div
+                  key={`axis-lbl-${ann.id}`}
+                  style={{
+                    right: '6px',
+                    top: `${dividerY}%`,
+                    transform: 'translateY(-50%)',
+                  }}
+                  className="absolute z-30 pointer-events-none select-none text-[11px] sm:text-[12px] font-black font-mono text-zinc-400 tracking-wider leading-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]"
+                  title={`${axisLetter}軸 (${ann.color})`}
+                >
+                  {axisLetter}
+                </div>
+              );
+            }
+            if (ann.type === 'line') {
+              const isDivider =
+                Math.abs((ann.y2 ?? ann.y1 ?? 0) - (ann.y1 ?? 0)) < 8 &&
+                Math.abs((ann.x2 ?? 100) - (ann.x1 ?? 0)) >= 10;
+              if (isDivider) {
+                const dividerY = (ann.y1 + ann.y2) / 2;
+                const axisLetter = getAxisLetterForColor(ann.color);
+                if (!axisLetter) return null;
+                const rightX = Math.max(ann.x1, ann.x2);
+                return (
+                  <div
+                    key={`axis-lbl-${ann.id}`}
+                    style={{
+                      left: `${Math.min(96, rightX)}%`,
+                      top: `${dividerY}%`,
+                      transform: 'translate(-100%, -50%)',
+                    }}
+                    className="absolute z-30 pointer-events-none select-none text-[11px] sm:text-[12px] font-black font-mono text-zinc-400 tracking-wider leading-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]"
+                    title={`${axisLetter}軸 (${ann.color})`}
+                  >
+                    {axisLetter}
+                  </div>
+                );
+              }
+            }
             return null;
           })}
 
@@ -3212,6 +3464,11 @@ export const StockCardVisualizer: React.FC<Props> = ({
             {hoveredLabel.isAveragingSys2 && (
               <span className="text-[10px] text-blue-300 mt-1">
                 系統二向下攤平 (組別 #{hoveredLabel.groupIndex}, -{hoveredLabel.discountPct}%)
+                {hoveredLabel.discountPct === 6 || hoveredLabel.isBasePosition
+                  ? " - (基準倉位(下注終局))"
+                  : hoveredLabel.discountPct === 12 || hoveredLabel.isForceClosePosition
+                    ? " - (強制平倉)"
+                    : ""}
               </span>
             )}
           </div>
@@ -3276,7 +3533,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
             {/* Divider Horizontal Line Mode Button */}
             <button
               type="button"
-              title="水平線 Divider (點擊卡片任何位置劃出全幅水平線)"
+              title="水平線 Divider (黑色: D軸, 藍色: B軸, 綠色: G軸, 黃色: Y軸, 紅色: R軸)"
               onClick={() => { setMode('divider'); setInputCoords(null); }}
               className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'divider' ? 'bg-zinc-900/15 text-zinc-950 font-bold ring-1 ring-zinc-200' : 'text-zinc-700 hover:text-zinc-950 hover:bg-zinc-900/5'}`}
             >

@@ -831,6 +831,11 @@ export default function Dashboard() {
   const handleViewTabChange = useCallback((newTab: "active" | "real" | "completed" | "notes") => {
     playClickSound();
     setActiveViewTab(newTab);
+    if (newTab === "real") {
+      setMetricsTradeTab("real");
+    } else if (newTab === "active") {
+      setMetricsTradeTab("simulated");
+    }
     setTimeout(() => {
       if (newTab === "active" || newTab === "real") {
         scrollToElement("#active-cards-section", -20);
@@ -1711,6 +1716,7 @@ export default function Dashboard() {
   const [isEditingBankBalance, setIsEditingBankBalance] = useState(false);
   const [editBankBalanceVal, setEditBankBalanceVal] = useState("");
   const [isDesktopMetricsOpen, setIsDesktopMetricsOpen] = useState(false);
+  const [metricsTradeTab, setMetricsTradeTab] = useState<"simulated" | "real">("simulated");
   const [isMobileCinemaSidebarOpen, setIsMobileCinemaSidebarOpen] = useState(false);
 
   useEffect(() => {
@@ -3453,6 +3459,21 @@ export default function Dashboard() {
         return acc + (stats.unrealizedPnL || 0);
       }, 0);
   }, [activeTabs, activeTabTrades]);
+
+  const realUnrealizedPnL = useMemo(() => {
+    return activeTabs
+      .filter((tab) => tab.tradeType === "real")
+      .reduce((acc, tab) => {
+        const trades = activeTabTrades[tab.id] || [];
+        const stats = calculateStats(trades, tab.currentPrice);
+        return acc + (stats.unrealizedPnL || 0);
+      }, 0);
+  }, [activeTabs, activeTabTrades]);
+
+  const realHoldingCount = useMemo(() => activeTabs.filter((t) => t.tradeType === "real").length, [activeTabs]);
+  const simulatedHoldingCount = useMemo(() => activeTabs.filter((t) => t.tradeType === "simulated").length, [activeTabs]);
+  const maxStrategyRiskPool60 = (totalCapital * 2) * 0.6;
+  const remainingStrategyRiskPool = maxStrategyRiskPool60 - totalRealHoldingCost;
 
   const remainingBalance = totalCapital - totalRealHoldingCost;
 
@@ -5319,9 +5340,9 @@ export default function Dashboard() {
             <DialogFooter className="pt-4 pb-2">
               <button
                 type="submit"
-                className="glass-button w-full h-[52px] sm:h-auto justify-center bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 hover:bg-emerald-500/20 py-0 sm:py-6 text-[17px] font-bold transition-all rounded-xl"
+                className="glass-btn-emerald w-full py-3.5 sm:py-2.5 rounded-xl font-bold text-base sm:text-sm shadow-md"
               >
-                å»ºç«‹äº¤æ˜“æ—¥èªŒæª”æ¡ˆ
+                ç¢ºèªæ–°å¢
               </button>
             </DialogFooter>
           </form>
@@ -5330,11 +5351,58 @@ export default function Dashboard() {
 
       {/* 2. Main content container, aligned nicely with responsive layout */}
       <div className={`space-y-4 sm:space-y-6 mx-auto mt-4 sm:mt-6 px-2 sm:px-4 ${activeViewTab === "notes" || activeViewTab === "completed" ? "w-full max-w-full lg:max-w-[98%] xl:max-w-[1920px]" : "max-w-[1600px]"}`}>
+      {/* Desktop Metrics Bar Header with Tab Switcher & Collapsible Controller */}
+      <div className="hidden sm:flex items-center justify-between mt-2 mb-1.5">
+        <div className="flex items-center gap-1 bg-black/[0.04] p-1 rounded-xl border border-black/5">
+          <button
+            type="button"
+            onClick={() => {
+              playClickSound();
+              setMetricsTradeTab("simulated");
+              setIsDesktopMetricsOpen(true);
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer select-none ${
+              metricsTradeTab === "simulated"
+                ? "bg-white text-zinc-900 shadow-xs ring-1 ring-black/5"
+                : "text-[#666661] hover:text-[#2C2C2A] hover:bg-black/[0.02]"
+            }`}
+          >
+            <Gamepad2 className={`w-3.5 h-3.5 ${metricsTradeTab === "simulated" ? "text-amber-600" : "text-zinc-500"}`} />
+            <span>æ¨¡æ“¬äº¤æ˜“</span>
+            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+              metricsTradeTab === "simulated" ? "bg-amber-100 text-amber-800" : "bg-black/[0.05] text-zinc-500"
+            }`}>
+              {simulatedHoldingCount}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              playClickSound();
+              setMetricsTradeTab("real");
+              setIsDesktopMetricsOpen(true);
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer select-none ${
+              metricsTradeTab === "real"
+                ? "bg-white text-zinc-900 shadow-xs ring-1 ring-black/5"
+                : "text-[#666661] hover:text-[#2C2C2A] hover:bg-black/[0.02]"
+            }`}
+          >
+            <ShieldCheck className={`w-3.5 h-3.5 ${metricsTradeTab === "real" ? "text-emerald-600" : "text-zinc-500"}`} />
+            <span>çœŸå¯¦äº¤æ˜“</span>
+            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+              metricsTradeTab === "real" ? "bg-emerald-100 text-emerald-800" : "bg-black/[0.05] text-zinc-500"
+            }`}>
+              {realHoldingCount}
+            </span>
+          </button>
+        </div>
 
-      {/* Desktop Metrics Collapsible Controller */}
-      <div className="hidden sm:flex justify-end mt-2 mb-1">
         <button
-          onClick={() => setIsDesktopMetricsOpen(!isDesktopMetricsOpen)}
+          onClick={() => {
+            playClickSound();
+            setIsDesktopMetricsOpen(!isDesktopMetricsOpen);
+          }}
           className="flex items-center gap-1.5 text-xs font-medium text-[#666661] hover:text-[#2C2C2A] transition-colors py-1.5 px-3 rounded-lg bg-black/[0.03] hover:bg-black/[0.06] cursor-pointer"
         >
           <span>{isDesktopMetricsOpen ? "éš±è—æ•¸æ“šçµ±è¨ˆ" : "é¡¯ç¤ºæ•¸æ“šçµ±è¨ˆ"}</span>
@@ -5352,72 +5420,151 @@ export default function Dashboard() {
             className="hidden sm:block overflow-hidden"
           >
             <div className="bg-white/80 backdrop-blur-sm border border-black/5 shadow-xs rounded-2xl p-4 sm:p-5 select-none mb-3">
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-y-4 gap-x-0 divide-x-0 lg:divide-x divide-black/[0.06]">
-                {[
-                  {
-                    title: "ç¸½æŒè‚¡æ•¸",
-                    rawValue: activeTabs.length,
-                    prefix: "",
-                    suffix: "",
-                    decimals: 0,
-                    pnl: undefined,
-                    showPlus: false,
-                  },
-                  {
-                    title: "ç¸½å¯¦ç¾æç›Š",
-                    rawValue: totalCompletedPnL,
-                    prefix: "$",
-                    suffix: "",
-                    decimals: 2,
-                    pnl: totalCompletedPnL,
-                    showPlus: true,
-                  },
-                  {
-                    title: "æ¨¡æ“¬å¯¦ç¾æç›Š",
-                    rawValue: simulatedCompletedPnL,
-                    prefix: "$",
-                    suffix: "",
-                    decimals: 2,
-                    pnl: simulatedCompletedPnL,
-                    showPlus: true,
-                  },
-                  {
-                    title: "æ¨¡æ“¬æœªå¯¦ç¾ç¸½æç›Š",
-                    rawValue: simulatedUnrealizedPnL,
-                    prefix: "$",
-                    suffix: "",
-                    decimals: 2,
-                    pnl: simulatedUnrealizedPnL,
-                    showPlus: true,
-                  },
-                  {
-                    title: "çœŸå¯¦äº¤æ˜“å‹ç‡",
-                    rawValue: realWinRate,
-                    prefix: "",
-                    suffix: "%",
-                    decimals: 0,
-                    pnl: undefined,
-                    showPlus: false,
-                  },
-                  {
-                    title: "æ¨¡æ“¬äº¤æ˜“å‹ç‡",
-                    rawValue: simulatedWinRate,
-                    prefix: "",
-                    suffix: "%",
-                    decimals: 0,
-                    pnl: undefined,
-                    showPlus: false,
-                  },
-                ].map((metric: any, i) => {
+              <div className={`grid grid-cols-2 sm:grid-cols-4 ${metricsTradeTab === "real" ? "lg:grid-cols-8" : "lg:grid-cols-6"} gap-y-4 gap-x-0 divide-x-0 lg:divide-x divide-black/[0.06]`}>
+                {(metricsTradeTab === "real"
+                  ? [
+                      {
+                        title: "çœŸå¯¦æŒè‚¡æ•¸",
+                        rawValue: realHoldingCount,
+                        prefix: "",
+                        suffix: "",
+                        decimals: 0,
+                        pnl: undefined,
+                        showPlus: false,
+                      },
+                      {
+                        title: "çœŸå¯¦å¯¦ç¾æç›Š",
+                        rawValue: totalCompletedPnL,
+                        prefix: "$",
+                        suffix: "",
+                        decimals: 2,
+                        pnl: totalCompletedPnL,
+                        showPlus: true,
+                      },
+                      {
+                        title: "çœŸå¯¦æœªå¯¦ç¾æç›Š",
+                        rawValue: realUnrealizedPnL,
+                        prefix: "$",
+                        suffix: "",
+                        decimals: 2,
+                        pnl: realUnrealizedPnL,
+                        showPlus: true,
+                      },
+                      {
+                        title: "çœŸå¯¦äº¤æ˜“å‹ç‡",
+                        rawValue: Number(realWinRate),
+                        prefix: "",
+                        suffix: "%",
+                        decimals: 0,
+                        pnl: undefined,
+                        showPlus: false,
+                      },
+                      {
+                        title: "ç›®å‰ç¸½è³‡é‡‘",
+                        rawValue: totalCapital,
+                        prefix: "$",
+                        suffix: "",
+                        decimals: 2,
+                        pnl: undefined,
+                        showPlus: false,
+                      },
+                      {
+                        title: "æœ€å¤§ç­–ç•¥é¢¨éšªæ± (60%)",
+                        rawValue: maxStrategyRiskPool60,
+                        prefix: "$",
+                        suffix: "",
+                        decimals: 2,
+                        pnl: undefined,
+                        showPlus: false,
+                        isRiskPool: true,
+                      },
+                      {
+                        title: "ç›®å‰å·²ä½¿ç”¨é¡åº¦",
+                        rawValue: totalRealHoldingCost,
+                        prefix: "$",
+                        suffix: "",
+                        decimals: 2,
+                        pnl: undefined,
+                        showPlus: false,
+                      },
+                      {
+                        title: "å‰©é¤˜å¯é‹ç”¨é‡‘é¡",
+                        rawValue: remainingStrategyRiskPool,
+                        prefix: "$",
+                        suffix: "",
+                        decimals: 2,
+                        pnl: undefined,
+                        showPlus: false,
+                        isRiskPool: true,
+                      },
+                    ]
+                  : [
+                      {
+                        title: "æ¨¡æ“¬æŒè‚¡æ•¸",
+                        rawValue: simulatedHoldingCount,
+                        prefix: "",
+                        suffix: "",
+                        decimals: 0,
+                        pnl: undefined,
+                        showPlus: false,
+                      },
+                      {
+                        title: "æ¨¡æ“¬æŒå€‰æˆæœ¬",
+                        rawValue: totalVirtualHoldingCost,
+                        prefix: "$",
+                        suffix: "",
+                        decimals: 2,
+                        pnl: undefined,
+                        showPlus: false,
+                      },
+                      {
+                        title: "æ¨¡æ“¬å¯¦ç¾æç›Š",
+                        rawValue: simulatedCompletedPnL,
+                        prefix: "$",
+                        suffix: "",
+                        decimals: 2,
+                        pnl: simulatedCompletedPnL,
+                        showPlus: true,
+                      },
+                      {
+                        title: "æ¨¡æ“¬æœªå¯¦ç¾ç¸½æç›Š",
+                        rawValue: simulatedUnrealizedPnL,
+                        prefix: "$",
+                        suffix: "",
+                        decimals: 2,
+                        pnl: simulatedUnrealizedPnL,
+                        showPlus: true,
+                      },
+                      {
+                        title: "æ¨¡æ“¬äº¤æ˜“å‹ç‡",
+                        rawValue: Number(simulatedWinRate),
+                        prefix: "",
+                        suffix: "%",
+                        decimals: 0,
+                        pnl: undefined,
+                        showPlus: false,
+                      },
+                      {
+                        title: "æ¨¡æ“¬å·²å®Œæˆæ•¸",
+                        rawValue: simulatedCompletedTabs.length,
+                        prefix: "",
+                        suffix: "",
+                        decimals: 0,
+                        pnl: undefined,
+                        showPlus: false,
+                      },
+                    ]
+                ).map((metric: any, i) => {
                   const isPnl = metric.pnl !== undefined;
                   const isPositive = metric.rawValue >= 0;
-                  const valueColor = isPnl 
-                    ? (isPositive ? "text-[#085041]" : "text-rose-700") 
+                  const valueColor = isPnl
+                    ? (isPositive ? "text-[#085041]" : "text-rose-700")
+                    : metric.isRiskPool
+                    ? (metric.rawValue >= 0 ? "text-[#085041]" : "text-rose-700")
                     : "text-[#2C2C2A]";
-
                   return (
-                    <div 
-                      key={i} 
+                    <div
+                      key={i}
                       className="flex flex-col items-center justify-center text-center py-1.5 px-2 sm:px-3 lg:px-4"
                     >
                       <span className="text-[11px] sm:text-[12px] font-semibold text-[#666661] tracking-wide uppercase whitespace-nowrap">
@@ -5443,76 +5590,192 @@ export default function Dashboard() {
 
       {/* Floating Metrics Section - Mobile Only (Ultra-Compact & Designed for Mobile Reading proportions) */}
       <div className="block sm:hidden select-none px-4 py-4 mb-3 bg-transparent">
-        <div className="grid grid-cols-2 gap-y-3.5 gap-x-0 text-center">
-          {/* Row 1, Col 1: ç¸½æŒè‚¡æ•¸ */}
-          <div className="flex flex-col items-center justify-center border-r border-black/[0.06] py-1">
-            <span className="text-[11px] text-[#888780] font-medium tracking-wide">
-              ç¸½æŒè‚¡æ•¸
+        {/* Mobile Tab Switcher */}
+        <div className="flex items-center justify-center gap-1 bg-black/[0.04] p-1 rounded-xl border border-black/5 mb-3 w-fit mx-auto">
+          <button
+            type="button"
+            onClick={() => {
+              playClickSound();
+              setMetricsTradeTab("simulated");
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+              metricsTradeTab === "simulated"
+                ? "bg-white text-zinc-900 shadow-xs ring-1 ring-black/5"
+                : "text-[#666661]"
+            }`}
+          >
+            <Gamepad2 className="w-3.5 h-3.5 text-amber-600" />
+            <span>æ¨¡æ“¬äº¤æ˜“</span>
+            <span className="text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold bg-amber-100 text-amber-800">
+              {simulatedHoldingCount}
             </span>
-            <div className="text-[19px] font-bold tracking-tight mt-0.5 text-[#2C2C2A] font-mono leading-none">
-              <AnimatedNumber value={activeTabs.length} prefix="" suffix="" decimals={0} showPlus={false} />
-            </div>
-          </div>
-
-          {/* Row 1, Col 2: ç¸½å¯¦ç¾æç›Š */}
-          <div className="flex flex-col items-center justify-center py-1">
-            <span className="text-[11px] text-[#888780] font-medium tracking-wide">
-              ç¸½å¯¦ç¾æç›Š
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              playClickSound();
+              setMetricsTradeTab("real");
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+              metricsTradeTab === "real"
+                ? "bg-white text-zinc-900 shadow-xs ring-1 ring-black/5"
+                : "text-[#666661]"
+            }`}
+          >
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+            <span>çœŸå¯¦äº¤æ˜“</span>
+            <span className="text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold bg-emerald-100 text-emerald-800">
+              {realHoldingCount}
             </span>
-            <div className={`text-[19px] font-bold tracking-tight mt-0.5 font-mono leading-none ${totalCompletedPnL >= 0 ? "text-[#085041]" : "text-rose-700"}`}>
-              <AnimatedNumber value={totalCompletedPnL} prefix="$" suffix="" decimals={2} showPlus={true} />
-            </div>
-          </div>
-
-          {/* Divider 1 */}
-          <div className="col-span-2 h-[0.5px] bg-black/[0.06] mx-2" />
-
-          {/* Row 2, Col 1: æ¨¡æ“¬å¯¦ç¾æç›Š */}
-          <div className="flex flex-col items-center justify-center border-r border-black/[0.06] py-1">
-            <span className="text-[11px] text-[#888780] font-medium tracking-wide">
-              æ¨¡æ“¬å¯¦ç¾æç›Š
-            </span>
-            <div className={`text-[19px] font-bold tracking-tight mt-0.5 font-mono leading-none ${simulatedCompletedPnL >= 0 ? "text-[#085041]" : "text-rose-700"}`}>
-              <AnimatedNumber value={simulatedCompletedPnL} prefix="$" suffix="" decimals={2} showPlus={true} />
-            </div>
-          </div>
-
-          {/* Row 2, Col 2: æ¨¡æ“¬æœªå¯¦ç¾ç¸½æç›Š */}
-          <div className="flex flex-col items-center justify-center py-1">
-            <span className="text-[11px] text-[#888780] font-medium tracking-wide">
-              æ¨¡æ“¬æœªå¯¦ç¾ç¸½æç›Š
-            </span>
-            <div className={`text-[19px] font-bold tracking-tight mt-0.5 font-mono leading-none ${simulatedUnrealizedPnL >= 0 ? "text-[#085041]" : "text-rose-700"}`}>
-              <AnimatedNumber value={simulatedUnrealizedPnL} prefix="$" suffix="" decimals={2} showPlus={true} />
-            </div>
-          </div>
-
-          {/* Divider 2 */}
-          <div className="col-span-2 h-[0.5px] bg-black/[0.06] mx-2" />
-
-          {/* Row 3, Col 1: çœŸå¯¦äº¤æ˜“å‹ç‡ */}
-          <div className="flex flex-col items-center justify-center border-r border-black/[0.06] py-1">
-            <span className="text-[11px] text-[#888780] font-medium tracking-wide">
-              çœŸå¯¦äº¤æ˜“å‹ç‡
-            </span>
-            <div className="text-[19px] font-bold tracking-tight mt-0.5 text-[#2C2C2A] font-mono leading-none">
-              <AnimatedNumber value={Number(realWinRate)} prefix="" suffix="%" decimals={0} showPlus={false} />
-            </div>
-          </div>
-
-          {/* Row 3, Col 2: æ¨¡æ“¬äº¤æ˜“å‹ç‡ */}
-          <div className="flex flex-col items-center justify-center py-1">
-            <span className="text-[11px] text-[#888780] font-medium tracking-wide">
-              æ¨¡æ“¬äº¤æ˜“å‹ç‡
-            </span>
-            <div className="text-[19px] font-bold tracking-tight mt-0.5 text-[#2C2C2A] font-mono leading-none">
-              <AnimatedNumber value={Number(simulatedWinRate)} prefix="" suffix="%" decimals={0} showPlus={false} />
-            </div>
-          </div>
+          </button>
         </div>
+
+        {metricsTradeTab === "real" ? (
+          <div className="grid grid-cols-2 gap-y-3.5 gap-x-0 text-center bg-white/70 backdrop-blur-sm border border-black/5 rounded-2xl p-3 shadow-xs">
+            {/* Row 1, Col 1: çœŸå¯¦æŒè‚¡æ•¸ */}
+            <div className="flex flex-col items-center justify-center border-r border-black/[0.06] py-1">
+              <span className="text-[11px] text-[#888780] font-medium tracking-wide">
+                çœŸå¯¦æŒè‚¡æ•¸
+              </span>
+              <div className="text-[19px] font-bold tracking-tight mt-0.5 text-[#2C2C2A] font-mono leading-none">
+                <AnimatedNumber value={realHoldingCount} prefix="" suffix="" decimals={0} showPlus={false} />
+              </div>
+            </div>
+            {/* Row 1, Col 2: çœŸå¯¦äº¤æ˜“å‹ç‡ */}
+            <div className="flex flex-col items-center justify-center py-1">
+              <span className="text-[11px] text-[#888780] font-medium tracking-wide">
+                çœŸå¯¦äº¤æ˜“å‹ç‡
+              </span>
+              <div className="text-[19px] font-bold tracking-tight mt-0.5 text-[#2C2C2A] font-mono leading-none">
+                <AnimatedNumber value={Number(realWinRate)} prefix="" suffix="%" decimals={0} showPlus={false} />
+              </div>
+            </div>
+            {/* Divider 1 */}
+            <div className="col-span-2 h-[0.5px] bg-black/[0.06] mx-2" />
+            {/* Row 2, Col 1: çœŸå¯¦å¯¦ç¾æç›Š */}
+            <div className="flex flex-col items-center justify-center border-r border-black/[0.06] py-1">
+              <span className="text-[11px] text-[#888780] font-medium tracking-wide">
+                çœŸå¯¦å¯¦ç¾æç›Š
+              </span>
+              <div className={`text-[19px] font-bold tracking-tight mt-0.5 font-mono leading-none ${totalCompletedPnL >= 0 ? "text-[#085041]" : "text-rose-700"}`}>
+                <AnimatedNumber value={totalCompletedPnL} prefix="$" suffix="" decimals={2} showPlus={true} />
+              </div>
+            </div>
+            {/* Row 2, Col 2: çœŸå¯¦æœªå¯¦ç¾æç›Š */}
+            <div className="flex flex-col items-center justify-center py-1">
+              <span className="text-[11px] text-[#888780] font-medium tracking-wide">
+                çœŸå¯¦æœªå¯¦ç¾æç›Š
+              </span>
+              <div className={`text-[19px] font-bold tracking-tight mt-0.5 font-mono leading-none ${realUnrealizedPnL >= 0 ? "text-[#085041]" : "text-rose-700"}`}>
+                <AnimatedNumber value={realUnrealizedPnL} prefix="$" suffix="" decimals={2} showPlus={true} />
+              </div>
+            </div>
+            {/* Divider 2 */}
+            <div className="col-span-2 h-[0.5px] bg-black/[0.06] mx-2" />
+            {/* Row 3, Col 1: ç›®å‰ç¸½è³‡é‡‘ */}
+            <div className="flex flex-col items-center justify-center border-r border-black/[0.06] py-1">
+              <span className="text-[11px] text-[#888780] font-medium tracking-wide">
+                ç›®å‰ç¸½è³‡é‡‘
+              </span>
+              <div className="text-[17px] font-bold tracking-tight mt-0.5 text-[#2C2C2A] font-mono leading-none">
+                <AnimatedNumber value={totalCapital} prefix="$" suffix="" decimals={2} showPlus={false} />
+              </div>
+            </div>
+            {/* Row 3, Col 2: æœ€å¤§ç­–ç•¥é¢¨éšªæ± (60%) */}
+            <div className="flex flex-col items-center justify-center py-1">
+              <span className="text-[11px] text-emerald-800 font-semibold tracking-wide">
+                æœ€å¤§ç­–ç•¥é¢¨éšªæ± (60%)
+              </span>
+              <div className="text-[17px] font-bold tracking-tight mt-0.5 text-[#085041] font-mono leading-none">
+                <AnimatedNumber value={maxStrategyRiskPool60} prefix="$" suffix="" decimals={2} showPlus={false} />
+              </div>
+            </div>
+            {/* Divider 3 */}
+            <div className="col-span-2 h-[0.5px] bg-black/[0.06] mx-2" />
+            {/* Row 4, Col 1: ç›®å‰å·²ä½¿ç”¨é¡åº¦ */}
+            <div className="flex flex-col items-center justify-center border-r border-black/[0.06] py-1">
+              <span className="text-[11px] text-[#888780] font-medium tracking-wide">
+                ç›®å‰å·²ä½¿ç”¨é¡åº¦
+              </span>
+              <div className="text-[17px] font-bold tracking-tight mt-0.5 text-[#2C2C2A] font-mono leading-none">
+                <AnimatedNumber value={totalRealHoldingCost} prefix="$" suffix="" decimals={2} showPlus={false} />
+              </div>
+            </div>
+            {/* Row 4, Col 2: å‰©é¤˜å¯é‹ç”¨é‡‘é¡ */}
+            <div className="flex flex-col items-center justify-center py-1">
+              <span className="text-[11px] text-emerald-800 font-semibold tracking-wide">
+                å‰©é¤˜å¯é‹ç”¨é‡‘é¡
+              </span>
+              <div className={`text-[17px] font-bold tracking-tight mt-0.5 font-mono leading-none ${remainingStrategyRiskPool >= 0 ? "text-[#085041]" : "text-rose-700"}`}>
+                <AnimatedNumber value={remainingStrategyRiskPool} prefix="$" suffix="" decimals={2} showPlus={false} />
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-y-3.5 gap-x-0 text-center bg-white/70 backdrop-blur-sm border border-black/5 rounded-2xl p-3 shadow-xs">
+            {/* Row 1, Col 1: æ¨¡æ“¬æŒè‚¡æ•¸ */}
+            <div className="flex flex-col items-center justify-center border-r border-black/[0.06] py-1">
+              <span className="text-[11px] text-[#888780] font-medium tracking-wide">
+                æ¨¡æ“¬æŒè‚¡æ•¸
+              </span>
+              <div className="text-[19px] font-bold tracking-tight mt-0.5 text-[#2C2C2A] font-mono leading-none">
+                <AnimatedNumber value={simulatedHoldingCount} prefix="" suffix="" decimals={0} showPlus={false} />
+              </div>
+            </div>
+            {/* Row 1, Col 2: æ¨¡æ“¬æŒå€‰æˆæœ¬ */}
+            <div className="flex flex-col items-center justify-center py-1">
+              <span className="text-[11px] text-[#888780] font-medium tracking-wide">
+                æ¨¡æ“¬æŒå€‰æˆæœ¬
+              </span>
+              <div className="text-[19px] font-bold tracking-tight mt-0.5 text-[#2C2C2A] font-mono leading-none">
+                <AnimatedNumber value={totalVirtualHoldingCost} prefix="$" suffix="" decimals={2} showPlus={false} />
+              </div>
+            </div>
+            {/* Divider 1 */}
+            <div className="col-span-2 h-[0.5px] bg-black/[0.06] mx-2" />
+            {/* Row 2, Col 1: æ¨¡æ“¬å¯¦ç¾æç›Š */}
+            <div className="flex flex-col items-center justify-center border-r border-black/[0.06] py-1">
+              <span className="text-[11px] text-[#888780] font-medium tracking-wide">
+                æ¨¡æ“¬å¯¦ç¾æç›Š
+              </span>
+              <div className={`text-[19px] font-bold tracking-tight mt-0.5 font-mono leading-none ${simulatedCompletedPnL >= 0 ? "text-[#085041]" : "text-rose-700"}`}>
+                <AnimatedNumber value={simulatedCompletedPnL} prefix="$" suffix="" decimals={2} showPlus={true} />
+              </div>
+            </div>
+            {/* Row 2, Col 2: æ¨¡æ“¬æœªå¯¦ç¾ç¸½æç›Š */}
+            <div className="flex flex-col items-center justify-center py-1">
+              <span className="text-[11px] text-[#888780] font-medium tracking-wide">
+                æ¨¡æ“¬æœªå¯¦ç¾ç¸½æç›Š
+              </span>
+              <div className={`text-[19px] font-bold tracking-tight mt-0.5 font-mono leading-none ${simulatedUnrealizedPnL >= 0 ? "text-[#085041]" : "text-rose-700"}`}>
+                <AnimatedNumber value={simulatedUnrealizedPnL} prefix="$" suffix="" decimals={2} showPlus={true} />
+              </div>
+            </div>
+            {/* Divider 2 */}
+            <div className="col-span-2 h-[0.5px] bg-black/[0.06] mx-2" />
+            {/* Row 3, Col 1: æ¨¡æ“¬äº¤æ˜“å‹ç‡ */}
+            <div className="flex flex-col items-center justify-center border-r border-black/[0.06] py-1">
+              <span className="text-[11px] text-[#888780] font-medium tracking-wide">
+                æ¨¡æ“¬äº¤æ˜“å‹ç‡
+              </span>
+              <div className="text-[19px] font-bold tracking-tight mt-0.5 text-[#2C2C2A] font-mono leading-none">
+                <AnimatedNumber value={Number(simulatedWinRate)} prefix="" suffix="%" decimals={0} showPlus={false} />
+              </div>
+            </div>
+            {/* Row 3, Col 2: æ¨¡æ“¬å·²å®Œæˆæ•¸ */}
+            <div className="flex flex-col items-center justify-center py-1">
+              <span className="text-[11px] text-[#888780] font-medium tracking-wide">
+                æ¨¡æ“¬å·²å®Œæˆæ•¸
+              </span>
+              <div className="text-[19px] font-bold tracking-tight mt-0.5 text-[#2C2C2A] font-mono leading-none">
+                <AnimatedNumber value={simulatedCompletedTabs.length} prefix="" suffix="" decimals={0} showPlus={false} />
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Tab Row (No bottom border, pill styling for selected tab with Lenis smooth scroll and motion layout transition) */}
+{/* Tab Row (No bottom border, pill styling for selected tab with Lenis smooth scroll and motion layout transition) */}
       <div className="flex flex-row snap-x flex-nowrap w-full gap-2 sm:gap-3 mb-4 sm:mb-6 mt-4 sm:mt-5 overflow-x-auto pt-2 pb-px scrollbar-hide">
         {[
           { id: "active", label: "æŒæœ‰ä¸­", icon: Activity, count: visibleActiveTabs.filter((t) => t.tradeType === "simulated").length },
@@ -7138,7 +7401,7 @@ export default function Dashboard() {
                                     <div
                                       key={tab.id}
                                       id={`stock-card-${tab.id}`}
-                                      className={`card-wrapper w-[calc(100vw-32px)] sm:w-[410px] md:w-[410px] shrink-0 flex flex-col transition-all duration-300 ${isCardExpanded ? "min-h-[460px] h-[460px] select-none" : "min-h-[135px] h-[135px]"}`}
+                                      className={`card-wrapper w-[calc(100vw-32px)] sm:w-[500px] md:w-[520px] shrink-0 flex flex-col transition-all duration-300 ${isCardExpanded ? "min-h-[580px] h-[580px] select-none" : "min-h-[135px] h-[135px]"}`}
                                       style={{ touchAction: isCardExpanded ? "none" : "auto" }}
                                       onMouseDown={(e) => {
                                         if (e.button !== 0) return; // only left click
@@ -7261,7 +7524,7 @@ export default function Dashboard() {
                                       }}
                                     >
                                       <div
-                                        className={`card-inner-parallax w-full h-full flex flex-col transition-all duration-300 ${isCardExpanded ? "min-h-[460px] h-[460px]" : "min-h-[135px] h-[135px]"}`}
+                                        className={`card-inner-parallax w-full h-full flex flex-col transition-all duration-300 ${isCardExpanded ? "min-h-[580px] h-[580px]" : "min-h-[135px] h-[135px]"}`}
                                         style={{ perspective: "1200px" }}
                                       >
                                         <motion.div
@@ -7279,7 +7542,7 @@ export default function Dashboard() {
                                             delay: idx * 0.05,
                                           }}
                                           key={tab.id}
-                                          className={`relative w-full h-full flex-1 flex flex-col cursor-pointer slide-drawer-container transition-all duration-300 ${isCardExpanded ? "min-h-[460px] h-[460px]" : "min-h-[135px] h-[135px]"} ${
+                                          className={`relative w-full h-full flex-1 flex flex-col cursor-pointer slide-drawer-container transition-all duration-300 ${isCardExpanded ? "min-h-[580px] h-[580px]" : "min-h-[135px] h-[135px]"} ${
                                             ((flippedCards[tab.id] !== false) && isCardExpanded) ? "show-back" : ""
                                           } ${activeTabStrategies[tab.id]?.observeChecked ? "card-breathe-observe" : activeTabStrategies[tab.id]?.closeChecked ? "card-breathe-close" : activeTabStrategies[tab.id]?.slChecked ? "card-breathe-sl" : activeTabStrategies[tab.id]?.addChecked ? "card-breathe-add" : activeTabStrategies[tab.id]?.tpChecked ? "card-breathe-tp" : ""}`}
                                         >
@@ -7330,18 +7593,18 @@ export default function Dashboard() {
                                           </div>
 
                                           {/* Top Center Edge Badge: Stock's Unrealized PnL (æœªå¯¦ç¾æç›Š) */}
-                                          <div className="absolute -top-3 left-1/2 -translate-x-1/2 z-40 pointer-events-none flex items-center justify-center">
+                                          <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 z-40 pointer-events-none flex items-center justify-center">
                                             <div
-                                              className={`flex items-center gap-1.5 text-[11px] font-black px-3 py-0.5 rounded-full border shadow-md whitespace-nowrap select-none font-mono ${
+                                              className={`flex items-center gap-1.5 text-[14px] font-black whitespace-nowrap select-none font-mono ${
                                                 unrealizedPnL > 0
-                                                  ? "bg-emerald-600 text-white border-emerald-400/80 shadow-emerald-600/30"
+                                                  ? "text-emerald-500"
                                                   : unrealizedPnL < 0
-                                                    ? "bg-rose-600 text-white border-rose-400/80 shadow-rose-600/30"
-                                                    : "bg-zinc-700 text-zinc-100 border-zinc-500/80 shadow-zinc-900/20"
+                                                    ? "text-rose-500"
+                                                    : "text-zinc-400"
                                               }`}
                                             >
-                                              <span className="text-[10px] font-medium opacity-90">æœªå¯¦ç¾:</span>
-                                              <span className="tabular-nums">
+                                              <span className="text-[13px] font-bold opacity-90">æœªå¯¦ç¾:</span>
+                                              <span className="tabular-nums font-black">
                                                 {unrealizedPnL > 0 ? "+" : ""}
                                                 ${unrealizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                               </span>
@@ -7513,6 +7776,11 @@ export default function Dashboard() {
                                                       >
                                                         {tab.symbol}
                                                       </span>
+                                                      {(!tab.plannedBuyPercent || tab.plannedBuyPercent <= 0) && (
+                                                        <span className="text-xs font-semibold text-zinc-400 select-none tracking-normal font-sans">
+                                                          (Not ready)
+                                                        </span>
+                                                      )}
                                                       {typeof tab.currentPrice === "number" && (
                                                         <div className="flex items-baseline gap-1.5 shrink-0">
                                                           <span className="text-xl font-black tabular-nums text-zinc-900 leading-none">
@@ -7865,7 +8133,10 @@ export default function Dashboard() {
                                               onUpdateAnnotations={(annots) => updateTab(tab.id, { chartAnnotations: annots })}
                                               averageCost={stats.totalQuantity !== 0 ? stats.averagePrice : undefined}
                                               averageCostQuantity={stats.totalQuantity !== 0 ? stats.totalQuantity : undefined}
+                                              averagingRows={tab.averagingRows}
                                               averagingRowsSys2={tab.averagingRowsSys2}
+                                              plannedBuyQty={tab.plannedBuyQty}
+                                              plannedBuyPercent={tab.plannedBuyPercent}
                                               holdingQuantity={tab.status !== "COMPLETED" ? stats.totalQuantity : 0}
                                               stockName={tab.symbol}
                                               rating={tab.rating}
@@ -10100,426 +10371,15 @@ export default function Dashboard() {
 
                       {/* Templates list with edit/delete buttons */}
                       <div className="flex flex-col gap-2 mt-2">
-                        <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
-                          ç¾æœ‰æ¨¡ç‰ˆåˆ—è¡¨ ({dynamicPrompts.length})
-                        </div>
-                        <div className="flex flex-col gap-1.5 max-h-[220px] overflow-y-auto pr-1">
-                          {dynamicPrompts.map((tmpl) => (
-                            <div
-                              key={`tmpl-item-${tmpl.id}`}
-                              className="p-2.5 bg-[#141414] rounded border border-white/5 flex items-center justify-between gap-3 text-xs hover:border-white/10 transition-all"
-                            >
-                              <div className="flex-1 min-w-0">
-                                <div className="font-bold text-zinc-200 truncate">{tmpl.name}</div>
-                                <div className="text-[10px] text-zinc-500 truncate mt-0.5">{tmpl.template}</div>
-                                {tmpl.note && (
-                                  <div className="text-[9px] text-amber-500/80 truncate mt-0.5 font-sans">
-                                    å‚™è¨»: {tmpl.note}
-                                  </div>
-                                )}
-                              </div>
-                              <div className="flex items-center gap-1.5 shrink-0">
-                                <button
-                                  onClick={() => {
-                                    setEditingPromptId(tmpl.id);
-                                    setEditingPromptName(tmpl.name);
-                                    setEditingPromptTemplate(tmpl.template);
-                                    setEditingPromptNote(tmpl.note || "");
-                                    playClickSound();
-                                  }}
-                                  className="p-1 hover:bg-white/10 rounded text-zinc-400 hover:text-white transition-all cursor-pointer"
-                                  title="ç·¨è¼¯æ¨™é¡Œèˆ‡å…§å®¹"
-                                >
-                                  <Edit3 className="w-3.5 h-3.5" />
-                                </button>
-                                {confirmDeletePromptId === tmpl.id ? (
-                                  <div className="flex items-center gap-1 bg-[#1a1a1a] p-1 rounded border border-red-500/20">
-                                    <button
-                                      onClick={() => {
-                                        const updated = dynamicPrompts.filter(p => p.id !== tmpl.id);
-                                        handleSavePrompts(updated);
-                                        if (aiSelectedPromptId === tmpl.id) {
-                                          setAiSelectedPromptId(updated[0].id);
-                                        }
-                                        toast.success("æ¨¡ç‰ˆå·²åˆªé™¤");
-                                        playClickSound();
-                                        setConfirmDeletePromptId(null);
-                                      }}
-                                      className="px-1.5 py-0.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded text-[9px] transition-all cursor-pointer"
-                                      title="ç¢ºèªåˆªé™¤"
-                                    >
-                                      ç¢ºèª
-                                    </button>
-                                    <button
-                                      onClick={() => {
-                                        setConfirmDeletePromptId(null);
-                                        playClickSound();
-                                      }}
-                                      className="px-1.5 py-0.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded text-[9px] transition-all cursor-pointer"
-                                      title="å–æ¶ˆ"
-                                    >
-                                      å–æ¶ˆ
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <button
-                                    onClick={() => {
-                                      if (dynamicPrompts.length <= 1) {
-                                        toast.error("è‡³å°‘éœ€è¦ä¿ç•™ä¸€å€‹æŒ‡ä»¤æ¨¡ç‰ˆ");
-                                        return;
-                                      }
-                                      setConfirmDeletePromptId(tmpl.id);
-                                      playClickSound();
-                                    }}
-                                    className="p-1 hover:bg-red-500/10 rounded text-zinc-500 hover:text-red-400 transition-all cursor-pointer"
-                                    title="åˆªé™¤"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    {/* Stock selector */}
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold tracking-wider text-zinc-500 font-sans uppercase">
-                        é¸æ“‡åˆ†æå€‹è‚¡ SELECT STOCK
-                      </label>
-                      <select
-                        value={aiSelectedSymbol}
-                        onChange={(e) => {
-                          setAiSelectedSymbol(e.target.value);
-                          playClickSound();
-                        }}
-                        className="w-full bg-[#161616] border border-white/10 text-white rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-red-500/50 cursor-pointer"
-                      >
-                        {uniqueActiveStocks.length === 0 ? (
-                          <option value="">(ç„¡æŒæœ‰æˆ–çœŸå¯¦äº¤æ˜“å€‹è‚¡)</option>
-                        ) : (
-                          uniqueActiveStocks.map((stock) => (
-                            <option key={`ai-stock-${stock.symbol}`} value={stock.symbol}>
-                              {stock.symbol} {stock.companyName ? `(${stock.companyName})` : ""}
-                            </option>
-                          ))
-                        )}
-                      </select>
-                    </div>
-
-                    {/* Prompt Template selector */}
-                    <div className="flex flex-col gap-1.5">
-                      <div className="flex items-center justify-between">
-                        <label className="text-[10px] font-bold tracking-wider text-zinc-500 font-sans uppercase">
-                          é¸æ“‡æŒ‡ä»¤æ¨¡ç‰ˆ SELECT PROMPT
-                        </label>
-                        <button
-                          onClick={() => {
-                            setIsPromptManagerOpen(true);
-                            playClickSound();
-                          }}
-                          className="text-[10px] text-amber-500 hover:text-amber-400 flex items-center gap-1 bg-amber-500/5 hover:bg-amber-500/10 px-2.5 py-0.5 rounded border border-amber-500/20 transition-all cursor-pointer font-bold"
-                          title="ç®¡ç†/æ–°å¢/ä¿®æ”¹ Prompt ç¯„æœ¬"
-                        >
-                          <Settings className="w-3 h-3 text-amber-500" />
-                          <span>ç®¡ç†æ¨¡ç‰ˆ</span>
-                        </button>
-                      </div>
-                      <select
-                        value={aiSelectedPromptId}
-                        onChange={(e) => {
-                          setAiSelectedPromptId(e.target.value);
-                          playClickSound();
-                        }}
-                        className="w-full bg-[#161616] border border-white/10 text-white rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-red-500/50 cursor-pointer"
-                      >
-                        {dynamicPrompts.map((tmpl) => (
-                          <option key={`ai-tmpl-${tmpl.id}`} value={tmpl.id}>
-                            {tmpl.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {/* Prompt Template Memo Field */}
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold tracking-wider text-zinc-500 font-sans uppercase">
-                        æŒ‡ä»¤æ¨¡ç‰ˆå‚™è¨» PROMPT TEMPLATE NOTE
-                      </label>
-                      <textarea
-                        value={(() => {
-                          const selectedTmpl = dynamicPrompts.find(t => t.id === aiSelectedPromptId);
-                          return selectedTmpl?.note || "";
-                        })()}
-                        onChange={(e) => {
-                          const updated = dynamicPrompts.map(p => 
-                            p.id === aiSelectedPromptId 
-                              ? { ...p, note: e.target.value } 
-                              : p
-                          );
-                          handleSavePrompts(updated);
-                        }}
-                        placeholder="åœ¨æ­¤è¼¸å…¥æ­¤æŒ‡ä»¤æ¨¡ç‰ˆçš„å‚™è¨»èªªæ˜ï¼Œä¿®æ”¹å¾Œæœƒè‡ªå‹•å­˜æª”..."
-                        className="w-full h-20 bg-[#161616] border border-white/10 text-white rounded-lg p-2.5 text-xs focus:outline-none focus:border-red-500/50 resize-none font-sans leading-relaxed"
-                      />
-                    </div>
-                                {/* Prompt Text Box */}
-                    <div className="flex-1 flex flex-col gap-1.5 relative min-h-[220px]">
-                      <div className="flex items-center justify-between gap-2">
-                        <label className="text-[10px] font-bold tracking-wider text-zinc-500 font-sans uppercase">
-                          ç·¨è¼¯èˆ‡ç¢ºèªæŒ‡ä»¤ EDIT PROMPT
-                        </label>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              handlePasteOnDeepseek();
-                              playClickSound();
-                            }}
-                            className="lg:hidden text-[10px] text-amber-500 hover:text-amber-400 flex items-center gap-1 bg-amber-500/10 hover:bg-amber-500/20 px-2.5 py-1 rounded transition-all cursor-pointer border border-amber-500/20 font-bold"
-                          >
-                            <span>Deepseek</span>
-                            <ExternalLink className="w-3 h-3" />
-                          </button>
-                          <button
-                            onClick={async () => {
-                              try {
-                                await navigator.clipboard.writeText(aiPromptText);
-                                toast.success("å·²è¤‡è£½ Prompt åˆ°å‰ªè²¼ç°¿ï¼");
-                              } catch (err) {
-                                toast.error("è¤‡è£½å¤±æ•—");
-                              }
-                            }}
-                            className="text-[10px] text-zinc-400 hover:text-white flex items-center gap-1 bg-white/5 hover:bg-white/10 px-2 py-1 rounded transition-all cursor-pointer border border-white/5"
-                          >
-                            <Copy className="w-3 h-3" />
-                            <span>è¤‡è£½æŒ‡ä»¤</span>
-                          </button>
-                        </div>
-                      </div>
-                      <textarea
-                        value={aiPromptText}
-                        onChange={(e) => setAiPromptText(e.target.value)}
-                        className="flex-1 w-full bg-[#161616] border border-white/10 text-white rounded-lg p-3 text-xs focus:outline-none focus:border-red-500/50 resize-none font-sans leading-relaxed"
-                        placeholder="è«‹è¼¸å…¥æˆ–é¸æ“‡ Prompt æŒ‡ä»¤..."
-                      />
-                    </div>
-
-                    {/* Compact Tab Interface for AI Operations */}
-                    <div className="flex flex-col gap-2 mt-2 border-t border-white/5 pt-3 shrink-0">
-                      <div className="flex bg-black/40 p-0.5 rounded-lg border border-white/[0.03] gap-0.5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setAiLeftTab("upload");
-                            playClickSound();
-                          }}
-                          className={`flex-1 py-1 text-[11px] font-bold rounded transition-all cursor-pointer text-center ${
-                            aiLeftTab === "upload"
-                              ? "bg-[#10b981]/15 text-[#10b981] border border-[#10b981]/25"
-                              : "text-zinc-400 hover:text-zinc-200"
-                          }`}
-                        >
-                          ä¸Šå‚³ HTML
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setAiLeftTab("preview");
-                            playClickSound();
-                          }}
-                          className={`flex-1 py-1 text-[11px] font-bold rounded transition-all cursor-pointer text-center relative ${
-                            aiLeftTab === "preview"
-                              ? "bg-zinc-800 text-white border border-white/[0.05]"
-                              : "text-zinc-400 hover:text-zinc-200"
-                          }`}
-                        >
-                          é è¦½ HTML
-                          {aiHtmlFiles.length > 0 && (
-                            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[8px] px-1 rounded-full scale-90">
-                              {aiHtmlFiles.length}
-                            </span>
-                          )}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            handlePasteOnDeepseek();
-                            playClickSound();
-                          }}
-                          className="hidden lg:block flex-1 py-1 text-[11px] font-bold rounded transition-all cursor-pointer text-center text-amber-500 hover:text-amber-400 hover:bg-amber-500/5 border border-transparent hover:border-amber-500/10"
-                        >
-                          Paste on Deepseek
-                        </button>
-                      </div>
-
-                      {/* Tab Content Areas */}
-                      <div className="mt-1">
-                        {aiLeftTab === "upload" && (
-                          <div className="flex flex-col gap-2 p-2 bg-white/[0.02] border border-white/5 rounded-lg animate-fadeIn">
-                            <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
-                              ä¸Šå‚³å€‹è‚¡åˆ†ææª”æ¡ˆ ({aiSelectedSymbol || "å°šæœªé¸æ“‡"})
-                            </div>
-                            
-                            <div className="relative border border-dashed border-white/10 hover:border-emerald-500/30 rounded-lg p-3 transition-all flex flex-col items-center justify-center gap-1.5 bg-black/20">
-                              <input
-                                type="file"
-                                accept=".html"
-                                onChange={handleAiFileChange}
-                                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                              />
-                              <Upload className="w-5 h-5 text-zinc-500" />
-                              <span className="text-[10px] text-zinc-300 font-sans">
-                                {aiUploadFile ? aiUploadFile.name : "é»æ“Šæˆ–æ‹–æ›³é¸æ“‡ HTML æª”æ¡ˆ"}
-                              </span>
-                              {aiUploadFile && (
-                                <span className="text-[8px] font-mono text-zinc-500">
-                                  å¤§å°: {(aiUploadFile.size / 1024).toFixed(1)} KB
-                                </span>
-                              )}
-                            </div>
-
-                            <button
-                              onClick={handleAiUploadSubmit}
-                              disabled={isAiUploading || !aiUploadContent || !aiSelectedSymbol}
-                              className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-800 disabled:text-zinc-500 text-white font-bold rounded-lg transition-all text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow"
-                            >
-                              {isAiUploading ? (
-                                <>
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                  <span>æ­£åœ¨ä¸Šå‚³ä¸­...</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Check className="w-3.5 h-3.5" />
-                                  <span>ç¢ºèªä¸Šå‚³ HTML æª”æ¡ˆ</span>
-                                </>
-                              )}
-                            </button>
-                          </div>
-                        )}
-
-                        {aiLeftTab === "preview" && (
-                          <div className="flex flex-col gap-2 animate-fadeIn">
-                            {aiHtmlFiles.length === 0 ? (
-                              <div className="text-center py-4 text-xs text-zinc-500 bg-white/[0.01] border border-white/5 rounded-lg">
-                                ç›®å‰æ­¤å€‹è‚¡å°šç„¡ä¸Šå‚³ä¹‹ HTML æª”æ¡ˆã€‚
-                              </div>
-                            ) : (
-                              <div className="flex flex-col gap-1.5 max-h-[220px] overflow-y-auto scrollbar-hide">
-                                {aiHtmlFiles.map((file) => (
-                                  <div
-                                    key={`ai-html-${file.id}`}
-                                    onClick={() => {
-                                      setSelectedPreviewUrl(`/api/html-files/${file.id}/content`);
-                                      setSelectedPreviewLinkTitle(file.fileName);
-                                      setAiMobileActiveTab("preview");
-                                      playClickSound();
-                                    }}
-                                    className={`px-2.5 py-1.5 rounded bg-[#141414]/80 border text-xs cursor-pointer flex items-center justify-between transition-all group ${
-                                      selectedPreviewUrl === `/api/html-files/${file.id}/content`
-                                        ? "border-amber-500/40 bg-amber-500/10 text-white"
-                                        : "border-white/5 text-zinc-400 hover:text-white hover:bg-white/5"
-                                    }`}
-                                  >
-                                    <div className="flex-1 min-w-0 pr-2">
-                                      <div className="truncate font-semibold text-[11px]">{file.fileName}</div>
-                                      <div className="text-[9px] font-mono text-zinc-500 mt-0.5">{file.uploadDate}</div>
-                                    </div>
-                                    {confirmDeleteFileId === file.id ? (
-                                      <div className="flex items-center gap-1 bg-[#1a1a1a] p-1 rounded border border-red-500/20 animate-fadeIn" onClick={(e) => e.stopPropagation()}>
-                                        <button
-                                          onClick={(e) => {
-                                            handleAiDeleteHtmlFile(e, file.id);
-                                            playClickSound();
-                                          }}
-                                          className="px-1.5 py-0.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded text-[9px] transition-all cursor-pointer"
-                                          title="ç¢ºèªåˆªé™¤"
-                                        >
-                                          ç¢ºèª
-                                        </button>
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            setConfirmDeleteFileId(null);
-                                            playClickSound();
-                                          }}
-                                          className="px-1.5 py-0.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded text-[9px] transition-all cursor-pointer"
-                                          title="å–æ¶ˆ"
-                                        >
-                                          å–æ¶ˆ
-                                        </button>
-                                      </div>
-                                    ) : (
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setConfirmDeleteFileId(file.id);
-                                          playClickSound();
-                                        }}
-                                        className="p-1 text-zinc-500 hover:text-red-400 hover:bg-white/5 rounded transition-colors"
-                                        title="åˆªé™¤æª”æ¡ˆ"
-                                      >
-                                        <Trash className="w-3.5 h-3.5" />
-                                      </button>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {/* Right Column (Output Display) */}
-              <div className={`flex-1 flex-col min-h-0 bg-[#121212]/50 border border-white/5 rounded-xl overflow-hidden p-4 ${aiMobileActiveTab === "preview" ? "flex" : "hidden lg:flex"}`}>
-                
-                {/* Content Container */}
-                <div className="flex-1 overflow-hidden relative">
-                  
-                  {selectedPreviewUrl ? (
-                    <div className="h-full w-full flex flex-col">
-                      <div className="flex-1 bg-white rounded-lg overflow-hidden relative">
-                        <a
-                          href={selectedPreviewUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="absolute top-3 right-3 z-10 p-2 bg-black/85 hover:bg-black/95 text-white hover:text-[#10b981] rounded-full transition-all border border-white/10 hover:border-[#10b981]/50 shadow-lg flex items-center justify-center cursor-pointer"
-                          title="åœ¨æ–°åˆ†é é–‹å•Ÿ"
-                        >
-                          <ExternalLink className="w-4 h-4" />
-                        </a>
-                        <iframe
-                          src={selectedPreviewUrl}
-                          className="w-full h-full border-none"
-                          title="HTML Preview"
-                          sandbox="allow-scripts allow-same-origin allow-popups"
-                        />
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="h-full flex flex-col items-center justify-center gap-2 text-zinc-650">
-                      <FileJson className="w-10 h-10 text-zinc-800" />
-                      <p className="text-xs text-zinc-550 font-medium font-sans">è«‹åœ¨å·¦å´é¸æ“‡æˆ–ä¸Šå‚³å€‹è‚¡çš„ HTML æª”æ¡ˆä»¥é€²è¡Œç¶²é é è¦½ã€‚</p>
-                    </div>
-                  )}
-
-                </div>
-              </div>
-
-            </div>
-          </motion.div>
-        </AnimatePresence>
-      )}
-    </div>
-    </div>
-  );
-}
+                        <div className="text-[10px] font-bold text-zinc-500 uppercasexœì\msÜÄßO±\3ŒÌ {²M÷Æ8fHIH›WO­Ó­}ªu’*éb›Ã3IˆCB¡	$¸€Á„Œi H€ƒï|~ÅWè>H:I'í®ÎNH™®’ÈÒ>şÿ¿ııvk+ê¢f,ÈKZÚ¹Ã¿©eçí;ë;77v.®µ×ŞïnÜR«¶b(M=i›Ëuò:4ÜúêPj5•BM;ŞJı¨ºâ8/)8›×á2Àÿ“USŠ%—ò£ ¡,ËuùT¹\´–gyÚóº¹$¯ÈJÓ5eË%æ@ân(–$¹Kã‡Äø’vù ‹pe¼5‡ë“56ä-ü÷¼V[[å|¹%—ÑH«ò©ß—FğÏ,°Í¦Qƒ5P5m´VŞòRµR%³pƒ¬BÃE/ü¥é¸ÚüŠ\…î„™¾aàÂeW^v@ÏÛX¤’R y0ÍÕLCVt=Çì/kı¹Š/¦\Í—ä"s‰R*0W®šzâUÍPårwºi¨Šs‡éT£Õ…«IKkƒÔ|ªD$«×Êh¨Ğpåb~ÔoÍ¸¥£Ç¢z]4QEO>É‘6V=TU´„¨‹…ƒ}½dÎ´¨óKûÜµîÍûc¡nò„–tQlìC¼º„êI‰ˆäû@áÔmÍX“µjÓuMC`¬¦1©kêâxK"xÑšVºS5¤WÆE£5ÉC…¡?TºHû€•Ìx²+E$yĞ™~ED¸_{är‚U¡fWÈ¤Ncˆ“„¾Z‘Ë –|Ì[èá©=UAªNß#ÏÈ›1XjÓvL[¶L‹%iq5WGØ¹{³ûàëÎÍk»—»kÚ¯Ñşê;ş÷"ª[Á‹1ñ’<Œt ÿŸ(PÀ0Õ4æ5»qêĞ…¾DƒññqàI5xv hKQeoTğÏ,À’÷BÖ–E4´/¬õ¸¤ù¸ ér\Ğ´jH»Ğ4™×t4TÉÂ•ZxòèM¤ áRWŒš§•ÓŞŠ8’×b†:´y )Ú4ZW}˜´²CÆM@b¢¯:¿_§Š³ÙF(¢ò´¸¦â¸y§©ªĞq¤œÇZïŞi¯mí^ÛÅ%\Á&ZĞØ'“ôD2šº.\ÎáÆºe²ıY+„ å±MÊÏÈæ?!´¦‡r=~EjìqñağÓï»[oyk!ô©˜:##…Ô,¦ûÂpGŞ~4H±?23¸Ôî‹´‘}ô`XÚÈ“?øÒFş5\,>l1k¿}µóíÚş
+­sßL”@ƒ1±}5ƒ´(«x§H´şAe”²ì«¡m›¶”ë^ø¦}û»ëgº7ÎnÿôÏ+×¶ïiŸ¹Ô¹|aûş&Åñ,ğmC·iÂâ/ø^ªšfİµÓSA-Mc¿>MJä¿£Qş‹ß)Æé¥¯•Â°/ˆÌ3¶âÔË{a¾Ytu?lXî+CŒV˜3~™ú«”_¤aM%¹úVá)0íšê"RL÷L<UH…—/•ÁWt¥
+õ4ŸMÈGqmÆ$<p‹ VnA[UÈ0vÏŞë¼{¡½öFç£wuÏm€é©cS“3`zæÄä‹©kAzš::O©Vô&oõØøôJ,]0#`}#A.”Gˆ9­Y‚yW± ›'M3±H·XÑØyDp<;ïü3›èç,E«‡^²¾ 	Æ¤88çMµéŒ™MW×(¦½G1cq´(ˆféòÑjÚ_›pBuµÓ(A°bË©È±†+¦…Õ[ñ\î°´s~£sù,v·¯]İYÿ¸ıõíï7;¼K…o¨R _¤÷ˆG:LÜàş»ˆÜë2uv+šL>”´ÈŸy‡ŠêÜª/Å‘Ç<¾íÿSE[¬b¬`yAó9'è¾:4‡ÆË±!š?{€Ó§6­öJj4~S±“Rà»ä:Šr=/±ğDö19L}L>ùò‰ã'gû'–EÈs&ÊŒö¨CW÷¸b(Ğ>aACrmÄf#‡LJÈŠoÑƒ0ë£1ïcxäzq‡Ñ·ì=DP@¹Ü³“}v½Ê–Ù“$yô]_mì¼óF¡sõvûÓ
+Û?}Õyï;_Çv¾>ßYÿWz%,±«LCû¼ßÄl36¡êYql¦ı¤Œ ?bH.›¤²™aVºáÛ4ƒpöÒÿ)Ç ”cà vßÖMBÕá(µ/şö~Š¹²ZåS–G´±‡<¯A´!ıf”ğ6H#¸Ş.f¦Ÿ<613^:135 ¡‚{¦ØPáa‡Äßi$Äñ``-IR8©·‹krq03è~TbBuúDšy6•d ÇÄ°¼3á'æƒõ•|Ø }ØD‘[ ŸÏ[O<ğ1EZ°Êû~X,~ÌšşAQÌFj«Â:ÒhçÚë7;·6»îµ_ÿı%,ø;×ÏSÙïnmu>øû/.Óm¿ıãåÎúßº¶Ú—®´o}ĞÙzÍKúîß¿EÔeDMö°O4ÀaCG{5xÇÇ*5Œ6Ô•e˜Ê…R¸‡h–J8—]ğœ¹œ	-CLÎİÂ½ÆF'I
+’¸öÏL!•7c…Æı»kh|ŠJ-˜:rt¬•ıÍ†‰¸+jˆ¾ÈöãfŒ-Pà8©8.<aĞr \ä;Å³9Ñ9ÎóĞTêcu­VCBõP¬¦R1Él*‡Í¦^¢Û2b˜TBFÇ]MÌ=xV
+ùbjuËPôcHâ,%i$àÔ@ügÅP˜ºöŠ@ğJYR4ÊimAqM;¯êšU5»–_²ÑÂcĞ”ÍO³Zv";±œ…öİ;İÍİÏ~ğ¸½v»}q«{çÁÎíŸ~yp–[ªâªu AÛ	ÈEq¤íöæ¿;WŞhjŸT.9ı21'‹¡c~Nl¾V­ÁË«wš4iZ+ÙõÁWAº&t÷à«!_‹%e°	Â:YoAïË¸Ÿ@ÈÀ÷xÈŞíüPÖô£bo1ÖÛıò’Gy×®RÇ§
+T„–ÍS­æIìUWûSªà(V…yÔ4L'çQ°Ê8{0¡Ë8E¹ì¯Ïg·\4í\Ê’ØZê*š½ÅÂRø°ë¯fÒÒŸ*æ‹Ã³¤WE†a/²éˆr£¬.ä	íœwÑjH¹¦¥›J‡ÉÁyÜšóTŠ ¨Õ¥(mƒUò­‡ÚØcWü;Ø<×øÍQ}/V,ÍJı<‰‰AïÍ2İq¹ÔÉ?’Àªƒu„çÛ÷ŞlŸû¼0süØÀâÇD‚-ÖàÒoF„£6›,ûÓ $ÌAR]h“JÃ²ÑÙÇUˆw?y§{ã¶£HÑ^púóšƒ@úaPä˜!4)¼(UÇÔ›hªd×ÄäP¶µ…ºKY¢·W‡'”
+ÄA,8«1Ø7ƒpTE‡ò!~nyB÷yi—cæ=¦:?5ÿ0bÌùª”ˆx¬ıÑ˜“-D¬7zB/ì6,rI­ ğ—b¯qÆ”ßböˆ!nÍ&Æ²Òyb?…C¬u~³•LxØ ÂGñ±ˆq´œl)Dø¤bhÅ…ò¼RƒGYYI½Hq=F9ğ0‚‡uq¡„¦ÑÜµÎÖ{5 õ%•‘¸HûöõÎú5/rŒ3¼d |7r¦‰vĞè|×§dôì´ˆfÀ2Ftjvû·¨G—=Ñ‘óšÆ„À¡¢ŠfXÍô»_(ÚÎ£íŸ«¨*´Üñ\¾vşë=Cš¢ï„†w!úŒŸ4œ´qjânr˜ÈÔÜ9ºAÿÁë!7·ò
+Ñç¨çòF]ğy½}d Ù¹4öçœCÊCûˆg‘³ğ?I“«İûuŞ}YëKW;~ãÙì˜ö ª„œ5NĞß¡Å)Ór0À †i˜±ÉI¡no~Ñ¾ıöhI‘ÁNP ¥byd(ïšÏkË°&•†VÁ‹Ïñ»*4œŒlönå½#t^"`?¾nÑaN7«áÜ¢¥¦9JU‡µñ–æø_",ÇÈû„?aş–IŸ‰æıÒÒ¶$©)¾|€Œœÿ
+¡fĞµ±°™<Œ‚gÃ˜ÃÛÀo–·‹Ám\œºR39WG¢.r25%Ç=öÒ1T#´ÓNÌÀ±4Cô‘÷Î­ÏÚë7éö½}ïV>ŸS,ë\e:A$6şÉ:TãÑ¬ç.h‰Š†Hîã°y!pbSÔ‚0gõÿı ­™øg’a-’¡Ô™°õƒ f$Ğõ(`DuŸã­ŸPì5;~Õ¾øVçÖ¦Çmo_ß9¿á©Ëw—Âôó™sÜm–KdETf?.®qTÛÔõªbËÈ`eçĞYM’ ˆ9¥@ö~¯Ï¯^¦ æ ònEè>Z<`ˆhg/ç‰èË+¶.ÍK+àn8…^w
+*İ>ç„Oßõ7ãÕ38ƒ˜L%>™_¿_Ãós7«è;z¸"‹¿³WÑ±ÀÖ\(Õ œ¡ºv_*ãé¬¯àñ´lnNNŒ, v,¯´Wœ>) ˜%"	‚-PkÜÑ2RìË×è±Ñ£ÈÄÕ;N`;µæ$hÓFÁ#•Ì››ğ[¬+v]ÁEÔæ‚­çó ~¸ÜáVDùDoVJi¯w¶<Åºé]èDš¥¥#®t"ÍŠ¿½=£·wÃ†'¾‚w§$vßîO‰ÓŠˆÓv®i´MKY ¡`iˆ{®+ÔïL·)ào?Ë%$¾+zB£Sîoš|ÚŸó'ÊqüRW,àò¿p©._ì‹¸Üdºà—l—|/±h&(R6YŒßE@%ë…!¸<Rı«_‚Ë ˆà’E3\$‚KVAÎ°‰^*BªÍ¨{Ñ=jFŠ^øƒ+FµˆİÖÁ½‘#N“‚–Èø4mG\€#WtxjÁ3 ,¹°co~#RO&•àŞÛA«»†g?.aÖÁw6eşqÿGÂåñ’½è8Öû2Î¨ “¦Şl@:Ñt­¦hVš¡„¸oŒ³9·„ñOÜ”ñÏ,N¨d{–õCÅø[ò²2•¸=óÁ!Ó7Ã†Z/S€<B6UÿÔô= é’ÔsÿT4&ÛO±«âıöƒ¡‰6VÂ£V‚…œfCÄ»@Ãv~/â¶Ê”tJ¼‡2Í«==§yÎ'Œ—¥K4sx<÷çª®‹,<C½Ï&jÚ6›1$…JqŠÑ0 FÃàUç›Ó e¤Ó'‡FAŸáKTŒ¤ ÅNJs$<ŞKmD*DÃ)xa¸qòäoë7ñiûµ7v?9»{õRûÊÇ°O?;2‚öˆæQ)(Œ_jó6ª‰Ñ¶c«Y¥+é¸ M8§óó¿f8­OòdÉVÍe$u:V+Gµ5Ëu€÷/ÔÙD¨ŞË´šƒ ¤Nå I:‘LAlÙå'zf”‘™ŞŸÓˆ®V¹¶"2Ó*VŸ)Üõò°¦5á‚î——6´ïŞhŸıwOÉÚÕp:ÎÎõóá0ÅöıÏwÏÜén\ŞùöÖ’$ùó™s•‚•u	¢P‰/'íç}/V
+ƒM>ò¼R˜ Î!$®4TèÿÊ#¡j‚¿"Ê¼ú»ÿ  ÿÿ ?2¢F

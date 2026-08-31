@@ -57,6 +57,20 @@ export function useTrades(tabId: string | undefined) {
     }
   };
 
+  const updateTrade = async (id: string, updates: Partial<Trade>) => {
+    if (!tabId || !user) return;
+    try {
+      const sanitized: any = { ...updates };
+      Object.keys(sanitized).forEach(k => {
+        if (sanitized[k] === undefined) delete sanitized[k];
+      });
+      await updateDoc(doc(db, `stockTabs/${tabId}/trades`, id), sanitized);
+    } catch (error) {
+      toast.error('更新交易紀錄失敗');
+      handleFirestoreError(error, OperationType.UPDATE, `stockTabs/${tabId}/trades/${id}`);
+    }
+  };
+
   const deleteTrade = async (id: string) => {
     if (!tabId || !user) return;
     try {
@@ -67,5 +81,5 @@ export function useTrades(tabId: string | undefined) {
     }
   };
 
-  return { trades, loading, addTrade, deleteTrade };
+  return { trades, loading, addTrade, updateTrade, deleteTrade };
 }

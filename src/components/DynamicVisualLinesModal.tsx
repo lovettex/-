@@ -31,13 +31,20 @@ import {
   Download,
   Upload,
   MoveHorizontal,
+  RefreshCw,
+  AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { playClickSound, playSuccessSound } from "../lib/audio";
 import { db, handleFirestoreError, OperationType } from "../lib/firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { StockTab } from "../types";
-import { syncSubTabDividersToCanvas, formatTagDate, analyzeCardDividers } from "../utils/visualLinesSync";
+import {
+  syncSubTabDividersToCanvas,
+  formatTagDate,
+  analyzeCardDividers,
+  calculateCanvasYFromDividers,
+} from "../utils/visualLinesSync";
 
 export interface PositionMap {
   [symbol: string]: {
@@ -132,14 +139,14 @@ interface DynamicVisualLinesModalProps {
   statsMap?: Record<string, { averagePrice?: number; totalQuantity?: number }>;
 }
 
-// 6 Horizontal Visual Lines
+// 6 Horizontal Visual Lines (黑色: D軸, 藍色: B軸, 綠色: G軸, 黃色: Y軸, 紅色: R軸)
 export const VISUAL_LINES = [
-  { id: "line-top-yellow", yPercent: 12, color: "#EAB308", label: "頂部獲利", desc: "Take Profit / 極限超買" },
-  { id: "line-red", yPercent: 28, color: "#EF4444", label: "停損警戒", desc: "Stop Loss / 阻力警戒" },
-  { id: "line-black", yPercent: 44, color: "#000000", label: "基準中軸", desc: "Base / 成本平衡線" },
-  { id: "line-blue", yPercent: 60, color: "#2563EB", label: "回檔加碼", desc: "Support / 回檔支撐" },
-  { id: "line-green", yPercent: 76, color: "#16A34A", label: "底部買進", desc: "Floor / 強力買進" },
-  { id: "line-bottom-yellow", yPercent: 90, color: "#EAB308", label: "深幅價值", desc: "Deep Value / 極限超賣" },
+  { id: "line-top-yellow", axis: "Y", yPercent: 12, color: "#EAB308", label: "頂部獲利", desc: "Take Profit / 極限超買" },
+  { id: "line-red", axis: "R", yPercent: 28, color: "#EF4444", label: "停損警戒", desc: "Stop Loss / 阻力警戒" },
+  { id: "line-black", axis: "D", yPercent: 44, color: "#000000", label: "基準中軸", desc: "Base / 成本平衡線" },
+  { id: "line-blue", axis: "B", yPercent: 60, color: "#2563EB", label: "回檔加碼", desc: "Support / 回檔支撐" },
+  { id: "line-green", axis: "G", yPercent: 76, color: "#16A34A", label: "底部買進", desc: "Floor / 強力買進" },
+  { id: "line-bottom-yellow", axis: "Y", yPercent: 90, color: "#EAB308", label: "深幅價值", desc: "Deep Value / 極限超賣" },
 ];
 
 // 5 Background Color Bands Between the 6 Lines
@@ -332,6 +339,7 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
   const [positions, setPositions] = useState<PositionMap>({});
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isUpdatingPositions, setIsUpdatingPositions] = useState(false);
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const mainTabDropdownRef = useRef<HTMLDivElement>(null);
@@ -462,27 +470,73 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     }
   }, [isOpen]);
 
-  // 全部不重複股票 Map (優先對應非已結算的 持有中/真實交易 tab 資訊)
+  // 全部不重複股票 Map (嚴格優先對應 Tickbox 有勾選之卡片，絕不使用未勾選卡片覆蓋有勾選卡片)
   const allStockMap = useMemo(() => {
     const map = new Map<string, StockTab>();
-    // 優先放入未結算的 (持有中/真實交易) 分頁
+
+    // 1. 最高優先級：有勾選 Tickbox 且未結算之卡片 (若同一代號勾選多張，優先選取具備分隔線/現價者)
+    if (selectedCardIds && selectedCardIds.size > 0) {
+      const checkedActiveTabs = allTabs.filter(
+        (t) => selectedCardIds.has(t.id) && t.status !== "COMPLETED" && (t.symbol || "").trim() !== ""
+      );
+      const checkedGroups = new Map<string, StockTab[]>();
+      checkedActiveTabs.forEach((t) => {
+        const sym = t.symbol.trim().toUpperCase();
+        if (!checkedGroups.has(sym)) checkedGroups.set(sym, []);
+        checkedGroups.get(sym)!.push(t);
+      });
+      checkedGroups.forEach((tabsForSym, sym) => {
+        if (tabsForSym.length === 1) {
+          map.set(sym, tabsForSym[0]);
+        } else {
+          const scored = tabsForSym.map((t) => {
+            const analysis = analyzeCardDividers(t);
+            const dividerCount = analysis.allDividers.length;
+            const hasPrice = t.currentPrice && t.currentPrice > 0 ? 1 : 0;
+            const isEligible = analysis.isEligible ? 100 : 0;
+            const updateTime = t.updatedAt?.toMillis?.() || 0;
+            return {
+              tab: t,
+              score: isEligible + dividerCount * 10 + hasPrice * 5,
+              updateTime,
+            };
+          });
+          scored.sort((a, b) => (b.score !== a.score ? b.score - a.score : b.updateTime - a.updateTime));
+          map.set(sym, scored[0].tab);
+        }
+      });
+
+      // 1.5 次高優先級：其他有勾選之卡片
+      allTabs
+        .filter((t) => selectedCardIds.has(t.id) && (t.symbol || "").trim() !== "")
+        .forEach((t) => {
+          const sym = t.symbol.trim().toUpperCase();
+          if (!map.has(sym)) {
+            map.set(sym, t);
+          }
+        });
+    }
+
+    // 2. 第三優先級：其餘未結算的 (持有中/真實交易) 分頁
     allTabs
-      .filter((t) => t.status !== "COMPLETED")
+      .filter((t) => t.status !== "COMPLETED" && (t.symbol || "").trim() !== "")
       .forEach((t) => {
         const sym = t.symbol.trim().toUpperCase();
         if (!map.has(sym)) {
           map.set(sym, t);
         }
       });
-    // 補足其餘分頁
+
+    // 3. 補足其餘分頁
     allTabs.forEach((t) => {
-      const sym = t.symbol.trim().toUpperCase();
-      if (!map.has(sym)) {
+      const sym = (t.symbol || "").trim().toUpperCase();
+      if (sym && !map.has(sym)) {
         map.set(sym, t);
       }
     });
+
     return map;
-  }, [allTabs]);
+  }, [allTabs, selectedCardIds]);
 
   // 主分頁分類下的美股數據集 (嚴格對應交易總覽之層級)
   const mainTabFilteredPool = useMemo(() => {
@@ -520,9 +574,19 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     });
   }, [mainTabFilteredPool, selectedSubTab, mainTabFilter]);
 
-  // 取得此篩選條件下的不重複股票清單 (依代號排序)
+  // 取得此篩選條件下的不重複股票清單 (依代號排序，優先對應有勾選 Tickbox 之卡片)
   const availableBlockStocks = useMemo(() => {
     const symMap = new Map<string, StockTab>();
+    if (selectedCardIds && selectedCardIds.size > 0) {
+      filteredTabs
+        .filter((tab) => selectedCardIds.has(tab.id))
+        .forEach((tab) => {
+          const sym = tab.symbol.trim().toUpperCase();
+          if (!symMap.has(sym)) {
+            symMap.set(sym, tab);
+          }
+        });
+    }
     filteredTabs.forEach((tab) => {
       const sym = tab.symbol.trim().toUpperCase();
       if (!symMap.has(sym)) {
@@ -530,7 +594,7 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
       }
     });
     return Array.from(symMap.values()).sort((a, b) => a.symbol.localeCompare(b.symbol));
-  }, [filteredTabs]);
+  }, [filteredTabs, selectedCardIds]);
 
   // 所有在圖表上的股票代號
   const allCanvasSymbols = useMemo(() => {
@@ -549,6 +613,48 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     }
     return Object.keys(positions).filter((sym) => !positions[sym]?.hidden);
   }, [positions, showHiddenTags]);
+
+  // 計算每檔股票根據卡片分隔線與現價的預期 Y 軸位置，並檢測是否與目前看板位置對不上 (需提示人為更新操作並在看板上閃爍)
+  const syncStatusMap = useMemo(() => {
+    const map = new Map<
+      string,
+      { expectedY: number; isOutOfSync: boolean; diff: number; targetTab?: StockTab }
+    >();
+
+    for (const sym of activeCanvasSymbols) {
+      const pos = positions[sym];
+      const tab = allStockMap.get(sym);
+      if (!pos || !tab) continue;
+
+      const strat = strategiesMap?.[tab.id] || (tab as any).strategy;
+      const stat = statsMap?.[tab.id];
+      const avgCost = stat?.totalQuantity !== 0 ? stat?.averagePrice : undefined;
+      const holdingQty = stat?.totalQuantity ?? (tab as any).holdingQuantity;
+
+      const expectedY = calculateCanvasYFromDividers(tab, strat, avgCost, holdingQty);
+      if (expectedY !== null && typeof pos.y === "number") {
+        const diff = Math.abs(pos.y - expectedY);
+        // 若高度差距 >= 2.5%，即視為看板標籤與視覺圖示化中的分隔線位置對不上
+        const isOutOfSync = diff >= 2.5;
+        map.set(sym, {
+          expectedY: parseFloat(expectedY.toFixed(2)),
+          isOutOfSync,
+          diff: parseFloat(diff.toFixed(2)),
+          targetTab: tab,
+        });
+      }
+    }
+    return map;
+  }, [activeCanvasSymbols, positions, allStockMap, strategiesMap, statsMap]);
+
+  // 待人為更新 (位置對不上) 的股票數量
+  const outOfSyncCount = useMemo(() => {
+    let count = 0;
+    syncStatusMap.forEach((status) => {
+      if (status.isOutOfSync) count++;
+    });
+    return count;
+  }, [syncStatusMap]);
 
   // 判斷勾選的股票標籤是否全部為隱藏狀態
   const isAllSelectedHidden = useMemo(() => {
@@ -765,8 +871,14 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     const res = await syncSubTabDividersToCanvas(targetTabs, userId, strategiesMap, statsMap);
     if (res.updatedCount > 0) {
       playSuccessSound();
-      setPositions(res.allPositions);
+      const resolved = applyAvoidOverlapToPositions(
+        res.allPositions,
+        canvasRef.current,
+        tagSizeOffset
+      );
+      setPositions(resolved.positions);
       setHasUnsavedChanges(false);
+      await savePositionsDirectly(resolved.positions, tagSizeOffset);
       toast.success(
         `成功同步所勾選的 ${res.updatedCount} 檔股票分隔線現價位置 (${res.updatedSymbols.join(", ")})`,
         { duration: 4000 }
@@ -1017,7 +1129,7 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
         localStorage.setItem("visualLines_tagSizeOffset", String(currentTagSizeOffset));
         localStorage.setItem("visualLines_tagShape", "circle");
 
-        // 2. Firestore
+        // 2. Firestore 雲端寫入權威資料 (直接覆蓋舊座標)
         if (userId) {
           const docRef = doc(db, "users", userId, "visualLinesBoard", "positions");
           try {
@@ -1028,8 +1140,7 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
                 tagSizeOffset: currentTagSizeOffset,
                 defaultShape: "circle",
                 updatedAt: new Date().toISOString(),
-              },
-              { merge: true }
+              }
             );
           } catch (dbErr) {
             handleFirestoreError(dbErr, OperationType.WRITE, `users/${userId}/visualLinesBoard/positions`);
@@ -1055,6 +1166,32 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
       }
     },
     [userId, tagSizeOffset]
+  );
+
+  // 單一股票快速對齊至圖示化分隔線計算位置
+  const handleSnapSingleStock = useCallback(
+    async (sym: string, targetY: number) => {
+      const prev = positions[sym];
+      if (!prev) return;
+      playSuccessSound();
+
+      const newPosMap: PositionMap = {
+        ...positions,
+        [sym]: {
+          ...prev,
+          y: parseFloat(targetY.toFixed(2)),
+          updatedAt: new Date().toISOString(),
+        },
+      };
+
+      setPositions(newPosMap);
+      setHasUnsavedChanges(true);
+      await savePositionsDirectly(newPosMap, tagSizeOffset);
+      toast.success(`已將「${sym}」位置同步更新至圖示化分隔線 (Y: ${targetY.toFixed(1)}%)！`, {
+        id: `snap-${sym}`,
+      });
+    },
+    [positions, savePositionsDirectly, tagSizeOffset]
   );
 
   // 設定/切換勾選股票標籤的攤平進度 (#1, #2, #3, #4) 並自動儲存
@@ -1269,23 +1406,26 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     }
   };
 
-  // 一鍵避開重疊：保持 Y 軸（現價相對高度）不變，純水平調整 X 軸使標籤彼此錯開
-  const handleAvoidOverlap = () => {
-    playClickSound();
-    const entries = Object.entries(positions);
+  /**
+   * 純水平 X 軸微調避開重疊核心演算法 (保持 Y 軸高低位置不變，嚴格保留原有的顏色邊框、尺寸偏移、隱藏與各項屬性)
+   */
+  const applyAvoidOverlapToPositions = (
+    inputPositions: PositionMap,
+    canvasEl: HTMLElement | null,
+    globalTagSizeOffset: number = 0
+  ): { positions: PositionMap; movedCount: number } => {
+    const entries = Object.entries(inputPositions);
     if (entries.length <= 1) {
-      toast.info("目前畫布上的標籤數量不足以產生重疊");
-      return;
+      return { positions: { ...inputPositions }, movedCount: 0 };
     }
 
-    const canvasEl = canvasRef.current;
     const canvasWidth = canvasEl ? Math.max(300, canvasEl.clientWidth) : 1200;
     const canvasHeight = canvasEl ? Math.max(200, canvasEl.clientHeight) : 600;
 
-    // 複製一份工作用位置
+    // 複製工作用位置
     const working: { [sym: string]: { x: number; y: number; size: number } } = {};
     entries.forEach(([sym, pos]) => {
-      const effectiveSizeOffset = (pos.sizeOffset ?? 0) + tagSizeOffset;
+      const effectiveSizeOffset = (pos.sizeOffset ?? 0) + globalTagSizeOffset;
       const diameter = Math.max(44, 54 + effectiveSizeOffset * 2.2);
       working[sym] = {
         x: pos.x, // 百分比
@@ -1368,9 +1508,9 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
       }
     }
 
-    // 產生新位置映射 (嚴格保持 Y 座標不變)
+    // 產生新位置映射 (嚴格保持 Y 座標不變，且顏色邊框等屬性 100% 完整保留)
     let totalMovedCount = 0;
-    const newPositions: PositionMap = { ...positions };
+    const newPositions: PositionMap = { ...inputPositions };
     symbols.forEach((sym) => {
       const diff = Math.abs(working[sym].x - originalX[sym]);
       if (diff > 0.15) {
@@ -1380,23 +1520,196 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
         newPositions[sym] = {
           ...newPositions[sym],
           x: Math.round(working[sym].x * 100) / 100,
-          // Y 座標絕對保持原樣不變
-          y: positions[sym].y,
-          updatedAt: new Date().toISOString(),
+          // Y 座標嚴格保持傳入之 Y 座標
+          y: inputPositions[sym].y,
+          // 保持既有顏色邊框與各項設定
+          color: inputPositions[sym].color,
+          sizeOffset: inputPositions[sym].sizeOffset,
+          shape: inputPositions[sym].shape,
+          hidden: inputPositions[sym].hidden,
+          dcaProgress: inputPositions[sym].dcaProgress,
+          updatedAt: inputPositions[sym].updatedAt || new Date().toISOString(),
         };
       }
     });
 
-    if (totalMovedCount > 0) {
+    return { positions: newPositions, movedCount: totalMovedCount };
+  };
+
+  // 一鍵避開重疊：保持 Y 軸（現價相對高度）不變，純水平調整 X 軸使標籤彼此錯開
+  const handleAvoidOverlap = () => {
+    playClickSound();
+    const entries = Object.entries(positions);
+    if (entries.length <= 1) {
+      toast.info("目前畫布上的標籤數量不足以產生重疊");
+      return;
+    }
+
+    const { positions: newPositions, movedCount } = applyAvoidOverlapToPositions(
+      positions,
+      canvasRef.current,
+      tagSizeOffset
+    );
+
+    if (movedCount > 0) {
       setPositions(newPositions);
       setHasUnsavedChanges(true);
       playSuccessSound();
-      toast.success(`已完成水平避開重疊！共微調了 ${totalMovedCount} 檔股票標籤位置（現價高度維持不變）。`, {
+      toast.success(`已完成水平避開重疊！共微調了 ${movedCount} 檔股票標籤位置（現價高度維持不變）。`, {
         id: "avoid-overlap",
         duration: 3500,
       });
     } else {
       toast.info("目前畫布上所有股票標籤已均勻分散，無重疊需要調整。");
+    }
+  };
+
+  // 一鍵「更新位置」：若有勾選卡片則同步勾選之卡片；若未勾選則自動同步畫布上所有股票標籤至卡片分隔線計算高度，並自動水平避開重疊，且 100% 保持既有顏色邊框、形狀與尺寸
+  const handleUpdatePositions = async () => {
+    playClickSound();
+    setIsUpdatingPositions(true);
+
+    try {
+      // 1. 判斷是否有勾選卡片；若無勾選則取用目前畫布上的股票標籤進行同步更新
+      let checkedTabs: StockTab[] = [];
+      if (selectedCardIds && selectedCardIds.size > 0) {
+        checkedTabs = allTabs.filter(
+          (t) => selectedCardIds.has(t.id) && (t.symbol || "").trim() !== ""
+        );
+      } else {
+        // 未特別勾選特定卡片時，自動搜集畫布上所有個股對應之卡片
+        const symsOnCanvas = new Set(Object.keys(positions));
+        checkedTabs = allTabs.filter(
+          (t) => symsOnCanvas.has((t.symbol || "").trim().toUpperCase()) && (t.symbol || "").trim() !== ""
+        );
+      }
+
+      if (checkedTabs.length === 0) {
+        toast.info("圖表或卡片列表中尚無可更新位置的股票卡片");
+        setIsUpdatingPositions(false);
+        return;
+      }
+
+      // 依股票代號分組（僅限有勾選的卡片）
+      const symbolGroups = new Map<string, StockTab[]>();
+      checkedTabs.forEach((tab) => {
+        const sym = (tab.symbol || "").trim().toUpperCase();
+        if (!sym) return;
+        if (!symbolGroups.has(sym)) {
+          symbolGroups.set(sym, []);
+        }
+        symbolGroups.get(sym)!.push(tab);
+      });
+
+      const nowIso = new Date().toISOString();
+      const updatedPositions: PositionMap = { ...positions };
+      let updatedCount = 0;
+      let tabIndex = 0;
+
+      symbolGroups.forEach((tabsForSym, sym) => {
+        const prevPos = positions[sym];
+
+        // 若同一個股票代號有多張勾選的卡片，從勾選的卡片中評選最佳卡片（絕不參考未勾選卡片）
+        let targetTab: StockTab;
+        if (tabsForSym.length === 1) {
+          targetTab = tabsForSym[0];
+        } else {
+          const scored = tabsForSym.map((t) => {
+            const analysis = analyzeCardDividers(t);
+            const dividerCount = analysis.allDividers.length;
+            const hasPrice = t.currentPrice && t.currentPrice > 0 ? 1 : 0;
+            const isEligible = analysis.isEligible ? 100 : 0;
+            const updateTime = t.updatedAt?.toMillis?.() || 0;
+            return {
+              tab: t,
+              score: isEligible + dividerCount * 10 + hasPrice * 5,
+              updateTime,
+            };
+          });
+
+          scored.sort((a, b) => {
+            if (b.score !== a.score) return b.score - a.score;
+            return b.updateTime - a.updateTime;
+          });
+
+          targetTab = { ...scored[0].tab };
+          if (!targetTab.currentPrice || targetTab.currentPrice <= 0) {
+            const altWithPrice = tabsForSym.find((t) => t.currentPrice && t.currentPrice > 0);
+            if (altWithPrice) {
+              targetTab.currentPrice = altWithPrice.currentPrice;
+            }
+          }
+        }
+
+        const strat = strategiesMap?.[targetTab.id] || (targetTab as any).strategy;
+        const stat = statsMap?.[targetTab.id];
+        const avgCost = stat?.totalQuantity !== 0 ? stat?.averagePrice : undefined;
+        const holdingQty = stat?.totalQuantity ?? (targetTab as any).holdingQuantity;
+
+        // 計算該勾選卡片的分隔線與現價 Y 軸位置
+        const canvasY = calculateCanvasYFromDividers(targetTab, strat, avgCost, holdingQty);
+        if (canvasY !== null) {
+          const defaultX = 20 + ((tabIndex % 6) * 12);
+          const initialX = prevPos?.x !== undefined ? prevPos.x : defaultX;
+
+          // 嚴格保留原有的顏色邊框 (color)、尺寸偏移 (sizeOffset)、形狀 (shape)、隱藏狀態 (hidden) 與攤平進度 (dcaProgress)
+          updatedPositions[sym] = {
+            ...prevPos,
+            x: initialX,
+            y: canvasY,
+            shape: prevPos?.shape || "circle",
+            sizeOffset: prevPos?.sizeOffset ?? 0,
+            color: prevPos?.color && prevPos.color !== "#000000" ? prevPos.color : undefined,
+            hidden: Boolean(prevPos?.hidden),
+            dcaProgress: prevPos?.dcaProgress,
+            updatedAt: nowIso,
+          };
+          updatedCount++;
+          tabIndex++;
+        }
+      });
+
+      if (updatedCount === 0) {
+        toast.info("所勾選的卡片未能計算出有效的現價或分隔線位置，請確認卡片價格。");
+        setIsUpdatingPositions(false);
+        return;
+      }
+
+      // 2. 同步水平避開重疊 (保持剛剛計算好的 Y 軸現價相對高度)
+      const resolved = applyAvoidOverlapToPositions(
+        updatedPositions,
+        canvasRef.current,
+        tagSizeOffset
+      );
+
+      // 3. 更新 state 與即時儲存至 Firestore / LocalStorage
+      setPositions(resolved.positions);
+      setHasUnsavedChanges(false);
+
+      await savePositionsDirectly(resolved.positions, tagSizeOffset);
+
+      // 4. 觸發自訂事件通知全域同步
+      window.dispatchEvent(
+        new CustomEvent("visual_lines_positions_updated", {
+          detail: {
+            allPositions: resolved.positions,
+          },
+        })
+      );
+
+      playSuccessSound();
+      toast.success(
+        `已成功更新位置！已依勾選之 ${updatedCount} 檔卡片同步分隔線與現價位置（已避開重疊並完整保留原本顏色邊框與尺寸）`,
+        {
+          id: "update-positions",
+          duration: 4000,
+        }
+      );
+    } catch (err) {
+      console.error("Update positions error:", err);
+      toast.error("更新位置時發生錯誤，請稍後再試");
+    } finally {
+      setIsUpdatingPositions(false);
     }
   };
 
@@ -2252,6 +2565,36 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
             )}
           </div>
 
+          {/* 3.8 一鍵「更新位置」按鈕 (自動同步目前分隔線現價 + 同時避開重疊 + 保持原本顏色邊框) */}
+          <button
+            type="button"
+            onClick={handleUpdatePositions}
+            disabled={isUpdatingPositions}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-black transition-all cursor-pointer shadow-sm active:scale-95 shrink-0 disabled:opacity-50 ${
+              outOfSyncCount > 0
+                ? "bg-amber-400 hover:bg-amber-300 text-black border border-amber-300 ring-2 ring-amber-400/50 animate-pulse"
+                : "bg-emerald-950/80 hover:bg-emerald-900/90 text-emerald-300 border border-emerald-700/80 hover:border-emerald-500"
+            }`}
+            title={
+              outOfSyncCount > 0
+                ? `有 ${outOfSyncCount} 檔股票標籤與卡片分隔線位置不一致，點擊一鍵同步更新！`
+                : "一鍵更新位置：自動同步目前所有股票之分隔線現價，同時自動水平避開重疊，並完整保留原本顏色邊框與尺寸"
+            }
+          >
+            <RefreshCw
+              className={`w-3.5 h-3.5 ${
+                outOfSyncCount > 0 ? "text-black stroke-[3]" : "text-emerald-400 stroke-[2.2]"
+              } ${isUpdatingPositions ? "animate-spin" : ""}`}
+            />
+            <span className="hidden sm:inline">更新位置</span>
+            <span className="sm:hidden">更新</span>
+            {outOfSyncCount > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-black text-amber-300 text-[10px] font-mono font-black shadow-xs">
+                {outOfSyncCount} 待更新
+              </span>
+            )}
+          </button>
+
           {/* 4. 一鍵同步分隔線現價至畫布按鈕 (涵蓋「持有中」與「真實交易」所有子分頁卡片) */}
           <button
             type="button"
@@ -2763,6 +3106,14 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
               }}
             />
 
+            {/* Left Axis Letter Badge in Gray font (D, B, G, Y, R) */}
+            <div
+              className="absolute left-3 sm:left-4 -top-3 px-1.5 py-0.5 rounded text-[11px] sm:text-xs font-mono font-black text-zinc-400 bg-white/90 border border-zinc-200 shadow-xs pointer-events-none select-none drop-shadow-[0_1px_1px_rgba(0,0,0,0.05)]"
+              title={`${line.axis}軸 (${line.label})`}
+            >
+              {line.axis}
+            </div>
+
             {/* Line label with Nike typography at the right margin */}
             {showLineLabels && (
               <div
@@ -2772,6 +3123,7 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
                   backgroundColor: "rgba(255, 255, 255, 0.96)",
                 }}
               >
+                <span className="text-zinc-400 font-mono font-black mr-0.5">{line.axis}</span>
                 <span className="text-black font-black uppercase">{line.label}</span>
                 <span className="text-[9.5px] text-zinc-500 font-mono font-bold">[{line.desc}]</span>
               </div>
@@ -2789,6 +3141,10 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
           const effectiveSizeOffset = pos.sizeOffset !== undefined ? pos.sizeOffset : tagSizeOffset;
           const isSelected = selectedTagSymbols.includes(sym);
           const isHidden = Boolean(pos.hidden);
+
+          // 檢測此標籤是否與卡片視覺圖示化分隔線位置對不上
+          const syncInfo = syncStatusMap.get(sym);
+          const isOutOfSync = Boolean(syncInfo?.isOutOfSync);
 
           const symbolFontSize = Math.max(10, 13 + Math.round(effectiveSizeOffset * 0.85));
           const priceFontSize = Math.max(8, 10 + Math.round(effectiveSizeOffset * 0.5));
@@ -2811,6 +3167,10 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
             return null;
           })();
 
+          const outOfSyncPrefix = isOutOfSync && syncInfo
+            ? `【⚠️ 提示人為更新：與圖示化分隔線位置對不上】\n目前看板高度: Y ${pos.y.toFixed(1)}% (圖示化分隔線預期: Y ${syncInfo.expectedY.toFixed(1)}%)\n請手動拖曳調整，或點擊標籤右上「需更新」徽章一鍵同步\n--------------------------------\n`
+            : "";
+
           return (
             <div
               key={sym}
@@ -2830,26 +3190,50 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
                 top: `${pos.y}%`,
               }}
             >
-              {/* Android Flat Design Spherical Tag - 運動球體標籤 (內部純白 #FFFFFF, 依設定顯示 6px 套用純色或 1px 預設黑, 勾選不改變邊框顏色, 內部文字 #000000) */}
+              {/* Android Flat Design Spherical Tag - 運動球體標籤 (內部純白 #FFFFFF, 依設定顯示 6px 套用純色或 1px 預設黑, 勾選不改變邊框顏色, 內部文字 #000000, 位置對不上時於看板上強烈閃爍提示人為更新) */}
               <div
                 className={`relative flex flex-col items-center justify-center rounded-full transition-all select-none bg-white shadow-md hover:shadow-lg hover:scale-105 ${
                   isHidden ? "border-dashed ring-1 ring-amber-500/50" : ""
+                } ${
+                  isOutOfSync
+                    ? "ring-4 ring-amber-400 ring-offset-2 ring-offset-white animate-pulse shadow-[0_0_22px_rgba(251,191,36,0.85)]"
+                    : ""
                 }`}
                 style={{
                   width: `${circleSize}px`,
                   height: `${circleSize}px`,
                   backgroundColor: "#FFFFFF",
                   border: `${borderThickness} ${isHidden ? "dashed" : "solid"} ${tagBorderColor}`,
-                  boxShadow: isHidden
+                  boxShadow: isOutOfSync
+                    ? "0 0 20px rgba(245,158,11,0.85), 0 0 35px rgba(245,158,11,0.35)"
+                    : isHidden
                     ? "0 1px 4px rgba(0,0,0,0.08)"
                     : "0 2px 6px rgba(0,0,0,0.10), 0 1px 3px rgba(0,0,0,0.06)",
                 }}
                 title={
-                  isSelected && tab
+                  outOfSyncPrefix +
+                  (isSelected && tab
                     ? `【${sym}】${isHidden ? "(目前處於隱藏狀態)\n" : ""}雙擊或點擊原點前往視覺圖示化卡片\n分類: ${tab?.holdingStatus || "候選名單"}\n模式: ${tab?.tradeType === "real" ? "真實交易" : "模擬交易"}\n最新現價: ${formattedCurrentPrice || "-"}\n更新時間: ${pos.updatedAt ? new Date(pos.updatedAt).toLocaleString() : "-"}`
-                    : `${sym} ${isHidden ? "(隱藏中)" : ""}- 拖曳至任意位置\n分類: ${tab?.holdingStatus || "候選名單"}\n模式: ${tab?.tradeType === "real" ? "真實交易" : "模擬交易"}\n最新現價: ${formattedCurrentPrice || "-"}\n更新時間: ${pos.updatedAt ? new Date(pos.updatedAt).toLocaleString() : "-"}`
+                    : `${sym} ${isHidden ? "(隱藏中)" : ""}- 拖曳至任意位置\n分類: ${tab?.holdingStatus || "候選名單"}\n模式: ${tab?.tradeType === "real" ? "真實交易" : "模擬交易"}\n最新現價: ${formattedCurrentPrice || "-"}\n更新時間: ${pos.updatedAt ? new Date(pos.updatedAt).toLocaleString() : "-"}`)
                 }
               >
+                {/* 提示進行人為更新操作：位置與分隔線對不上時右上角跳動閃爍徽章 */}
+                {isOutOfSync && syncInfo && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      playClickSound();
+                      handleSnapSingleStock(sym, syncInfo.expectedY);
+                    }}
+                    title={`【⚠️ 提示人為更新】\n目前看板位置：Y ${pos.y.toFixed(1)}%\n圖示化分隔線計算位置：Y ${syncInfo.expectedY.toFixed(1)}%\n點擊直接同步更新！`}
+                    className="absolute -top-3.5 -right-3.5 px-1.5 py-0.5 rounded-full bg-amber-400 hover:bg-amber-300 text-black border border-amber-600 text-[9px] font-mono font-black flex items-center gap-0.5 shadow-lg z-30 animate-bounce cursor-pointer transition-all active:scale-90"
+                  >
+                    <AlertTriangle className="w-2.5 h-2.5 text-black stroke-[3]" />
+                    <span>需更新</span>
+                  </button>
+                )}
+
                 {/* 隱藏標籤指示徽章 (當處於顯示隱藏模式下醒目標示) */}
                 {isHidden && (
                   <div className="absolute -top-3.5 px-1.5 py-0.2 bg-zinc-900/95 text-amber-300 border border-amber-500/60 rounded-full text-[8.5px] font-black flex items-center gap-0.5 pointer-events-none shadow-md z-30 tracking-tight">

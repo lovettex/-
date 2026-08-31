@@ -17,7 +17,7 @@ import firebaseConfig from '../../firebase-applet-config.json';
 
 export const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore with robust multi-tab persistent IndexedDB cache & long polling auto-detect
+// Initialize Firestore with robust multi-tab persistent IndexedDB cache & forced long polling
 let firestoreInstance;
 try {
   firestoreInstance = initializeFirestore(
@@ -26,7 +26,7 @@ try {
       localCache: persistentLocalCache({
         tabManager: persistentMultipleTabManager(),
       }),
-      experimentalAutoDetectLongPolling: true,
+      experimentalForceLongPolling: true,
     },
     firebaseConfig.firestoreDatabaseId
   );
