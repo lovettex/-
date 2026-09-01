@@ -5,6 +5,7 @@ import { useAuth } from '../lib/AuthContext';
 import { Trade } from '../types';
 import { toast } from 'sonner';
 import { getTimestampMillis } from '../lib/dateUtils';
+import { safeSessionStorage } from '../lib/utils';
 
 export function useTrades(tabId: string | undefined) {
   const { user } = useAuth();
@@ -31,6 +32,18 @@ export function useTrades(tabId: string | undefined) {
       const sorted = data.sort((a, b) => getTimestampMillis(b.tradeDate) - getTimestampMillis(a.tradeDate));
       setTrades(sorted);
       setLoading(false);
+
+      if (user?.uid && tabId) {
+        try {
+          const cachedTradesRaw = safeSessionStorage.getItem(`cached_tab_trades_v3_${user.uid}`);
+          const cachedTrades = cachedTradesRaw ? JSON.parse(cachedTradesRaw) : {};
+          cachedTrades[tabId] = sorted;
+          safeSessionStorage.setItem(`cached_tab_trades_v3_${user.uid}`, JSON.stringify(cachedTrades));
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('tab_trades_updated', { detail: { tabId, trades: sorted } }));
+          }
+        } catch (e) {}
+      }
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, `stockTabs/${tabId}/trades`);
       setLoading(false);

@@ -33,6 +33,8 @@ export interface StockTab {
   chartAnnotations?: ChartAnnotation[];
   plannedBuyQty?: number;
   plannedBuyPercent?: number;
+  holdingQuantity?: number;
+  averageCost?: number;
   stopLossPrice?: number;
   takeProfitPrice?: number;
   averagingRows?: { price: string; quantity: string; quantity2?: string; bought?: boolean; riskFlag?: boolean }[];

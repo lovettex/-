@@ -17,9 +17,12 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { playClickSound, playSuccessSound } from "../lib/audio";
-import { db, handleFirestoreError, OperationType } from "../lib/firebase";
-import { doc, getDoc, setDoc } from "firebase/firestore";
 import { HOLDING_CONFIG, PositionMap } from "./DynamicVisualLinesModal";
+import {
+  getVisualLinesDataSync,
+  revalidateVisualLinesDataAsync,
+  saveVisualLinesDataOptimistic,
+} from "../utils/visualLinesStorage";
 
 interface MiniVisualLinesModalProps {
   isOpen: boolean;
@@ -200,12 +203,6 @@ export const MiniVisualLinesModal: React.FC<MiniVisualLinesModalProps> = ({
 }) => {
   const cleanSymbol = (stockName || "").trim().toUpperCase();
 
-  const [selectedOptionId, setSelectedOptionId] = useState<string>("line-d");
-  const [selectedYPercent, setSelectedYPercent] = useState<number>(44);
-  const [allPositions, setAllPositions] = useState<PositionMap>({});
-  const [isSaving, setIsSaving] = useState<boolean>(false);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-
   const conf = HOLDING_CONFIG[holdingStatus] || HOLDING_CONFIG["候選名單"];
 
   // 根據 yPercent 找到最貼近的項目 ID
@@ -223,50 +220,12 @@ export const MiniVisualLinesModal: React.FC<MiniVisualLinesModalProps> = ({
     return closestId;
   }, []);
 
-  // 1. 載入既有位置 (localStorage & Firestore)
-  const loadInitialPosition = useCallback(async () => {
-    if (!cleanSymbol) return;
-    setIsLoading(true);
-
-    const storageKey = `visual_lines_board_positions_${userId || "guest"}`;
-    let loadedPosMap: PositionMap = {};
-    let loadedFromFirestore = false;
-
-    if (userId) {
-      try {
-        const docRef = doc(db, "users", userId, "visualLinesBoard", "positions");
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          const remotePos = docSnap.data()?.positions as PositionMap;
-          if (remotePos && typeof remotePos === "object") {
-            loadedPosMap = remotePos;
-            loadedFromFirestore = true;
-            try {
-              localStorage.setItem(storageKey, JSON.stringify(remotePos));
-            } catch (e) {}
-          }
-        }
-      } catch (err) {
-        console.warn("Failed to load Firestore positions in mini modal:", err);
-      }
-    }
-
-    if (!loadedFromFirestore) {
-      try {
-        const localData = localStorage.getItem(storageKey);
-        if (localData) {
-          loadedPosMap = JSON.parse(localData);
-        }
-      } catch (e) {
-        console.warn("Failed to load local positions in mini modal:", e);
-      }
-    }
-
-    setAllPositions(loadedPosMap);
-
+  // 1. 同步即時讀取記憶體/本地快取（0ms 零延遲秒開）
+  const getComputedInitialState = useCallback(() => {
+    const { positions } = getVisualLinesDataSync(userId);
     let initialY = 44;
-    if (loadedPosMap[cleanSymbol] && typeof loadedPosMap[cleanSymbol].y === "number") {
-      initialY = loadedPosMap[cleanSymbol].y;
+    if (cleanSymbol && positions[cleanSymbol] && typeof positions[cleanSymbol].y === "number") {
+      initialY = positions[cleanSymbol].y;
     } else {
       if (holdingStatus === "賣出操作" || holdingStatus === "平倉操作") {
         initialY = 16;
@@ -278,26 +237,45 @@ export const MiniVisualLinesModal: React.FC<MiniVisualLinesModalProps> = ({
         initialY = 88;
       }
     }
-
-    setSelectedYPercent(initialY);
-    setSelectedOptionId(findClosestOptionId(initialY));
-    setIsLoading(false);
+    return {
+      positions,
+      initialY,
+      optionId: findClosestOptionId(initialY),
+    };
   }, [cleanSymbol, userId, holdingStatus, findClosestOptionId]);
 
+  const [allPositions, setAllPositions] = useState<PositionMap>(() => getComputedInitialState().positions);
+  const [selectedYPercent, setSelectedYPercent] = useState<number>(() => getComputedInitialState().initialY);
+  const [selectedOptionId, setSelectedOptionId] = useState<string>(() => getComputedInitialState().optionId);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+
+  // 當視窗開啟或股票切換時，立即同步狀態並在背景執行靜默非同步複驗
   useEffect(() => {
     if (isOpen) {
-      loadInitialPosition();
-    }
-  }, [isOpen, loadInitialPosition]);
+      const init = getComputedInitialState();
+      setAllPositions(init.positions);
+      setSelectedYPercent(init.initialY);
+      setSelectedOptionId(init.optionId);
 
-  // 2. 儲存指定位置至 Firebase 與 LocalStorage
+      // 背景靜默非同步複驗（不阻塞使用者互動與介面渲染）
+      revalidateVisualLinesDataAsync(userId, (fresh) => {
+        setAllPositions(fresh.positions);
+        if (cleanSymbol && fresh.positions[cleanSymbol]?.y !== undefined) {
+          const freshY = fresh.positions[cleanSymbol].y;
+          setSelectedYPercent(freshY);
+          setSelectedOptionId(findClosestOptionId(freshY));
+        }
+      });
+    }
+  }, [isOpen, cleanSymbol, getComputedInitialState, findClosestOptionId, userId]);
+
+  // 2. 秒速儲存指定位置 (樂觀更新 + 記憶體快取 + 廣播事件 + 背景非同步 Firestore 寫入)
   const savePosition = useCallback(
-    async (yPercent: number, customOptionTitle?: string) => {
+    (yPercent: number, customOptionTitle?: string) => {
       if (!cleanSymbol) return;
-      setIsSaving(true);
       playSuccessSound();
 
-      const storageKey = `visual_lines_board_positions_${userId || "guest"}`;
       const prevConfig = allPositions[cleanSymbol];
       const newEntry: {
         x: number;
@@ -329,55 +307,24 @@ export const MiniVisualLinesModal: React.FC<MiniVisualLinesModalProps> = ({
         newEntry.dcaProgress = prevConfig.dcaProgress;
       }
 
-      const updatedPositions: PositionMap = { ...allPositions };
-      updatedPositions[cleanSymbol] = newEntry;
+      const updatedPositions: PositionMap = {
+        ...allPositions,
+        [cleanSymbol]: newEntry,
+      };
 
-      try {
-        // LocalStorage
-        localStorage.setItem(storageKey, JSON.stringify(updatedPositions));
-        setAllPositions(updatedPositions);
+      setAllPositions(updatedPositions);
 
-        // Firestore
-        if (userId) {
-          const docRef = doc(db, "users", userId, "visualLinesBoard", "positions");
-          try {
-            await setDoc(
-              docRef,
-              {
-                positions: updatedPositions,
-                updatedAt: new Date().toISOString(),
-              }
-            );
-          } catch (dbErr) {
-            handleFirestoreError(dbErr, OperationType.WRITE, `users/${userId}/visualLinesBoard/positions`);
-          }
+      // 極速樂觀寫入（0ms 完成本地與記憶體寫入，背景安全同步 Firestore）
+      saveVisualLinesDataOptimistic(userId, updatedPositions);
+
+      toast.success(
+        `已成功設定 ${cleanSymbol} 於「${customOptionTitle || "指定視覺線/區間"}」！`,
+        {
+          id: `mini-save-${cleanSymbol}`,
+          duration: 2500,
         }
-
-        // Broadcast Event
-        window.dispatchEvent(
-          new CustomEvent("visual_lines_positions_updated", {
-            detail: {
-              symbol: cleanSymbol,
-              position: { x: newEntry.x, y: newEntry.y },
-              allPositions: updatedPositions,
-            },
-          })
-        );
-
-        toast.success(
-          `已成功設定 ${cleanSymbol} 於「${customOptionTitle || "指定視覺線/區間"}」！`,
-          {
-            id: `mini-save-${cleanSymbol}`,
-            duration: 2500,
-          }
-        );
-        onClose();
-      } catch (err: any) {
-        console.error("Save error:", err);
-        toast.error("儲存失敗：" + (err?.message || "請稍後再試"));
-      } finally {
-        setIsSaving(false);
-      }
+      );
+      onClose();
     },
     [cleanSymbol, allPositions, userId, onClose]
   );
@@ -387,7 +334,7 @@ export const MiniVisualLinesModal: React.FC<MiniVisualLinesModalProps> = ({
     playClickSound();
     setSelectedOptionId(opt.id);
     setSelectedYPercent(opt.yPercent);
-    // 直接快速儲存並關閉
+    // 直接快速儲存並關閉（零等待）
     savePosition(opt.yPercent, opt.title);
   };
 

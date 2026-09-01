@@ -11,13 +11,21 @@ import {
   getFirestore,
   initializeFirestore,
   persistentLocalCache,
-  persistentMultipleTabManager
+  persistentMultipleTabManager,
+  setLogLevel
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 export const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore with robust multi-tab persistent IndexedDB cache & forced long polling
+// Suppress non-critical internal network latency / offline mode warnings from Firestore SDK
+try {
+  setLogLevel('error');
+} catch (e) {
+  // Ignore in case setLogLevel is restricted
+}
+
+// Initialize Firestore with robust multi-tab persistent IndexedDB cache & auto-detected polling
 let firestoreInstance;
 try {
   firestoreInstance = initializeFirestore(
@@ -26,7 +34,7 @@ try {
       localCache: persistentLocalCache({
         tabManager: persistentMultipleTabManager(),
       }),
-      experimentalForceLongPolling: true,
+      experimentalAutoDetectLongPolling: true,
     },
     firebaseConfig.firestoreDatabaseId
   );

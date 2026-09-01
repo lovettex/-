@@ -572,6 +572,22 @@ export default function StockTabDetail() {
 
   const parsedCalc = parseAndCalculatePercentage(calcExpression);
 
+  // 當個股籌碼管理數據更新時，自動將最新持有數量與平均成本同步至 Firestore Tab 基礎資料
+  React.useEffect(() => {
+    if (!tab) return;
+    const currentHoldingQty = tab.status !== 'COMPLETED' ? (stats?.totalQuantity ?? 0) : 0;
+    const currentAvgPrice = (stats?.totalQuantity ?? 0) !== 0 && (stats?.averagePrice ?? 0) > 0 ? stats.averagePrice : 0;
+
+    if (tab.holdingQuantity !== currentHoldingQty || tab.averageCost !== currentAvgPrice) {
+      updateTab(tab.id, {
+        holdingQuantity: currentHoldingQty,
+        averageCost: currentAvgPrice,
+      }).catch((err) => {
+        console.error('Failed to sync holdingQuantity and averageCost to tab:', err);
+      });
+    }
+  }, [tab?.id, tab?.status, tab?.holdingQuantity, tab?.averageCost, stats?.totalQuantity, stats?.averagePrice, updateTab]);
+
   // 當個股在籌碼管理區塊有持有數量數據且非已完成狀態時，自動依平均成本計算系統一與系統二組別1~4的預計購入股價 ($) 並且自動儲存設定
   React.useEffect(() => {
     if (!tab) return;

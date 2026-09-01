@@ -1,7 +1,6 @@
 import { StockTab, ChartAnnotation } from "../types";
 import { PositionMap, HOLDING_CONFIG } from "../components/DynamicVisualLinesModal";
-import { db } from "../lib/firebase";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { getVisualLinesDataSync, saveVisualLinesDataOptimistic } from "./visualLinesStorage";
 
 /**
  * 分類分隔線顏色
@@ -171,6 +170,16 @@ export function classifyLineColor(
  */
 export type AxisLetter = "D" | "B" | "G" | "Y" | "R";
 
+export const CARD_TOP_Y = 7; // 個股卡片頂部價格邊界 (最高價 7%)
+export const CARD_BOTTOM_Y = 93; // 個股卡片底部價格邊界 (最低價 93%)
+
+export const CANVAS_TOP_YELLOW_Y = 12; // 頂黃 (Y軸 - 頂部獲利)
+export const CANVAS_RED_Y = 28; // 紅 (R軸 - 停損警戒)
+export const CANVAS_BLACK_Y = 44; // 黑 (D軸 - 基準中軸)
+export const CANVAS_BLUE_Y = 60; // 藍 (B軸 - 回檔加碼)
+export const CANVAS_GREEN_Y = 76; // 綠 (G軸 - 底部買進)
+export const CANVAS_BOTTOM_YELLOW_Y = 90; // 底黃 (Y軸 - 深幅價值)
+
 export function getAxisLetterForColor(colorStr?: string): AxisLetter | "" {
   const c = classifyLineColor(colorStr);
   switch (c) {
@@ -191,7 +200,7 @@ export function getAxisLetterForColor(colorStr?: string): AxisLetter | "" {
 
 /**
  * 檢查個股卡片是否符合匯入條件：
- * 必須至少有「黑色與藍色」或「黑色與紅色」等分隔線
+ * 必須至少有分隔線或有效現價
  */
 export interface CardDividerAnalysis {
   isEligible: boolean;
@@ -244,16 +253,19 @@ export function analyzeCardDividers(tab: StockTab): CardDividerAnalysis {
 }
 
 /**
- * 精確還原 StockCardVisualizer 內「現價標籤」在卡片畫布上的 SVG Y 軸百分比 (7% ~ 93%)
+ * 統一提取個股卡片內的所有價格點，與 StockCardVisualizer 內部 100% 同步
  */
-export function calculateCardPriceY(
+export function extractCardPricePoints(
   tab: StockTab,
   strategy?: any,
   averageCost?: number,
   holdingQuantity?: number
-): number {
+): {
+  dynamicPrice: number;
+  uniqueSortedPrices: number[];
+} {
   const tabAny = tab as any;
-  const dynPrice =
+  const dynamicPrice =
     tab.currentPrice && tab.currentPrice > 0
       ? tab.currentPrice
       : tabAny.price && tabAny.price > 0
@@ -262,57 +274,58 @@ export function calculateCardPriceY(
 
   const validOrders: { price: number; category?: string }[] = [];
 
-  // 1. 策略目標價 (TP/SL/壓力/支撐/分批進出場)
-  const strat = strategy || tabAny.strategy;
-  if (strat) {
-    if (Array.isArray(strat.tpTargets)) {
-      strat.tpTargets.forEach((tp: any) => {
-        const p = typeof tp.price === "number" ? tp.price : parseFloat(tp.price);
-        if (!isNaN(p) && p > 0) validOrders.push({ price: p, category: "止盈設定" });
-      });
-    }
-    if (Array.isArray(strat.slTargets)) {
-      strat.slTargets.forEach((sl: any) => {
-        const p = typeof sl.price === "number" ? sl.price : parseFloat(sl.price);
-        if (!isNaN(p) && p > 0) validOrders.push({ price: p, category: "止損設定" });
-      });
-    }
-    if (Array.isArray(strat.resistanceZones)) {
-      strat.resistanceZones.forEach((rz: any) => {
-        const p = typeof rz.price === "number" ? rz.price : parseFloat(rz.price);
-        if (!isNaN(p) && p > 0) validOrders.push({ price: p, category: "壓力門檻" });
-      });
-    }
-    if (Array.isArray(strat.supportZones)) {
-      strat.supportZones.forEach((sz: any) => {
-        const p = typeof sz.price === "number" ? sz.price : parseFloat(sz.price);
-        if (!isNaN(p) && p > 0) validOrders.push({ price: p, category: "支撐門檻" });
-      });
-    }
-    if (Array.isArray(strat.entries)) {
-      strat.entries.forEach((entry: any) => {
-        const p = typeof entry.price === "number" ? entry.price : parseFloat(entry.priceStr || entry.price);
-        if (!isNaN(p) && p > 0) validOrders.push({ price: p, category: "分批進出場規劃" });
-      });
-    }
-  }
-
-  // 2. 規劃訂單
-  if (Array.isArray(tabAny.plannedOrders)) {
+  // 1. 若 tab 有 plannedOrders (卡片上的主要訂單集合)
+  if (Array.isArray(tabAny.plannedOrders) && tabAny.plannedOrders.length > 0) {
     tabAny.plannedOrders.forEach((o: any) => {
       const p = typeof o.price === "number" ? o.price : parseFloat(o.price || o.priceStr);
-      if (!isNaN(p) && p > 0) validOrders.push({ price: p, category: o.category || "分批進出場規劃" });
+      if (!isNaN(p) && p > 0) {
+        validOrders.push({ price: p, category: o.category || "其他" });
+      }
     });
+  } else {
+    // 若無 plannedOrders，則從 strategy 目標價提取
+    const strat = strategy || tabAny.strategy;
+    if (strat) {
+      if (Array.isArray(strat.tpTargets)) {
+        strat.tpTargets.forEach((tp: any) => {
+          const p = typeof tp.price === "number" ? tp.price : parseFloat(tp.price);
+          if (!isNaN(p) && p > 0) validOrders.push({ price: p, category: "止盈設定" });
+        });
+      }
+      if (Array.isArray(strat.slTargets)) {
+        strat.slTargets.forEach((sl: any) => {
+          const p = typeof sl.price === "number" ? sl.price : parseFloat(sl.price);
+          if (!isNaN(p) && p > 0) validOrders.push({ price: p, category: "止損設定" });
+        });
+      }
+      if (Array.isArray(strat.resistanceZones)) {
+        strat.resistanceZones.forEach((rz: any) => {
+          const p = typeof rz.price === "number" ? rz.price : parseFloat(rz.price);
+          if (!isNaN(p) && p > 0) validOrders.push({ price: p, category: "壓力門檻" });
+        });
+      }
+      if (Array.isArray(strat.supportZones)) {
+        strat.supportZones.forEach((sz: any) => {
+          const p = typeof sz.price === "number" ? sz.price : parseFloat(sz.price);
+          if (!isNaN(p) && p > 0) validOrders.push({ price: p, category: "支撐門檻" });
+        });
+      }
+      if (Array.isArray(strat.entries)) {
+        strat.entries.forEach((entry: any) => {
+          const p = typeof entry.price === "number" ? entry.price : parseFloat(entry.priceStr || entry.price);
+          if (!isNaN(p) && p > 0) validOrders.push({ price: p, category: "分批進出場規劃" });
+        });
+      }
+    }
+    if (tab.stopLossPrice && tab.stopLossPrice > 0) {
+      validOrders.push({ price: tab.stopLossPrice, category: "止損設定" });
+    }
+    if (tab.takeProfitPrice && tab.takeProfitPrice > 0) {
+      validOrders.push({ price: tab.takeProfitPrice, category: "止盈設定" });
+    }
   }
 
-  if (tab.stopLossPrice && tab.stopLossPrice > 0) {
-    validOrders.push({ price: tab.stopLossPrice, category: "止損設定" });
-  }
-  if (tab.takeProfitPrice && tab.takeProfitPrice > 0) {
-    validOrders.push({ price: tab.takeProfitPrice, category: "止盈設定" });
-  }
-
-  // 3. 系統二向下攤平 (組別 1~4)
+  // 2. 系統二向下攤平 (組別 1~4)
   const avgSys2Prices: number[] = [];
   const hasHoldings =
     (holdingQuantity !== undefined ? holdingQuantity > 0 : false) ||
@@ -328,15 +341,6 @@ export function calculateCardPriceY(
     });
   }
 
-  if (tab.averagingRows && tab.averagingRows.length > 0) {
-    tab.averagingRows.forEach((row) => {
-      const parsed = parseFloat(row.price);
-      if (!isNaN(parsed) && parsed > 0) {
-        validOrders.push({ price: parsed, category: "分批進出場規劃" });
-      }
-    });
-  }
-
   const cost =
     averageCost && averageCost > 0
       ? averageCost
@@ -347,21 +351,39 @@ export function calculateCardPriceY(
       : 0;
 
   const allPrices = [
-    dynPrice,
+    dynamicPrice,
     ...(cost > 0 ? [cost] : []),
     ...validOrders.map((o) => o.price),
     ...avgSys2Prices,
   ].filter((p) => typeof p === "number" && !isNaN(p) && p > 0);
 
-  if (allPrices.length === 0) return 50;
-
   const uniqueSortedPrices = Array.from(new Set(allPrices)).sort((a, b) => a - b);
-  const topY = 7;
-  const bottomY = 93;
+  return { dynamicPrice, uniqueSortedPrices };
+}
 
+/**
+ * 精確還原 StockCardVisualizer 內「現價標籤」在卡片畫布上的 SVG Y 軸百分比 (CARD_TOP_Y 7% ~ CARD_BOTTOM_Y 93%)
+ */
+export function calculateCardPriceY(
+  tab: StockTab,
+  strategy?: any,
+  averageCost?: number,
+  holdingQuantity?: number
+): number {
+  const { dynamicPrice, uniqueSortedPrices } = extractCardPricePoints(
+    tab,
+    strategy,
+    averageCost,
+    holdingQuantity
+  );
+
+  if (uniqueSortedPrices.length === 0) return 50;
   if (uniqueSortedPrices.length <= 1) return 50;
+
+  const topY = CARD_TOP_Y; // 7%
+  const bottomY = CARD_BOTTOM_Y; // 93%
   const n = uniqueSortedPrices.length;
-  const targetP = dynPrice > 0 ? dynPrice : uniqueSortedPrices[Math.floor(uniqueSortedPrices.length / 2)];
+  const targetP = dynamicPrice > 0 ? dynamicPrice : uniqueSortedPrices[Math.floor(n / 2)];
 
   if (targetP <= uniqueSortedPrices[0]) return bottomY;
   if (targetP >= uniqueSortedPrices[n - 1]) return topY;
@@ -382,28 +404,78 @@ export function calculateCardPriceY(
 }
 
 /**
- * 計算現價與分隔線在卡片上的相對位置，並精準投射至動態視覺線畫布 Y 軸座標 (0-100%)
- * 畫布標準 6 條視覺基準線高度：
- * 頂黃 12% (頂部獲利), 紅 28% (停損警戒), 黑 44% (基準中軸), 藍 60% (回檔加碼), 綠 76% (底部買進), 底黃 90% (深幅價值)
+ * 輔助線與座標診斷詳細結果介面
  */
-export function calculateCanvasYFromDividers(
+export interface CanvasYCalculationDetails {
+  canvasY: number;
+  cardPriceY: number;
+  currentPrice: number;
+  anchors: { cardY: number; canvasY: number; name: string }[];
+  nearestLine: {
+    name: string;
+    axis: string;
+    yPercent: number;
+    diff: number;
+    color: string;
+  };
+  zone: {
+    name: string;
+    range: string;
+    desc: string;
+  };
+  isSnapped: boolean;
+  snappedTo?: string;
+  dividerCount: number;
+}
+
+/**
+ * 計算現價與分隔線在卡片上的相對位置，並提供完整的座標計算診斷資訊（用於輔助線測試與精準投射）
+ */
+export function calculateCanvasYDetails(
   tab: StockTab,
   strategy?: any,
   averageCost?: number,
   holdingQuantity?: number
-): number | null {
-  // 1. 精確計算現價標籤在卡片上的 SVG Y 軸高度 (7% ~ 93%)
+): CanvasYCalculationDetails {
   const cpCardY = calculateCardPriceY(tab, strategy, averageCost, holdingQuantity);
-
   const analysis = analyzeCardDividers(tab);
+  const dynPrice = tab.currentPrice && tab.currentPrice > 0 ? tab.currentPrice : (tab as any).price || 0;
 
-  // 2. 若卡片完全沒有任何分隔線，直接將卡片尺度 (7% ~ 93%) 線性投射至畫布視覺線 (12% ~ 90%)
+  // 1. 若卡片完全沒有任何分隔線，直接將卡片尺度 (7% ~ 93%) 線性投射至畫布視覺線 (12% ~ 90%)
   if (!analysis.allDividers || analysis.allDividers.length === 0) {
-    const canvasY = 12 + ((cpCardY - 7) / (93 - 7)) * (90 - 12);
-    return Math.max(6, Math.min(94, Math.round(canvasY * 10) / 10));
+    const rawCanvasY =
+      CANVAS_TOP_YELLOW_Y +
+      ((cpCardY - CARD_TOP_Y) / (CARD_BOTTOM_Y - CARD_TOP_Y)) *
+        (CANVAS_BOTTOM_YELLOW_Y - CANVAS_TOP_YELLOW_Y);
+    const canvasY = Math.max(6, Math.min(94, Math.round(rawCanvasY * 10) / 10));
+    const zoneInfo = getAxisZoneForCanvasY(canvasY);
+
+    return {
+      canvasY,
+      cardPriceY: cpCardY,
+      currentPrice: dynPrice,
+      anchors: [
+        { cardY: CARD_TOP_Y, canvasY: CANVAS_TOP_YELLOW_Y, name: "頂黃基準 (12%)" },
+        { cardY: CARD_BOTTOM_Y, canvasY: CANVAS_BOTTOM_YELLOW_Y, name: "底黃基準 (90%)" },
+      ],
+      nearestLine: {
+        name: zoneInfo.label,
+        axis: zoneInfo.axis,
+        yPercent: zoneInfo.targetY,
+        diff: zoneInfo.diff,
+        color: "#EAB308",
+      },
+      zone: {
+        name: zoneInfo.label,
+        range: `${zoneInfo.targetY}%`,
+        desc: zoneInfo.desc,
+      },
+      isSnapped: false,
+      dividerCount: 0,
+    };
   }
 
-  // 3. 取得卡片上各色系分隔線的實際繪製位置
+  // 2. 取得卡片上各色系分隔線
   const blackDividers = analysis.allDividers.filter((d) => d.colorType === "black").map((d) => d.y);
   const blueDividers = analysis.allDividers.filter((d) => d.colorType === "blue").map((d) => d.y);
   const redDividers = analysis.allDividers.filter((d) => d.colorType === "red").map((d) => d.y);
@@ -411,19 +483,26 @@ export function calculateCanvasYFromDividers(
   const yellowDividers = analysis.allDividers.filter((d) => d.colorType === "yellow").map((d) => d.y);
   const otherDividers = analysis.allDividers.filter((d) => d.colorType === "other").map((d) => d.y);
 
-  // 建立真實分隔線錨點集合 (收集卡片上實際繪製的分隔線及其在看板上的標準目標高度)
-  // 標準對照: 頂黃: 12%, 紅(警戒): 28%, 黑(中軸): 44%, 藍(加碼): 60%, 綠(買進): 76%, 底黃(深幅): 90%
+  // 3. 建立真實分隔線錨點集合 (標準目標高度: 頂黃 12%, 紅 28%, 黑 44%, 藍 60%, 綠 76%, 底黃 90%)
   const detectedAnchors: { cardY: number; canvasY: number; name: string }[] = [];
 
   // 頂部黃色線 (頂部獲利)：卡片上方 (y < 40)
   const topYellows = yellowDividers.filter((y) => y < 40);
   if (topYellows.length > 0) {
-    detectedAnchors.push({ cardY: Math.min(...topYellows), canvasY: 12, name: "topYellow" });
+    detectedAnchors.push({
+      cardY: Math.min(...topYellows),
+      canvasY: CANVAS_TOP_YELLOW_Y,
+      name: "頂黃 (Y軸 12%)",
+    });
   }
 
   // 紅色線 (停損警戒)：卡片中上方阻力
   if (redDividers.length > 0) {
-    detectedAnchors.push({ cardY: Math.min(...redDividers), canvasY: 28, name: "red" });
+    detectedAnchors.push({
+      cardY: Math.min(...redDividers),
+      canvasY: CANVAS_RED_Y,
+      name: "紅線 (R軸 28%)",
+    });
   }
 
   // 黑色線 (基準中軸)：卡片中間基準
@@ -431,34 +510,52 @@ export function calculateCanvasYFromDividers(
     const closestBlack = blackDividers.reduce((prev, curr) =>
       Math.abs(curr - 50) < Math.abs(prev - 50) ? curr : prev
     );
-    detectedAnchors.push({ cardY: closestBlack, canvasY: 44, name: "black" });
+    detectedAnchors.push({
+      cardY: closestBlack,
+      canvasY: CANVAS_BLACK_Y,
+      name: "黑線 (D軸 44%)",
+    });
   }
 
   // 藍色線 (回檔加碼)：卡片中下方支撐
   if (blueDividers.length > 0) {
-    detectedAnchors.push({ cardY: Math.min(...blueDividers), canvasY: 60, name: "blue" });
+    detectedAnchors.push({
+      cardY: Math.min(...blueDividers),
+      canvasY: CANVAS_BLUE_Y,
+      name: "藍線 (B軸 60%)",
+    });
   }
 
   // 綠色線 (底部買進)：卡片下方買進
   if (greenDividers.length > 0) {
-    detectedAnchors.push({ cardY: Math.max(...greenDividers), canvasY: 76, name: "green" });
+    detectedAnchors.push({
+      cardY: Math.max(...greenDividers),
+      canvasY: CANVAS_GREEN_Y,
+      name: "綠線 (G軸 76%)",
+    });
   }
 
   // 底部黃色線 (深幅價值)：卡片最下方 (y > 60)
   const bottomYellows = yellowDividers.filter((y) => y > 60);
   if (bottomYellows.length > 0) {
-    detectedAnchors.push({ cardY: Math.max(...bottomYellows), canvasY: 90, name: "bottomYellow" });
+    detectedAnchors.push({
+      cardY: Math.max(...bottomYellows),
+      canvasY: CANVAS_BOTTOM_YELLOW_Y,
+      name: "底黃 (Y軸 90%)",
+    });
   }
 
-  // 若卡片上有一般分隔線且未收集到標準色系線
+  // 若只有一般分隔線且未收集到標準色系線
   if (detectedAnchors.length === 0 && otherDividers.length > 0) {
     otherDividers.sort((a, b) => a - b);
     if (otherDividers.length === 1) {
-      detectedAnchors.push({ cardY: otherDividers[0], canvasY: 44, name: "black" });
+      detectedAnchors.push({ cardY: otherDividers[0], canvasY: CANVAS_BLACK_Y, name: "自訂中軸 (44%)" });
     } else {
       otherDividers.forEach((y, i) => {
-        const cY = 28 + (i / (otherDividers.length - 1)) * (76 - 28);
-        detectedAnchors.push({ cardY: y, canvasY: cY, name: `other-${i}` });
+        const cY =
+          CANVAS_RED_Y +
+          (i / (otherDividers.length - 1)) * (CANVAS_GREEN_Y - CANVAS_RED_Y);
+        detectedAnchors.push({ cardY: y, canvasY: cY, name: `自訂線-${i + 1}` });
       });
     }
   }
@@ -467,62 +564,213 @@ export function calculateCanvasYFromDividers(
   detectedAnchors.sort((a, b) => a.cardY - b.cardY);
 
   // 5. 加入卡片頂部與底部邊界錨點，建立覆蓋全範圍的映射
-  const minCardY = detectedAnchors.length > 0 ? Math.min(7, detectedAnchors[0].cardY - 10) : 7;
-  const maxCardY = detectedAnchors.length > 0 ? Math.max(93, detectedAnchors[detectedAnchors.length - 1].cardY + 10) : 93;
+  const firstAnchor = detectedAnchors[0];
+  const lastAnchor = detectedAnchors[detectedAnchors.length - 1];
 
-  const minCanvasY = detectedAnchors.length > 0 ? Math.min(10, detectedAnchors[0].canvasY - 12) : 10;
-  const maxCanvasY = detectedAnchors.length > 0 ? Math.max(92, detectedAnchors[detectedAnchors.length - 1].canvasY + 10) : 92;
+  const minCardY = Math.min(CARD_TOP_Y, firstAnchor ? firstAnchor.cardY - 10 : CARD_TOP_Y);
+  const maxCardY = Math.max(CARD_BOTTOM_Y, lastAnchor ? lastAnchor.cardY + 10 : CARD_BOTTOM_Y);
+
+  const minCanvasY = firstAnchor
+    ? Math.max(6, Math.min(CANVAS_TOP_YELLOW_Y, firstAnchor.canvasY - 10))
+    : CANVAS_TOP_YELLOW_Y;
+  const maxCanvasY = lastAnchor
+    ? Math.min(94, Math.max(CANVAS_BOTTOM_YELLOW_Y, lastAnchor.canvasY + 10))
+    : CANVAS_BOTTOM_YELLOW_Y;
 
   const anchors = [
-    { cardY: minCardY, canvasY: Math.max(6, minCanvasY) },
+    { cardY: minCardY, canvasY: minCanvasY, name: "頂部邊界" },
     ...detectedAnchors,
-    { cardY: maxCardY, canvasY: Math.min(94, maxCanvasY) },
+    { cardY: maxCardY, canvasY: maxCanvasY, name: "底部邊界" },
   ];
 
   // 6. 確保 anchors 的 canvasY 保持嚴格單調遞增 (拓撲保證)
   for (let i = 1; i < anchors.length; i++) {
     if (anchors[i].canvasY <= anchors[i - 1].canvasY) {
-      anchors[i].canvasY = anchors[i - 1].canvasY + 2;
+      anchors[i].canvasY = anchors[i - 1].canvasY + 1.5;
     }
   }
 
   // 7. 高精度分段線性插值 (Piecewise Linear Interpolation)
-  let canvasY: number;
+  let rawCanvasY: number;
 
   if (cpCardY <= anchors[0].cardY) {
-    canvasY = anchors[0].canvasY;
+    rawCanvasY = anchors[0].canvasY;
   } else if (cpCardY >= anchors[anchors.length - 1].cardY) {
-    canvasY = anchors[anchors.length - 1].canvasY;
+    rawCanvasY = anchors[anchors.length - 1].canvasY;
   } else {
     let found = false;
-    canvasY = 44;
+    rawCanvasY = CANVAS_BLACK_Y;
     for (let i = 0; i < anchors.length - 1; i++) {
       const a = anchors[i];
       const b = anchors[i + 1];
       if (cpCardY >= a.cardY && cpCardY <= b.cardY) {
         const span = Math.max(0.0001, b.cardY - a.cardY);
         const t = (cpCardY - a.cardY) / span;
-        canvasY = a.canvasY + t * (b.canvasY - a.canvasY);
+        rawCanvasY = a.canvasY + t * (b.canvasY - a.canvasY);
         found = true;
         break;
       }
     }
     if (!found) {
-      canvasY = 44;
+      rawCanvasY = CANVAS_BLACK_Y;
     }
   }
 
-  // 8. 靠近分隔線吸附精度：若極度靠近某分隔線 (小於 0.3% 畫布高度誤差)，精確吸附對齊該分隔線
+  // 8. 靠近分隔線吸附精度：若極度靠近某分隔線 (小於 0.8% 卡片高度或 0.5% 畫布高度)，精確吸附對齊
+  let isSnapped = false;
+  let snappedTo: string | undefined;
   for (const anchor of detectedAnchors) {
-    if (Math.abs(canvasY - anchor.canvasY) <= 0.3) {
-      canvasY = anchor.canvasY;
+    if (
+      Math.abs(cpCardY - anchor.cardY) <= 0.8 ||
+      Math.abs(rawCanvasY - anchor.canvasY) <= 0.5
+    ) {
+      rawCanvasY = anchor.canvasY;
+      isSnapped = true;
+      snappedTo = anchor.name;
       break;
     }
   }
 
   // 9. 安全邊界限制與精度四捨五入 (保留 6% ~ 94% 可視範圍，精確保留小數點一位)
-  const clampedY = Math.max(6, Math.min(94, Math.round(canvasY * 10) / 10));
-  return clampedY;
+  const clampedY = Math.max(6, Math.min(94, Math.round(rawCanvasY * 10) / 10));
+  const zoneInfo = getAxisZoneForCanvasY(clampedY);
+
+  return {
+    canvasY: clampedY,
+    cardPriceY: cpCardY,
+    currentPrice: dynPrice,
+    anchors: detectedAnchors,
+    nearestLine: {
+      name: zoneInfo.label,
+      axis: zoneInfo.axis,
+      yPercent: zoneInfo.targetY,
+      diff: zoneInfo.diff,
+      color:
+        zoneInfo.axis === "D"
+          ? "#000000"
+          : zoneInfo.axis === "B"
+          ? "#2563EB"
+          : zoneInfo.axis === "G"
+          ? "#16A34A"
+          : zoneInfo.axis === "R"
+          ? "#EF4444"
+          : "#EAB308",
+    },
+    zone: {
+      name: zoneInfo.label,
+      range: `${zoneInfo.targetY}%`,
+      desc: zoneInfo.desc,
+    },
+    isSnapped,
+    snappedTo,
+    dividerCount: analysis.allDividers.length,
+  };
+}
+
+/**
+ * 計算現價與分隔線在卡片上的相對位置，並精準投射至動態視覺線畫布 Y 軸座標 (0-100%)
+ */
+export function calculateCanvasYFromDividers(
+  tab: StockTab,
+  strategy?: any,
+  averageCost?: number,
+  holdingQuantity?: number
+): number | null {
+  const details = calculateCanvasYDetails(tab, strategy, averageCost, holdingQuantity);
+  return details.canvasY;
+}
+
+/**
+ * 判定給定 Canvas Y 軸座標所屬的標準視覺線或區間
+ */
+export function getAxisZoneForCanvasY(canvasY: number): {
+  type: "line" | "zone";
+  axis: string;
+  label: string;
+  desc: string;
+  targetY: number;
+  diff: number;
+} {
+  const lines = [
+    { axis: "Y", label: "頂黃 Y軸 (頂部獲利)", targetY: CANVAS_TOP_YELLOW_Y, desc: "Take Profit / 極限超買" },
+    { axis: "R", label: "紅色 R軸 (停損警戒)", targetY: CANVAS_RED_Y, desc: "Stop Loss / 阻力警戒" },
+    { axis: "D", label: "黑色 D軸 (基準中軸)", targetY: CANVAS_BLACK_Y, desc: "Base / 成本平衡線" },
+    { axis: "B", label: "藍色 B軸 (回檔加碼)", targetY: CANVAS_BLUE_Y, desc: "Support / 回檔支撐" },
+    { axis: "G", label: "綠色 G軸 (底部買進)", targetY: CANVAS_GREEN_Y, desc: "Floor / 強力買進" },
+    { axis: "Y", label: "底黃 Y軸 (深幅價值)", targetY: CANVAS_BOTTOM_YELLOW_Y, desc: "Deep Value / 極限超賣" },
+  ];
+
+  for (const l of lines) {
+    const diff = Math.abs(canvasY - l.targetY);
+    if (diff <= 1.0) {
+      return { type: "line", axis: l.axis, label: l.label, desc: l.desc, targetY: l.targetY, diff };
+    }
+  }
+
+  if (canvasY < CANVAS_TOP_YELLOW_Y) {
+    return {
+      type: "zone",
+      axis: "Y+",
+      label: "頂部突破區 (<12%)",
+      desc: "極限超買延伸區間",
+      targetY: CANVAS_TOP_YELLOW_Y,
+      diff: CANVAS_TOP_YELLOW_Y - canvasY,
+    };
+  } else if (canvasY < CANVAS_RED_Y) {
+    return {
+      type: "zone",
+      axis: "Y-R",
+      label: "Y - R 區間 (12%~28%)",
+      desc: "淡粉紅 / 頂部獲利 ~ 停損警戒",
+      targetY: 20,
+      diff: Math.abs(canvasY - 20),
+    };
+  } else if (canvasY < CANVAS_BLACK_Y) {
+    return {
+      type: "zone",
+      axis: "R-D",
+      label: "R - D 區間 (28%~44%)",
+      desc: "淡灰色 / 阻力警戒 ~ 基準中軸",
+      targetY: 36,
+      diff: Math.abs(canvasY - 36),
+    };
+  } else if (canvasY < CANVAS_BLUE_Y) {
+    return {
+      type: "zone",
+      axis: "D-B",
+      label: "D - B 區間 (44%~60%)",
+      desc: "淡藍色 / 基準中軸 ~ 回檔加碼",
+      targetY: 52,
+      diff: Math.abs(canvasY - 52),
+    };
+  } else if (canvasY < CANVAS_GREEN_Y) {
+    return {
+      type: "zone",
+      axis: "B-G",
+      label: "B - G 區間 (60%~76%)",
+      desc: "淡青綠 / 回檔加碼 ~ 底部買進",
+      targetY: 68,
+      diff: Math.abs(canvasY - 68),
+    };
+  } else if (canvasY <= CANVAS_BOTTOM_YELLOW_Y) {
+    return {
+      type: "zone",
+      axis: "G-Y",
+      label: "G - Y 區間 (76%~90%)",
+      desc: "淡金色 / 底部買進 ~ 深幅價值",
+      targetY: 83,
+      diff: Math.abs(canvasY - 83),
+    };
+  } else {
+    return {
+      type: "zone",
+      axis: "Y-",
+      label: "底部超跌區 (>90%)",
+      desc: "極限超賣延伸區間",
+      targetY: CANVAS_BOTTOM_YELLOW_Y,
+      diff: canvasY - CANVAS_BOTTOM_YELLOW_Y,
+    };
+  }
 }
 
 /**
@@ -550,7 +798,16 @@ export async function syncSubTabDividersToCanvas(
   subTabTabs: StockTab[],
   userId?: string,
   strategiesMap?: Record<string, any>,
-  statsMap?: Record<string, { averagePrice?: number; totalQuantity?: number }>
+  statsMap?: Record<
+    string,
+    {
+      averagePrice?: number;
+      totalQuantity?: number;
+      unrealizedPnL?: number;
+      unrealizedPnLPercent?: number;
+      realizedPnL?: number;
+    }
+  >
 ): Promise<{
   success: boolean;
   updatedCount: number;
@@ -558,33 +815,9 @@ export async function syncSubTabDividersToCanvas(
   updatedSymbols: string[];
   allPositions: PositionMap;
 }> {
-  const storageKey = `visual_lines_board_positions_${userId || "guest"}`;
-  let currentPositions: PositionMap = {};
-
-  // 1. 讀取現有位置資料
-  if (userId) {
-    try {
-      const docRef = doc(db, "users", userId, "visualLinesBoard", "positions");
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        const remotePos = docSnap.data()?.positions as PositionMap;
-        if (remotePos && typeof remotePos === "object") {
-          currentPositions = { ...remotePos };
-        }
-      }
-    } catch (e) {
-      console.warn("Failed to load firestore positions:", e);
-    }
-  }
-
-  if (Object.keys(currentPositions).length === 0) {
-    try {
-      const localData = localStorage.getItem(storageKey);
-      if (localData) {
-        currentPositions = JSON.parse(localData);
-      }
-    } catch (e) {}
-  }
+  // 1. 同步即時讀取現有位置快取資料 (0ms 延遲)
+  const currentData = getVisualLinesDataSync(userId);
+  const currentPositions = currentData.positions;
 
   const updatedSymbols: string[] = [];
   const newPositions: PositionMap = { ...currentPositions };
@@ -669,35 +902,8 @@ export async function syncSubTabDividersToCanvas(
   });
 
   if (updatedCount > 0) {
-    // 3. 儲存至 LocalStorage
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(newPositions));
-    } catch (e) {}
-
-    // 4. 儲存至 Firestore (直接覆蓋舊座標紀錄為權威資料源)
-    if (userId) {
-      try {
-        const docRef = doc(db, "users", userId, "visualLinesBoard", "positions");
-        await setDoc(
-          docRef,
-          {
-            positions: newPositions,
-            updatedAt: nowIso,
-          }
-        );
-      } catch (err) {
-        console.warn("Failed to save synced positions to firestore:", err);
-      }
-    }
-
-    // 5. 觸發即時事件通知各組件更新
-    window.dispatchEvent(
-      new CustomEvent("visual_lines_positions_updated", {
-        detail: {
-          allPositions: newPositions,
-        },
-      })
-    );
+    // 3. 極速樂觀寫入（記憶體 + 本地快取 + 廣播 + 背景非同步寫入 Firestore）
+    saveVisualLinesDataOptimistic(userId, newPositions, currentData.tagSizeOffset);
   }
 
   return {

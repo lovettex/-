@@ -32,19 +32,35 @@ import {
   Upload,
   MoveHorizontal,
   RefreshCw,
-  AlertTriangle,
+  Crosshair,
+  Ruler,
+  HelpCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { playClickSound, playSuccessSound } from "../lib/audio";
-import { db, handleFirestoreError, OperationType } from "../lib/firebase";
-import { doc, getDoc, setDoc } from "firebase/firestore";
 import { StockTab } from "../types";
 import {
   syncSubTabDividersToCanvas,
   formatTagDate,
   analyzeCardDividers,
   calculateCanvasYFromDividers,
+  calculateCanvasYDetails,
+  getAxisZoneForCanvasY,
+  CARD_TOP_Y,
+  CARD_BOTTOM_Y,
+  CANVAS_TOP_YELLOW_Y,
+  CANVAS_RED_Y,
+  CANVAS_BLACK_Y,
+  CANVAS_BLUE_Y,
+  CANVAS_GREEN_Y,
+  CANVAS_BOTTOM_YELLOW_Y,
+  CanvasYCalculationDetails,
 } from "../utils/visualLinesSync";
+import {
+  getVisualLinesDataSync,
+  revalidateVisualLinesDataAsync,
+  saveVisualLinesDataOptimistic,
+} from "../utils/visualLinesStorage";
 
 export interface PositionMap {
   [symbol: string]: {
@@ -136,7 +152,16 @@ interface DynamicVisualLinesModalProps {
   initialTradeType?: "active" | "real" | "all" | "completed";
   onSelectStock?: (tabId: string, symbol: string) => void;
   strategiesMap?: Record<string, any>;
-  statsMap?: Record<string, { averagePrice?: number; totalQuantity?: number }>;
+  statsMap?: Record<
+    string,
+    {
+      averagePrice?: number;
+      totalQuantity?: number;
+      unrealizedPnL?: number;
+      unrealizedPnLPercent?: number;
+      realizedPnL?: number;
+    }
+  >;
 }
 
 // 6 Horizontal Visual Lines (黑色: D軸, 藍色: B軸, 綠色: G軸, 黃色: Y軸, 紅色: R軸)
@@ -186,6 +211,21 @@ export const VISUAL_BANDS = [
     bg: "rgba(254, 252, 232, 0.7)", // 淡淡的金色 (青綠色與黃色之間)
     label: "淡金色區域",
   },
+];
+
+// 輔助測試基準線 (包含 6 大主軸 12/28/44/60/76/90% 與 5 大區間中線 20/36/52/68/83%)
+export const AUXILIARY_TEST_INTERVALS = [
+  { yPercent: 12, label: "頂黃 Y軸 (12.0%)", isMain: true, color: "#EAB308", desc: "頂部獲利 / Take Profit" },
+  { yPercent: 20, label: "Y-R 中線 (20.0%)", isMain: false, color: "#FB7185", desc: "淡粉紅中線" },
+  { yPercent: 28, label: "紅色 R軸 (28.0%)", isMain: true, color: "#EF4444", desc: "停損警戒 / Stop Loss" },
+  { yPercent: 36, label: "R-D 中線 (36.0%)", isMain: false, color: "#9CA3AF", desc: "淡灰中線" },
+  { yPercent: 44, label: "黑色 D軸 (44.0%)", isMain: true, color: "#000000", desc: "基準中軸 / Base Balance" },
+  { yPercent: 52, label: "D-B 中線 (52.0%)", isMain: false, color: "#60A5FA", desc: "淡藍中線" },
+  { yPercent: 60, label: "藍色 B軸 (60.0%)", isMain: true, color: "#2563EB", desc: "回檔加碼 / Support" },
+  { yPercent: 68, label: "B-G 中線 (68.0%)", isMain: false, color: "#34D399", desc: "淡青綠中線" },
+  { yPercent: 76, label: "綠色 G軸 (76.0%)", isMain: true, color: "#16A34A", desc: "底部買進 / Floor Buy" },
+  { yPercent: 83, label: "G-Y 中線 (83.0%)", isMain: false, color: "#FACC15", desc: "淡金中線" },
+  { yPercent: 90, label: "底黃 Y軸 (90.0%)", isMain: true, color: "#EAB308", desc: "深幅價值 / Deep Value" },
 ];
 
 export const HOLDING_CONFIG: Record<
@@ -308,6 +348,10 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
   // 輔助視覺狀態 - 預設不顯示線條標籤
   const [showLineLabels, setShowLineLabels] = useState(false);
   const [showPriceBadge, setShowPriceBadge] = useState(false);
+  // 輔助線測試狀態 - 統一基準點與輔助線座標診斷
+  const [showAuxiliaryTestLines, setShowAuxiliaryTestLines] = useState(false);
+  const [selectedDiagnosticSymbol, setSelectedDiagnosticSymbol] = useState<string | null>(null);
+  const [hoveredDiagnosticSymbol, setHoveredDiagnosticSymbol] = useState<string | null>(null);
 
   // 框選模式開關 (可點擊切換，或在畫布空白處直接拖曳框選)
   const [isBoxSelectMode, setIsBoxSelectMode] = useState(false);
@@ -327,16 +371,13 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
 
   // 全域標籤尺寸調整偏移量 (每次 +/- 2px，儲存至 localStorage)
   const [tagSizeOffset, setTagSizeOffset] = useState<number>(() => {
-    try {
-      const saved = localStorage.getItem("visualLines_tagSizeOffset");
-      return saved !== null && !isNaN(Number(saved)) ? Number(saved) : 0;
-    } catch {
-      return 0;
-    }
+    return getVisualLinesDataSync(userId).tagSizeOffset;
   });
 
-  // 標籤位置狀態
-  const [positions, setPositions] = useState<PositionMap>({});
+  // 標籤位置狀態（同步即時由記憶體/本地讀取，0ms 開啟）
+  const [positions, setPositions] = useState<PositionMap>(() => {
+    return getVisualLinesDataSync(userId).positions;
+  });
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isUpdatingPositions, setIsUpdatingPositions] = useState(false);
@@ -351,64 +392,18 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
   const draggingSymbolRef = useRef<string | null>(null);
   const dragOffsetRef = useRef<{ offsetX: number; offsetY: number }>({ offsetX: 0, offsetY: 0 });
 
-  // 載入已儲存的標籤位置、形狀與大小 (Firestore / localStorage)
-  const loadPositions = useCallback(async () => {
-    const storageKey = `visual_lines_board_positions_${userId || "guest"}`;
-    let loadedPos: PositionMap = {};
-    let loadedFromFirestore = false;
-
-    // 1. 優先從 Firestore 雲端讀取權威資料
-    if (userId) {
-      try {
-        const docRef = doc(db, "users", userId, "visualLinesBoard", "positions");
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          const docData = docSnap.data();
-          const remotePos = docData?.positions as PositionMap;
-          if (remotePos && typeof remotePos === "object") {
-            loadedPos = remotePos;
-            loadedFromFirestore = true;
-            try {
-              localStorage.setItem(storageKey, JSON.stringify(remotePos));
-            } catch (e) {}
-          }
-          if (docData?.tagSizeOffset !== undefined && !isNaN(Number(docData.tagSizeOffset))) {
-            setTagSizeOffset(Number(docData.tagSizeOffset));
-            try {
-              localStorage.setItem("visualLines_tagSizeOffset", String(docData.tagSizeOffset));
-            } catch (e) {}
-          }
-        }
-      } catch (err) {
-        console.warn("Failed to load Firestore positions:", err);
-      }
-    }
-
-    // 2. 若未從 Firestore 取得，則由 LocalStorage 回退讀取
-    if (!loadedFromFirestore) {
-      try {
-        const localData = localStorage.getItem(storageKey);
-        if (localData) {
-          loadedPos = JSON.parse(localData);
-        }
-      } catch (e) {
-        console.warn("Failed to load local positions:", e);
-      }
-    }
-
-    // 確保所有載入的標籤都帶有 shape: "circle" 與正確的 hidden 狀態與攤平進度
-    const sanitizedLoadedPos: PositionMap = {};
-    Object.entries(loadedPos).forEach(([sym, pos]) => {
-      sanitizedLoadedPos[sym] = {
-        ...pos,
-        shape: "circle",
-        hidden: Boolean(pos.hidden),
-        dcaProgress: pos.dcaProgress || undefined,
-      };
-    });
-
-    setPositions(sanitizedLoadedPos);
+  // 載入已儲存的標籤位置、形狀與大小 (0ms 讀取快取 + 背景靜默非同步複驗)
+  const loadPositions = useCallback(() => {
+    const data = getVisualLinesDataSync(userId);
+    setPositions(data.positions);
+    setTagSizeOffset(data.tagSizeOffset);
     setHasUnsavedChanges(false);
+
+    // 背景靜默複驗 Firestore（不卡頓、不阻塞 UI）
+    revalidateVisualLinesDataAsync(userId, (fresh) => {
+      setPositions(fresh.positions);
+      setTagSizeOffset(fresh.tagSizeOffset);
+    });
   }, [userId]);
 
   useEffect(() => {
@@ -613,48 +608,6 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     }
     return Object.keys(positions).filter((sym) => !positions[sym]?.hidden);
   }, [positions, showHiddenTags]);
-
-  // 計算每檔股票根據卡片分隔線與現價的預期 Y 軸位置，並檢測是否與目前看板位置對不上 (需提示人為更新操作並在看板上閃爍)
-  const syncStatusMap = useMemo(() => {
-    const map = new Map<
-      string,
-      { expectedY: number; isOutOfSync: boolean; diff: number; targetTab?: StockTab }
-    >();
-
-    for (const sym of activeCanvasSymbols) {
-      const pos = positions[sym];
-      const tab = allStockMap.get(sym);
-      if (!pos || !tab) continue;
-
-      const strat = strategiesMap?.[tab.id] || (tab as any).strategy;
-      const stat = statsMap?.[tab.id];
-      const avgCost = stat?.totalQuantity !== 0 ? stat?.averagePrice : undefined;
-      const holdingQty = stat?.totalQuantity ?? (tab as any).holdingQuantity;
-
-      const expectedY = calculateCanvasYFromDividers(tab, strat, avgCost, holdingQty);
-      if (expectedY !== null && typeof pos.y === "number") {
-        const diff = Math.abs(pos.y - expectedY);
-        // 若高度差距 >= 2.5%，即視為看板標籤與視覺圖示化中的分隔線位置對不上
-        const isOutOfSync = diff >= 2.5;
-        map.set(sym, {
-          expectedY: parseFloat(expectedY.toFixed(2)),
-          isOutOfSync,
-          diff: parseFloat(diff.toFixed(2)),
-          targetTab: tab,
-        });
-      }
-    }
-    return map;
-  }, [activeCanvasSymbols, positions, allStockMap, strategiesMap, statsMap]);
-
-  // 待人為更新 (位置對不上) 的股票數量
-  const outOfSyncCount = useMemo(() => {
-    let count = 0;
-    syncStatusMap.forEach((status) => {
-      if (status.isOutOfSync) count++;
-    });
-    return count;
-  }, [syncStatusMap]);
 
   // 判斷勾選的股票標籤是否全部為隱藏狀態
   const isAllSelectedHidden = useMemo(() => {
@@ -917,7 +870,7 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
   };
 
   // 一鍵「重置」：刪除畫布上所有個股標籤並即時更新與儲存
-  const handleResetAllCanvas = async () => {
+  const handleResetAllCanvas = () => {
     playClickSound();
     const currentCount = Object.keys(positions).length;
     if (currentCount === 0) {
@@ -925,44 +878,13 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
       return;
     }
 
-    const storageKey = `visual_lines_board_positions_${userId || "guest"}`;
-
-    // 1. 本地狀態重置
+    // 1. 本地狀態與快取重置
     setSelectedTagSymbols([]);
     setPositions({});
     setHasUnsavedChanges(false);
 
-    // 2. 清空 LocalStorage
-    try {
-      localStorage.setItem(storageKey, JSON.stringify({}));
-    } catch (e) {
-      console.warn("Reset LocalStorage failed:", e);
-    }
-
-    // 3. 清空 Firestore 雲端文檔
-    if (userId) {
-      try {
-        const docRef = doc(db, "users", userId, "visualLinesBoard", "positions");
-        await setDoc(docRef, {
-          positions: {},
-          tagSizeOffset,
-          defaultShape: "circle",
-          updatedAt: new Date().toISOString(),
-        });
-      } catch (dbErr) {
-        console.warn("Reset Firestore failed:", dbErr);
-      }
-    }
-
-    // 4. 發送全域自訂廣播事件
-    window.dispatchEvent(
-      new CustomEvent("visual_lines_positions_updated", {
-        detail: {
-          allPositions: {},
-          tagSizeOffset,
-        },
-      })
-    );
+    // 2. 秒速樂觀寫入（記憶體 + LocalStorage + 廣播 + 背景同步 Firestore）
+    saveVisualLinesDataOptimistic(userId, {}, tagSizeOffset);
 
     playSuccessSound();
     toast.success(`已成功重置！已刪除畫布上所有個股標籤 (共清除 ${currentCount} 檔)`, {
@@ -1087,111 +1009,15 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     }
   };
 
-  // 直接儲存位置資料庫並廣播更新
+  // 直接儲存位置資料庫並廣播更新（極速 0ms 樂觀寫入 + 背景非同步 Firestore 同步）
   const savePositionsDirectly = useCallback(
-    async (targetPositions: PositionMap, currentTagSizeOffset: number = tagSizeOffset) => {
-      const storageKey = `visual_lines_board_positions_${userId || "guest"}`;
-
-      // 確保每檔股票標籤都有完整的 shape: 'circle'、sizeOffset、color、dcaProgress 等設定，且無 undefined 欄位以符合 Firestore 要求
-      const sanitizedPositions: PositionMap = {};
-      Object.entries(targetPositions).forEach(([sym, pos]) => {
-        const entry: {
-          x: number;
-          y: number;
-          shape?: "circle";
-          sizeOffset?: number;
-          color?: string;
-          hidden?: boolean;
-          dcaProgress?: string;
-          updatedAt?: string;
-        } = {
-          x: typeof pos.x === "number" ? pos.x : 50,
-          y: typeof pos.y === "number" ? pos.y : 50,
-          shape: "circle",
-          sizeOffset: typeof pos.sizeOffset === "number" ? pos.sizeOffset : 0,
-          updatedAt: pos.updatedAt || new Date().toISOString(),
-        };
-        if (pos.color && typeof pos.color === "string" && pos.color.trim() !== "" && pos.color !== "#09090b") {
-          entry.color = pos.color;
-        }
-        if (pos.hidden) {
-          entry.hidden = true;
-        }
-        if (pos.dcaProgress && typeof pos.dcaProgress === "string") {
-          entry.dcaProgress = pos.dcaProgress;
-        }
-        sanitizedPositions[sym] = entry;
-      });
-
-      try {
-        // 1. LocalStorage
-        localStorage.setItem(storageKey, JSON.stringify(sanitizedPositions));
-        localStorage.setItem("visualLines_tagSizeOffset", String(currentTagSizeOffset));
-        localStorage.setItem("visualLines_tagShape", "circle");
-
-        // 2. Firestore 雲端寫入權威資料 (直接覆蓋舊座標)
-        if (userId) {
-          const docRef = doc(db, "users", userId, "visualLinesBoard", "positions");
-          try {
-            await setDoc(
-              docRef,
-              {
-                positions: sanitizedPositions,
-                tagSizeOffset: currentTagSizeOffset,
-                defaultShape: "circle",
-                updatedAt: new Date().toISOString(),
-              }
-            );
-          } catch (dbErr) {
-            handleFirestoreError(dbErr, OperationType.WRITE, `users/${userId}/visualLinesBoard/positions`);
-          }
-        }
-
-        // 3. 發送全域自訂廣播事件
-        window.dispatchEvent(
-          new CustomEvent("visual_lines_positions_updated", {
-            detail: {
-              allPositions: sanitizedPositions,
-              tagSizeOffset: currentTagSizeOffset,
-            },
-          })
-        );
-
-        setPositions(sanitizedPositions);
-        setHasUnsavedChanges(false);
-        return sanitizedPositions;
-      } catch (err: any) {
-        console.error("Auto save positions error:", err);
-        throw err;
-      }
+    (targetPositions: PositionMap, currentTagSizeOffset: number = tagSizeOffset) => {
+      const sanitized = saveVisualLinesDataOptimistic(userId, targetPositions, currentTagSizeOffset);
+      setPositions(sanitized);
+      setHasUnsavedChanges(false);
+      return sanitized;
     },
     [userId, tagSizeOffset]
-  );
-
-  // 單一股票快速對齊至圖示化分隔線計算位置
-  const handleSnapSingleStock = useCallback(
-    async (sym: string, targetY: number) => {
-      const prev = positions[sym];
-      if (!prev) return;
-      playSuccessSound();
-
-      const newPosMap: PositionMap = {
-        ...positions,
-        [sym]: {
-          ...prev,
-          y: parseFloat(targetY.toFixed(2)),
-          updatedAt: new Date().toISOString(),
-        },
-      };
-
-      setPositions(newPosMap);
-      setHasUnsavedChanges(true);
-      await savePositionsDirectly(newPosMap, tagSizeOffset);
-      toast.success(`已將「${sym}」位置同步更新至圖示化分隔線 (Y: ${targetY.toFixed(1)}%)！`, {
-        id: `snap-${sym}`,
-      });
-    },
-    [positions, savePositionsDirectly, tagSizeOffset]
   );
 
   // 設定/切換勾選股票標籤的攤平進度 (#1, #2, #3, #4) 並自動儲存
@@ -1564,28 +1390,26 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     }
   };
 
-  // 一鍵「更新位置」：若有勾選卡片則同步勾選之卡片；若未勾選則自動同步畫布上所有股票標籤至卡片分隔線計算高度，並自動水平避開重疊，且 100% 保持既有顏色邊框、形狀與尺寸
+  // 一鍵「更新位置」：以 Tickbox 有勾選之卡片為主，嚴格忽略未勾選卡片（即使代號相同亦不參考），自動同步分隔線與現價相對 Y 軸位置，並自動水平避開重疊，且 100% 保持既有顏色邊框、形狀與尺寸
   const handleUpdatePositions = async () => {
     playClickSound();
     setIsUpdatingPositions(true);
 
     try {
-      // 1. 判斷是否有勾選卡片；若無勾選則取用目前畫布上的股票標籤進行同步更新
-      let checkedTabs: StockTab[] = [];
-      if (selectedCardIds && selectedCardIds.size > 0) {
-        checkedTabs = allTabs.filter(
-          (t) => selectedCardIds.has(t.id) && (t.symbol || "").trim() !== ""
-        );
-      } else {
-        // 未特別勾選特定卡片時，自動搜集畫布上所有個股對應之卡片
-        const symsOnCanvas = new Set(Object.keys(positions));
-        checkedTabs = allTabs.filter(
-          (t) => symsOnCanvas.has((t.symbol || "").trim().toUpperCase()) && (t.symbol || "").trim() !== ""
-        );
+      // 1. 嚴格檢查是否有勾選任何卡片（以 Tickbox 勾選為準，未勾選者完全忽略不參考）
+      if (!selectedCardIds || selectedCardIds.size === 0) {
+        toast.info("請先在卡片列表中勾選要同步的個股卡片（勾選圓形 Tickbox），未勾選之卡片將被忽略。");
+        setIsUpdatingPositions(false);
+        return;
       }
 
+      // 取得所有「有勾選 Tickbox」的個股卡片 (未勾選之卡片即使代號名稱相同也絕對忽略)
+      const checkedTabs = allTabs.filter(
+        (t) => selectedCardIds.has(t.id) && (t.symbol || "").trim() !== ""
+      );
+
       if (checkedTabs.length === 0) {
-        toast.info("圖表或卡片列表中尚無可更新位置的股票卡片");
+        toast.error("所勾選的卡片已不存在或代號空白，請重新勾選後再試");
         setIsUpdatingPositions(false);
         return;
       }
@@ -1751,23 +1575,94 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     });
   };
 
-  // 儲存位置、形狀與大小 (Save button 或 Shift + S)
-  const handleSavePositions = useCallback(async () => {
-    setIsSaving(true);
-    playSuccessSound();
+  // 單檔股票依卡片分隔線與現價重新校準座標
+  const handleCalibrateSingleStock = useCallback(
+    (sym: string) => {
+      const tab = allStockMap.get(sym);
+      if (!tab) {
+        toast.error(`找不到股票「${sym}」的資料`);
+        return;
+      }
+      const stat = statsMap?.[tab.id];
+      const avgCost = stat?.totalQuantity !== 0 ? stat?.averagePrice : undefined;
+      const holdingQty = stat?.totalQuantity ?? (tab as any).holdingQuantity;
+      const targetY = calculateCanvasYFromDividers(
+        tab,
+        (tab as any).strategy,
+        avgCost,
+        holdingQty
+      );
 
-    try {
-      const saved = await savePositionsDirectly(positions, tagSizeOffset);
-      toast.success(`圖表標籤位置、形狀與尺寸已成功儲存！(共 ${Object.keys(saved).length} 檔)`, {
-        id: "visual-lines-save",
-        duration: 2500,
+      if (targetY === null) {
+        toast.error(`無法為「${sym}」計算卡片分隔線座標`);
+        return;
+      }
+
+      setPositions((prev) => ({
+        ...prev,
+        [sym]: {
+          ...prev[sym],
+          y: targetY,
+          shape: "circle",
+          sizeOffset: prev[sym]?.sizeOffset ?? tagSizeOffset,
+          updatedAt: new Date().toISOString(),
+        },
+      }));
+      setHasUnsavedChanges(true);
+      playSuccessSound();
+      toast.success(`已將「${sym}」依卡片分隔線精準校準至 Y: ${targetY.toFixed(1)}%`, {
+        id: `calib-${sym}`,
       });
-    } catch (err: any) {
-      console.error("Save error:", err);
-      toast.error("儲存失敗：" + (err?.message || "請稍後再試"));
-    } finally {
-      setIsSaving(false);
-    }
+    },
+    [allStockMap, statsMap, tagSizeOffset]
+  );
+
+  // 全域所有畫布股票一鍵依卡片分隔線重新校準座標
+  const handleCalibrateAllActiveStocks = useCallback(() => {
+    if (activeCanvasSymbols.length === 0) return;
+    let count = 0;
+    const newPositions: PositionMap = { ...positions };
+
+    activeCanvasSymbols.forEach((sym) => {
+      const tab = allStockMap.get(sym);
+      if (!tab) return;
+      const stat = statsMap?.[tab.id];
+      const avgCost = stat?.totalQuantity !== 0 ? stat?.averagePrice : undefined;
+      const holdingQty = stat?.totalQuantity ?? (tab as any).holdingQuantity;
+      const targetY = calculateCanvasYFromDividers(
+        tab,
+        (tab as any).strategy,
+        avgCost,
+        holdingQty
+      );
+      if (targetY === null) return;
+
+      newPositions[sym] = {
+        ...newPositions[sym],
+        y: targetY,
+        shape: "circle",
+        sizeOffset: newPositions[sym]?.sizeOffset ?? tagSizeOffset,
+        updatedAt: new Date().toISOString(),
+      };
+      count++;
+    });
+
+    setPositions(newPositions);
+    setHasUnsavedChanges(true);
+    playSuccessSound();
+    toast.success(`已將畫布上 ${count} 檔股票依各自卡片分隔線重新校準座標`, {
+      id: "calib-all",
+    });
+  }, [activeCanvasSymbols, allStockMap, positions, statsMap, tagSizeOffset]);
+
+  // 儲存位置、形狀與大小 (Save button 或 Shift + S，0ms 秒存)
+  const handleSavePositions = useCallback(() => {
+    playSuccessSound();
+    const saved = savePositionsDirectly(positions, tagSizeOffset);
+    toast.success(`圖表標籤位置、形狀與尺寸已成功儲存！(共 ${Object.keys(saved).length} 檔)`, {
+      id: "visual-lines-save",
+      duration: 2500,
+    });
   }, [positions, tagSizeOffset, savePositionsDirectly]);
 
   const lastHKeyPressTimeRef = useRef<number>(0);
@@ -2570,29 +2465,12 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
             type="button"
             onClick={handleUpdatePositions}
             disabled={isUpdatingPositions}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-black transition-all cursor-pointer shadow-sm active:scale-95 shrink-0 disabled:opacity-50 ${
-              outOfSyncCount > 0
-                ? "bg-amber-400 hover:bg-amber-300 text-black border border-amber-300 ring-2 ring-amber-400/50 animate-pulse"
-                : "bg-emerald-950/80 hover:bg-emerald-900/90 text-emerald-300 border border-emerald-700/80 hover:border-emerald-500"
-            }`}
-            title={
-              outOfSyncCount > 0
-                ? `有 ${outOfSyncCount} 檔股票標籤與卡片分隔線位置不一致，點擊一鍵同步更新！`
-                : "一鍵更新位置：自動同步目前所有股票之分隔線現價，同時自動水平避開重疊，並完整保留原本顏色邊框與尺寸"
-            }
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-950/80 hover:bg-emerald-900/90 text-emerald-300 border border-emerald-700/80 hover:border-emerald-500 rounded-full text-xs font-black transition-all cursor-pointer shadow-sm active:scale-95 shrink-0 disabled:opacity-50"
+            title="一鍵更新位置：自動同步目前所有股票之分隔線現價，同時自動水平避開重疊，並完整保留原本顏色邊框與尺寸"
           >
-            <RefreshCw
-              className={`w-3.5 h-3.5 ${
-                outOfSyncCount > 0 ? "text-black stroke-[3]" : "text-emerald-400 stroke-[2.2]"
-              } ${isUpdatingPositions ? "animate-spin" : ""}`}
-            />
+            <RefreshCw className={`w-3.5 h-3.5 text-emerald-400 stroke-[2.2] ${isUpdatingPositions ? "animate-spin" : ""}`} />
             <span className="hidden sm:inline">更新位置</span>
             <span className="sm:hidden">更新</span>
-            {outOfSyncCount > 0 && (
-              <span className="px-1.5 py-0.2 rounded-full bg-black text-amber-300 text-[10px] font-mono font-black shadow-xs">
-                {outOfSyncCount} 待更新
-              </span>
-            )}
           </button>
 
           {/* 4. 一鍵同步分隔線現價至畫布按鈕 (涵蓋「持有中」與「真實交易」所有子分頁卡片) */}
@@ -2882,6 +2760,64 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
                 </div>
               </div>
             )}
+
+            {/* 單選個股即時數據資訊膠囊 (顯示攤平進度、已購/預計股數與未實現損益) */}
+            {selectedTagSymbols.length === 1 && (() => {
+              const sym = selectedTagSymbols[0];
+              const tab = allStockMap.get(sym);
+              const stat = tab ? statsMap?.[tab.id] : undefined;
+              const pos = positions[sym];
+              const holdingQty =
+                stat?.totalQuantity !== undefined && stat.totalQuantity !== 0
+                  ? stat.totalQuantity
+                  : tab?.holdingQuantity || 0;
+              const avgCost =
+                stat?.averagePrice !== undefined && stat.averagePrice > 0
+                  ? stat.averagePrice
+                  : tab?.averageCost || 0;
+              const curPrice = tab?.currentPrice ? Number(tab.currentPrice) : 0;
+              let pnl = stat?.unrealizedPnL || 0;
+              if (holdingQty > 0 && avgCost > 0 && curPrice > 0) {
+                pnl = (curPrice - avgCost) * holdingQty;
+              } else if (holdingQty < 0 && avgCost > 0 && curPrice > 0) {
+                pnl = (avgCost - curPrice) * Math.abs(holdingQty);
+              }
+              const planQty = tab?.plannedBuyQty || 0;
+              const dca = pos?.dcaProgress;
+
+              return (
+                <div className="hidden lg:flex items-center gap-2 bg-zinc-950 border border-zinc-700/80 rounded-full px-2.5 py-0.5 text-[10.5px] font-mono text-zinc-300 shadow-sm animate-in fade-in select-none">
+                  <span className="font-sans font-black text-white">{sym}</span>
+                  {dca && (
+                    <span className="text-[#D2F800] bg-[#D2F800]/15 border border-[#D2F800]/50 px-1 py-0.2 rounded text-[9.5px] font-black">
+                      {dca}
+                    </span>
+                  )}
+                  <span>
+                    已購: <strong className="text-white font-black">{holdingQty.toLocaleString()}</strong>
+                    {planQty > 0 && (
+                      <span className="text-zinc-400">
+                        {" "}/ 預計: <strong className="text-amber-300 font-bold">{planQty.toLocaleString()}</strong>
+                      </span>
+                    )}
+                    {" "}股
+                  </span>
+                  {(holdingQty !== 0 || pnl !== 0) && (
+                    <span
+                      className={`font-black px-1.5 py-0.2 rounded ${
+                        pnl > 0
+                          ? "text-emerald-300 bg-emerald-950/80 border border-emerald-500/40"
+                          : pnl < 0
+                          ? "text-rose-300 bg-rose-950/80 border border-rose-500/40"
+                          : "text-zinc-300 bg-zinc-900 border border-zinc-700/60"
+                      }`}
+                    >
+                      未實現: {pnl > 0 ? `+$${pnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : pnl < 0 ? `-$${Math.abs(pnl).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "$0.00"}
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </div>
 
@@ -2968,6 +2904,33 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
               <span className="md:hidden">全部取消</span>
             </button>
           )}
+
+          {/* 輔助線測試 / 座標診斷開關 (統一基準點、縮放平移校驗、輔助線測試) */}
+          <button
+            type="button"
+            onClick={() => {
+              const next = !showAuxiliaryTestLines;
+              setShowAuxiliaryTestLines(next);
+              playClickSound();
+              if (next) {
+                toast.info("已開啟「輔助線測試」：顯示 6 大主軸基準線、5 大區間中線與即時座標換算診斷", {
+                  id: "auxiliary-lines-toggle",
+                });
+              } else {
+                toast.info("已關閉「輔助線測試」", { id: "auxiliary-lines-toggle" });
+              }
+            }}
+            title="開啟/關閉輔助線測試：顯示高精準基準線刻度、區間中線、現價水平射線與座標換算診斷 HUD"
+            className={`px-3 py-1.5 rounded-full border text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 ${
+              showAuxiliaryTestLines
+                ? "bg-[#D2F800] text-black border-[#D2F800] shadow-[0_0_10px_rgba(210,248,0,0.4)]"
+                : "bg-zinc-900 border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+            }`}
+          >
+            <Crosshair className={`w-3.5 h-3.5 ${showAuxiliaryTestLines ? "text-black animate-spin" : "text-current"}`} />
+            <span className="hidden md:inline">輔助線測試</span>
+            <span className="md:hidden">輔助線</span>
+          </button>
 
           {/* Toggle Line Labels */}
           <button
@@ -3108,10 +3071,15 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
 
             {/* Left Axis Letter Badge in Gray font (D, B, G, Y, R) */}
             <div
-              className="absolute left-3 sm:left-4 -top-3 px-1.5 py-0.5 rounded text-[11px] sm:text-xs font-mono font-black text-zinc-400 bg-white/90 border border-zinc-200 shadow-xs pointer-events-none select-none drop-shadow-[0_1px_1px_rgba(0,0,0,0.05)]"
+              className="absolute left-3 sm:left-4 -top-3 px-1.5 py-0.5 rounded text-[11px] sm:text-xs font-mono font-black text-zinc-400 bg-white/90 border border-zinc-200 shadow-xs pointer-events-none select-none drop-shadow-[0_1px_1px_rgba(0,0,0,0.05)] flex items-center gap-1"
               title={`${line.axis}軸 (${line.label})`}
             >
-              {line.axis}
+              <span>{line.axis}</span>
+              {showAuxiliaryTestLines && (
+                <span className="text-[9.5px] font-bold text-zinc-600 font-mono">
+                  {line.yPercent.toFixed(1)}%
+                </span>
+              )}
             </div>
 
             {/* Line label with Nike typography at the right margin */}
@@ -3131,20 +3099,78 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
           </div>
         ))}
 
-        {/* Draggable Stock Symbol Tags on Canvas (Android 扁平化運動球體標籤: 內部純白 #FFFFFF, 文字極致黑 #000000, 邊緣約 2px Solid Color 邊框, 含最新現價, 下方顯示更新時間與日期) */}
+        {/* 輔助測試中間基準線 (20%, 36%, 52%, 68%, 83%) */}
+        {showAuxiliaryTestLines &&
+          AUXILIARY_TEST_INTERVALS.filter((line) => !line.isMain).map((line) => (
+            <div
+              key={line.yPercent}
+              className="absolute left-0 right-0 pointer-events-none flex items-center z-10 animate-in fade-in duration-200"
+              style={{ top: `${line.yPercent}%` }}
+            >
+              <div
+                className="w-full border-t border-dashed transition-all"
+                style={{
+                  borderColor: line.color,
+                  opacity: 0.65,
+                }}
+              />
+              <div className="absolute left-16 -top-2.5 px-1.5 py-0.2 rounded text-[9.5px] font-mono font-bold bg-white/95 border border-zinc-300 text-zinc-600 shadow-xs pointer-events-none select-none">
+                {line.label}
+              </div>
+              <div className="absolute right-16 -top-2.5 px-1.5 py-0.2 rounded text-[9.5px] font-mono font-bold bg-white/95 border border-zinc-300 text-zinc-600 shadow-xs pointer-events-none select-none">
+                {line.yPercent.toFixed(1)}%
+              </div>
+            </div>
+          ))}
+
+        {/* 輔助測試射線 (Auxiliary Laser Rays through each Tag) */}
+        {showAuxiliaryTestLines &&
+          activeCanvasSymbols.map((sym) => {
+            const pos = positions[sym];
+            if (!pos) return null;
+            const isTarget =
+              sym === selectedDiagnosticSymbol ||
+              sym === hoveredDiagnosticSymbol ||
+              selectedTagSymbols.includes(sym);
+
+            return (
+              <div
+                key={`laser-${sym}`}
+                className="absolute left-0 right-0 pointer-events-none flex items-center z-15 transition-opacity"
+                style={{
+                  top: `${pos.y}%`,
+                  opacity: isTarget ? 0.95 : 0.4,
+                }}
+              >
+                <div
+                  className={`w-full border-t ${
+                    isTarget ? "border-sky-500 border-solid" : "border-zinc-400 border-dotted"
+                  }`}
+                />
+                <div
+                  className={`absolute right-2 -top-2.5 px-1.5 py-0.2 rounded text-[9px] font-mono font-black shadow-xs ${
+                    isTarget
+                      ? "bg-sky-600 text-white border border-sky-400"
+                      : "bg-zinc-900/90 text-zinc-300 border border-zinc-700"
+                  }`}
+                >
+                  {sym} Y: {pos.y.toFixed(1)}%
+                </div>
+              </div>
+            );
+          })}
+
+        {/* Draggable Stock Symbol Tags on Canvas (Android 扁平化運動球體標籤: 內部純白 #FFFFFF, 文字極致黑 #000000, 邊緣約 2px Solid Color 邊框, 含最新現價, 下方顯示攤平進度、已購/預計數量與未實現損益) */}
         {activeCanvasSymbols.map((sym) => {
           const pos = positions[sym];
           if (!pos) return null;
           const tab = allStockMap.get(sym);
+          const stat = tab ? statsMap?.[tab.id] : undefined;
           const conf = HOLDING_CONFIG[tab?.holdingStatus || "候選名單"];
 
           const effectiveSizeOffset = pos.sizeOffset !== undefined ? pos.sizeOffset : tagSizeOffset;
           const isSelected = selectedTagSymbols.includes(sym);
           const isHidden = Boolean(pos.hidden);
-
-          // 檢測此標籤是否與卡片視覺圖示化分隔線位置對不上
-          const syncInfo = syncStatusMap.get(sym);
-          const isOutOfSync = Boolean(syncInfo?.isOutOfSync);
 
           const symbolFontSize = Math.max(10, 13 + Math.round(effectiveSizeOffset * 0.85));
           const priceFontSize = Math.max(8, 10 + Math.round(effectiveSizeOffset * 0.5));
@@ -3156,6 +3182,95 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
           const tagBorderColor = hasAppliedColor ? pos.color! : "#000000";
           const borderThickness = hasAppliedColor ? "6px" : "1px";
 
+          // 1. 已購數量 (Bought / Holding Quantity) & 平均成本
+          const effectiveHoldingQty =
+            stat?.totalQuantity !== undefined && stat.totalQuantity !== 0
+              ? stat.totalQuantity
+              : tab?.holdingQuantity || 0;
+          const effectiveAvgPrice =
+            stat?.averagePrice !== undefined && stat.averagePrice > 0
+              ? stat.averagePrice
+              : tab?.averageCost || 0;
+          const curPriceNum =
+            tab?.currentPrice !== undefined && tab.currentPrice !== null
+              ? Number(tab.currentPrice)
+              : 0;
+
+          // 2. 預計購買數量 (Planned Buy Quantity)
+          const batchPlannedSizes: number[] = [0, 1, 2, 3].map((i) => {
+            const row = tab?.averagingRowsSys2?.[i];
+            const q1 = parseFloat(row?.quantity || "") || 0;
+            const q2 = parseFloat(row?.quantity2 || "") || 0;
+            if (q1 + q2 > 0) return q1 + q2;
+            if (tab?.plannedBuyQty && tab.plannedBuyQty > 0) {
+              const pcts = [0.15, 0.25, 0.35, 0.25];
+              return Math.ceil(tab.plannedBuyQty * pcts[i]);
+            }
+            return 0;
+          });
+          const totalSys2Planned = batchPlannedSizes.reduce((a, b) => a + b, 0);
+          const totalSys1Planned = (tab?.averagingRows || []).reduce((sum, r) => {
+            const q1 = parseFloat(r?.quantity || "") || 0;
+            const q2 = parseFloat(r?.quantity2 || "") || 0;
+            return sum + q1 + q2;
+          }, 0);
+          const effectivePlannedBuyQty =
+            tab?.plannedBuyQty && tab.plannedBuyQty > 0
+              ? tab.plannedBuyQty
+              : totalSys2Planned > 0
+              ? totalSys2Planned
+              : totalSys1Planned > 0
+              ? totalSys1Planned
+              : 0;
+
+          // 3. 目前攤平欄位號碼 (#1, #2, #3, #4)
+          const effectiveDcaProgress = (() => {
+            if (pos.dcaProgress) return pos.dcaProgress;
+            // 自動偵測系統二或系統一已購買欄位
+            if (tab?.averagingRowsSys2?.[3]?.bought) return "#4";
+            if (tab?.averagingRowsSys2?.[2]?.bought) return "#3";
+            if (tab?.averagingRowsSys2?.[1]?.bought) return "#2";
+            if (tab?.averagingRowsSys2?.[0]?.bought) return "#1";
+            if (tab?.averagingRows?.[3]?.bought) return "#4";
+            if (tab?.averagingRows?.[2]?.bought) return "#3";
+            if (tab?.averagingRows?.[1]?.bought) return "#2";
+            if (tab?.averagingRows?.[0]?.bought) return "#1";
+            // 若有持有數量且有批次規劃，推算目前處於哪一批
+            if (effectiveHoldingQty > 0 && totalSys2Planned > 0) {
+              if (
+                effectiveHoldingQty >=
+                  batchPlannedSizes[0] + batchPlannedSizes[1] + batchPlannedSizes[2] &&
+                batchPlannedSizes[3] > 0
+              )
+                return "#4";
+              if (
+                effectiveHoldingQty >= batchPlannedSizes[0] + batchPlannedSizes[1] &&
+                batchPlannedSizes[2] > 0
+              )
+                return "#3";
+              if (effectiveHoldingQty >= batchPlannedSizes[0] && batchPlannedSizes[1] > 0)
+                return "#2";
+              return "#1";
+            }
+            if (effectiveHoldingQty > 0) return "#1";
+            return undefined;
+          })();
+
+          // 4. 未實現損益金額 (Unrealized PnL)
+          const effectiveUnrealizedPnL = (() => {
+            if (stat?.unrealizedPnL !== undefined && stat.unrealizedPnL !== 0) {
+              return stat.unrealizedPnL;
+            }
+            if (effectiveHoldingQty > 0 && effectiveAvgPrice > 0 && curPriceNum > 0) {
+              return (curPriceNum - effectiveAvgPrice) * effectiveHoldingQty;
+            }
+            if (effectiveHoldingQty < 0 && effectiveAvgPrice > 0 && curPriceNum > 0) {
+              return (effectiveAvgPrice - curPriceNum) * Math.abs(effectiveHoldingQty);
+            }
+            return 0;
+          })();
+          const hasHoldingOrPnL = effectiveHoldingQty !== 0 || effectiveUnrealizedPnL !== 0;
+
           // 格式化最新現價
           const formattedCurrentPrice = (() => {
             if (tab?.currentPrice !== undefined && tab.currentPrice !== null) {
@@ -3166,10 +3281,6 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
             }
             return null;
           })();
-
-          const outOfSyncPrefix = isOutOfSync && syncInfo
-            ? `【⚠️ 提示人為更新：與圖示化分隔線位置對不上】\n目前看板高度: Y ${pos.y.toFixed(1)}% (圖示化分隔線預期: Y ${syncInfo.expectedY.toFixed(1)}%)\n請手動拖曳調整，或點擊標籤右上「需更新」徽章一鍵同步\n--------------------------------\n`
-            : "";
 
           return (
             <div
@@ -3190,50 +3301,33 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
                 top: `${pos.y}%`,
               }}
             >
-              {/* Android Flat Design Spherical Tag - 運動球體標籤 (內部純白 #FFFFFF, 依設定顯示 6px 套用純色或 1px 預設黑, 勾選不改變邊框顏色, 內部文字 #000000, 位置對不上時於看板上強烈閃爍提示人為更新) */}
+              {/* Android Flat Design Spherical Tag - 運動球體標籤 (內部純白 #FFFFFF, 依設定顯示 6px 套用純色或 1px 預設黑, 勾選不改變邊框顏色, 內部文字 #000000) */}
               <div
                 className={`relative flex flex-col items-center justify-center rounded-full transition-all select-none bg-white shadow-md hover:shadow-lg hover:scale-105 ${
                   isHidden ? "border-dashed ring-1 ring-amber-500/50" : ""
-                } ${
-                  isOutOfSync
-                    ? "ring-4 ring-amber-400 ring-offset-2 ring-offset-white animate-pulse shadow-[0_0_22px_rgba(251,191,36,0.85)]"
-                    : ""
                 }`}
                 style={{
                   width: `${circleSize}px`,
                   height: `${circleSize}px`,
                   backgroundColor: "#FFFFFF",
                   border: `${borderThickness} ${isHidden ? "dashed" : "solid"} ${tagBorderColor}`,
-                  boxShadow: isOutOfSync
-                    ? "0 0 20px rgba(245,158,11,0.85), 0 0 35px rgba(245,158,11,0.35)"
-                    : isHidden
+                  boxShadow: isHidden
                     ? "0 1px 4px rgba(0,0,0,0.08)"
                     : "0 2px 6px rgba(0,0,0,0.10), 0 1px 3px rgba(0,0,0,0.06)",
                 }}
                 title={
-                  outOfSyncPrefix +
-                  (isSelected && tab
-                    ? `【${sym}】${isHidden ? "(目前處於隱藏狀態)\n" : ""}雙擊或點擊原點前往視覺圖示化卡片\n分類: ${tab?.holdingStatus || "候選名單"}\n模式: ${tab?.tradeType === "real" ? "真實交易" : "模擬交易"}\n最新現價: ${formattedCurrentPrice || "-"}\n更新時間: ${pos.updatedAt ? new Date(pos.updatedAt).toLocaleString() : "-"}`
-                    : `${sym} ${isHidden ? "(隱藏中)" : ""}- 拖曳至任意位置\n分類: ${tab?.holdingStatus || "候選名單"}\n模式: ${tab?.tradeType === "real" ? "真實交易" : "模擬交易"}\n最新現價: ${formattedCurrentPrice || "-"}\n更新時間: ${pos.updatedAt ? new Date(pos.updatedAt).toLocaleString() : "-"}`)
+                  `【${sym}】${isHidden ? "(隱藏中)\n" : "\n"}` +
+                  `最新現價: ${formattedCurrentPrice || "-"}\n` +
+                  (effectiveAvgPrice > 0 ? `平均成本: $${effectiveAvgPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n` : "") +
+                  (effectiveDcaProgress ? `目前攤平: ${effectiveDcaProgress}\n` : "") +
+                  (effectivePlannedBuyQty > 0 ? `預計購買: ${effectivePlannedBuyQty.toLocaleString()} 股\n` : "") +
+                  (effectiveHoldingQty > 0 ? `已購數量: ${effectiveHoldingQty.toLocaleString()} 股\n` : "") +
+                  (hasHoldingOrPnL ? `未實現損益: ${effectiveUnrealizedPnL >= 0 ? "+" : "-"}$${Math.abs(effectiveUnrealizedPnL).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n` : "") +
+                  `分類: ${tab?.holdingStatus || "候選名單"}\n` +
+                  `模式: ${tab?.tradeType === "real" ? "真實交易" : "模擬交易"}\n` +
+                  (isSelected && tab ? "雙擊或點擊原點前往視覺圖示化卡片" : "拖曳至任意位置")
                 }
               >
-                {/* 提示進行人為更新操作：位置與分隔線對不上時右上角跳動閃爍徽章 */}
-                {isOutOfSync && syncInfo && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      playClickSound();
-                      handleSnapSingleStock(sym, syncInfo.expectedY);
-                    }}
-                    title={`【⚠️ 提示人為更新】\n目前看板位置：Y ${pos.y.toFixed(1)}%\n圖示化分隔線計算位置：Y ${syncInfo.expectedY.toFixed(1)}%\n點擊直接同步更新！`}
-                    className="absolute -top-3.5 -right-3.5 px-1.5 py-0.5 rounded-full bg-amber-400 hover:bg-amber-300 text-black border border-amber-600 text-[9px] font-mono font-black flex items-center gap-0.5 shadow-lg z-30 animate-bounce cursor-pointer transition-all active:scale-90"
-                  >
-                    <AlertTriangle className="w-2.5 h-2.5 text-black stroke-[3]" />
-                    <span>需更新</span>
-                  </button>
-                )}
-
                 {/* 隱藏標籤指示徽章 (當處於顯示隱藏模式下醒目標示) */}
                 {isHidden && (
                   <div className="absolute -top-3.5 px-1.5 py-0.2 bg-zinc-900/95 text-amber-300 border border-amber-500/60 rounded-full text-[8.5px] font-black flex items-center gap-0.5 pointer-events-none shadow-md z-30 tracking-tight">
@@ -3339,25 +3433,245 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
                 </button>
               </div>
 
-              {/* 攤平進度顯示在標籤下方 (已取消時間戳章，僅在有設定進度時顯示) */}
-              {pos.dcaProgress && (
+              {/* 攤平進度 (#1~#4)、預計/已購數量與未實現損益標籤資訊卡 */}
+              {(effectiveDcaProgress || effectivePlannedBuyQty > 0 || effectiveHoldingQty > 0 || effectiveUnrealizedPnL !== 0) && (
                 <div
-                  className="mt-1 px-2 py-0.5 rounded-full bg-zinc-950 border border-[#D2F800]/90 pointer-events-none flex items-center justify-center gap-0.5 select-none transition-all shadow-[0_0_8px_rgba(210,248,0,0.35)] z-10"
-                  title={`攤平進度: ${pos.dcaProgress}`}
+                  className="mt-1 flex flex-col items-center gap-0.5 pointer-events-none select-none z-10 animate-in fade-in zoom-in-95 duration-150"
+                  style={{
+                    maxWidth: `${Math.max(130, circleSize + 60)}px`,
+                  }}
                 >
-                  <span
-                    className="font-mono font-black text-[#D2F800] tracking-tight leading-none whitespace-nowrap"
-                    style={{
-                      fontSize: `${Math.max(8, Math.min(11, 9 + Math.round(effectiveSizeOffset * 0.2)))}px`,
-                    }}
-                  >
-                    {pos.dcaProgress}
-                  </span>
+                  {/* 第 1 列：目前攤平欄位號碼 (#1~#4) + 預計購買數量 & 已購數量 */}
+                  <div className="px-2 py-0.5 rounded-full bg-zinc-950/95 border border-zinc-700/80 shadow-md backdrop-blur-xs flex items-center justify-center gap-1.5 whitespace-nowrap">
+                    {effectiveDcaProgress && (
+                      <span className="font-mono font-black text-[#D2F800] bg-[#D2F800]/15 border border-[#D2F800]/60 px-1 py-0.2 rounded text-[9.5px] leading-tight tracking-tight">
+                        {effectiveDcaProgress}
+                      </span>
+                    )}
+
+                    <div className="flex items-center gap-1 text-[9.5px] font-mono leading-tight tracking-tight text-zinc-300">
+                      {effectiveHoldingQty > 0 ? (
+                        <span>
+                          已 <strong className="text-white font-black">{effectiveHoldingQty.toLocaleString()}</strong>
+                          {effectivePlannedBuyQty > 0 && (
+                            <span className="text-zinc-400">
+                              {" "}/ 預 <span className="text-amber-300 font-bold">{effectivePlannedBuyQty.toLocaleString()}</span>
+                            </span>
+                          )}
+                        </span>
+                      ) : effectivePlannedBuyQty > 0 ? (
+                        <span>
+                          預 <strong className="text-amber-300 font-bold">{effectivePlannedBuyQty.toLocaleString()}</strong> 股
+                        </span>
+                      ) : (
+                        <span className="text-zinc-500">無庫存</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 第 2 列：未實現損益金額 (當有持股或損益時顯示，明確標記正負與金額) */}
+                  {hasHoldingOrPnL && (
+                    <div
+                      className={`px-2 py-0.5 rounded-full text-[9.5px] font-mono font-black border shadow-xs flex items-center gap-1 whitespace-nowrap backdrop-blur-xs ${
+                        effectiveUnrealizedPnL > 0
+                          ? "bg-emerald-950/90 text-emerald-300 border-emerald-500/50"
+                          : effectiveUnrealizedPnL < 0
+                          ? "bg-rose-950/90 text-rose-300 border-rose-500/50"
+                          : "bg-zinc-900/90 text-zinc-300 border-zinc-700/60"
+                      }`}
+                    >
+                      <span className="text-[8.5px] opacity-80 uppercase tracking-tight">未實現</span>
+                      <span>
+                        {effectiveUnrealizedPnL > 0
+                          ? `+$${effectiveUnrealizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          : effectiveUnrealizedPnL < 0
+                          ? `-$${Math.abs(effectiveUnrealizedPnL).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          : "$0.00"}
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           );
         })}
+
+        {/* Bottom Coordinate Diagnostic & Calibration HUD (當開啟輔助線測試時顯示) */}
+        {showAuxiliaryTestLines && activeCanvasSymbols.length > 0 && (() => {
+          const activeDiagSym =
+            (selectedDiagnosticSymbol && activeCanvasSymbols.includes(selectedDiagnosticSymbol))
+              ? selectedDiagnosticSymbol
+              : (selectedTagSymbols.length > 0 && activeCanvasSymbols.includes(selectedTagSymbols[0]))
+              ? selectedTagSymbols[0]
+              : activeCanvasSymbols[0];
+
+          const diagTab = activeDiagSym ? allStockMap.get(activeDiagSym) : undefined;
+          const stat = diagTab ? statsMap?.[diagTab.id] : undefined;
+          const avgCost = stat?.totalQuantity !== 0 ? stat?.averagePrice : undefined;
+          const holdingQty = stat?.totalQuantity ?? (diagTab as any)?.holdingQuantity;
+          const diagDetails = diagTab
+            ? calculateCanvasYDetails(diagTab, (diagTab as any).strategy, avgCost, holdingQty)
+            : null;
+          const currentPos = activeDiagSym ? positions[activeDiagSym] : undefined;
+          const currentY = currentPos?.y ?? 50;
+          const targetY = diagDetails?.canvasY ?? 50;
+          const diffY = currentY - targetY;
+
+          return (
+            <div className="absolute bottom-10 left-5 z-40 bg-zinc-950/95 border border-zinc-700/90 text-white rounded-2xl p-3.5 shadow-2xl backdrop-blur-md max-w-lg w-full animate-in fade-in slide-in-from-bottom-2 duration-200 pointer-events-auto">
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-zinc-800 pb-2 mb-2.5">
+                <div className="flex items-center gap-2">
+                  <div className="w-5 h-5 rounded-full bg-[#D2F800] text-black flex items-center justify-center font-black">
+                    <Crosshair className="w-3 h-3 text-black stroke-[3]" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black text-white tracking-wider flex items-center gap-1.5 uppercase">
+                      座標換算診斷與校準 HUD
+                    </h4>
+                    <span className="text-[9.5px] text-zinc-400 font-mono">
+                      統一基準點: 卡片[7~93%] ➔ 畫布[12~90%]
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleCalibrateAllActiveStocks}
+                    className="px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-[10px] font-mono font-black text-[#D2F800] border border-zinc-600 transition-all cursor-pointer active:scale-95"
+                    title="將畫布上所有股票依卡片分隔線重新計算座標"
+                  >
+                    全圖校準
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowAuxiliaryTestLines(false)}
+                    className="p-1 text-zinc-400 hover:text-white rounded-full hover:bg-zinc-800 transition-colors"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Stock Selector Pills */}
+              <div className="flex items-center gap-1 overflow-x-auto pb-1.5 mb-2 scrollbar-none">
+                <span className="text-[10px] text-zinc-400 font-bold shrink-0">選取診斷:</span>
+                {activeCanvasSymbols.map((sym) => {
+                  const isCur = sym === activeDiagSym;
+                  return (
+                    <button
+                      key={sym}
+                      type="button"
+                      onClick={() => {
+                        setSelectedDiagnosticSymbol(sym);
+                        playClickSound();
+                      }}
+                      className={`px-2 py-0.5 rounded-full text-[10.5px] font-mono font-black transition-all shrink-0 cursor-pointer ${
+                        isCur
+                          ? "bg-[#D2F800] text-black shadow-xs scale-105"
+                          : "bg-zinc-900 text-zinc-300 hover:bg-zinc-800 border border-zinc-700"
+                      }`}
+                    >
+                      {sym}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Diagnostic Details Content */}
+              {diagTab && diagDetails ? (
+                <div className="space-y-2 text-[11px]">
+                  {/* Grid stats */}
+                  <div className="grid grid-cols-3 gap-2 bg-zinc-900/80 border border-zinc-800 rounded-xl p-2 font-mono">
+                    <div className="flex flex-col">
+                      <span className="text-[9.5px] text-zinc-400">最新現價</span>
+                      <strong className="text-white text-xs font-black">
+                        ${diagDetails.currentPrice > 0 ? diagDetails.currentPrice.toFixed(2) : "-"}
+                      </strong>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-[9.5px] text-zinc-400">卡片原始 Y%</span>
+                      <strong className="text-amber-300 text-xs font-black">
+                        {diagDetails.cardPriceY.toFixed(1)}%
+                      </strong>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-[9.5px] text-zinc-400">目標畫布 Y%</span>
+                      <strong className="text-[#D2F800] text-xs font-black">
+                        {diagDetails.canvasY.toFixed(1)}%
+                      </strong>
+                    </div>
+                  </div>
+
+                  {/* Alignment & Anchors breakdown */}
+                  <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-xl p-2 space-y-1">
+                    <div className="flex items-center justify-between text-[10.5px]">
+                      <span className="text-zinc-400">投射計算狀態:</span>
+                      {diagDetails.isSnapped && diagDetails.snappedTo ? (
+                        <span className="text-emerald-400 font-bold flex items-center gap-1 font-mono">
+                          <Check className="w-3 h-3 stroke-[3]" />
+                          精準吸附: {diagDetails.snappedTo}
+                        </span>
+                      ) : (
+                        <span className="text-sky-300 font-bold font-mono">
+                          📐 區間分段線性插值 (Piecewise Linear)
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center justify-between text-[10.5px]">
+                      <span className="text-zinc-400">所屬視覺區域:</span>
+                      <span className="text-zinc-200 font-bold">
+                        {diagDetails.zone.name} ({diagDetails.nearestLine.axis}軸附近)
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[10.5px]">
+                      <span className="text-zinc-400">目前畫布 Y 偏差:</span>
+                      <span className={`font-mono font-black ${Math.abs(diffY) <= 0.5 ? "text-emerald-400" : "text-amber-400"}`}>
+                        目前: {currentY.toFixed(1)}% (偏差: {diffY >= 0 ? `+${diffY.toFixed(1)}%` : `${diffY.toFixed(1)}%`})
+                      </span>
+                    </div>
+
+                    {/* Anchors list */}
+                    {diagDetails.anchors.length > 0 && (
+                      <div className="mt-1 pt-1 border-t border-zinc-800 text-[10px]">
+                        <span className="text-zinc-400 font-bold">卡片分隔線對齊錨點 ({diagDetails.anchors.length} 條):</span>
+                        <div className="flex flex-wrap gap-1.5 mt-0.5 font-mono">
+                          {diagDetails.anchors.map((anc, idx) => (
+                            <span
+                              key={idx}
+                              className="px-1.5 py-0.2 rounded bg-black/60 border border-zinc-600 text-zinc-200 text-[9.5px]"
+                            >
+                              {anc.name}: 卡片 {anc.cardY.toFixed(0)}% ➔ 畫布 {anc.canvasY.toFixed(0)}%
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Actions for active stock */}
+                  <div className="flex items-center justify-end gap-2 pt-0.5">
+                    <button
+                      type="button"
+                      onClick={() => handleCalibrateSingleStock(activeDiagSym)}
+                      className="px-3 py-1 bg-[#D2F800] hover:bg-[#bde000] text-black font-black text-xs rounded-full transition-all cursor-pointer active:scale-95 flex items-center gap-1 shadow-sm"
+                    >
+                      <RefreshCw className="w-3 h-3 text-black stroke-[2.5]" />
+                      <span>校準「{activeDiagSym}」至目標座標 ({diagDetails.canvasY.toFixed(1)}%)</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-xs text-zinc-400 py-2 text-center">
+                  請選取一檔股票以檢視座標診斷
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Empty state hint */}
         {activeCanvasSymbols.length === 0 && (

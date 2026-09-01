@@ -771,6 +771,26 @@ export default function Dashboard() {
       }
     },
   );
+
+  useEffect(() => {
+    const handleTradesUpdated = (e: any) => {
+      const { tabId, trades } = e.detail || {};
+      if (tabId && Array.isArray(trades)) {
+        setActiveTabTrades((prev) => {
+          const next = { ...prev, [tabId]: trades };
+          if (user) {
+            try {
+              safeSessionStorage.setItem(`cached_tab_trades_v3_${user.uid}`, JSON.stringify(next));
+            } catch (err) {}
+          }
+          return next;
+        });
+      }
+    };
+
+    window.addEventListener('tab_trades_updated', handleTradesUpdated);
+    return () => window.removeEventListener('tab_trades_updated', handleTradesUpdated);
+  }, [user]);
   const [isGeneratingSuggestion, setIsGeneratingSuggestion] = useState(false);
   const [isMobile, setIsMobile] = useState(typeof window !== "undefined" ? window.innerWidth < 640 : false);
 
@@ -1010,11 +1030,40 @@ export default function Dashboard() {
   }, [user?.uid]);
 
   const activeTabStatsMap = useMemo(() => {
-    const map: Record<string, { averagePrice?: number; totalQuantity?: number }> = {};
-    Object.entries(activeTabTrades).forEach(([tabId, trades]) => {
-      const tab = tabs.find((t) => t.id === tabId);
+    const map: Record<
+      string,
+      {
+        averagePrice?: number;
+        totalQuantity?: number;
+        unrealizedPnL?: number;
+        unrealizedPnLPercent?: number;
+        realizedPnL?: number;
+      }
+    > = {};
+    tabs.forEach((tab) => {
+      const trades = activeTabTrades[tab.id] || [];
       const st = calculateStats(trades as any, tab?.currentPrice);
-      map[tabId] = { averagePrice: st.averagePrice, totalQuantity: st.totalQuantity };
+      const effectiveHoldingQuantity = st.totalQuantity !== 0 ? st.totalQuantity : (tab.holdingQuantity || 0);
+      const effectiveAveragePrice = (st.totalQuantity !== 0 && st.averagePrice > 0) ? st.averagePrice : (tab.averageCost || 0);
+      const curPrice = Number(tab.currentPrice || 0);
+      let unrealizedPnL = st.unrealizedPnL || 0;
+      if (effectiveHoldingQuantity > 0 && effectiveAveragePrice > 0 && curPrice > 0) {
+        unrealizedPnL = (curPrice - effectiveAveragePrice) * effectiveHoldingQuantity;
+      } else if (effectiveHoldingQuantity < 0 && effectiveAveragePrice > 0 && curPrice > 0) {
+        unrealizedPnL = (effectiveAveragePrice - curPrice) * Math.abs(effectiveHoldingQuantity);
+      }
+      const unrealizedPnLPercent =
+        effectiveHoldingQuantity !== 0 && effectiveAveragePrice > 0 && curPrice > 0
+          ? ((curPrice - effectiveAveragePrice) / effectiveAveragePrice) * (effectiveHoldingQuantity > 0 ? 100 : -100)
+          : 0;
+
+      map[tab.id] = {
+        averagePrice: effectiveAveragePrice,
+        totalQuantity: effectiveHoldingQuantity,
+        unrealizedPnL,
+        unrealizedPnLPercent,
+        realizedPnL: st.realizedPnL || 0,
+      };
     });
     return map;
   }, [activeTabTrades, tabs]);
@@ -7338,6 +7387,8 @@ export default function Dashboard() {
                                     trades,
                                     tab.currentPrice,
                                   );
+                                  const effectiveHoldingQuantity = stats.totalQuantity !== 0 ? stats.totalQuantity : (tab.holdingQuantity || 0);
+                                  const effectiveAveragePrice = (stats.totalQuantity !== 0 && stats.averagePrice > 0) ? stats.averagePrice : (tab.averageCost || 0);
                                   const unrealizedPnL =
                                     stats.unrealizedPnL || 0;
                                   const pnlColor =
@@ -7982,20 +8033,20 @@ export default function Dashboard() {
                                                   <div className="mt-2 pt-2 border-t border-white/10 relative z-10">
                                                     <div className="flex items-center justify-between mb-[4px]">
                                                       <p className="text-[12px] font-bold text-zinc-500 tracking-wide uppercase">
-                                                        è¿‘æœŸæ“ä½œè¨˜éŒ„ (${trades.length})
+                                                        è¿‘æœŸæ“ä½œè¨˜éŒ„ ({trades.length})
                                                       </p>
-                                                      {stats.totalQuantity !== 0 && (
+                                                      {effectiveHoldingQuantity !== 0 && (
                                                         <div className="flex items-center gap-2 text-[10px] text-white/40">
                                                           <span>
                                                             å¹³å‡æˆæœ¬{" "}
                                                             <span className="font-bold text-white/80">
-                                                              $${stats.averagePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                              ${effectiveAveragePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                             </span>
                                                           </span>
                                                           <span>
                                                             æŒæœ‰æ•¸é‡{" "}
                                                             <span className="font-bold text-white/80">
-                                                              {Math.abs(stats.totalQuantity)}è‚¡
+                                                              {Math.abs(effectiveHoldingQuantity)}è‚¡
                                                             </span>
                                                           </span>
                                                         </div>
@@ -8131,13 +8182,13 @@ export default function Dashboard() {
                                               tabId={tab.id}
                                               annotations={tab.chartAnnotations || EMPTY_CHART_ANNOTATIONS}
                                               onUpdateAnnotations={(annots) => updateTab(tab.id, { chartAnnotations: annots })}
-                                              averageCost={stats.totalQuantity !== 0 ? stats.averagePrice : undefined}
-                                              averageCostQuantity={stats.totalQuantity !== 0 ? stats.totalQuantity : undefined}
+                                              averageCost={effectiveHoldingQuantity !== 0 && effectiveAveragePrice > 0 ? effectiveAveragePrice : undefined}
+                                              averageCostQuantity={effectiveHoldingQuantity !== 0 ? effectiveHoldingQuantity : undefined}
                                               averagingRows={tab.averagingRows}
                                               averagingRowsSys2={tab.averagingRowsSys2}
                                               plannedBuyQty={tab.plannedBuyQty}
                                               plannedBuyPercent={tab.plannedBuyPercent}
-                                              holdingQuantity={tab.status !== "COMPLETED" ? stats.totalQuantity : 0}
+                                              holdingQuantity={tab.status !== "COMPLETED" ? effectiveHoldingQuantity : 0}
                                               stockName={tab.symbol}
                                               rating={tab.rating}
                                               qualityScore={tab.qualityScore}
@@ -9408,6 +9459,7 @@ export default function Dashboard() {
           )}
         </DialogContent>
       </Dialog>
+      </div>
 
       {isCinemaModeActive && (
         <AnimatePresence>
@@ -10162,20 +10214,20 @@ export default function Dashboard() {
             </div>
 
             {/* Mobile Tab Switcher */}
-            <div className="flex lg:hidden bg-zinc-950 p-0.5 rounded-lg border border-white/5 gap-0.5 mt-3 shrink-0">
+            <div className="flex sm:hidden items-center justify-center gap-2 mt-3 pt-2 border-t border-white/5">
               <button
                 type="button"
                 onClick={() => {
                   setAiMobileActiveTab("controls");
                   playClickSound();
                 }}
-                className={`flex-1 py-1.5 text-[11px] font-bold rounded transition-all cursor-pointer text-center ${
+                className={`flex-1 py-2 text-xs font-bold rounded-lg border transition-all ${
                   aiMobileActiveTab === "controls"
-                    ? "bg-[#e5484d] text-white border border-[#e5484d]/10"
-                    : "text-zinc-400 hover:text-zinc-200 hover:bg-white/5"
+                    ? "bg-[#e5484d] text-white border-[#e5484d]"
+                    : "bg-white/5 text-zinc-400 border-white/5"
                 }`}
               >
-                æŒ‡ä»¤èˆ‡è¨­å®š Settings & Prompt
+                æŒ‡ä»¤æ§åˆ¶å°
               </button>
               <button
                 type="button"
@@ -10183,24 +10235,22 @@ export default function Dashboard() {
                   setAiMobileActiveTab("preview");
                   playClickSound();
                 }}
-                className={`flex-1 py-1.5 text-[11px] font-bold rounded transition-all cursor-pointer text-center relative ${
+                className={`flex-1 py-2 text-xs font-bold rounded-lg border transition-all flex items-center justify-center gap-1.5 ${
                   aiMobileActiveTab === "preview"
-                    ? "bg-[#e5484d] text-white border border-[#e5484d]/10"
-                    : "text-zinc-400 hover:text-zinc-200 hover:bg-white/5"
+                    ? "bg-emerald-600 text-white border-emerald-600"
+                    : "bg-white/5 text-zinc-400 border-white/5"
                 }`}
               >
-                ç¶²é é è¦½ Web Preview
-                {aiHtmlFiles.length > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-[#e5484d] text-white text-[8px] px-1.5 rounded-full font-bold">
-                    {aiHtmlFiles.length}
-                  </span>
+                <span>ç¶²é å ±å‘Šé è¦½</span>
+                {selectedPreviewUrl && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-pulse" />
                 )}
               </button>
             </div>
 
             {/* Main Section */}
             <div className="flex-1 w-full flex flex-col lg:flex-row min-h-0 relative mt-4 overflow-hidden gap-6">
-              {/* Left Column (Dropdowns, Prompt Text Box, Execute button) */}
+              {/* Left Column */}
               <div className={`w-full lg:w-[420px] shrink-0 flex-col gap-4 lg:border-r lg:border-white/5 lg:pr-6 justify-start py-2 overflow-y-auto scrollbar-hide ${aiMobileActiveTab === "controls" ? "flex" : "hidden lg:flex"}`}>
                 
                 {isPromptManagerOpen ? (
@@ -10229,7 +10279,6 @@ export default function Dashboard() {
 
                     {/* Editor list */}
                     <div className="flex flex-col gap-3">
-                      {/* Active Edit Area if editing */}
                       {editingPromptId ? (
                         <div className="p-3 bg-white/5 rounded-lg border border-amber-500/20 flex flex-col gap-2.5">
                           <div className="text-[10px] font-bold text-amber-400 flex items-center gap-1">
@@ -10270,116 +10319,478 @@ export default function Dashboard() {
                             />
                           </div>
 
-                          <div className="flex items-center gap-2 mt-1">
+                          <div className="flex items-center gap-2 pt-1">
                             <button
+                              type="button"
                               onClick={() => {
                                 if (!editingPromptName.trim() || !editingPromptTemplate.trim()) {
-                                  toast.error("è«‹å¡«å¯«å®Œæ•´çš„åç¨±èˆ‡å…§å®¹");
+                                  toast.error("è«‹å¡«å¯«æ¨¡ç‰ˆåç¨±èˆ‡å…§å®¹");
                                   return;
                                 }
-                                const updated = dynamicPrompts.map(p => 
-                                  p.id === editingPromptId 
-                                    ? { ...p, name: editingPromptName, template: editingPromptTemplate, note: editingPromptNote } 
+                                const updated = dynamicPrompts.map((p) =>
+                                  p.id === editingPromptId
+                                    ? {
+                                        ...p,
+                                        name: editingPromptName.trim(),
+                                        template: editingPromptTemplate.trim(),
+                                        note: editingPromptNote.trim() || undefined,
+                                      }
                                     : p
                                 );
                                 handleSavePrompts(updated);
                                 setEditingPromptId(null);
-                                setEditingPromptNote("");
-                                toast.success("æ¨¡ç‰ˆä¿®æ”¹æˆåŠŸï¼");
+                                toast.success("æ¨¡ç‰ˆå·²æ›´æ–°");
                                 playClickSound();
                               }}
-                              className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded text-[10px] flex items-center justify-center gap-1 transition-all cursor-pointer border border-emerald-500/20"
+                              className="flex-1 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded transition-all cursor-pointer"
                             >
-                              <Save className="w-3 h-3" />
                               å„²å­˜ä¿®æ”¹
                             </button>
                             <button
-                              onClick={() => {
-                                setEditingPromptId(null);
-                                playClickSound();
-                              }}
-                              className="px-3 py-1.5 bg-zinc-850 hover:bg-zinc-750 text-zinc-300 font-bold rounded text-[10px] transition-all cursor-pointer border border-white/5"
+                              type="button"
+                              onClick={() => setEditingPromptId(null)}
+                              className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold rounded transition-all cursor-pointer"
                             >
                               å–æ¶ˆ
                             </button>
                           </div>
                         </div>
                       ) : (
-                        /* Create New Area */
-                        <div className="p-3 bg-white/[0.02] rounded-lg border border-white/5 flex flex-col gap-2">
-                          <div className="text-[10px] font-bold text-zinc-300 flex items-center gap-1">
-                            <Plus className="w-3.5 h-3.5 text-emerald-500" />
-                            æ–°å¢è‡ªè¨‚æ¨¡ç‰ˆ
+                        <div className="p-3 bg-white/[0.02] rounded-lg border border-white/5 flex flex-col gap-2.5">
+                          <div className="text-[10px] font-bold text-zinc-400 flex items-center gap-1">
+                            <Plus className="w-3 h-3 text-zinc-400" />
+                            <span>æ–°å¢æŒ‡ä»¤æ¨¡ç‰ˆ</span>
                           </div>
 
                           <div className="flex flex-col gap-1">
+                            <label className="text-[9px] text-zinc-500 font-bold">æ¨¡ç‰ˆåç¨±</label>
                             <input
                               type="text"
-                              placeholder="è¼¸å…¥æ¨¡ç‰ˆåç¨± (ä¾‹å¦‚: å€‹è‚¡ç±Œç¢¼é€è¦–)"
+                              placeholder="ä¾‹ï¼šåŸºæœ¬é¢æ·±å…¥æª¢è¦–"
                               value={newPromptName}
                               onChange={(e) => setNewPromptName(e.target.value)}
-                              className="w-full bg-[#161616] border border-white/10 text-white rounded px-2.5 py-1.5 text-xs focus:outline-none focus:border-emerald-500/50"
+                              className="w-full bg-[#161616] border border-white/10 text-white rounded px-2.5 py-1.5 text-xs focus:outline-none focus:border-red-500"
                             />
                           </div>
 
                           <div className="flex flex-col gap-1">
+                            <label className="text-[9px] text-zinc-500 font-bold">æ¨¡ç‰ˆå‚™è¨» (é¸å¡«)</label>
                             <input
                               type="text"
-                              placeholder="è¼¸å…¥æ¨¡ç‰ˆå‚™è¨» (ä¾‹å¦‚: ä¸»è¦åˆ†æç±Œç¢¼ä¸»åŠ›, é¸å¡«)"
+                              placeholder="è¼¸å…¥æ¨¡ç‰ˆå‚™è¨» (é¸å¡«)"
                               value={newPromptNote}
                               onChange={(e) => setNewPromptNote(e.target.value)}
-                              className="w-full bg-[#161616] border border-white/10 text-white rounded px-2.5 py-1.5 text-xs focus:outline-none focus:border-emerald-500/50"
+                              className="w-full bg-[#161616] border border-white/10 text-white rounded px-2.5 py-1.5 text-xs focus:outline-none focus:border-red-500"
                             />
                           </div>
 
                           <div className="flex flex-col gap-1">
+                            <label className="text-[9px] text-zinc-500 font-bold">
+                              æ¨¡ç‰ˆå…§å®¹ (æ”¯æ´ &#123;symbol&#125;, &#123;companyName&#125;)
+                            </label>
                             <textarea
-                              placeholder="è¼¸å…¥æ¨¡ç‰ˆå…§å®¹ã€‚æ”¯æ´ {symbol} èˆ‡ {companyName} è‡ªå‹•ä»£å…¥"
+                              placeholder="è«‹è¼¸å…¥æŒ‡ä»¤å…§å®¹ï¼Œå¯åŒ…å«è®Šæ•¸ &#123;symbol&#125; èˆ‡ &#123;companyName&#125;..."
                               value={newPromptTemplate}
                               onChange={(e) => setNewPromptTemplate(e.target.value)}
                               rows={3}
-                              className="w-full bg-[#161616] border border-white/10 text-white rounded p-2 text-xs focus:outline-none focus:border-emerald-500/50 resize-none leading-relaxed"
+                              className="w-full bg-[#161616] border border-white/10 text-white rounded p-2 text-xs focus:outline-none focus:border-red-500 resize-none leading-relaxed"
                             />
                           </div>
 
                           <button
+                            type="button"
                             onClick={() => {
                               if (!newPromptName.trim() || !newPromptTemplate.trim()) {
-                                toast.error("è«‹è¼¸å…¥æ¨™é¡Œèˆ‡æ¨¡ç‰ˆå…§å®¹");
+                                toast.error("è«‹å¡«å¯«æ¨¡ç‰ˆåç¨±èˆ‡å…§å®¹");
                                 return;
                               }
-                              const newId = `custom_${Date.now()}`;
-                              const updated = [
-                                ...dynamicPrompts,
-                                { id: newId, name: newPromptName, template: newPromptTemplate, note: newPromptNote }
-                              ];
+                              const newP = {
+                                id: `prompt_${Date.now()}`,
+                                name: newPromptName.trim(),
+                                template: newPromptTemplate.trim(),
+                                note: newPromptNote.trim() || undefined,
+                              };
+                              const updated = [...dynamicPrompts, newP];
                               handleSavePrompts(updated);
-                              setAiSelectedPromptId(newId);
                               setNewPromptName("");
                               setNewPromptTemplate("");
                               setNewPromptNote("");
-                              toast.success("è‡ªè¨‚æ¨¡ç‰ˆæ–°å¢æˆåŠŸï¼");
+                              setAiSelectedPromptId(newP.id);
+                              toast.success("å·²æ–°å¢æŒ‡ä»¤æ¨¡ç‰ˆ");
                               playClickSound();
                             }}
-                            className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded text-[10px] flex items-center justify-center gap-1 transition-all cursor-pointer border border-emerald-500/20"
+                            className="w-full py-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded transition-all cursor-pointer border border-white/10"
                           >
-                            <Plus className="w-3 h-3" />
-                            æ–°å¢ä¸¦å„²å­˜
+                            ç¢ºèªæ–°å¢
                           </button>
                         </div>
                       )}
 
                       {/* Templates list with edit/delete buttons */}
+                      {/* Templates list with edit/delete buttons */}
                       <div className="flex flex-col gap-2 mt-2">
-                        <div className="text-[10px] font-bold text-zinc-500 uppercasexœì\msÜÄßO±\3ŒÌ {²M÷Æ8fHIH›WO­Ó­}ªu’*éb›Ã3IˆCB¡	$¸€Á„Œi H€ƒï|~ÅWè>H:I'í®ÎNH™®’ÈÒ>şÿ¿ııvk+ê¢f,ÈKZÚ¹Ã¿©eçí;ë;77v.®µ×ŞïnÜR«¶b(M=i›Ëuò:4ÜúêPj5•BM;ŞJı¨ºâ8/)8›×á2Àÿ“USŠ%—ò£ ¡,ËuùT¹\´–gyÚóº¹$¯ÈJÓ5eË%æ@ân(–$¹Kã‡Äø’vù ‹pe¼5‡ë“56ä-ü÷¼V[[å|¹%—ÑH«ò©ß—FğÏ,°Í¦Qƒ5P5m´VŞòRµR%³pƒ¬BÃE/ü¥é¸ÚüŠ\…î„™¾aàÂeW^v@ÏÛX¤’R y0ÍÕLCVt=Çì/kı¹Š/¦\Í—ä"s‰R*0W®šzâUÍPårwºi¨Šs‡éT£Õ…«IKkƒÔ|ªD$«×Êh¨Ğpåb~ÔoÍ¸¥£Ç¢z]4QEO>É‘6V=TU´„¨‹…ƒ}½dÎ´¨óKûÜµîÍûc¡nò„–tQlìC¼º„êI‰ˆäû@áÔmÍX“µjÓuMC`¬¦1©kêâxK"xÑšVºS5¤WÆE£5ÉC…¡?TºHû€•Ìx²+E$yĞ™~ED¸_{är‚U¡fWÈ¤Ncˆ“„¾Z‘Ë –|Ì[èá©=UAªNß#ÏÈ›1XjÓvL[¶L‹%iq5WGØ¹{³ûàëÎÍk»—»kÚ¯Ñşê;ş÷"ª[Á‹1ñ’<Œt ÿŸ(PÀ0Õ4æ5»qêĞ…¾DƒññqàI5xv hKQeoTğÏ,À’÷BÖ–E4´/¬õ¸¤ù¸ ér\Ğ´jH»Ğ4™×t4TÉÂ•ZxòèM¤ áRWŒš§•ÓŞŠ8’×b†:´y )Ú4ZW}˜´²CÆM@b¢¯:¿_§Š³ÙF(¢ò´¸¦â¸y§©ªĞq¤œÇZïŞi¯mí^ÛÅ%\Á&ZĞØ'“ôD2šº.\ÎáÆºe²ıY+„ å±MÊÏÈæ?!´¦‡r=~EjìqñağÓï»[oyk!ô©˜:##…Ô,¦ûÂpGŞ~4H±?23¸Ôî‹´‘}ô`XÚÈ“?øÒFş5\,>l1k¿}µóíÚş
-­sßL”@ƒ1±}5ƒ´(«x§H´şAe”²ì«¡m›¶”ë^ø¦}û»ëgº7ÎnÿôÏ+×¶ïiŸ¹Ô¹|aûş&Åñ,ğmC·iÂâ/ø^ªšfİµÓSA-Mc¿>MJä¿£Qş‹ß)Æé¥¯•Â°/ˆÌ3¶âÔË{a¾Ytu?lXî+CŒV˜3~™ú«”_¤aM%¹úVá)0íšê"RL÷L<UH…—/•ÁWt¥
-õ4ŸMÈGqmÆ$<p‹ VnA[UÈ0vÏŞë¼{¡½öFç£wuÏm€é©cS“3`zæÄä‹©kAzš::O©Vô&oõØøôJ,]0#`}#A.”Gˆ9­Y‚yW± ›'M3±H·XÑØyDp<;ïü3›èç,E«‡^²¾ 	Æ¤88çMµéŒ™MW×(¦½G1cq´(ˆféòÑjÚ_›pBuµÓ(A°bË©È±†+¦…Õ[ñ\î°´s~£sù,v·¯]İYÿ¸ıõíï7;¼K…o¨R _¤÷ˆG:LÜàş»ˆÜë2uv+šL>”´ÈŸy‡ŠêÜª/Å‘Ç<¾íÿSE[¬b¬`yAó9'è¾:4‡ÆË±!š?{€Ó§6­öJj4~S±“Rà»ä:Šr=/±ğDö19L}L>ùò‰ã'gû'–EÈs&ÊŒö¨CW÷¸b(Ğ>aACrmÄf#‡LJÈŠoÑƒ0ë£1ïcxäzq‡Ñ·ì=DP@¹Ü³“}v½Ê–Ù“$yô]_mì¼óF¡sõvûÓ
-Û?}Õyï;_Çv¾>ßYÿWz%,±«LCû¼ßÄl36¡êYql¦ı¤Œ ?bH.›¤²™aVºáÛ4ƒpöÒÿ)Ç ”cà vßÖMBÕá(µ/şö~Š¹²ZåS–G´±‡<¯A´!ıf”ğ6H#¸Ş.f¦Ÿ<613^:135 ¡‚{¦ØPáa‡Äßi$Äñ``-IR8©·‹krq03è~TbBuúDšy6•d ÇÄ°¼3á'æƒõ•|Ø }ØD‘[ ŸÏ[O<ğ1EZ°Êû~X,~ÌšşAQÌFj«Â:ÒhçÚë7;·6»îµ_ÿı%,ø;×ÏSÙïnmu>øû/.Óm¿ıãåÎúßº¶Ú—®´o}ĞÙzÍKúîß¿EÔeDMö°O4ÀaCG{5xÇÇ*5Œ6Ô•e˜Ê…R¸‡h–J8—]ğœ¹œ	-CLÎİÂ½ÆF'I
-’¸öÏL!•7c…Æı»kh|ŠJ-˜:rt¬•ıÍ†‰¸+jˆ¾ÈöãfŒ-Pà8©8.<aĞr \ä;Å³9Ñ9ÎóĞTêcu­VCBõP¬¦R1Él*‡Í¦^¢Û2b˜TBFÇ]MÌ=xV
-ùbjuËPôcHâ,%i$àÔ@ügÅP˜ºöŠ@ğJYR4ÊimAqM;¯êšU5»–_²ÑÂcĞ”ÍO³Zv";±œ…öİ;İÍİÏ~ğ¸½v»}q«{çÁÎíŸ~yp–[ªâªu AÛ	ÈEq¤íöæ¿;WŞhjŸT.9ı21'‹¡c~Nl¾V­ÁË«wš4iZ+ÙõÁWAº&t÷à«!_‹%e°	Â:YoAïË¸Ÿ@ÈÀ÷xÈŞíüPÖô£bo1ÖÛıò’Gy×®RÇ§
-T„–ÍS­æIìUWûSªà(V…yÔ4L'çQ°Ê8{0¡Ë8E¹ì¯Ïg·\4í\Ê’ØZê*š½ÅÂRø°ë¯fÒÒŸ*æ‹Ã³¤WE†a/²éˆr£¬.ä	íœwÑjH¹¦¥›J‡ÉÁyÜšóTŠ ¨Õ¥(mƒUò­‡ÚØcWü;Ø<×øÍQ}/V,ÍJı<‰‰AïÍ2İq¹ÔÉ?’Àªƒu„çÛ÷ŞlŸû¼0süØÀâÇD‚-ÖàÒoF„£6›,ûÓ $ÌAR]h“JÃ²ÑÙÇUˆw?y§{ã¶£HÑ^púóšƒ@úaPä˜!4)¼(UÇÔ›hªd×ÄäP¶µ…ºKY¢·W‡'”
-ÄA,8«1Ø7ƒpTE‡ò!~nyB÷yi—cæ=¦:?5ÿ0bÌùª”ˆx¬ıÑ˜“-D¬7zB/ì6,rI­ ğ—b¯qÆ”ßböˆ!nÍ&Æ²Òyb?…C¬u~³•LxØ ÂGñ±ˆq´œl)Dø¤bhÅ…ò¼RƒGYYI½Hq=F9ğ0‚‡uq¡„¦ÑÜµÎÖ{5 õ%•‘¸HûöõÎú5/rŒ3¼d |7r¦‰vĞè|×§dôì´ˆfÀ2Ftjvû·¨G—=Ñ‘óšÆ„À¡¢ŠfXÍô»_(ÚÎ£íŸ«¨*´Üñ\¾vşë=Cš¢ï„†w!úŒŸ4œ´qjânr˜ÈÔÜ9ºAÿÁë!7·ò
-Ñç¨çòF]ğy½}d Ù¹4öçœCÊCûˆg‘³ğ?I“«İûuŞ}YëKW;~ãÙì˜ö ª„œ5NĞß¡Å)Ór0À †i˜±ÉI¡no~Ñ¾ıöhI‘ÁNP ¥byd(ïšÏkË°&•†VÁ‹Ïñ»*4œŒlönå½#t^"`?¾nÑaN7«áÜ¢¥¦9JU‡µñ–æø_",ÇÈû„?aş–IŸ‰æıÒÒ¶$©)¾|€Œœÿ
-¡fĞµ±°™<Œ‚gÃ˜ÃÛÀo–·‹Ám\œºR39WG¢.r25%Ç=öÒ1T#´ÓNÌÀ±4Cô‘÷Î­ÏÚë7éö½}ïV>ŸS,ë\e:A$6şÉ:TãÑ¬ç.h‰Š†Hîã°y!pbSÔ‚0gõÿı ­™øg’a-’¡Ô™°õƒ f$Ğõ(`DuŸã­ŸPì5;~Õ¾øVçÖ¦Çmo_ß9¿á©Ëw—Âôó™sÜm–KdETf?.®qTÛÔõªbËÈ`eçĞYM’ ˆ9¥@ö~¯Ï¯^¦ æ ònEè>Z<`ˆhg/ç‰èË+¶.ÍK+àn8…^w
-*İ>ç„Oßõ7ãÕ38ƒ˜L%>™_¿_Ãós7«è;z¸"‹¿³WÑ±ÀÖ\(Õ œ¡ºv_*ãé¬¯àñ´lnNNŒ, v,¯´Wœ>) ˜%"	‚-PkÜÑ2RìË×è±Ñ£ÈÄÕ;N`;µæ$hÓFÁ#•Ì››ğ[¬+v]ÁEÔæ‚­çó ~¸ÜáVDùDoVJi¯w¶<Åºé]èDš¥¥#®t"ÍŠ¿½=£·wÃ†'¾‚w§$vßîO‰ÓŠˆÓv®i´MKY ¡`iˆ{®+ÔïL·)ào?Ë%$¾+zB£Sîoš|ÚŸó'ÊqüRW,àò¿p©._ì‹¸Üdºà—l—|/±h&(R6YŒßE@%ë…!¸<Rı«_‚Ë ˆà’E3\$‚KVAÎ°‰^*BªÍ¨{Ñ=jFŠ^øƒ+FµˆİÖÁ½‘#N“‚–Èø4mG\€#WtxjÁ3 ,¹°co~#RO&•àŞÛA«»†g?.aÖÁw6eşqÿGÂåñ’½è8Öû2Î¨ “¦Şl@:Ñt­¦hVš¡„¸oŒ³9·„ñOÜ”ñÏ,N¨d{–õCÅø[ò²2•¸=óÁ!Ó7Ã†Z/S€<B6UÿÔô= é’ÔsÿT4&ÛO±«âıöƒ¡‰6VÂ£V‚…œfCÄ»@Ãv~/â¶Ê”tJ¼‡2Í«==§yÎ'Œ—¥K4sx<÷çª®‹,<C½Ï&jÚ6›1$…JqŠÑ0 FÃàUç›Ó e¤Ó'‡FAŸáKTŒ¤ ÅNJs$<ŞKmD*DÃ)xa¸qòäoë7ñiûµ7v?9»{õRûÊÇ°O?;2‚öˆæQ)(Œ_jó6ª‰Ñ¶c«Y¥+é¸ M8§óó¿f8­OòdÉVÍe$u:V+Gµ5Ëu€÷/ÔÙD¨ŞË´šƒ ¤Nå I:‘LAlÙå'zf”‘™ŞŸÓˆ®V¹¶"2Ó*VŸ)Üõò°¦5á‚î——6´ïŞhŸıwOÉÚÕp:ÎÎõóá0ÅöıÏwÏÜén\ŞùöÖ’$ùó™s•‚•u	¢P‰/'íç}/V
-ƒM>ò¼R˜ Î!$®4TèÿÊ#¡j‚¿"Ê¼ú»ÿ  ÿÿ ?2¢F
+                        {dynamicPrompts.map((prompt) => (
+                          <div
+                            key={prompt.id}
+                            className="p-2.5 bg-white/[0.03] hover:bg-white/[0.06] border border-white/5 rounded-lg flex items-start justify-between gap-2 transition-all"
+                          >
+                            <div className="flex flex-col gap-0.5 flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs font-bold text-white truncate">{prompt.name}</span>
+                                {prompt.note && (
+                                  <span className="text-[10px] text-zinc-400 bg-white/5 px-1.5 py-0.5 rounded border border-white/5 truncate">
+                                    {prompt.note}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-zinc-500 line-clamp-2 leading-relaxed">
+                                {prompt.template}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingPromptId(prompt.id);
+                                  setEditingPromptName(prompt.name);
+                                  setEditingPromptTemplate(prompt.template);
+                                  setEditingPromptNote(prompt.note || "");
+                                  playClickSound();
+                                }}
+                                className="p-1 text-zinc-400 hover:text-amber-400 transition-all rounded hover:bg-white/5"
+                                title="ç·¨è¼¯æ¨¡ç‰ˆ"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              {confirmDeletePromptId === prompt.id ? (
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const updated = dynamicPrompts.filter((p) => p.id !== prompt.id);
+                                      handleSavePrompts(updated);
+                                      if (aiSelectedPromptId === prompt.id && updated.length > 0) {
+                                        setAiSelectedPromptId(updated[0].id);
+                                      }
+                                      setConfirmDeletePromptId(null);
+                                      toast.success("å·²åˆªé™¤æ¨¡ç‰ˆ");
+                                      playClickSound();
+                                    }}
+                                    className="px-1.5 py-0.5 bg-red-600 hover:bg-red-500 text-[10px] text-white font-bold rounded"
+                                  >
+                                    ç¢ºå®š
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeletePromptId(null)}
+                                    className="px-1.5 py-0.5 bg-zinc-700 text-[10px] text-zinc-300 rounded"
+                                  >
+                                    å–æ¶ˆ
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeletePromptId(prompt.id)}
+                                  className="p-1 text-zinc-400 hover:text-red-400 transition-all rounded hover:bg-white/5"
+                                  title="åˆªé™¤æ¨¡ç‰ˆ"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-4 animate-fadeIn">
+                    {/* Stock Selector */}
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider flex items-center justify-between">
+                        <span>1. é¸æ“‡åˆ†æå€‹è‚¡</span>
+                        <span className="text-[10px] font-normal text-zinc-500">
+                          å…± {uniqueActiveStocks.length} æª”æŒè‚¡
+                        </span>
+                      </label>
+                      <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto p-1 bg-white/[0.02] border border-white/5 rounded-lg">
+                        {uniqueActiveStocks.map((stock) => (
+                          <button
+                            key={stock.symbol}
+                            type="button"
+                            onClick={() => {
+                              setAiSelectedSymbol(stock.symbol);
+                              playClickSound();
+                            }}
+                            className={`px-2.5 py-1 text-xs font-bold rounded transition-all cursor-pointer ${
+                              aiSelectedSymbol === stock.symbol
+                                ? "bg-[#e5484d] text-white shadow-sm"
+                                : "bg-white/5 text-zinc-400 hover:bg-white/10 hover:text-white"
+                            }`}
+                          >
+                            {stock.symbol}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Prompt Template Selector */}
+                    <div className="flex flex-col gap-1.5">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">
+                          2. é¸æ“‡åˆ†ææŒ‡ä»¤æ¨¡ç‰ˆ
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsPromptManagerOpen(true);
+                            playClickSound();
+                          }}
+                          className="text-[10px] text-amber-400 hover:text-amber-300 flex items-center gap-1 font-bold cursor-pointer"
+                        >
+                          <Settings className="w-3 h-3" />
+                          <span>ç®¡ç†æ¨¡ç‰ˆ</span>
+                        </button>
+                      </div>
+                      <select
+                        value={aiSelectedPromptId}
+                        onChange={(e) => {
+                          setAiSelectedPromptId(e.target.value);
+                          playClickSound();
+                        }}
+                        className="w-full bg-[#161616] border border-white/10 text-white rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-red-500 cursor-pointer"
+                      >
+                        {dynamicPrompts.map((prompt) => (
+                          <option key={prompt.id} value={prompt.id}>
+                            {prompt.name} {prompt.note ? `(${prompt.note})` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Prompt Preview & Quick Actions */}
+                    <div className="flex flex-col gap-1.5">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">
+                          3. æŒ‡ä»¤å…§å®¹èˆ‡åŸ·è¡Œ
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(aiPromptText);
+                            toast.success("å·²è¤‡è£½æŒ‡ä»¤å…§å®¹");
+                            playClickSound();
+                          }}
+                          className="text-[10px] text-zinc-400 hover:text-white flex items-center gap-1 cursor-pointer"
+                        >
+                          <Copy className="w-3 h-3" />
+                          <span>åƒ…è¤‡è£½æ–‡å­—</span>
+                        </button>
+                      </div>
+                      <textarea
+                        value={aiPromptText}
+                        onChange={(e) => setAiPromptText(e.target.value)}
+                        rows={4}
+                        className="w-full bg-[#161616] border border-white/10 text-white rounded-lg p-2.5 text-xs focus:outline-none focus:border-red-500 resize-none leading-relaxed"
+                      />
+                      <button
+                        type="button"
+                        onClick={handlePasteOnDeepseek}
+                        className="w-full py-2.5 bg-gradient-to-r from-[#e5484d] to-red-600 hover:from-red-500 hover:to-red-600 text-white text-xs font-bold rounded-lg transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer mt-1"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>è¤‡è£½æŒ‡ä»¤ä¸¦é–‹å•“ Deepseek</span>
+                      </button>
+                    </div>
+
+                    {/* File Upload & Manage Section */}
+                    <div className="flex flex-col gap-2 pt-2 border-t border-white/5">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">
+                          4. HTML åˆ†æå ±å‘Šç®¡ç†
+                        </label>
+                        <div className="flex items-center gap-1 bg-white/5 p-0.5 rounded border border-white/5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAiLeftTab("upload");
+                              playClickSound();
+                            }}
+                            className={`px-2 py-0.5 text-[10px] font-bold rounded transition-all ${
+                              aiLeftTab === "upload"
+                                ? "bg-white/10 text-white"
+                                : "text-zinc-400 hover:text-white"
+                            }`}
+                          >
+                            ä¸Šå‚³å ±å‘Š
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAiLeftTab("preview");
+                              playClickSound();
+                            }}
+                            className={`px-2 py-0.5 text-[10px] font-bold rounded transition-all ${
+                              aiLeftTab === "preview"
+                                ? "bg-white/10 text-white"
+                                : "text-zinc-400 hover:text-white"
+                            }`}
+                          >
+                            å ±å‘Šæ¸…å–® ({aiHtmlFiles.length})
+                          </button>
+                        </div>
+                      </div>
+
+                      {aiLeftTab === "upload" ? (
+                        <div className="p-3 bg-white/[0.02] border border-dashed border-white/10 rounded-lg flex flex-col gap-2.5">
+                          <input
+                            type="file"
+                            accept=".html,.htm"
+                            onChange={handleAiFileChange}
+                            className="text-xs text-zinc-400 file:mr-2 file:py-1 file:px-2.5 file:rounded file:border-0 file:text-xs file:font-bold file:bg-white/10 file:text-white hover:file:bg-white/20 cursor-pointer"
+                          />
+                          {aiUploadFile && (
+                            <div className="text-[10px] text-emerald-400 flex items-center gap-1">
+                              <span>å·²é¸å–æª”æ¡ˆ: {aiUploadFile.name}</span>
+                            </div>
+                          )}
+                          <button
+                            type="button"
+                            onClick={handleAiUploadSubmit}
+                            disabled={isAiUploading || !aiUploadContent}
+                            className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                          >
+                            <Upload className="w-3.5 h-3.5" />
+                            <span>{isAiUploading ? "ä¸Šå‚³ä¸­..." : "ç¢ºèªä¸Šå‚³ HTML å ±å‘Š"}</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col gap-1.5 max-h-48 overflow-y-auto">
+                          {aiHtmlFiles.length === 0 ? (
+                            <div className="text-center py-6 text-xs text-zinc-500">
+                              å°šæœªä¸Šå‚³æ­¤å€‹è‚¡çš„ HTML å ±å‘Š
+                            </div>
+                          ) : (
+                            aiHtmlFiles.map((file) => (
+                              <div
+                                key={file.id}
+                                onClick={() => {
+                                  setSelectedPreviewUrl(`/api/html-files/${file.id}/content`);
+                                  setSelectedPreviewLinkTitle(file.fileName);
+                                  setAiMobileActiveTab("preview");
+                                  playClickSound();
+                                }}
+                                className={`p-2 rounded-lg border transition-all flex items-center justify-between gap-2 cursor-pointer ${
+                                  selectedPreviewUrl === `/api/html-files/${file.id}/content`
+                                    ? "bg-emerald-950/40 border-emerald-500/40 text-emerald-300"
+                                    : "bg-white/[0.02] hover:bg-white/5 border-white/5 text-zinc-300"
+                                }`}
+                              >
+                                <div className="flex items-center gap-2 min-w-0 flex-1">
+                                  <FileText className="w-3.5 h-3.5 shrink-0 text-emerald-400" />
+                                  <div className="flex flex-col min-w-0">
+                                    <span className="text-xs font-bold truncate">{file.fileName}</span>
+                                    <span className="text-[9px] text-zinc-500">
+                                      {file.createdAt ? new Date(file.createdAt).toLocaleString("zh-TW") : ""}
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  {confirmDeleteFileId === file.id ? (
+                                    <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => handleAiDeleteHtmlFile(e, file.id)}
+                                        className="px-1.5 py-0.5 bg-red-600 hover:bg-red-500 text-[10px] text-white font-bold rounded"
+                                      >
+                                        åˆªé™¤
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setConfirmDeleteFileId(null)}
+                                        className="px-1.5 py-0.5 bg-zinc-700 text-[10px] text-zinc-300 rounded"
+                                      >
+                                        å–æ¶ˆ
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setConfirmDeleteFileId(file.id);
+                                      }}
+                                      className="p-1 text-zinc-500 hover:text-red-400 rounded"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Right Column: Preview Iframe */}
+              <div
+                className={`flex-1 flex-col min-h-0 bg-[#121212] rounded-xl border border-white/5 overflow-hidden ${
+                  aiMobileActiveTab === "preview" ? "flex" : "hidden lg:flex"
+                }`}
+              >
+                {selectedPreviewUrl ? (
+                  <div className="w-full h-full flex flex-col">
+                    <div className="flex items-center justify-between px-4 py-2 border-b border-white/5 bg-[#161616]">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <FileText className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span className="text-xs font-bold text-zinc-200 truncate">
+                          {selectedPreviewLinkTitle || "HTML å ±å‘Šé è¦½"}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={selectedPreviewUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="px-2 py-1 bg-white/5 hover:bg-white/10 rounded text-[10px] font-bold text-zinc-300 hover:text-white flex items-center gap-1 transition-all"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          <span>åœ¨æ–°åˆ†é é–‹å•Ÿ</span>
+                        </a>
+                      </div>
+                    </div>
+                    <div className="flex-1 w-full h-full bg-white relative">
+                      <iframe
+                        src={selectedPreviewUrl}
+                        title="AI Analysis Report Preview"
+                        className="w-full h-full border-0"
+                        sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center text-zinc-500 gap-3">
+                    <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-zinc-400">
+                      <FileText className="w-6 h-6 opacity-40" />
+                    </div>
+                    <div className="flex flex-col gap-1 max-w-sm">
+                      <span className="text-sm font-bold text-zinc-400">å°šæœªé¸å– HTML åˆ†æå ±å‘Š</span>
+                      <span className="text-xs text-zinc-600">
+                        è«‹åœ¨å·¦å´é¸å–å·²ä¸Šå‚³çš„ HTML å ±å‘Šä»¥é€²è¡Œå³æ™‚æ¸²æŸ“é è¦½ï¼Œæˆ–ä¸Šå‚³ç”± AI ç”¢ç”Ÿçš„åˆ†æå ±å‘Šã€‚
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        </AnimatePresence>
+      )}
+    </div>
+  );
+}

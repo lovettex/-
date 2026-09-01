@@ -108,83 +108,57 @@ function resolveCollisions<T extends { rawY: number; isFixed?: boolean }>(
   if (items.length === 1) {
     return [{ ...items[0], y: items[0].isFixed ? items[0].rawY : Math.max(7, Math.min(93, items[0].rawY)) }];
   }
-  
-  let sorted = [...items]
+
+  const sorted = [...items]
     .sort((a, b) => a.rawY - b.rawY)
-    .map((item) => ({ ...item, y: item.rawY }));
+    .map((item) => ({ ...item, y: item.isFixed ? item.rawY : Math.max(7, Math.min(93, item.rawY)) }));
 
   const minY = 7;
   const maxY = 93;
+  const n = sorted.length;
   // Adaptive minDisp so large numbers of targets don't push beyond container bounds
-  const effectiveMinDisp = Math.min(minDisp, (maxY - minY) / Math.max(1, sorted.length - 1));
+  const effectiveMinDisp = Math.min(minDisp, (maxY - minY) / Math.max(1, n - 1));
 
-  // 100 rounds of relaxation
-  for (let iter = 0; iter < 100; iter++) {
-    let changed = false;
+  // 80 rounds of gentle iterative spring relaxation and collision resolution
+  for (let iter = 0; iter < 80; iter++) {
+    // 1. Gentle spring attraction to raw position (keeps labels as faithful to actual price line as possible)
+    for (let i = 0; i < n; i++) {
+      if (!sorted[i].isFixed) {
+        sorted[i].y += (sorted[i].rawY - sorted[i].y) * 0.08;
+      }
+    }
 
-    // Standard push-apart
-    for (let i = 0; i < sorted.length - 1; i++) {
+    // 2. Pairwise collision separation
+    for (let i = 0; i < n - 1; i++) {
       const diff = sorted[i + 1].y - sorted[i].y;
       if (diff < effectiveMinDisp) {
         const overlap = effectiveMinDisp - diff;
-        if (sorted[i].isFixed && !sorted[i + 1].isFixed) {
+        const iFixed = !!sorted[i].isFixed;
+        const nextFixed = !!sorted[i + 1].isFixed;
+        if (iFixed && !nextFixed) {
           sorted[i + 1].y += overlap;
-          changed = true;
-        } else if (!sorted[i].isFixed && sorted[i + 1].isFixed) {
+        } else if (!iFixed && nextFixed) {
           sorted[i].y -= overlap;
-          changed = true;
-        } else if (!sorted[i].isFixed && !sorted[i + 1].isFixed) {
+        } else if (!iFixed && !nextFixed) {
           sorted[i].y -= overlap / 2;
           sorted[i + 1].y += overlap / 2;
-          changed = true;
         }
       }
     }
 
-    // Dynamic, cooperative bounds clamping (pushes the entire stack if standard clamping squeezes it)
-    if (sorted[0].y < minY && !sorted[0].isFixed) {
-      const push = minY - sorted[0].y;
-      for (let j = 0; j < sorted.length; j++) {
-        if (!sorted[j].isFixed) sorted[j].y += push;
-      }
-      changed = true;
-    }
-
-    const lastIdx = sorted.length - 1;
-    if (sorted[lastIdx].y > maxY && !sorted[lastIdx].isFixed) {
-      const push = sorted[lastIdx].y - maxY;
-      for (let j = 0; j <= lastIdx; j++) {
-        if (!sorted[j].isFixed) sorted[j].y -= push;
-      }
-      changed = true;
-    }
-
-    if (!changed) break;
-  }
-
-  // Final strict clamps and guarantee passes
-  for (let i = 0; i < sorted.length; i++) {
-    if (!sorted[i].isFixed) {
-      sorted[i].y = Math.max(minY, Math.min(maxY, sorted[i].y));
-    }
-  }
-
-  // Forward sweep guarantee
-  for (let i = 0; i < sorted.length - 1; i++) {
-    const diff = sorted[i + 1].y - sorted[i].y;
-    if (diff < effectiveMinDisp * 0.95) {
-      if (!sorted[i + 1].isFixed) {
-        sorted[i + 1].y = Math.min(maxY, sorted[i].y + effectiveMinDisp * 0.95);
+    // 3. Individual boundary constraints (clamp strictly to boundaries without falsely pushing unrelated items)
+    for (let i = 0; i < n; i++) {
+      if (!sorted[i].isFixed) {
+        sorted[i].y = Math.max(minY, Math.min(maxY, sorted[i].y));
       }
     }
   }
 
-  // Backward sweep guarantee to balance space distribution
-  for (let i = sorted.length - 1; i > 0; i--) {
-    const diff = sorted[i].y - sorted[i - 1].y;
-    if (diff < effectiveMinDisp * 0.95) {
-      if (!sorted[i - 1].isFixed) {
-        sorted[i - 1].y = Math.max(minY, sorted[i].y - effectiveMinDisp * 0.95);
+  // 4. Final monotonic ordering and minimum spacing pass
+  for (let i = 0; i < n - 1; i++) {
+    if (!sorted[i + 1].isFixed) {
+      if (sorted[i + 1].y < sorted[i].y + effectiveMinDisp * 0.85) {
+        sorted[i + 1].y = Math.min(maxY, sorted[i].y + effectiveMinDisp * 0.85);
       }
     }
   }
@@ -2177,7 +2151,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
               text: `均本 $${averageCost.toLocaleString(undefined, {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2,
-              })}${averageCostQuantity && averageCostQuantity !== 0 ? ` (${Math.abs(averageCostQuantity).toLocaleString(undefined, { maximumFractionDigits: 4 })}股)` : ""}`,
+              })}${((averageCostQuantity && averageCostQuantity !== 0) || (holdingQuantity && holdingQuantity > 0)) ? ` (${Math.abs(averageCostQuantity || holdingQuantity || 0).toLocaleString(undefined, { maximumFractionDigits: 4 })}股)` : ""}`,
               rawY: getYPct(averageCost),
               color: "#f97316",
               isBold: true,
@@ -2359,9 +2333,9 @@ export const StockCardVisualizer: React.FC<Props> = ({
             <span className="bg-white text-orange-700 px-1 py-0.5 rounded font-mono font-black shadow-2xs leading-none">
               ${typeof l.price === "number" ? l.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : l.price}
             </span>
-            {averageCostQuantity && averageCostQuantity !== 0 && (
+            {((averageCostQuantity && averageCostQuantity !== 0) || (holdingQuantity && holdingQuantity > 0)) && (
               <span className="font-mono font-bold text-white/95">
-                ({Math.abs(averageCostQuantity).toLocaleString(undefined, { maximumFractionDigits: 4 })}股)
+                ({Math.abs(averageCostQuantity || holdingQuantity || 0).toLocaleString(undefined, { maximumFractionDigits: 4 })}股)
               </span>
             )}
           </span>
