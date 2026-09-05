@@ -12,7 +12,9 @@ import {
   initializeFirestore,
   persistentLocalCache,
   persistentMultipleTabManager,
-  setLogLevel
+  setLogLevel,
+  doc,
+  getDocFromServer
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
@@ -25,7 +27,7 @@ try {
   // Ignore in case setLogLevel is restricted
 }
 
-// Initialize Firestore with robust multi-tab persistent IndexedDB cache & auto-detected polling
+// Initialize Firestore with robust multi-tab persistent IndexedDB cache & forced long-polling for iframe/proxy reliability
 let firestoreInstance;
 try {
   firestoreInstance = initializeFirestore(
@@ -34,6 +36,7 @@ try {
       localCache: persistentLocalCache({
         tabManager: persistentMultipleTabManager(),
       }),
+      experimentalForceLongPolling: true,
       experimentalAutoDetectLongPolling: true,
     },
     firebaseConfig.firestoreDatabaseId
@@ -44,6 +47,18 @@ try {
 }
 
 export const db = firestoreInstance;
+
+// Initial connection test as recommended by Firebase integration guidelines
+async function testConnection() {
+  try {
+    await getDocFromServer(doc(db, 'test', 'connection'));
+  } catch (error) {
+    if (error instanceof Error && (error.message.includes('the client is offline') || error.message.includes('offline') || error.message.includes('unavailable'))) {
+      console.info("[Firestore Connection Status] Firestore client operates with local cache persistence.");
+    }
+  }
+}
+testConnection();
 
 // Initialize Firebase Auth with multiple persistence targets to prevent WKWebView/Chrome iOS sandboxed storage crashes.
 let authInstance;
@@ -94,7 +109,10 @@ export function isFirestoreOfflineError(error: unknown): boolean {
     msg.includes('unavailable') ||
     msg.includes('could not reach') ||
     msg.includes('backend didn\'t respond') ||
-    msg.includes('failed-precondition')
+    msg.includes('failed-precondition') ||
+    msg.includes('deadline-exceeded') ||
+    msg.includes('network-request-failed') ||
+    msg.includes('timed out')
   );
 }
 

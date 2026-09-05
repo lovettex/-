@@ -1,6 +1,7 @@
 import { StockTab, ChartAnnotation } from "../types";
 import { PositionMap, HOLDING_CONFIG } from "../components/DynamicVisualLinesModal";
 import { getVisualLinesDataSync, saveVisualLinesDataOptimistic } from "./visualLinesStorage";
+import { getTimestampMillis } from "../lib/dateUtils";
 
 /**
  * 分類分隔線顏色
@@ -848,7 +849,7 @@ export async function syncSubTabDividersToCanvas(
         const dividerCount = analysis.allDividers.length;
         const hasPrice = t.currentPrice && t.currentPrice > 0 ? 1 : 0;
         const isEligible = analysis.isEligible ? 100 : 0;
-        const updateTime = t.updatedAt?.toMillis?.() || 0;
+        const updateTime = getTimestampMillis(t.updatedAt) || getTimestampMillis(t.createdAt);
         return {
           tab: t,
           score: isEligible + dividerCount * 10 + hasPrice * 5,

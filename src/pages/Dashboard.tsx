@@ -804,7 +804,22 @@ export default function Dashboard() {
 
   const [activeViewTab, setActiveViewTab] = useState<
     "active" | "real" | "completed" | "socrates" | "alerts" | "notes"
-  >("active");
+  >(() => {
+    try {
+      const saved = safeSessionStorage.getItem("preferredActiveViewTab");
+      if (
+        saved &&
+        ["active", "real", "completed", "socrates", "alerts", "notes"].includes(saved)
+      ) {
+        return saved as any;
+      }
+    } catch (e) {}
+    return "active";
+  });
+
+  useEffect(() => {
+    safeSessionStorage.setItem("preferredActiveViewTab", activeViewTab);
+  }, [activeViewTab]);
 
   const [completedMainTab, setCompletedMainTab] = useState<"all" | "real" | "simulated">("all");
   const [completedResultFilter, setCompletedResultFilter] = useState<"all" | "win" | "lose">("all");
@@ -1765,7 +1780,13 @@ export default function Dashboard() {
   const [isEditingBankBalance, setIsEditingBankBalance] = useState(false);
   const [editBankBalanceVal, setEditBankBalanceVal] = useState("");
   const [isDesktopMetricsOpen, setIsDesktopMetricsOpen] = useState(false);
-  const [metricsTradeTab, setMetricsTradeTab] = useState<"simulated" | "real">("simulated");
+  const [metricsTradeTab, setMetricsTradeTab] = useState<"simulated" | "real">(() => {
+    try {
+      const saved = safeSessionStorage.getItem("preferredActiveViewTab");
+      if (saved === "real") return "real";
+    } catch (e) {}
+    return "simulated";
+  });
   const [isMobileCinemaSidebarOpen, setIsMobileCinemaSidebarOpen] = useState(false);
 
   useEffect(() => {
@@ -6589,7 +6610,14 @@ export default function Dashboard() {
                               return;
                             }
                             const targetTabs = tabs.filter(
-                              (tab) => tab.status !== "COMPLETED" && selectedCardIds.has(tab.id)
+                              (tab) =>
+                                tab.status !== "COMPLETED" &&
+                                selectedCardIds.has(tab.id) &&
+                                (activeViewTab === "real"
+                                  ? tab.tradeType === "real"
+                                  : activeViewTab === "active"
+                                  ? tab.tradeType !== "real"
+                                  : true)
                             );
                             if (targetTabs.length === 0) {
                               toast.error("所勾選的卡片中沒有可同步的有效個股卡片");
@@ -6719,7 +6747,14 @@ export default function Dashboard() {
                                 return;
                               }
                               const targetTabs = tabs.filter(
-                                (tab) => tab.status !== "COMPLETED" && selectedCardIds.has(tab.id)
+                                (tab) =>
+                                  tab.status !== "COMPLETED" &&
+                                  selectedCardIds.has(tab.id) &&
+                                  (activeViewTab === "real"
+                                    ? tab.tradeType === "real"
+                                    : activeViewTab === "active"
+                                    ? tab.tradeType !== "real"
+                                    : true)
                               );
                               if (targetTabs.length === 0) {
                                 toast.error("所勾選的卡片中沒有可同步的有效個股卡片");
@@ -10113,6 +10148,7 @@ export default function Dashboard() {
         initialTradeType={activeViewTab === "real" ? "real" : activeViewTab === "active" ? "active" : "all"}
         strategiesMap={activeTabStrategies}
         statsMap={activeTabStatsMap}
+        tradesMap={activeTabTrades}
         onSelectStock={(tabId, symbol) => {
           setIsVisualLinesBoardOpen(false);
           try {

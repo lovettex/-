@@ -128,8 +128,8 @@ export const BATCH_OPTIONS: BatchOption[] = [
     dotColor: 'bg-purple-500',
   },
   {
-    id: '第四批拆分交易 (10%)',
-    label: '第四批拆分交易 (10%)',
+    id: '第四批拆分交易(10%)',
+    label: '第四批拆分交易(10%)',
     group: '第四批',
     isSplit: true,
     borderColor: 'border-fuchsia-300',
@@ -139,8 +139,8 @@ export const BATCH_OPTIONS: BatchOption[] = [
     dotColor: 'bg-fuchsia-500',
   },
   {
-    id: '第四批拆分交易 (15%)',
-    label: '第四批拆分交易 (15%)',
+    id: '第四批拆分交易(15%)',
+    label: '第四批拆分交易(15%)',
     group: '第四批',
     isSplit: true,
     borderColor: 'border-violet-300',

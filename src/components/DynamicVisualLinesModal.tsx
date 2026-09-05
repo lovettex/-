@@ -30,15 +30,16 @@ import {
   CheckSquare,
   Download,
   Upload,
-  MoveHorizontal,
   RefreshCw,
   Crosshair,
   Ruler,
   HelpCircle,
+  MoveVertical,
 } from "lucide-react";
 import { toast } from "sonner";
 import { playClickSound, playSuccessSound } from "../lib/audio";
 import { StockTab } from "../types";
+import { getTimestampMillis } from "../lib/dateUtils";
 import {
   syncSubTabDividersToCanvas,
   formatTagDate,
@@ -61,6 +62,8 @@ import {
   revalidateVisualLinesDataAsync,
   saveVisualLinesDataOptimistic,
 } from "../utils/visualLinesStorage";
+import { db } from "../lib/firebase";
+import { doc, updateDoc } from "firebase/firestore";
 
 export interface PositionMap {
   [symbol: string]: {
@@ -70,9 +73,1308 @@ export interface PositionMap {
     shape?: "circle"; // tag shape (always 'circle')
     color?: string; // custom circle background color hex
     hidden?: boolean; // whether tag is hidden on visual board
-    dcaProgress?: "#1" | "#2" | "#3" | "#4" | string; // 攤平進度 #1, #2, #3, #4
+    dcaProgress?: "#1" | "#2" | "#3" | "#4" | string; // 攤平進度 #1, #2, #3, #4 或拆分交易選項
     updatedAt?: string;
   };
+}
+
+// 拆分交易百分比選項 (8 大標準拆分交易)
+export interface SplitTradeOption {
+  id: string; // 標準 ID, 如 "第一批拆分交易(7%)"
+  label: string; // 顯示名稱
+  batchNum: "#1" | "#2" | "#3" | "#4";
+  batchGroup: "第一批" | "第二批" | "第三批" | "第四批";
+  shortName: string; // 簡短標籤, 如 "批1(7%)"
+  percent: number; // 0.07
+  percentText: string; // "7%"
+  color: string;
+  badgeBg: string;
+  badgeText: string;
+  badgeBorder: string;
+}
+
+export const SPLIT_TRADE_OPTIONS: SplitTradeOption[] = [
+  // === 第一批 ===
+  {
+    id: "第一批拆分交易(7%)",
+    label: "第一批拆分交易(7%)",
+    batchNum: "#1",
+    batchGroup: "第一批",
+    shortName: "第一批拆分交易(7%)",
+    percent: 0.07,
+    percentText: "7%",
+    color: "#38BDF8",
+    badgeBg: "bg-blue-900",
+    badgeText: "text-blue-100",
+    badgeBorder: "border-blue-400",
+  },
+  {
+    id: "第一批拆分交易(8%)",
+    label: "第一批拆分交易(8%)",
+    batchNum: "#1",
+    batchGroup: "第一批",
+    shortName: "第一批拆分交易(8%)",
+    percent: 0.08,
+    percentText: "8%",
+    color: "#22D3EE",
+    badgeBg: "bg-cyan-900",
+    badgeText: "text-cyan-100",
+    badgeBorder: "border-cyan-400",
+  },
+
+  // === 第二批 ===
+  {
+    id: "第二批拆分交易(10%)",
+    label: "第二批拆分交易(10%)",
+    batchNum: "#2",
+    batchGroup: "第二批",
+    shortName: "第二批拆分交易(10%)",
+    percent: 0.10,
+    percentText: "10%",
+    color: "#2DD4BF",
+    badgeBg: "bg-teal-900",
+    badgeText: "text-teal-100",
+    badgeBorder: "border-teal-400",
+  },
+  {
+    id: "第二批拆分交易(15%)",
+    label: "第二批拆分交易(15%)",
+    batchNum: "#2",
+    batchGroup: "第二批",
+    shortName: "第二批拆分交易(15%)",
+    percent: 0.15,
+    percentText: "15%",
+    color: "#4ADE80",
+    badgeBg: "bg-emerald-900",
+    badgeText: "text-emerald-100",
+    badgeBorder: "border-emerald-400",
+  },
+
+  // === 第三批 ===
+  {
+    id: "第三批拆分交易(15%)",
+    label: "第三批拆分交易(15%)",
+    batchNum: "#3",
+    batchGroup: "第三批",
+    shortName: "第三批拆分交易(15%)",
+    percent: 0.15,
+    percentText: "15%",
+    color: "#FB923C",
+    badgeBg: "bg-amber-900",
+    badgeText: "text-amber-100",
+    badgeBorder: "border-amber-400",
+  },
+  {
+    id: "第三批拆分交易(20%)",
+    label: "第三批拆分交易(20%)",
+    batchNum: "#3",
+    batchGroup: "第三批",
+    shortName: "第三批拆分交易(20%)",
+    percent: 0.20,
+    percentText: "20%",
+    color: "#FACC15",
+    badgeBg: "bg-orange-900",
+    badgeText: "text-orange-100",
+    badgeBorder: "border-orange-400",
+  },
+
+  // === 第四批 ===
+  {
+    id: "第四批拆分交易(10%)",
+    label: "第四批拆分交易(10%)",
+    batchNum: "#4",
+    batchGroup: "第四批",
+    shortName: "第四批拆分交易(10%)",
+    percent: 0.10,
+    percentText: "10%",
+    color: "#C084FC",
+    badgeBg: "bg-purple-900",
+    badgeText: "text-purple-100",
+    badgeBorder: "border-purple-400",
+  },
+  {
+    id: "第四批拆分交易(15%)",
+    label: "第四批拆分交易(15%)",
+    batchNum: "#4",
+    batchGroup: "第四批",
+    shortName: "第四批拆分交易(15%)",
+    percent: 0.15,
+    percentText: "15%",
+    color: "#F472B6",
+    badgeBg: "bg-pink-900",
+    badgeText: "text-pink-100",
+    badgeBorder: "border-pink-400",
+  },
+];
+
+/**
+ * 查詢與匹配拆分交易選項（相容空格與不同命名格式）
+ */
+export function findSplitTradeOption(val?: string): SplitTradeOption | undefined {
+  if (!val) return undefined;
+  const clean = val.replace(/\s+/g, "");
+  return SPLIT_TRADE_OPTIONS.find(
+    (opt) =>
+      opt.id.replace(/\s+/g, "") === clean ||
+      opt.label.replace(/\s+/g, "") === clean ||
+      opt.shortName.replace(/\s+/g, "") === clean ||
+      clean.includes(opt.id.replace(/\s+/g, "")) ||
+      (clean.includes(opt.batchGroup) && clean.includes(opt.percentText))
+  );
+}
+
+/**
+ * 取得攤平進度或拆分交易的高對比顏色背景徽章樣式
+ */
+export function getDcaProgressBadge(dca?: string) {
+  if (!dca) return null;
+  const splitOpt = findSplitTradeOption(dca);
+  if (splitOpt) {
+    return {
+      label: splitOpt.shortName || splitOpt.label,
+      bg: splitOpt.badgeBg,
+      text: splitOpt.badgeText,
+      border: splitOpt.badgeBorder,
+    };
+  }
+  if (dca === "#1") {
+    return {
+      label: "第一批 (#1)",
+      bg: "bg-blue-900",
+      text: "text-blue-100",
+      border: "border-blue-400",
+    };
+  }
+  if (dca === "#2") {
+    return {
+      label: "第二批 (#2)",
+      bg: "bg-emerald-900",
+      text: "text-emerald-100",
+      border: "border-emerald-400",
+    };
+  }
+  if (dca === "#3") {
+    return {
+      label: "第三批 (#3)",
+      bg: "bg-amber-900",
+      text: "text-amber-100",
+      border: "border-amber-400",
+    };
+  }
+  if (dca === "#4") {
+    return {
+      label: "第四批 (#4)",
+      bg: "bg-purple-900",
+      text: "text-purple-100",
+      border: "border-purple-400",
+    };
+  }
+  return {
+    label: dca,
+    bg: "bg-zinc-900",
+    text: "text-zinc-100",
+    border: "border-zinc-500",
+  };
+}
+
+export interface SplitCompanionStage {
+  stageName: string; // e.g. "第一批拆分(8%)"
+  fullStageName: string; // e.g. "第一批拆分交易(8%)"
+  stageSize: number; // e.g. 35 股
+  stageBought: number; // e.g. 0 股
+  stageRemaining: number; // e.g. 35 股
+  badgeBg: string;
+  badgeText: string;
+  badgeBorder: string;
+}
+
+export interface SplitStageDetail {
+  isSplitSelected: boolean;
+  stageName: string; // e.g. "第一批拆分(7%)"
+  fullStageName: string; // e.g. "第一批拆分交易(7%)"
+  batchGroup: string; // e.g. "第一批"
+  stageSize: number; // e.g. 47 股
+  stageBought: number; // e.g. 38 股
+  stageRemaining: number; // 該階段剩餘可用股數 e.g. 9 股
+  totalPlanned: number;
+  totalBought: number;
+  badgeBg: string;
+  badgeText: string;
+  badgeBorder: string;
+  // 同步提供接續拆分階段資訊 (如 1st 7%->8%、1st 8%->2nd 10%、2nd 10%->15%、2nd 15%->3rd 15%、3rd 15%->20%、3rd 20%->4th 10%、4th 10%->15%)
+  companionStage?: SplitCompanionStage | null;
+}
+
+/**
+ * 輔助計算目前所處的拆分交易階段與該階段剩餘可用股數
+ */
+export function calculateSplitTradeStageDetail(
+  tab: any,
+  dcaProgress?: string,
+  plannedQty: number = 0,
+  holdingQty: number = 0,
+  strategy?: any
+): SplitStageDetail | null {
+  const rowsSys2 = tab?.averagingRowsSys2 || strategy?.averagingRowsSys2;
+  const rowsSys1 = tab?.averagingRows || strategy?.averagingRows;
+
+  // 優先從系統二 (averagingRowsSys2) 或系統一 (averagingRows) 讀取使用者自訂的各階段預計購買股數 (例如 55 張)
+  const sys2Row0_q1 = parseFloat(rowsSys2?.[0]?.quantity || "");
+  const sys2Row0_q2 = parseFloat(rowsSys2?.[0]?.quantity2 || "");
+  const sys2Row1_q1 = parseFloat(rowsSys2?.[1]?.quantity || "");
+  const sys2Row1_q2 = parseFloat(rowsSys2?.[1]?.quantity2 || "");
+  const sys2Row2_q1 = parseFloat(rowsSys2?.[2]?.quantity || "");
+  const sys2Row2_q2 = parseFloat(rowsSys2?.[2]?.quantity2 || "");
+  const sys2Row3_q1 = parseFloat(rowsSys2?.[3]?.quantity || "");
+  const sys2Row3_q2 = parseFloat(rowsSys2?.[3]?.quantity2 || "");
+
+  const sys1Row0_q1 = parseFloat(rowsSys1?.[0]?.quantity || "");
+  const sys1Row0_q2 = parseFloat(rowsSys1?.[0]?.quantity2 || "");
+  const sys1Row1_q1 = parseFloat(rowsSys1?.[1]?.quantity || "");
+  const sys1Row1_q2 = parseFloat(rowsSys1?.[1]?.quantity2 || "");
+  const sys1Row2_q1 = parseFloat(rowsSys1?.[2]?.quantity || "");
+  const sys1Row2_q2 = parseFloat(rowsSys1?.[2]?.quantity2 || "");
+  const sys1Row3_q1 = parseFloat(rowsSys1?.[3]?.quantity || "");
+  const sys1Row3_q2 = parseFloat(rowsSys1?.[3]?.quantity2 || "");
+
+  const custom1_a = !isNaN(sys2Row0_q1) && sys2Row0_q1 > 0 ? sys2Row0_q1 : (!isNaN(sys1Row0_q1) && sys1Row0_q1 > 0 ? sys1Row0_q1 : 0);
+  const custom1_b = !isNaN(sys2Row0_q2) && sys2Row0_q2 > 0 ? sys2Row0_q2 : (!isNaN(sys1Row0_q2) && sys1Row0_q2 > 0 ? sys1Row0_q2 : 0);
+  const custom2_a = !isNaN(sys2Row1_q1) && sys2Row1_q1 > 0 ? sys2Row1_q1 : (!isNaN(sys1Row1_q1) && sys1Row1_q1 > 0 ? sys1Row1_q1 : 0);
+  const custom2_b = !isNaN(sys2Row1_q2) && sys2Row1_q2 > 0 ? sys2Row1_q2 : (!isNaN(sys1Row1_q2) && sys1Row1_q2 > 0 ? sys1Row1_q2 : 0);
+  const custom3_a = !isNaN(sys2Row2_q1) && sys2Row2_q1 > 0 ? sys2Row2_q1 : (!isNaN(sys1Row2_q1) && sys1Row2_q1 > 0 ? sys1Row2_q1 : 0);
+  const custom3_b = !isNaN(sys2Row2_q2) && sys2Row2_q2 > 0 ? sys2Row2_q2 : (!isNaN(sys1Row2_q2) && sys1Row2_q2 > 0 ? sys1Row2_q2 : 0);
+  const custom4_a = !isNaN(sys2Row3_q1) && sys2Row3_q1 > 0 ? sys2Row3_q1 : (!isNaN(sys1Row3_q1) && sys1Row3_q1 > 0 ? sys1Row3_q1 : 0);
+  const custom4_b = !isNaN(sys2Row3_q2) && sys2Row3_q2 > 0 ? sys2Row3_q2 : (!isNaN(sys1Row3_q2) && sys1Row3_q2 > 0 ? sys1Row3_q2 : 0);
+
+  const totalFromCustomRows =
+    custom1_a + custom1_b + custom2_a + custom2_b + custom3_a + custom3_b + custom4_a + custom4_b;
+
+  let effectivePlanned = plannedQty > 0 ? plannedQty : totalFromCustomRows;
+  if (effectivePlanned <= 0) {
+    if (holdingQty > 0) {
+      effectivePlanned = Math.max(holdingQty, Math.round(holdingQty / 0.15));
+    } else {
+      effectivePlanned = 1000;
+    }
+  }
+
+  const totalBought = Math.max(0, holdingQty);
+
+  // 1. 第一批 (15%) -> 第一批拆分交易(7%) + 第一批交易(8%)
+  const size1_a = custom1_a > 0 ? custom1_a : Math.round(effectivePlanned * 0.07);
+  const size1_b = custom1_b > 0 ? custom1_b : Math.max(0, Math.ceil(effectivePlanned * 0.15) - size1_a);
+  const size1 = size1_a + size1_b;
+
+  // 2. 第二批 (25%) -> 第二批拆分交易(10%) + 第二批拆分交易(15%)
+  const size2_a = custom2_a > 0 ? custom2_a : Math.round(effectivePlanned * 0.10);
+  const size2_b = custom2_b > 0 ? custom2_b : Math.max(0, Math.ceil(effectivePlanned * 0.25) - size2_a);
+  const size2 = size2_a + size2_b;
+
+  // 3. 第三批 (35%) -> 第三批拆分交易(15%) + 第三批拆分交易(20%)
+  const size3_a = custom3_a > 0 ? custom3_a : Math.round(effectivePlanned * 0.15);
+  const size3_b = custom3_b > 0 ? custom3_b : Math.max(0, Math.ceil(effectivePlanned * 0.35) - size3_a);
+  const size3 = size3_a + size3_b;
+
+  // 4. 第四批 (25%) -> 第四批拆分交易 (10%) + 第四批拆分交易 (15%)
+  const size4_a = custom4_a > 0 ? custom4_a : Math.round(effectivePlanned * 0.10);
+  const size4_b = custom4_b > 0 ? custom4_b : Math.max(0, Math.ceil(effectivePlanned * 0.25) - size4_a);
+  const size4 = size4_a + size4_b;
+
+  // 各批拆分已購與剩餘股數計算 (累進階梯推進)
+  // 該階段剩餘股數 = 該階段預計購買數量 扣除 該階段已購買數量
+  const bought1_a = Math.min(totalBought, size1_a);
+  const rem1_a = Math.max(0, size1_a - bought1_a);
+
+  const remAfter1_a = Math.max(0, totalBought - size1_a);
+  const bought1_b = Math.min(remAfter1_a, size1_b);
+  const rem1_b = Math.max(0, size1_b - bought1_b);
+
+  const remAfter1 = Math.max(0, totalBought - size1);
+  const bought2_a = Math.min(remAfter1, size2_a);
+  const rem2_a = Math.max(0, size2_a - bought2_a);
+
+  const remAfter2_a = Math.max(0, remAfter1 - size2_a);
+  const bought2_b = Math.min(remAfter2_a, size2_b);
+  const rem2_b = Math.max(0, size2_b - bought2_b);
+
+  const remAfter2 = Math.max(0, totalBought - size1 - size2);
+  const bought3_a = Math.min(remAfter2, size3_a);
+  const rem3_a = Math.max(0, size3_a - bought3_a);
+
+  const remAfter3_a = Math.max(0, remAfter2 - size3_a);
+  const bought3_b = Math.min(remAfter3_a, size3_b);
+  const rem3_b = Math.max(0, size3_b - bought3_b);
+
+  const remAfter3 = Math.max(0, totalBought - size1 - size2 - size3);
+  const bought4_a = Math.min(remAfter3, size4_a);
+  const rem4_a = Math.max(0, size4_a - bought4_a);
+
+  const remAfter4_a = Math.max(0, remAfter3 - size4_a);
+  const bought4_b = Math.min(remAfter4_a, size4_b);
+  const rem4_b = Math.max(0, size4_b - bought4_b);
+
+  // 若已有實際持股 (totalBought > 0)，優先依據累計已購數量精確判定當前所處之進行中批次 (避免被舊標籤或已滿批之早前批次卡死)
+  if (totalBought > 0) {
+    if (totalBought >= (size1 + size2 + size3)) {
+      // 第三批已 100% 購買完畢 (餘 0 股)，必定已推進至第四批拆分交易
+      if (totalBought < (size1 + size2 + size3 + size4_a)) {
+        return {
+          isSplitSelected: true,
+          stageName: "第四批拆分(10%)",
+          fullStageName: "第四批拆分交易(10%)",
+          batchGroup: "第四批",
+          stageSize: size4_a,
+          stageBought: bought4_a,
+          stageRemaining: rem4_a,
+          totalPlanned: effectivePlanned,
+          totalBought,
+          badgeBg: "bg-purple-900",
+          badgeText: "text-purple-100",
+          badgeBorder: "border-purple-400",
+          companionStage: {
+            stageName: "第四批拆分(15%)",
+            fullStageName: "第四批拆分交易(15%)",
+            stageSize: size4_b,
+            stageBought: bought4_b,
+            stageRemaining: rem4_b,
+            badgeBg: "bg-pink-900",
+            badgeText: "text-pink-100",
+            badgeBorder: "border-pink-400",
+          },
+        };
+      } else {
+        return {
+          isSplitSelected: true,
+          stageName: "第四批拆分(15%)",
+          fullStageName: "第四批拆分交易(15%)",
+          batchGroup: "第四批",
+          stageSize: size4_b,
+          stageBought: bought4_b,
+          stageRemaining: rem4_b,
+          totalPlanned: effectivePlanned,
+          totalBought,
+          badgeBg: "bg-pink-900",
+          badgeText: "text-pink-100",
+          badgeBorder: "border-pink-400",
+          companionStage: null,
+        };
+      }
+    } else if (totalBought >= (size1 + size2)) {
+      // 第二批已 100% 購買完畢，推進至第三批拆分交易
+      if (totalBought < (size1 + size2 + size3_a)) {
+        return {
+          isSplitSelected: true,
+          stageName: "第三批拆分(15%)",
+          fullStageName: "第三批拆分交易(15%)",
+          batchGroup: "第三批",
+          stageSize: size3_a,
+          stageBought: bought3_a,
+          stageRemaining: rem3_a,
+          totalPlanned: effectivePlanned,
+          totalBought,
+          badgeBg: "bg-amber-900",
+          badgeText: "text-amber-100",
+          badgeBorder: "border-amber-400",
+          companionStage: {
+            stageName: "第三批拆分(20%)",
+            fullStageName: "第三批拆分交易(20%)",
+            stageSize: size3_b,
+            stageBought: bought3_b,
+            stageRemaining: rem3_b,
+            badgeBg: "bg-orange-900",
+            badgeText: "text-orange-100",
+            badgeBorder: "border-orange-400",
+          },
+        };
+      } else {
+        return {
+          isSplitSelected: true,
+          stageName: "第三批拆分(20%)",
+          fullStageName: "第三批拆分交易(20%)",
+          batchGroup: "第三批",
+          stageSize: size3_b,
+          stageBought: bought3_b,
+          stageRemaining: rem3_b,
+          totalPlanned: effectivePlanned,
+          totalBought,
+          badgeBg: "bg-orange-900",
+          badgeText: "text-orange-100",
+          badgeBorder: "border-orange-400",
+          companionStage: {
+            stageName: "第四批拆分(10%)",
+            fullStageName: "第四批拆分交易(10%)",
+            stageSize: size4_a,
+            stageBought: bought4_a,
+            stageRemaining: rem4_a,
+            badgeBg: "bg-purple-900",
+            badgeText: "text-purple-100",
+            badgeBorder: "border-purple-400",
+          },
+        };
+      }
+    } else if (totalBought >= size1) {
+      // 第一批已 100% 購買完畢，推進至第二批拆分交易
+      if (totalBought < (size1 + size2_a)) {
+        return {
+          isSplitSelected: true,
+          stageName: "第二批拆分(10%)",
+          fullStageName: "第二批拆分交易(10%)",
+          batchGroup: "第二批",
+          stageSize: size2_a,
+          stageBought: bought2_a,
+          stageRemaining: rem2_a,
+          totalPlanned: effectivePlanned,
+          totalBought,
+          badgeBg: "bg-teal-900",
+          badgeText: "text-teal-100",
+          badgeBorder: "border-teal-400",
+          companionStage: {
+            stageName: "第二批拆分(15%)",
+            fullStageName: "第二批拆分交易(15%)",
+            stageSize: size2_b,
+            stageBought: bought2_b,
+            stageRemaining: rem2_b,
+            badgeBg: "bg-emerald-900",
+            badgeText: "text-emerald-100",
+            badgeBorder: "border-emerald-400",
+          },
+        };
+      } else {
+        return {
+          isSplitSelected: true,
+          stageName: "第二批拆分(15%)",
+          fullStageName: "第二批拆分交易(15%)",
+          batchGroup: "第二批",
+          stageSize: size2_b,
+          stageBought: bought2_b,
+          stageRemaining: rem2_b,
+          totalPlanned: effectivePlanned,
+          totalBought,
+          badgeBg: "bg-emerald-900",
+          badgeText: "text-emerald-100",
+          badgeBorder: "border-emerald-400",
+          companionStage: {
+            stageName: "第三批拆分(15%)",
+            fullStageName: "第三批拆分交易(15%)",
+            stageSize: size3_a,
+            stageBought: bought3_a,
+            stageRemaining: rem3_a,
+            badgeBg: "bg-amber-900",
+            badgeText: "text-amber-100",
+            badgeBorder: "border-amber-400",
+          },
+        };
+      }
+    } else {
+      // 處於第一批拆分交易
+      if (totalBought < size1_a) {
+        return {
+          isSplitSelected: true,
+          stageName: "第一批拆分(7%)",
+          fullStageName: "第一批拆分交易(7%)",
+          batchGroup: "第一批",
+          stageSize: size1_a,
+          stageBought: bought1_a,
+          stageRemaining: rem1_a,
+          totalPlanned: effectivePlanned,
+          totalBought,
+          badgeBg: "bg-blue-900",
+          badgeText: "text-blue-100",
+          badgeBorder: "border-blue-400",
+          companionStage: {
+            stageName: "第一批拆分(8%)",
+            fullStageName: "第一批拆分交易(8%)",
+            stageSize: size1_b,
+            stageBought: bought1_b,
+            stageRemaining: rem1_b,
+            badgeBg: "bg-cyan-900",
+            badgeText: "text-cyan-100",
+            badgeBorder: "border-cyan-400",
+          },
+        };
+      } else {
+        return {
+          isSplitSelected: true,
+          stageName: "第一批拆分(8%)",
+          fullStageName: "第一批拆分交易(8%)",
+          batchGroup: "第一批",
+          stageSize: size1_b,
+          stageBought: bought1_b,
+          stageRemaining: rem1_b,
+          totalPlanned: effectivePlanned,
+          totalBought,
+          badgeBg: "bg-cyan-900",
+          badgeText: "text-cyan-100",
+          badgeBorder: "border-cyan-400",
+          companionStage: {
+            stageName: "第二批拆分(10%)",
+            fullStageName: "第二批拆分交易(10%)",
+            stageSize: size2_a,
+            stageBought: bought2_a,
+            stageRemaining: rem2_a,
+            badgeBg: "bg-teal-900",
+            badgeText: "text-teal-100",
+            badgeBorder: "border-teal-400",
+          },
+        };
+      }
+    }
+  }
+
+  const splitOpt = findSplitTradeOption(dcaProgress);
+
+  if (splitOpt) {
+    let stageSize = 0;
+    let stageBought = 0;
+    let stageRemaining = 0;
+    let companionStage: SplitCompanionStage | null = null;
+
+    const optId = splitOpt.id.replace(/\s+/g, "");
+    if (optId.includes("第一批") && (optId.includes("7%") || optId.includes("拆分1"))) {
+      stageSize = size1_a;
+      stageBought = bought1_a;
+      stageRemaining = rem1_a;
+      // 若已經有第一批拆分交易(7%)，則也顯示第一批拆分交易(8%)以及剩餘股數和預購股數
+      companionStage = {
+        stageName: "第一批拆分(8%)",
+        fullStageName: "第一批拆分交易(8%)",
+        stageSize: size1_b,
+        stageBought: bought1_b,
+        stageRemaining: rem1_b,
+        badgeBg: "bg-cyan-900",
+        badgeText: "text-cyan-100",
+        badgeBorder: "border-cyan-400",
+      };
+    } else if (optId.includes("第一批") && (optId.includes("8%") || optId.includes("拆分2"))) {
+      stageSize = size1_b;
+      stageBought = bought1_b;
+      stageRemaining = rem1_b;
+      // 若已經有第一批拆分交易(8%)，則也顯示第二批拆分交易(10%)以及剩餘股數和預購股數
+      companionStage = {
+        stageName: "第二批拆分(10%)",
+        fullStageName: "第二批拆分交易(10%)",
+        stageSize: size2_a,
+        stageBought: bought2_a,
+        stageRemaining: rem2_a,
+        badgeBg: "bg-teal-900",
+        badgeText: "text-teal-100",
+        badgeBorder: "border-teal-400",
+      };
+    } else if (optId.includes("第二批") && (optId.includes("10%") || optId.includes("拆分1"))) {
+      stageSize = size2_a;
+      stageBought = bought2_a;
+      stageRemaining = rem2_a;
+      // 若已經有第二批拆分交易(10%)，則也顯示第二批拆分交易(15%)以及剩餘股數和預購股數
+      companionStage = {
+        stageName: "第二批拆分(15%)",
+        fullStageName: "第二批拆分交易(15%)",
+        stageSize: size2_b,
+        stageBought: bought2_b,
+        stageRemaining: rem2_b,
+        badgeBg: "bg-emerald-900",
+        badgeText: "text-emerald-100",
+        badgeBorder: "border-emerald-400",
+      };
+    } else if (optId.includes("第二批") && (optId.includes("15%") || optId.includes("拆分2"))) {
+      stageSize = size2_b;
+      stageBought = bought2_b;
+      stageRemaining = rem2_b;
+      // 若已經有第二批拆分交易(15%)，則也顯示第三批拆分交易(15%)以及剩餘股數和預購股數
+      companionStage = {
+        stageName: "第三批拆分(15%)",
+        fullStageName: "第三批拆分交易(15%)",
+        stageSize: size3_a,
+        stageBought: bought3_a,
+        stageRemaining: rem3_a,
+        badgeBg: "bg-amber-900",
+        badgeText: "text-amber-100",
+        badgeBorder: "border-amber-400",
+      };
+    } else if (optId.includes("第三批") && (optId.includes("15%") || optId.includes("拆分1"))) {
+      stageSize = size3_a;
+      stageBought = bought3_a;
+      stageRemaining = rem3_a;
+      // 若已經有第三批拆分交易(15%)，則也顯示第三批拆分交易(20%)以及剩餘股數和預購股數
+      companionStage = {
+        stageName: "第三批拆分(20%)",
+        fullStageName: "第三批拆分交易(20%)",
+        stageSize: size3_b,
+        stageBought: bought3_b,
+        stageRemaining: rem3_b,
+        badgeBg: "bg-orange-900",
+        badgeText: "text-orange-100",
+        badgeBorder: "border-orange-400",
+      };
+    } else if (optId.includes("第三批") && (optId.includes("20%") || optId.includes("拆分2"))) {
+      stageSize = size3_b;
+      stageBought = bought3_b;
+      stageRemaining = rem3_b;
+      // 若已經有第三批拆分交易(20%)，則也顯示第四批拆分交易(10%)以及剩餘股數和預購股數
+      companionStage = {
+        stageName: "第四批拆分(10%)",
+        fullStageName: "第四批拆分交易(10%)",
+        stageSize: size4_a,
+        stageBought: bought4_a,
+        stageRemaining: rem4_a,
+        badgeBg: "bg-purple-900",
+        badgeText: "text-purple-100",
+        badgeBorder: "border-purple-400",
+      };
+    } else if (optId.includes("第四批") && (optId.includes("10%") || optId.includes("拆分1"))) {
+      stageSize = size4_a;
+      stageBought = bought4_a;
+      stageRemaining = rem4_a;
+      // 若已經有第四批拆分交易(10%)，則也顯示第四批拆分交易(15%)以及剩餘股數和預購股數
+      companionStage = {
+        stageName: "第四批拆分(15%)",
+        fullStageName: "第四批拆分交易(15%)",
+        stageSize: size4_b,
+        stageBought: bought4_b,
+        stageRemaining: rem4_b,
+        badgeBg: "bg-pink-900",
+        badgeText: "text-pink-100",
+        badgeBorder: "border-pink-400",
+      };
+    } else if (optId.includes("第四批") && (optId.includes("15%") || optId.includes("拆分2"))) {
+      stageSize = size4_b;
+      stageBought = bought4_b;
+      stageRemaining = rem4_b;
+    } else {
+      stageSize = Math.round(effectivePlanned * splitOpt.percent);
+      stageBought = Math.min(totalBought, stageSize);
+      stageRemaining = Math.max(0, stageSize - stageBought);
+    }
+
+    return {
+      isSplitSelected: true,
+      stageName: splitOpt.shortName,
+      fullStageName: splitOpt.label,
+      batchGroup: splitOpt.batchGroup,
+      stageSize,
+      stageBought,
+      stageRemaining,
+      totalPlanned: effectivePlanned,
+      totalBought,
+      badgeBg: splitOpt.badgeBg,
+      badgeText: splitOpt.badgeText,
+      badgeBorder: splitOpt.badgeBorder,
+      companionStage,
+    };
+  }
+
+  // 自動推算目前所處的拆分子階段
+  let currentStageName = "第一批拆分交易(7%)";
+  let currentFullStageName = "第一批拆分交易(7%)";
+  let currentBatchGroup = "第一批";
+  let stageSize = size1_a;
+  let stageBought = bought1_a;
+  let stageRemaining = rem1_a;
+  let badgeBg = "bg-blue-900";
+  let badgeText = "text-blue-100";
+  let badgeBorder = "border-blue-400";
+  let companionStage: SplitCompanionStage | null = null;
+
+  if (dcaProgress === "#4" || totalBought >= (size1 + size2 + size3)) {
+    if (totalBought < (size1 + size2 + size3 + size4_a)) {
+      currentStageName = "第四批拆分交易(10%)";
+      currentFullStageName = "第四批拆分交易(10%)";
+      currentBatchGroup = "第四批";
+      stageSize = size4_a;
+      stageBought = bought4_a;
+      stageRemaining = rem4_a;
+      badgeBg = "bg-purple-900";
+      badgeText = "text-purple-100";
+      badgeBorder = "border-purple-400";
+      companionStage = {
+        stageName: "第四批拆分(15%)",
+        fullStageName: "第四批拆分交易(15%)",
+        stageSize: size4_b,
+        stageBought: bought4_b,
+        stageRemaining: rem4_b,
+        badgeBg: "bg-pink-900",
+        badgeText: "text-pink-100",
+        badgeBorder: "border-pink-400",
+      };
+    } else {
+      currentStageName = "第四批拆分交易(15%)";
+      currentFullStageName = "第四批拆分交易(15%)";
+      currentBatchGroup = "第四批";
+      stageSize = size4_b;
+      stageBought = bought4_b;
+      stageRemaining = rem4_b;
+      badgeBg = "bg-pink-900";
+      badgeText = "text-pink-100";
+      badgeBorder = "border-pink-400";
+    }
+  } else if (dcaProgress === "#3" || totalBought >= (size1 + size2)) {
+    if (totalBought < (size1 + size2 + size3_a)) {
+      currentStageName = "第三批拆分交易(15%)";
+      currentFullStageName = "第三批拆分交易(15%)";
+      currentBatchGroup = "第三批";
+      stageSize = size3_a;
+      stageBought = bought3_a;
+      stageRemaining = rem3_a;
+      badgeBg = "bg-amber-900";
+      badgeText = "text-amber-100";
+      badgeBorder = "border-amber-400";
+      companionStage = {
+        stageName: "第三批拆分(20%)",
+        fullStageName: "第三批拆分交易(20%)",
+        stageSize: size3_b,
+        stageBought: bought3_b,
+        stageRemaining: rem3_b,
+        badgeBg: "bg-orange-900",
+        badgeText: "text-orange-100",
+        badgeBorder: "border-orange-400",
+      };
+    } else {
+      currentStageName = "第三批拆分交易(20%)";
+      currentFullStageName = "第三批拆分交易(20%)";
+      currentBatchGroup = "第三批";
+      stageSize = size3_b;
+      stageBought = bought3_b;
+      stageRemaining = rem3_b;
+      badgeBg = "bg-orange-900";
+      badgeText = "text-orange-100";
+      badgeBorder = "border-orange-400";
+      // 若已經有第三批拆分交易(20%)，則也顯示第四批拆分交易(10%)以及剩餘股數和預購股數
+      companionStage = {
+        stageName: "第四批拆分(10%)",
+        fullStageName: "第四批拆分交易(10%)",
+        stageSize: size4_a,
+        stageBought: bought4_a,
+        stageRemaining: rem4_a,
+        badgeBg: "bg-purple-900",
+        badgeText: "text-purple-100",
+        badgeBorder: "border-purple-400",
+      };
+    }
+  } else if (dcaProgress === "#2" || totalBought >= size1) {
+    if (totalBought < (size1 + size2_a)) {
+      currentStageName = "第二批拆分交易(10%)";
+      currentFullStageName = "第二批拆分交易(10%)";
+      currentBatchGroup = "第二批";
+      stageSize = size2_a;
+      stageBought = bought2_a;
+      stageRemaining = rem2_a;
+      badgeBg = "bg-teal-900";
+      badgeText = "text-teal-100";
+      badgeBorder = "border-teal-400";
+      companionStage = {
+        stageName: "第二批拆分(15%)",
+        fullStageName: "第二批拆分交易(15%)",
+        stageSize: size2_b,
+        stageBought: bought2_b,
+        stageRemaining: rem2_b,
+        badgeBg: "bg-emerald-900",
+        badgeText: "text-emerald-100",
+        badgeBorder: "border-emerald-400",
+      };
+    } else {
+      currentStageName = "第二批拆分交易(15%)";
+      currentFullStageName = "第二批拆分交易(15%)";
+      currentBatchGroup = "第二批";
+      stageSize = size2_b;
+      stageBought = bought2_b;
+      stageRemaining = rem2_b;
+      badgeBg = "bg-emerald-900";
+      badgeText = "text-emerald-100";
+      badgeBorder = "border-emerald-400";
+      // 若已經有第二批拆分交易(15%)，則也顯示第三批拆分交易(15%)以及剩餘股數和預購股數
+      companionStage = {
+        stageName: "第三批拆分(15%)",
+        fullStageName: "第三批拆分交易(15%)",
+        stageSize: size3_a,
+        stageBought: bought3_a,
+        stageRemaining: rem3_a,
+        badgeBg: "bg-amber-900",
+        badgeText: "text-amber-100",
+        badgeBorder: "border-amber-400",
+      };
+    }
+  } else {
+    if (totalBought < size1_a) {
+      currentStageName = "第一批拆分交易(7%)";
+      currentFullStageName = "第一批拆分交易(7%)";
+      currentBatchGroup = "第一批";
+      stageSize = size1_a;
+      stageBought = bought1_a;
+      stageRemaining = rem1_a;
+      badgeBg = "bg-blue-900";
+      badgeText = "text-blue-100";
+      badgeBorder = "border-blue-400";
+      companionStage = {
+        stageName: "第一批拆分(8%)",
+        fullStageName: "第一批拆分交易(8%)",
+        stageSize: size1_b,
+        stageBought: bought1_b,
+        stageRemaining: rem1_b,
+        badgeBg: "bg-cyan-900",
+        badgeText: "text-cyan-100",
+        badgeBorder: "border-cyan-400",
+      };
+    } else {
+      currentStageName = "第一批拆分交易(8%)";
+      currentFullStageName = "第一批拆分交易(8%)";
+      currentBatchGroup = "第一批";
+      stageSize = size1_b;
+      stageBought = bought1_b;
+      stageRemaining = rem1_b;
+      badgeBg = "bg-cyan-900";
+      badgeText = "text-cyan-100";
+      badgeBorder = "border-cyan-400";
+      // 若已經有第一批拆分交易(8%)，則也顯示第二批拆分交易(10%)以及剩餘股數和預購股數
+      companionStage = {
+        stageName: "第二批拆分(10%)",
+        fullStageName: "第二批拆分交易(10%)",
+        stageSize: size2_a,
+        stageBought: bought2_a,
+        stageRemaining: rem2_a,
+        badgeBg: "bg-teal-900",
+        badgeText: "text-teal-100",
+        badgeBorder: "border-teal-400",
+      };
+    }
+  }
+
+  return {
+    isSplitSelected: false,
+    stageName: currentStageName,
+    fullStageName: currentFullStageName,
+    batchGroup: currentBatchGroup,
+    stageSize,
+    stageBought,
+    stageRemaining,
+    totalPlanned: effectivePlanned,
+    totalBought,
+    badgeBg,
+    badgeText,
+    badgeBorder,
+    companionStage,
+  };
+}
+
+export interface BatchStageInfo {
+  batchNum: number; // 1 | 2 | 3 | 4
+  batchTitle: string; // "第一批15%" | "第二批25%" | "第三批35%" | "第四批25%"
+  plannedQty: number; // 該批總計預購股數
+  boughtQty: number; // 該批已購股數
+  remainingQty: number; // 該批剩餘股數
+}
+
+export interface StockBatchProgressSummary {
+  currentBatch: BatchStageInfo;
+  nextBatch: BatchStageInfo | null;
+  batches: BatchStageInfo[];
+}
+
+/**
+ * 取得個股四批次交易進度摘要資訊 (第一批15%, 第二批25%, 第三批35%, 第四批25%)
+ * 用於滑鼠移入股票圓圈時之快顯對話窗顯示 (目前所處批次與下一批次之總計預購股數與已購股數)
+ */
+export function getStockBatchProgressSummary(
+  tab?: any,
+  strategy?: any,
+  plannedQty: number = 0,
+  holdingQty: number = 0,
+  dcaProgress?: string
+): StockBatchProgressSummary {
+  const rowsSys2 = tab?.averagingRowsSys2 || strategy?.averagingRowsSys2;
+  const rowsSys1 = tab?.averagingRows || strategy?.averagingRows;
+
+  // 取得自訂拆分/各列股數
+  const sys2Row0_q1 = parseFloat(rowsSys2?.[0]?.quantity || "");
+  const sys2Row0_q2 = parseFloat(rowsSys2?.[0]?.quantity2 || "");
+  const sys2Row1_q1 = parseFloat(rowsSys2?.[1]?.quantity || "");
+  const sys2Row1_q2 = parseFloat(rowsSys2?.[1]?.quantity2 || "");
+  const sys2Row2_q1 = parseFloat(rowsSys2?.[2]?.quantity || "");
+  const sys2Row2_q2 = parseFloat(rowsSys2?.[2]?.quantity2 || "");
+  const sys2Row3_q1 = parseFloat(rowsSys2?.[3]?.quantity || "");
+  const sys2Row3_q2 = parseFloat(rowsSys2?.[3]?.quantity2 || "");
+
+  const sys1Row0_q1 = parseFloat(rowsSys1?.[0]?.quantity || "");
+  const sys1Row0_q2 = parseFloat(rowsSys1?.[0]?.quantity2 || "");
+  const sys1Row1_q1 = parseFloat(rowsSys1?.[1]?.quantity || "");
+  const sys1Row1_q2 = parseFloat(rowsSys1?.[1]?.quantity2 || "");
+  const sys1Row2_q1 = parseFloat(rowsSys1?.[2]?.quantity || "");
+  const sys1Row2_q2 = parseFloat(rowsSys1?.[2]?.quantity2 || "");
+  const sys1Row3_q1 = parseFloat(rowsSys1?.[3]?.quantity || "");
+  const sys1Row3_q2 = parseFloat(rowsSys1?.[3]?.quantity2 || "");
+
+  const custom1_a = !isNaN(sys2Row0_q1) && sys2Row0_q1 > 0 ? sys2Row0_q1 : (!isNaN(sys1Row0_q1) && sys1Row0_q1 > 0 ? sys1Row0_q1 : 0);
+  const custom1_b = !isNaN(sys2Row0_q2) && sys2Row0_q2 > 0 ? sys2Row0_q2 : (!isNaN(sys1Row0_q2) && sys1Row0_q2 > 0 ? sys1Row0_q2 : 0);
+  const custom2_a = !isNaN(sys2Row1_q1) && sys2Row1_q1 > 0 ? sys2Row1_q1 : (!isNaN(sys1Row1_q1) && sys1Row1_q1 > 0 ? sys1Row1_q1 : 0);
+  const custom2_b = !isNaN(sys2Row1_q2) && sys2Row1_q2 > 0 ? sys2Row1_q2 : (!isNaN(sys1Row1_q2) && sys1Row1_q2 > 0 ? sys1Row1_q2 : 0);
+  const custom3_a = !isNaN(sys2Row2_q1) && sys2Row2_q1 > 0 ? sys2Row2_q1 : (!isNaN(sys1Row2_q1) && sys1Row2_q1 > 0 ? sys1Row2_q1 : 0);
+  const custom3_b = !isNaN(sys2Row2_q2) && sys2Row2_q2 > 0 ? sys2Row2_q2 : (!isNaN(sys1Row2_q2) && sys1Row2_q2 > 0 ? sys1Row2_q2 : 0);
+  const custom4_a = !isNaN(sys2Row3_q1) && sys2Row3_q1 > 0 ? sys2Row3_q1 : (!isNaN(sys1Row3_q1) && sys1Row3_q1 > 0 ? sys1Row3_q1 : 0);
+  const custom4_b = !isNaN(sys2Row3_q2) && sys2Row3_q2 > 0 ? sys2Row3_q2 : (!isNaN(sys1Row3_q2) && sys1Row3_q2 > 0 ? sys1Row3_q2 : 0);
+
+  const totalFromCustomRows =
+    custom1_a + custom1_b + custom2_a + custom2_b + custom3_a + custom3_b + custom4_a + custom4_b;
+
+  let effectivePlanned = plannedQty > 0 ? plannedQty : totalFromCustomRows;
+  if (effectivePlanned <= 0) {
+    if (holdingQty > 0) {
+      effectivePlanned = Math.max(holdingQty, Math.round(holdingQty / 0.15));
+    } else {
+      effectivePlanned = 1000;
+    }
+  }
+
+  const totalBought = Math.max(0, holdingQty);
+
+  // 第一批15%
+  const size1_a = custom1_a > 0 ? custom1_a : Math.round(effectivePlanned * 0.07);
+  const size1_b = custom1_b > 0 ? custom1_b : Math.max(0, Math.ceil(effectivePlanned * 0.15) - size1_a);
+  const size1 = size1_a + size1_b;
+
+  // 第二批25%
+  const size2_a = custom2_a > 0 ? custom2_a : Math.round(effectivePlanned * 0.10);
+  const size2_b = custom2_b > 0 ? custom2_b : Math.max(0, Math.ceil(effectivePlanned * 0.25) - size2_a);
+  const size2 = size2_a + size2_b;
+
+  // 第三批35%
+  const size3_a = custom3_a > 0 ? custom3_a : Math.round(effectivePlanned * 0.15);
+  const size3_b = custom3_b > 0 ? custom3_b : Math.max(0, Math.ceil(effectivePlanned * 0.35) - size3_a);
+  const size3 = size3_a + size3_b;
+
+  // 第四批25%
+  const size4_a = custom4_a > 0 ? custom4_a : Math.round(effectivePlanned * 0.10);
+  const size4_b = custom4_b > 0 ? custom4_b : Math.max(0, Math.ceil(effectivePlanned * 0.25) - size4_a);
+  const size4 = size4_a + size4_b;
+
+  // 各批已購股數計算 (累進階梯)
+  const bought1 = Math.min(totalBought, size1);
+  const bought2 = Math.min(Math.max(0, totalBought - size1), size2);
+  const bought3 = Math.min(Math.max(0, totalBought - size1 - size2), size3);
+  const bought4 = Math.min(Math.max(0, totalBought - size1 - size2 - size3), size4);
+
+  const batch1: BatchStageInfo = {
+    batchNum: 1,
+    batchTitle: "第一批15%",
+    plannedQty: size1,
+    boughtQty: bought1,
+    remainingQty: Math.max(0, size1 - bought1),
+  };
+  const batch2: BatchStageInfo = {
+    batchNum: 2,
+    batchTitle: "第二批25%",
+    plannedQty: size2,
+    boughtQty: bought2,
+    remainingQty: Math.max(0, size2 - bought2),
+  };
+  const batch3: BatchStageInfo = {
+    batchNum: 3,
+    batchTitle: "第三批35%",
+    plannedQty: size3,
+    boughtQty: bought3,
+    remainingQty: Math.max(0, size3 - bought3),
+  };
+  const batch4: BatchStageInfo = {
+    batchNum: 4,
+    batchTitle: "第四批25%",
+    plannedQty: size4,
+    boughtQty: bought4,
+    remainingQty: Math.max(0, size4 - bought4),
+  };
+
+  const batches = [batch1, batch2, batch3, batch4];
+
+  // 判定目前所處批次 (1, 2, 3, 4)
+  let currentNum = 1;
+  if (totalBought > 0) {
+    if (totalBought >= (size1 + size2 + size3)) {
+      currentNum = 4;
+    } else if (totalBought >= (size1 + size2)) {
+      currentNum = 3;
+    } else if (totalBought >= size1) {
+      currentNum = 2;
+    } else {
+      currentNum = 1;
+    }
+  } else {
+    // 依 dcaProgress 或 rows 標記輔助推算
+    const p = (dcaProgress || "").replace(/\s+/g, "");
+    if (p.includes("第四批") || p.includes("第4批") || p === "#4" || rowsSys2?.[3]?.bought || (parseFloat(rowsSys2?.[3]?.boughtQty || "") > 0) || rowsSys1?.[3]?.bought) {
+      currentNum = 4;
+    } else if (p.includes("第三批") || p.includes("第3批") || p === "#3" || rowsSys2?.[2]?.bought || (parseFloat(rowsSys2?.[2]?.boughtQty || "") > 0) || rowsSys1?.[2]?.bought) {
+      currentNum = 3;
+    } else if (p.includes("第二批") || p.includes("第2批") || p === "#2" || rowsSys2?.[1]?.bought || (parseFloat(rowsSys2?.[1]?.boughtQty || "") > 0) || rowsSys1?.[1]?.bought) {
+      currentNum = 2;
+    } else {
+      currentNum = 1;
+    }
+  }
+
+  const currentBatch = batches[currentNum - 1];
+  // 若目前已經在第四批 則不須顯示下一批
+  const nextBatch = currentNum < 4 ? batches[currentNum] : null;
+
+  return {
+    currentBatch,
+    nextBatch,
+    batches,
+  };
+}
+
+/**
+ * 自動且精準推算目前所處的拆分進度或攤平欄位
+ * 依序檢查：
+ * 1. 使用者在看板手動設定之 dcaProgress (8 大拆分交易選項之一或 #1~#4)
+ * 2. 歷史交易記錄 (trades) 中選取之批次 (如 第一批拆分交易(8%)、第二批拆分交易(15%)、第三批拆分交易(20%) 等)
+ * 3. 系統二 (averagingRowsSys2) 或系統一 (averagingRows) 的購買勾選標記
+ * 4. 根據目前持股量 (holdingQty) 與規劃股數推算所處拆分階段
+ */
+export function getEffectiveDcaProgress(
+  dcaProgress?: string,
+  tab?: any,
+  trades: any[] = [],
+  holdingQty: number = 0,
+  plannedQty: number = 0,
+  strategy?: any
+): string | undefined {
+  const getMillis = (val: any): number => {
+    if (!val) return 0;
+    if (typeof val === "number") return isNaN(val) ? 0 : val;
+    if (typeof val.toMillis === "function") {
+      try { return val.toMillis(); } catch {}
+    }
+    if (typeof val.toDate === "function") {
+      try { return val.toDate().getTime(); } catch {}
+    }
+    if (val instanceof Date) return isNaN(val.getTime()) ? 0 : val.getTime();
+    if (typeof val.seconds === "number") return val.seconds * 1000;
+    if (typeof val._seconds === "number") return val._seconds * 1000;
+    if (typeof val === "string") {
+      const p = new Date(val).getTime();
+      return isNaN(p) ? 0 : p;
+    }
+    return 0;
+  };
+
+  const getProgressRank = (val?: string): number => {
+    if (!val) return 0;
+    const v = val.replace(/\s+/g, "");
+    if (v.includes("第四批") || v.includes("第4批") || v.includes("#4")) {
+      return v.includes("15%") ? 8 : 7;
+    }
+    if (v.includes("第三批") || v.includes("第3批") || v.includes("#3")) {
+      return v.includes("20%") ? 6 : 5;
+    }
+    if (v.includes("第二批") || v.includes("第2批") || v.includes("#2")) {
+      return (v.includes("15%") || v.includes("25%")) ? 4 : 3;
+    }
+    if (v.includes("第一批") || v.includes("第1批") || v.includes("#1")) {
+      return (v.includes("8%") || v.includes("15%")) ? 2 : 1;
+    }
+    return 0;
+  };
+
+  // 1. 從歷史交易記錄 (trades) 中檢查最高階段與最新階段
+  let tradeDetected: string | undefined = undefined;
+  let maxTradeDetected: string | undefined = undefined;
+  let maxRank = 0;
+
+  if (trades && Array.isArray(trades) && trades.length > 0) {
+    // 依交易時間降冪排序（最新交易優先）
+    const sortedTrades = [...trades].sort((a, b) => {
+      const timeA = getMillis(a.tradeDate) || getMillis(a.createdAt);
+      const timeB = getMillis(b.tradeDate) || getMillis(b.createdAt);
+      return timeB - timeA;
+    });
+
+    for (const t of sortedTrades) {
+      if (t.batch && typeof t.batch === "string") {
+        const b = t.batch.replace(/\s+/g, "");
+        // 嚴格比對 8 種拆分交易選項
+        for (const opt of SPLIT_TRADE_OPTIONS) {
+          const optClean = opt.id.replace(/\s+/g, "");
+          const optShortClean = opt.shortName.replace(/\s+/g, "");
+          if (b.includes(optClean) || b.includes(optShortClean) || (b.includes(opt.batchGroup) && b.includes(opt.percentText))) {
+            if (!tradeDetected) tradeDetected = opt.id;
+            const r = getProgressRank(opt.id);
+            if (r > maxRank) {
+              maxRank = r;
+              maxTradeDetected = opt.id;
+            }
+          }
+        }
+
+        // 支援一般批次選項 (例如 "第四批交易 (25%)", "第四批", "#4", "第4批")
+        if (b.includes("第四批") || b.includes("第4批") || b.includes("#4")) {
+          const id = b.includes("15%") ? "第四批拆分交易(15%)" : "第四批拆分交易(10%)";
+          if (!tradeDetected) tradeDetected = id;
+          const r = getProgressRank(id);
+          if (r > maxRank) { maxRank = r; maxTradeDetected = id; }
+        } else if (b.includes("第三批") || b.includes("第3批") || b.includes("#3")) {
+          const id = b.includes("20%") ? "第三批拆分交易(20%)" : "第三批拆分交易(15%)";
+          if (!tradeDetected) tradeDetected = id;
+          const r = getProgressRank(id);
+          if (r > maxRank) { maxRank = r; maxTradeDetected = id; }
+        } else if (b.includes("第二批") || b.includes("第2批") || b.includes("#2")) {
+          const id = (b.includes("15%") || b.includes("25%")) ? "第二批拆分交易(15%)" : "第二批拆分交易(10%)";
+          if (!tradeDetected) tradeDetected = id;
+          const r = getProgressRank(id);
+          if (r > maxRank) { maxRank = r; maxTradeDetected = id; }
+        } else if (b.includes("第一批") || b.includes("第1批") || b.includes("#1")) {
+          const id = (b.includes("8%") || b.includes("15%")) ? "第一批拆分交易(8%)" : "第一批拆分交易(7%)";
+          if (!tradeDetected) tradeDetected = id;
+          const r = getProgressRank(id);
+          if (r > maxRank) { maxRank = r; maxTradeDetected = id; }
+        }
+      }
+    }
+  }
+
+  // 2. 取得自訂拆分股數並計算累計門檻
+  const rowsSys2 = tab?.averagingRowsSys2 || strategy?.averagingRowsSys2;
+  const rowsSys1 = tab?.averagingRows || strategy?.averagingRows;
+
+  const q1_0 = parseFloat(rowsSys2?.[0]?.quantity || rowsSys1?.[0]?.quantity || "0") || 0;
+  const q2_0 = parseFloat(rowsSys2?.[0]?.quantity2 || rowsSys1?.[0]?.quantity2 || "0") || 0;
+  const q1_1 = parseFloat(rowsSys2?.[1]?.quantity || rowsSys1?.[1]?.quantity || "0") || 0;
+  const q2_1 = parseFloat(rowsSys2?.[1]?.quantity2 || rowsSys1?.[1]?.quantity2 || "0") || 0;
+  const q1_2 = parseFloat(rowsSys2?.[2]?.quantity || rowsSys1?.[2]?.quantity || "0") || 0;
+  const q2_2 = parseFloat(rowsSys2?.[2]?.quantity2 || rowsSys1?.[2]?.quantity2 || "0") || 0;
+  const q1_3 = parseFloat(rowsSys2?.[3]?.quantity || rowsSys1?.[3]?.quantity || "0") || 0;
+  const q2_3 = parseFloat(rowsSys2?.[3]?.quantity2 || rowsSys1?.[3]?.quantity2 || "0") || 0;
+
+  const totalCustom = q1_0 + q2_0 + q1_1 + q2_1 + q1_2 + q2_2 + q1_3 + q2_3;
+  const effPlanned = plannedQty > 0 ? plannedQty : (totalCustom > 0 ? totalCustom : (holdingQty > 0 ? holdingQty : 1000));
+
+  const s1_a = q1_0 > 0 ? q1_0 : Math.round(effPlanned * 0.07);
+  const s1_b = q2_0 > 0 ? q2_0 : Math.max(0, Math.ceil(effPlanned * 0.15) - s1_a);
+  const s1 = s1_a + s1_b;
+
+  const s2_a = q1_1 > 0 ? q1_1 : Math.round(effPlanned * 0.10);
+  const s2_b = q2_1 > 0 ? q2_1 : Math.max(0, Math.ceil(effPlanned * 0.25) - s2_a);
+  const s2 = s2_a + s2_b;
+
+  const s3_a = q1_2 > 0 ? q1_2 : Math.round(effPlanned * 0.15);
+  const s3_b = q2_2 > 0 ? q2_2 : Math.max(0, Math.ceil(effPlanned * 0.35) - s3_a);
+  const s3 = s3_a + s3_b;
+
+  const s4_a = q1_3 > 0 ? q1_3 : Math.round(effPlanned * 0.10);
+
+  // 3. 根據已購持股數量判定拆分階段
+  let holdingDetected: string | undefined = undefined;
+  if (holdingQty > 0) {
+    if (holdingQty >= (s1 + s2 + s3 + s4_a)) {
+      holdingDetected = "第四批拆分交易(15%)";
+    } else if (holdingQty >= (s1 + s2 + s3)) {
+      holdingDetected = "第四批拆分交易(10%)";
+    } else if (holdingQty >= (s1 + s2 + s3_a)) {
+      holdingDetected = "第三批拆分交易(20%)";
+    } else if (holdingQty >= (s1 + s2)) {
+      holdingDetected = "第三批拆分交易(15%)";
+    } else if (holdingQty >= (s1 + s2_a)) {
+      holdingDetected = "第二批拆分交易(15%)";
+    } else if (holdingQty >= s1) {
+      holdingDetected = "第二批拆分交易(10%)";
+    } else if (holdingQty >= s1_a) {
+      holdingDetected = "第一批拆分交易(8%)";
+    } else {
+      holdingDetected = "第一批拆分交易(7%)";
+    }
+  }
+
+  // 4. 檢查系統二 (averagingRowsSys2) 或系統一 (averagingRows) 的購買標記
+  let rowDetected: string | undefined = undefined;
+  if (rowsSys2?.[3]?.bought || (parseFloat(rowsSys2?.[3]?.boughtQty) > 0) || rowsSys1?.[3]?.bought) {
+    rowDetected = "第四批拆分交易(15%)";
+  } else if (rowsSys2?.[2]?.bought || (parseFloat(rowsSys2?.[2]?.boughtQty) > 0) || rowsSys1?.[2]?.bought) {
+    rowDetected = "第四批拆分交易(10%)";
+  } else if (rowsSys2?.[1]?.bought || (parseFloat(rowsSys2?.[1]?.boughtQty) > 0) || rowsSys1?.[1]?.bought) {
+    rowDetected = "第三批拆分交易(15%)";
+  } else if (rowsSys2?.[0]?.bought || (parseFloat(rowsSys2?.[0]?.boughtQty) > 0) || rowsSys1?.[0]?.bought) {
+    rowDetected = "第二批拆分交易(10%)";
+  }
+
+  // 5. 評估各來源的階段等級
+  const manualRank = getProgressRank(dcaProgress);
+  const tradeRank = Math.max(getProgressRank(tradeDetected), maxRank);
+  const rowRank = getProgressRank(rowDetected);
+  const holdingRank = getProgressRank(holdingDetected);
+
+  // 若真實持股、真實/模擬交易或系統攤平列已推進到更高的批次，取實際進度最高者，避免被舊設定卡住
+  const maxActualRank = Math.max(tradeRank, rowRank, holdingRank);
+  if (maxActualRank > manualRank) {
+    if (holdingRank === maxActualRank && holdingDetected) return holdingDetected;
+    if (tradeRank === maxActualRank && maxTradeDetected) return maxTradeDetected;
+    if (rowRank === maxActualRank && rowDetected) return rowDetected;
+  }
+
+  if (dcaProgress) return dcaProgress;
+  if (holdingDetected) return holdingDetected;
+  if (maxTradeDetected) return maxTradeDetected;
+  if (rowDetected) return rowDetected;
+
+  return undefined;
+}
+
+/**
+ * 取得個股的基準倉位與強制平倉價位
+ */
+export function getStockBaseAndForceClosePrices(
+  tab?: any,
+  strategy?: any,
+  overridePrice?: number
+): {
+  basePrice: number | null;
+  forceClosePrice: number | null;
+} {
+  if (!tab && !strategy && !overridePrice) return { basePrice: null, forceClosePrice: null };
+
+  let basePrice: number | null = null;
+  let forceClosePrice: number | null = null;
+
+  const rowsSys2 = tab?.averagingRowsSys2 || strategy?.averagingRowsSys2;
+  const rowsSys1 = tab?.averagingRows || strategy?.averagingRows;
+
+  // 1. 優先從系統二 (averagingRowsSys2) 取得：第 2 欄 (-6%) 為基準倉位，第 4 欄 (-12%) 為強制平倉
+  if (rowsSys2 && Array.isArray(rowsSys2)) {
+    const p1 = parseFloat(rowsSys2[1]?.price);
+    if (!isNaN(p1) && p1 > 0) basePrice = p1;
+
+    const p3 = parseFloat(rowsSys2[3]?.price);
+    if (!isNaN(p3) && p3 > 0) forceClosePrice = p3;
+  }
+
+  // 2. 次優先從系統一 (averagingRows) 取得：第 3 欄 (-6%) 為基準倉位，第 6 欄 (-12%) 為強制平倉
+  if (rowsSys1 && Array.isArray(rowsSys1)) {
+    if (basePrice === null) {
+      const p2 = parseFloat(rowsSys1[2]?.price);
+      if (!isNaN(p2) && p2 > 0) basePrice = p2;
+    }
+    if (forceClosePrice === null) {
+      const p5 = parseFloat(rowsSys1[5]?.price);
+      if (!isNaN(p5) && p5 > 0) forceClosePrice = p5;
+    }
+  }
+
+  // 3. 檢查停損價作為強制平倉
+  const stopLoss = tab?.stopLossPrice || strategy?.stopLossPrice;
+  if (forceClosePrice === null && stopLoss && Number(stopLoss) > 0) {
+    forceClosePrice = Number(stopLoss);
+  }
+
+  // 4. 若仍無手動設定，依參考價 (refPnLPointSys2 / refPnLPoint / averageCost / currentPrice / overridePrice) 推算 -6% 基準倉位與 -12% 強制平倉
+  const ref = parseFloat(
+    tab?.refPnLPointSys2 || strategy?.refPnLPointSys2 ||
+    tab?.refPnLPoint || strategy?.refPnLPoint ||
+    tab?.averageCost || tab?.currentPrice || (overridePrice && overridePrice > 0 ? String(overridePrice) : "0")
+  );
+  if (ref > 0) {
+    if (basePrice === null) {
+      basePrice = Math.round(ref * 0.94 * 100) / 100; // -6%
+    }
+    if (forceClosePrice === null) {
+      forceClosePrice = Math.round(ref * 0.88 * 100) / 100; // -12%
+    }
+  }
+
+  return { basePrice, forceClosePrice };
 }
 
 // 預設標籤 Solid Color 明亮純色邊框色系選單 (包含 #DCFA57，改以明亮色系為主，預設黑為 1px)
@@ -152,6 +1454,7 @@ interface DynamicVisualLinesModalProps {
   initialTradeType?: "active" | "real" | "all" | "completed";
   onSelectStock?: (tabId: string, symbol: string) => void;
   strategiesMap?: Record<string, any>;
+  tradesMap?: Record<string, any[]>;
   statsMap?: Record<
     string,
     {
@@ -180,35 +1483,35 @@ export const VISUAL_BANDS = [
     id: "band-pink",
     top: 12,
     bottom: 28,
-    bg: "rgba(255, 228, 230, 0.45)", // 淡粉紅色 (紅色與金色之間)
+    bg: "rgba(244, 63, 94, 0.08)", // 淡粉紅色帶 (深色模式微透光)
     label: "淡粉紅色區域",
   },
   {
     id: "band-gray",
     top: 28,
     bottom: 44,
-    bg: "rgba(244, 244, 245, 0.6)", // 淡灰色 (紅色與黑色/藍色之間)
+    bg: "rgba(255, 255, 255, 0.02)", // 淡灰色帶
     label: "淡灰色區域",
   },
   {
     id: "band-blue",
     top: 44,
     bottom: 60,
-    bg: "rgba(239, 246, 255, 0.65)", // 淡淡的藍色 (黑色與藍色之間)
+    bg: "rgba(59, 130, 246, 0.08)", // 淡藍色帶
     label: "淡藍色區域",
   },
   {
     id: "band-emerald",
     top: 60,
     bottom: 76,
-    bg: "rgba(236, 253, 245, 0.65)", // 淡淡的青綠色 (藍色與綠色之間)
+    bg: "rgba(16, 185, 129, 0.08)", // 淡青綠色帶
     label: "淡青綠色區域",
   },
   {
     id: "band-gold",
     top: 76,
     bottom: 90,
-    bg: "rgba(254, 252, 232, 0.7)", // 淡淡的金色 (青綠色與黃色之間)
+    bg: "rgba(234, 179, 8, 0.08)", // 淡金色帶
     label: "淡金色區域",
   },
 ];
@@ -312,6 +1615,87 @@ export const SUB_TABS_LIST = [
   "乖離名單",
 ] as const;
 
+// 支援滑鼠拖曳與滾輪的水平滾動 Hook (Drag-and-Scroll)
+function useDragToScroll() {
+  const ref = useRef<HTMLDivElement>(null);
+  const isDownRef = useRef(false);
+  const startXRef = useRef(0);
+  const scrollLeftRef = useRef(0);
+  const isDraggingRef = useRef(false);
+  const justDraggedRef = useRef(false);
+
+  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    // 僅支援滑鼠左鍵
+    if (e.button !== 0 || !ref.current) return;
+    const target = e.target as HTMLElement;
+    // 不攔截文字輸入框等
+    if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
+
+    isDownRef.current = true;
+    startXRef.current = e.clientX;
+    scrollLeftRef.current = ref.current.scrollLeft;
+    isDraggingRef.current = false;
+  };
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isDownRef.current || !ref.current) return;
+    const dx = e.clientX - startXRef.current;
+    if (!isDraggingRef.current && Math.abs(dx) > 4) {
+      isDraggingRef.current = true;
+    }
+    if (isDraggingRef.current) {
+      ref.current.scrollLeft = scrollLeftRef.current - dx;
+    }
+  };
+
+  const handleMouseUp = () => {
+    if (isDraggingRef.current) {
+      justDraggedRef.current = true;
+      setTimeout(() => {
+        justDraggedRef.current = false;
+      }, 80);
+    }
+    isDownRef.current = false;
+    isDraggingRef.current = false;
+  };
+
+  const handleMouseLeave = () => {
+    if (isDraggingRef.current) {
+      justDraggedRef.current = true;
+      setTimeout(() => {
+        justDraggedRef.current = false;
+      }, 80);
+    }
+    isDownRef.current = false;
+    isDraggingRef.current = false;
+  };
+
+  const handleClickCapture = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (justDraggedRef.current || isDraggingRef.current) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  };
+
+  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    if (ref.current && e.deltaY && !e.deltaX) {
+      ref.current.scrollLeft += e.deltaY;
+    }
+  };
+
+  return {
+    ref,
+    props: {
+      onMouseDown: handleMouseDown,
+      onMouseMove: handleMouseMove,
+      onMouseUp: handleMouseUp,
+      onMouseLeave: handleMouseLeave,
+      onClickCapture: handleClickCapture,
+      onWheel: handleWheel,
+    },
+  };
+}
+
 export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = ({
   isOpen,
   onClose,
@@ -321,6 +1705,7 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
   initialTradeType = "active",
   onSelectStock,
   strategiesMap,
+  tradesMap,
   statsMap,
 }) => {
   // 1. 交易總覽主分頁選單 ("active" | "real" | "completed" | "all")
@@ -334,6 +1719,16 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
       : "active"
   );
 
+  // 1.5 交易模式 Tabs 狀態 ("simulated" 虛擬交易 | "real" 真實交易 | "all" 全部)
+  const [activeTradeModeTab, setActiveTradeModeTab] = useState<"simulated" | "real" | "all">(() => {
+    if (initialTradeType === "real") return "real";
+    return "simulated";
+  });
+
+  // 上方按鈕區塊水平拖曳滾動 (Drag-to-Scroll)
+  const topBarDrag = useDragToScroll();
+  const subBarDrag = useDragToScroll();
+
   // 2. 子分頁分類選單 ("all" 或特定子分頁)
   const [selectedSubTab, setSelectedSubTab] = useState<string>("all");
 
@@ -344,6 +1739,7 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
   const [isMainTabDropdownOpen, setIsMainTabDropdownOpen] = useState(false);
   const [isSubTabDropdownOpen, setIsSubTabDropdownOpen] = useState(false);
   const [isStockDropdownOpen, setIsStockDropdownOpen] = useState(false);
+  const [isSplitTradeDropdownOpen, setIsSplitTradeDropdownOpen] = useState(false);
 
   // 輔助視覺狀態 - 預設不顯示線條標籤
   const [showLineLabels, setShowLineLabels] = useState(false);
@@ -382,15 +1778,188 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
   const [isSaving, setIsSaving] = useState(false);
   const [isUpdatingPositions, setIsUpdatingPositions] = useState(false);
 
+  // 即時現價快取與抓取狀態 (針對 INTC 等尚未有現價之個股或手動更新)
+  const [livePrices, setLivePrices] = useState<Record<string, number>>(() => {
+    try {
+      const saved = localStorage.getItem("visual_lines_live_prices");
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+  const [isFetchingPriceMap, setIsFetchingPriceMap] = useState<Record<string, boolean>>({});
+  const [isRefreshingAllPrices, setIsRefreshingAllPrices] = useState(false);
+
+  // 抓取指定個股的最新即時現價
+  const fetchLivePriceForSymbol = useCallback(
+    async (sym: string, showToast = false) => {
+      const upperSym = sym.trim().toUpperCase();
+      if (!upperSym) return null;
+
+      setIsFetchingPriceMap((prev) => ({ ...prev, [upperSym]: true }));
+      try {
+        const response = await fetch(`/api/stock/${encodeURIComponent(upperSym)}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        const price =
+          typeof data?.price === "number" && data.price > 0
+            ? data.price
+            : data?.chart?.result?.[0]?.meta?.regularMarketPrice;
+
+        if (price && typeof price === "number" && price > 0) {
+          setLivePrices((prev) => {
+            const next = { ...prev, [upperSym]: price };
+            try {
+              localStorage.setItem("visual_lines_live_prices", JSON.stringify(next));
+            } catch {
+              // ignore
+            }
+            return next;
+          });
+
+          // 注意：為確保「視覺圖示化卡片」上的自訂分隔線與價格坐標系統絕對穩定不偏移，
+          // 動態視覺線看板抓取的即時現價僅維護於本看板的 livePrices 中，
+          // 絕不同步複寫 Firestore stockTabs 卡片數據，避免破壞使用者在卡片上設定的分隔線位置。
+
+          if (showToast) {
+            playSuccessSound();
+            toast.success(`已成功抓取 ${upperSym} 最新現價：$${price.toFixed(2)}`, {
+              id: `price-${upperSym}`,
+            });
+          }
+          return price;
+        } else {
+          if (showToast) {
+            toast.error(`無法取得 ${upperSym} 現價，請確認代號是否正確`);
+          }
+          return null;
+        }
+      } catch (err) {
+        console.error(`Fetch price failed for ${upperSym}:`, err);
+        if (showToast) {
+          toast.error(`抓取 ${upperSym} 現價時發生網路錯誤`);
+        }
+        return null;
+      } finally {
+        setIsFetchingPriceMap((prev) => ({ ...prev, [upperSym]: false }));
+      }
+    },
+    [allTabs]
+  );
+
+  // 批次抓取多檔個股的最新現價
+  const fetchPricesForSymbols = useCallback(
+    async (symbols: string[], showFeedback = false) => {
+      const validSyms = Array.from(new Set(symbols.map((s) => s.trim().toUpperCase()))).filter(Boolean);
+      if (validSyms.length === 0) return;
+
+      setIsRefreshingAllPrices(true);
+      if (showFeedback) {
+        toast.info(`正在更新 ${validSyms.length} 檔股票最新現價...`, { id: "refresh-prices" });
+      }
+
+      let successCount = 0;
+      await Promise.allSettled(
+        validSyms.map(async (sym) => {
+          const res = await fetchLivePriceForSymbol(sym, false);
+          if (res && res > 0) successCount++;
+        })
+      );
+
+      setIsRefreshingAllPrices(false);
+      if (showFeedback) {
+        if (successCount > 0) {
+          playSuccessSound();
+          toast.success(`成功更新 ${successCount} 檔股票最新現價！`, { id: "refresh-prices" });
+        } else {
+          toast.error("更新現價失敗，請稍候重試", { id: "refresh-prices" });
+        }
+      }
+    },
+    [fetchLivePriceForSymbol]
+  );
+
+  // 手動一鍵重新抓取畫布所有可見股票最新現價
+  const handleRefreshAllCanvasPrices = () => {
+    if (activeCanvasSymbols.length === 0) {
+      toast.info("目前畫布上沒有股票標籤");
+      return;
+    }
+    playClickSound();
+    fetchPricesForSymbols(activeCanvasSymbols, true);
+  };
+
   const canvasRef = useRef<HTMLDivElement>(null);
   const mainTabDropdownRef = useRef<HTMLDivElement>(null);
   const subTabDropdownRef = useRef<HTMLDivElement>(null);
   const stockDropdownRef = useRef<HTMLDivElement>(null);
+  const splitTradeDropdownRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 拖曳狀態
   const draggingSymbolRef = useRef<string | null>(null);
   const dragOffsetRef = useRef<{ offsetX: number; offsetY: number }>({ offsetX: 0, offsetY: 0 });
+
+  // 畫布視角垂直滾動平移 (Canvas Viewport Pan Y - 透過滾輪上下平移，方便查看被頂部按鈕欄遮擋的快顯示窗或底部文字，不影響個股所在位置)
+  const [canvasPanY, setCanvasPanY] = useState<number>(0);
+  const canvasPanYRef = useRef<number>(0);
+  useEffect(() => {
+    canvasPanYRef.current = canvasPanY;
+  }, [canvasPanY]);
+
+  // 切換主/子分頁或重新開啟時自動復位視角
+  useEffect(() => {
+    setCanvasPanY(0);
+  }, [isOpen, mainTabFilter, activeTradeModeTab, selectedSubTab]);
+
+  // 監聽畫布原生 wheel 滾輪事件，上下平移視角（支援阻止外層滾動並提供物理阻尼流暢體驗）
+  useEffect(() => {
+    const canvasEl = canvasRef.current;
+    if (!canvasEl || !isOpen) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      // 若游標正位於有內部滾動條的面板（例如診斷清單、下拉選單等），則保留其正常內部滾動
+      const target = e.target as HTMLElement | null;
+      if (target && target.closest("[data-scrollable], .overflow-y-auto, .overflow-auto, select, textarea")) {
+        return;
+      }
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      // deltaY > 0 (滾輪向下滾動) -> 視角向下看，畫布整體向上移動 (canvasPanY 減少，露出底部被擋住的股票或文字)
+      // deltaY < 0 (滾輪向上滾動) -> 視角向上看，畫布整體向下移動 (canvasPanY 增加，露出頂部被固定按鈕列擋住的快顯示窗)
+      setCanvasPanY((prev) => {
+        const next = prev - e.deltaY * 0.85;
+        // 限制在上下各 800px 範圍，防止無限滾動飄移
+        return Math.max(-800, Math.min(800, Math.round(next)));
+      });
+    };
+
+    canvasEl.addEventListener("wheel", handleWheel, { passive: false });
+    return () => {
+      canvasEl.removeEventListener("wheel", handleWheel);
+    };
+  }, [isOpen]);
+
+  // 雙擊畫布空白處快速復位視角
+  const handleCanvasDoubleClick = useCallback((e: React.MouseEvent) => {
+    const targetEl = e.target as HTMLElement | null;
+    if (
+      targetEl &&
+      (targetEl.closest("button") ||
+        targetEl.closest("input") ||
+        targetEl.closest("[data-tag-symbol]") ||
+        targetEl.closest("[data-no-marquee]"))
+    ) {
+      return;
+    }
+    if (canvasPanYRef.current !== 0) {
+      playClickSound();
+      setCanvasPanY(0);
+      toast.info("已恢復預設視角 (0px)");
+    }
+  }, []);
 
   // 載入已儲存的標籤位置、形狀與大小 (0ms 讀取快取 + 背景靜默非同步複驗)
   const loadPositions = useCallback(() => {
@@ -434,12 +2003,36 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     return () => window.removeEventListener("visual_lines_positions_updated", handlePositionsUpdated);
   }, []);
 
-  // 切換主分頁時自動重設子分頁為全部
+  // 切換主分頁時自動重設子分頁為全部，並連動交易模式 Tabs
   const handleSelectMainTab = (newMainTab: "active" | "real" | "completed" | "all") => {
     playClickSound();
     setMainTabFilter(newMainTab);
+    if (newMainTab === "real") {
+      setActiveTradeModeTab("real");
+    } else if (newMainTab === "active") {
+      setActiveTradeModeTab("simulated");
+    } else if (newMainTab === "all") {
+      setActiveTradeModeTab("all");
+    }
     setSelectedSubTab("all");
     setIsMainTabDropdownOpen(false);
+  };
+
+  // 切換交易模式 Tabs (虛擬交易 | 真實交易 | 全部)
+  const handleTradeModeTabChange = (mode: "simulated" | "real" | "all") => {
+    playClickSound();
+    setActiveTradeModeTab(mode);
+    if (mode === "real") {
+      setMainTabFilter("real");
+    } else if (mode === "simulated") {
+      setMainTabFilter("active");
+    } else {
+      setMainTabFilter("all");
+    }
+    setSelectedSubTab("all");
+    setIsMainTabDropdownOpen(false);
+    setIsSubTabDropdownOpen(false);
+    setIsStockDropdownOpen(false);
   };
 
   // 點擊外部關閉下拉選單
@@ -458,6 +2051,9 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
       if (stockDropdownRef.current && !stockDropdownRef.current.contains(target)) {
         setIsStockDropdownOpen(false);
       }
+      if (splitTradeDropdownRef.current && !splitTradeDropdownRef.current.contains(target)) {
+        setIsSplitTradeDropdownOpen(false);
+      }
     };
     if (isOpen) {
       window.addEventListener("mousedown", handleClickOutside);
@@ -465,56 +2061,47 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     }
   }, [isOpen]);
 
-  // 全部不重複股票 Map (嚴格優先對應 Tickbox 有勾選之卡片，絕不使用未勾選卡片覆蓋有勾選卡片)
-  const allStockMap = useMemo(() => {
+  // 1. 虛擬交易股票 Map (排除 COMPLETED，若同一代號有複數張卡片，嚴格優先選取 Tickbox 勾選者，若皆勾選或皆未勾選則依評分最高者)
+  const simulatedStockMap = useMemo(() => {
     const map = new Map<string, StockTab>();
+    const simTabs = allTabs.filter(
+      (t) => t.status !== "COMPLETED" && t.tradeType !== "real" && (t.symbol || "").trim() !== ""
+    );
 
-    // 1. 最高優先級：有勾選 Tickbox 且未結算之卡片 (若同一代號勾選多張，優先選取具備分隔線/現價者)
-    if (selectedCardIds && selectedCardIds.size > 0) {
-      const checkedActiveTabs = allTabs.filter(
-        (t) => selectedCardIds.has(t.id) && t.status !== "COMPLETED" && (t.symbol || "").trim() !== ""
-      );
-      const checkedGroups = new Map<string, StockTab[]>();
-      checkedActiveTabs.forEach((t) => {
-        const sym = t.symbol.trim().toUpperCase();
-        if (!checkedGroups.has(sym)) checkedGroups.set(sym, []);
-        checkedGroups.get(sym)!.push(t);
-      });
-      checkedGroups.forEach((tabsForSym, sym) => {
-        if (tabsForSym.length === 1) {
-          map.set(sym, tabsForSym[0]);
-        } else {
-          const scored = tabsForSym.map((t) => {
-            const analysis = analyzeCardDividers(t);
-            const dividerCount = analysis.allDividers.length;
-            const hasPrice = t.currentPrice && t.currentPrice > 0 ? 1 : 0;
-            const isEligible = analysis.isEligible ? 100 : 0;
-            const updateTime = t.updatedAt?.toMillis?.() || 0;
-            return {
-              tab: t,
-              score: isEligible + dividerCount * 10 + hasPrice * 5,
-              updateTime,
-            };
-          });
-          scored.sort((a, b) => (b.score !== a.score ? b.score - a.score : b.updateTime - a.updateTime));
-          map.set(sym, scored[0].tab);
-        }
-      });
+    const groups = new Map<string, StockTab[]>();
+    simTabs.forEach((t) => {
+      const sym = t.symbol.trim().toUpperCase();
+      if (!groups.has(sym)) groups.set(sym, []);
+      groups.get(sym)!.push(t);
+    });
 
-      // 1.5 次高優先級：其他有勾選之卡片
-      allTabs
-        .filter((t) => selectedCardIds.has(t.id) && (t.symbol || "").trim() !== "")
-        .forEach((t) => {
-          const sym = t.symbol.trim().toUpperCase();
-          if (!map.has(sym)) {
-            map.set(sym, t);
-          }
+    groups.forEach((tabsForSym, sym) => {
+      if (tabsForSym.length === 1) {
+        map.set(sym, tabsForSym[0]);
+      } else {
+        const checked = selectedCardIds ? tabsForSym.filter((t) => selectedCardIds.has(t.id)) : [];
+        const candidates = checked.length > 0 ? checked : tabsForSym;
+
+        const scored = candidates.map((t) => {
+          const analysis = analyzeCardDividers(t);
+          const dividerCount = analysis.allDividers.length;
+          const hasPrice = t.currentPrice && t.currentPrice > 0 ? 1 : 0;
+          const isEligible = analysis.isEligible ? 100 : 0;
+          const updateTime = getTimestampMillis(t.updatedAt) || getTimestampMillis(t.createdAt);
+          return {
+            tab: t,
+            score: isEligible + dividerCount * 10 + hasPrice * 50,
+            updateTime,
+          };
         });
-    }
+        scored.sort((a, b) => (b.score !== a.score ? b.score - a.score : b.updateTime - a.updateTime));
+        map.set(sym, scored[0].tab);
+      }
+    });
 
-    // 2. 第三優先級：其餘未結算的 (持有中/真實交易) 分頁
+    // 補足其餘非活躍（如 COMPLETED）的虛擬交易卡片作為備援
     allTabs
-      .filter((t) => t.status !== "COMPLETED" && (t.symbol || "").trim() !== "")
+      .filter((t) => t.tradeType !== "real" && (t.symbol || "").trim() !== "")
       .forEach((t) => {
         const sym = t.symbol.trim().toUpperCase();
         if (!map.has(sym)) {
@@ -522,7 +2109,97 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
         }
       });
 
-    // 3. 補足其餘分頁
+    return map;
+  }, [allTabs, selectedCardIds]);
+
+  // 2. 真實交易股票 Map (排除 COMPLETED，若同一代號有複數張卡片，嚴格優先選取 Tickbox 勾選者，若皆勾選或皆未勾選則依評分最高者)
+  const realStockMap = useMemo(() => {
+    const map = new Map<string, StockTab>();
+    const realTabs = allTabs.filter(
+      (t) => t.status !== "COMPLETED" && t.tradeType === "real" && (t.symbol || "").trim() !== ""
+    );
+
+    const groups = new Map<string, StockTab[]>();
+    realTabs.forEach((t) => {
+      const sym = t.symbol.trim().toUpperCase();
+      if (!groups.has(sym)) groups.set(sym, []);
+      groups.get(sym)!.push(t);
+    });
+
+    groups.forEach((tabsForSym, sym) => {
+      if (tabsForSym.length === 1) {
+        map.set(sym, tabsForSym[0]);
+      } else {
+        const checked = selectedCardIds ? tabsForSym.filter((t) => selectedCardIds.has(t.id)) : [];
+        const candidates = checked.length > 0 ? checked : tabsForSym;
+
+        const scored = candidates.map((t) => {
+          const analysis = analyzeCardDividers(t);
+          const dividerCount = analysis.allDividers.length;
+          const hasPrice = t.currentPrice && t.currentPrice > 0 ? 1 : 0;
+          const isEligible = analysis.isEligible ? 100 : 0;
+          const updateTime = getTimestampMillis(t.updatedAt) || getTimestampMillis(t.createdAt);
+          return {
+            tab: t,
+            score: isEligible + dividerCount * 10 + hasPrice * 50,
+            updateTime,
+          };
+        });
+        scored.sort((a, b) => (b.score !== a.score ? b.score - a.score : b.updateTime - a.updateTime));
+        map.set(sym, scored[0].tab);
+      }
+    });
+
+    // 補足其餘非活躍（如 COMPLETED）的真實交易卡片作為備援
+    allTabs
+      .filter((t) => t.tradeType === "real" && (t.symbol || "").trim() !== "")
+      .forEach((t) => {
+        const sym = t.symbol.trim().toUpperCase();
+        if (!map.has(sym)) {
+          map.set(sym, t);
+        }
+      });
+
+    return map;
+  }, [allTabs, selectedCardIds]);
+
+  // 3. 綜合股票 Map (用於全部模式，若同股票在真實與虛擬皆有，優先依勾選狀態，若皆有勾選或皆未勾選則以真實交易卡片或有現價者優先)
+  const combinedStockMap = useMemo(() => {
+    const map = new Map<string, StockTab>();
+
+    // 先放入虛擬交易卡片
+    simulatedStockMap.forEach((tab, sym) => {
+      map.set(sym, tab);
+    });
+
+    // 放入真實交易卡片
+    realStockMap.forEach((tab, sym) => {
+      const existing = map.get(sym);
+      if (!existing) {
+        map.set(sym, tab);
+      } else {
+        const isRealChecked = selectedCardIds?.has(tab.id);
+        const isSimChecked = selectedCardIds?.has(existing.id);
+        if (isRealChecked && !isSimChecked) {
+          map.set(sym, tab);
+        } else if (!isRealChecked && isSimChecked) {
+          // 保留虛擬
+        } else {
+          // 兩邊皆勾選或皆未勾選，優先選擇有現價者，若皆有現價或皆無現價則真實交易卡片優先
+          const tabHasPrice = tab.currentPrice !== undefined && Number(tab.currentPrice) > 0;
+          const existingHasPrice = existing.currentPrice !== undefined && Number(existing.currentPrice) > 0;
+          if (!existingHasPrice && tabHasPrice) {
+            map.set(sym, tab);
+          } else if (existingHasPrice && !tabHasPrice) {
+            // 保留 existing (有現價)
+          } else {
+            map.set(sym, tab);
+          }
+        }
+      }
+    });
+
+    // 補充其餘分頁
     allTabs.forEach((t) => {
       const sym = (t.symbol || "").trim().toUpperCase();
       if (sym && !map.has(sym)) {
@@ -531,7 +2208,22 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     });
 
     return map;
-  }, [allTabs, selectedCardIds]);
+  }, [simulatedStockMap, realStockMap, allTabs, selectedCardIds]);
+
+  // 4. 全部股票 Map (動態對齊當前交易模式 Tabs，確保在虛擬交易顯示虛擬卡片數據、真實交易顯示真實卡片數據)
+  const allStockMap = useMemo(() => {
+    if (activeTradeModeTab === "real") {
+      const map = new Map<string, StockTab>(combinedStockMap);
+      realStockMap.forEach((tab, sym) => map.set(sym, tab));
+      return map;
+    }
+    if (activeTradeModeTab === "simulated") {
+      const map = new Map<string, StockTab>(combinedStockMap);
+      simulatedStockMap.forEach((tab, sym) => map.set(sym, tab));
+      return map;
+    }
+    return combinedStockMap;
+  }, [activeTradeModeTab, realStockMap, simulatedStockMap, combinedStockMap]);
 
   // 主分頁分類下的美股數據集 (嚴格對應交易總覽之層級)
   const mainTabFilteredPool = useMemo(() => {
@@ -591,6 +2283,73 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     return Array.from(symMap.values()).sort((a, b) => a.symbol.localeCompare(b.symbol));
   }, [filteredTabs, selectedCardIds]);
 
+  // 判斷股票標籤是否符合當前交易模式 Tabs (若某股票在虛擬交易與真實交易皆有股票且勾選，各自 Tab 都要各自顯示該股票；純畫布自訂標籤如 KR、INTC 在所有模式下均保留顯示)
+  const isSymbolMatchTradeMode = useCallback(
+    (sym: string) => {
+      if (activeTradeModeTab === "all") return true;
+      const cleanSym = sym.trim().toUpperCase();
+
+      if (activeTradeModeTab === "real") {
+        if (realStockMap.has(cleanSym)) return true;
+        const hasRealTab = allTabs.some(
+          (t) => (t.symbol || "").trim().toUpperCase() === cleanSym && t.tradeType === "real"
+        );
+        if (hasRealTab) return true;
+        // 若該股票尚未在卡片列表中建立分頁（如純標籤 INTC、KR），在任何模式下都允許呈現，避免標籤突然消失
+        const hasAnyTab = allTabs.some(
+          (t) => (t.symbol || "").trim().toUpperCase() === cleanSym
+        );
+        return !hasAnyTab;
+      }
+      if (activeTradeModeTab === "simulated") {
+        if (simulatedStockMap.has(cleanSym)) return true;
+        const hasSimTab = allTabs.some(
+          (t) => (t.symbol || "").trim().toUpperCase() === cleanSym && t.tradeType !== "real"
+        );
+        if (hasSimTab) return true;
+        // 若該股票尚未在卡片列表中建立分頁（如純標籤 INTC、KR），在任何模式下都允許呈現，避免標籤突然消失
+        const hasAnyTab = allTabs.some(
+          (t) => (t.symbol || "").trim().toUpperCase() === cleanSym
+        );
+        return !hasAnyTab;
+      }
+      return (
+        realStockMap.has(cleanSym) ||
+        simulatedStockMap.has(cleanSym) ||
+        combinedStockMap.has(cleanSym) ||
+        Boolean(positions[cleanSym])
+      );
+    },
+    [realStockMap, simulatedStockMap, combinedStockMap, activeTradeModeTab, positions, allTabs]
+  );
+
+  // 各交易模式在畫布上的標籤數量計算
+  const simulatedCanvasCount = useMemo(() => {
+    return Object.keys(positions).filter((sym) => {
+      const cleanSym = sym.trim().toUpperCase();
+      if (simulatedStockMap.has(cleanSym)) return true;
+      const hasSim = allTabs.some((t) => (t.symbol || "").trim().toUpperCase() === cleanSym && t.tradeType !== "real");
+      if (hasSim) return true;
+      const hasAny = allTabs.some((t) => (t.symbol || "").trim().toUpperCase() === cleanSym);
+      return !hasAny;
+    }).length;
+  }, [positions, simulatedStockMap, allTabs]);
+
+  const realCanvasCount = useMemo(() => {
+    return Object.keys(positions).filter((sym) => {
+      const cleanSym = sym.trim().toUpperCase();
+      if (realStockMap.has(cleanSym)) return true;
+      const hasReal = allTabs.some((t) => (t.symbol || "").trim().toUpperCase() === cleanSym && t.tradeType === "real");
+      if (hasReal) return true;
+      const hasAny = allTabs.some((t) => (t.symbol || "").trim().toUpperCase() === cleanSym);
+      return !hasAny;
+    }).length;
+  }, [positions, realStockMap, allTabs]);
+
+  const totalCanvasCount = useMemo(() => {
+    return Object.keys(positions).length;
+  }, [positions]);
+
   // 所有在圖表上的股票代號
   const allCanvasSymbols = useMemo(() => {
     return Object.keys(positions);
@@ -601,13 +2360,36 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     return Object.values(positions).filter((p) => Boolean(p?.hidden)).length;
   }, [positions]);
 
-  // 目前在圖表畫布上呈現的標籤清單 (若 showHiddenTags 為 false，則過濾掉已隱藏的標籤)
+  // 目前在圖表畫布上呈現的標籤清單 (依交易模式 Tabs 與隱藏設定過濾)
   const activeCanvasSymbols = useMemo(() => {
+    const symbols = Object.keys(positions).filter((sym) => isSymbolMatchTradeMode(sym));
     if (showHiddenTags) {
-      return Object.keys(positions);
+      return symbols;
     }
-    return Object.keys(positions).filter((sym) => !positions[sym]?.hidden);
-  }, [positions, showHiddenTags]);
+    return symbols.filter((sym) => !positions[sym]?.hidden);
+  }, [positions, showHiddenTags, isSymbolMatchTradeMode]);
+
+  // 自動偵測畫布上現價缺失或為 0 的個股 (例如 INTC)，並於背景自動抓取最新現價
+  useEffect(() => {
+    if (!isOpen || activeCanvasSymbols.length === 0) return;
+
+    const missingSymbols = activeCanvasSymbols.filter((sym) => {
+      const tab =
+        allStockMap.get(sym) ||
+        allTabs.find((t) => (t.symbol || "").trim().toUpperCase() === sym);
+      const hasTabPrice =
+        tab?.currentPrice !== undefined &&
+        tab.currentPrice !== null &&
+        Number(tab.currentPrice) > 0;
+      const hasLivePrice = (livePrices[sym] ?? 0) > 0;
+      const isFetching = isFetchingPriceMap[sym];
+      return !hasTabPrice && !hasLivePrice && !isFetching;
+    });
+
+    if (missingSymbols.length > 0) {
+      fetchPricesForSymbols(missingSymbols, false);
+    }
+  }, [isOpen, activeCanvasSymbols, allStockMap, allTabs, livePrices, isFetchingPriceMap, fetchPricesForSymbols]);
 
   // 判斷勾選的股票標籤是否全部為隱藏狀態
   const isAllSelectedHidden = useMemo(() => {
@@ -703,6 +2485,11 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     }));
     setHasUnsavedChanges(true);
     toast.success(`已將 ${sym} 新增至視覺線圖表！`, { id: `add-${sym}`, duration: 1500 });
+
+    // 若該股票無現價，立即背景非同步抓取
+    if ((!tab?.currentPrice || Number(tab.currentPrice) <= 0) && (!livePrices[sym] || livePrices[sym] <= 0)) {
+      fetchLivePriceForSymbol(sym, false);
+    }
   };
 
   // 一鍵新增目前篩選區塊內的所有股票至畫布
@@ -746,25 +2533,37 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     setPositions(newPos);
     setHasUnsavedChanges(true);
     toast.success(`已將 ${addedCount} 檔區塊股票新增至圖表！`, { id: "add-all-block" });
+
+    // 背景抓取無現價者
+    const missingInBlock = availableBlockStocks
+      .map((t) => (t.symbol || "").trim().toUpperCase())
+      .filter((s) => s && (!livePrices[s] || livePrices[s] <= 0));
+    if (missingInBlock.length > 0) {
+      fetchPricesForSymbols(missingInBlock, false);
+    }
   };
 
   // 一鍵從卡片同步分隔線現價相對位置 (僅同步有勾選 Tickbox 之個股卡片)
   const handleSyncDividersFromCards = async () => {
     playClickSound();
 
-    // 檢查是否有勾選任何卡片
-    if (!selectedCardIds || selectedCardIds.size === 0) {
-      toast.info("請先在卡片列表中勾選要同步的個股卡片（勾選圓形 Tickbox），再點擊一鍵同步");
-      return;
+    // 檢查是否有勾選任何卡片；若有勾選以勾選為主，若無勾選則自動以畫布上目前現有的股票卡片為對象
+    let activeAndRealPool: StockTab[] = [];
+    if (selectedCardIds && selectedCardIds.size > 0) {
+      activeAndRealPool = allTabs.filter(
+        (tab) => tab.status !== "COMPLETED" && selectedCardIds.has(tab.id)
+      );
+    } else {
+      const activeSymbols = new Set(Object.keys(positions).map((s) => s.trim().toUpperCase()));
+      if (activeSymbols.size > 0) {
+        activeAndRealPool = allTabs.filter(
+          (tab) => tab.status !== "COMPLETED" && activeSymbols.has((tab.symbol || "").trim().toUpperCase())
+        );
+      }
     }
 
-    // 取得所有屬於「持有中 (模擬交易)」與「真實交易」下所有子分頁且「有勾選」的個股卡片 (排除已結算 COMPLETED 分頁與未勾選卡片)
-    const activeAndRealPool = allTabs.filter(
-      (tab) => tab.status !== "COMPLETED" && selectedCardIds.has(tab.id)
-    );
-
     if (activeAndRealPool.length === 0) {
-      toast.error("所勾選的卡片中沒有屬於「持有中」或「真實交易」的有效個股卡片");
+      toast.info("請先在卡片列表中勾選要同步的個股卡片（勾選圓形 Tickbox），或先新增股票至畫布");
       return;
     }
 
@@ -792,10 +2591,15 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
         const dividerCount = analysis.allDividers.length;
         const hasPrice = (t.currentPrice && t.currentPrice > 0) ? 1 : 0;
         const isEligible = analysis.isEligible ? 100 : 0;
-        const updateTime = t.updatedAt?.toMillis?.() || 0;
+        const modeMatchBonus =
+          (activeTradeModeTab === "real" && t.tradeType === "real") ||
+          (activeTradeModeTab === "simulated" && t.tradeType !== "real")
+            ? 500
+            : 0;
+        const updateTime = getTimestampMillis(t.updatedAt) || getTimestampMillis(t.createdAt);
         return {
           tab: t,
-          score: isEligible + dividerCount * 10 + hasPrice * 5,
+          score: modeMatchBonus + isEligible + dividerCount * 10 + hasPrice * 5,
           updateTime,
         };
       });
@@ -1020,10 +2824,10 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     [userId, tagSizeOffset]
   );
 
-  // 設定/切換勾選股票標籤的攤平進度 (#1, #2, #3, #4) 並自動儲存
-  const handleSetDcaProgress = async (step?: "#1" | "#2" | "#3" | "#4") => {
+  // 設定/切換勾選股票標籤的攤平進度 (#1, #2, #3, #4) 或拆分交易選項並自動儲存
+  const handleSetDcaProgress = async (step?: "#1" | "#2" | "#3" | "#4" | string) => {
     if (selectedTagSymbols.length === 0) {
-      toast.info("請先勾選欲設定攤平進度的股票標籤");
+      toast.info("請先勾選欲設定攤平進度或拆分交易的股票標籤");
       return;
     }
     playClickSound();
@@ -1049,11 +2853,13 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
       await savePositionsDirectly(nextPositions);
       if (targetStep) {
         playSuccessSound();
-        toast.success(`已將勾選的 ${selectedTagSymbols.length} 檔標籤設定為攤平進度 ${targetStep}（已自動儲存）`, {
+        const splitOpt = findSplitTradeOption(targetStep);
+        const displayLabel = splitOpt ? splitOpt.label : targetStep;
+        toast.success(`已將勾選的 ${selectedTagSymbols.length} 檔標籤設定為「${displayLabel}」（已自動儲存）`, {
           id: "dca-progress-save",
         });
       } else {
-        toast.info(`已清除勾選的 ${selectedTagSymbols.length} 檔標籤之攤平進度（已自動儲存）`, {
+        toast.info(`已清除勾選的 ${selectedTagSymbols.length} 檔標籤之進度標記（已自動儲存）`, {
           id: "dca-progress-save",
         });
       }
@@ -1233,7 +3039,7 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
   };
 
   /**
-   * 純水平 X 軸微調避開重疊核心演算法 (保持 Y 軸高低位置不變，嚴格保留原有的顏色邊框、尺寸偏移、隱藏與各項屬性)
+   * 純水平 X 軸微調避開重疊核心演算法 (平行左右散開重疊個股，包含下方資訊文字框在內，嚴格保持 Y 軸高低位置 100% 不變，嚴格保留原有的顏色邊框、尺寸偏移、隱藏與各項屬性)
    */
   const applyAvoidOverlapToPositions = (
     inputPositions: PositionMap,
@@ -1248,15 +3054,163 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     const canvasWidth = canvasEl ? Math.max(300, canvasEl.clientWidth) : 1200;
     const canvasHeight = canvasEl ? Math.max(200, canvasEl.clientHeight) : 600;
 
-    // 複製工作用位置
-    const working: { [sym: string]: { x: number; y: number; size: number } } = {};
+    // 精確計算每檔股票包含下方文字資訊卡 (拆分交易階段、已購/預計數量、損益、基準/平倉) 在內的完整 2D 幾何邊界
+    interface TagBoundingGeometry {
+      sym: string;
+      x: number; // 當前 X 百分比 (0~100)
+      y: number; // 固定的 Y 百分比 (0~100)
+      topYPx: number; // 頂部 Y 像素 (圓圈頂部)
+      bottomYPx: number; // 底部 Y 像素 (包含下方多列文字卡)
+      halfWidthPx: number; // 水平半寬 (取圓圈與文字框最大值 + 安全邊界)
+    }
+
+    const working: { [sym: string]: TagBoundingGeometry } = {};
+
     entries.forEach(([sym, pos]) => {
       const effectiveSizeOffset = (pos.sizeOffset ?? 0) + globalTagSizeOffset;
-      const diameter = Math.max(44, 54 + effectiveSizeOffset * 2.2);
+      const circleSize = Math.max(44, 54 + effectiveSizeOffset * 2.2);
+      const circleRadius = circleSize / 2;
+
+      const tab = allStockMap.get(sym) || allTabs.find((t) => (t.symbol || "").trim().toUpperCase() === sym);
+      const strat = tab ? (strategiesMap?.[tab.id] || (tab as any)?.strategy) : undefined;
+      const rowsSys2 = tab?.averagingRowsSys2 || strat?.averagingRowsSys2;
+      const rowsSys1 = tab?.averagingRows || strat?.averagingRows;
+      const stat = tab ? statsMap?.[tab.id] : undefined;
+      const effectiveHoldingQty = stat?.totalQuantity ?? (tab as any)?.holdingQuantity ?? 0;
+      const batchPlannedSizes = [
+        parseFloat(rowsSys2?.[0]?.quantity || "") || 0,
+        parseFloat(rowsSys2?.[1]?.quantity || "") || 0,
+        parseFloat(rowsSys2?.[2]?.quantity || "") || 0,
+        parseFloat(rowsSys2?.[3]?.quantity || "") || 0,
+      ];
+      const totalSys2Planned = batchPlannedSizes.reduce((a, b) => a + b, 0);
+      const totalSys1Planned = (rowsSys1 || []).reduce((sum: number, r: any) => {
+        const q1 = parseFloat(r?.quantity || "") || 0;
+        const q2 = parseFloat(r?.quantity2 || "") || 0;
+        return sum + q1 + q2;
+      }, 0);
+      const effectivePlannedBuyQty =
+        (tab as any)?.plannedBuyQty && (tab as any).plannedBuyQty > 0
+          ? (tab as any).plannedBuyQty
+          : totalSys2Planned > 0
+          ? totalSys2Planned
+          : totalSys1Planned > 0
+          ? totalSys1Planned
+          : 0;
+
+      const cardTrades = tab ? (tradesMap?.[tab.id] || (tab as any).trades || []) : [];
+      const effectiveDcaProgress = getEffectiveDcaProgress(
+        pos.dcaProgress,
+        tab,
+        cardTrades,
+        effectiveHoldingQty,
+        effectivePlannedBuyQty,
+        strat
+      );
+
+      const splitOpt = findSplitTradeOption(effectiveDcaProgress);
+      const splitStageDetail = calculateSplitTradeStageDetail(
+        tab,
+        effectiveDcaProgress,
+        effectivePlannedBuyQty,
+        effectiveHoldingQty,
+        strat
+      );
+      const tabCurPrice =
+        (tab as any)?.currentPrice !== undefined && (tab as any).currentPrice !== null && Number((tab as any).currentPrice) > 0
+          ? Number((tab as any).currentPrice)
+          : (livePrices[sym] || 0);
+
+      const { basePrice: basePositionPrice, forceClosePrice: forcedLiquidationPrice } =
+        getStockBaseAndForceClosePrices(tab, strat, tabCurPrice);
+
+      const effectiveUnrealizedPnL = stat?.unrealizedPnL ?? (tab as any)?.unrealizedPnL ?? 0;
+      const hasHoldingOrPnL = effectiveHoldingQty !== 0 || effectiveUnrealizedPnL !== 0;
+
+      const hasInfo = Boolean(
+        effectiveDcaProgress ||
+        effectivePlannedBuyQty > 0 ||
+        effectiveHoldingQty > 0 ||
+        effectiveUnrealizedPnL !== 0 ||
+        basePositionPrice !== null ||
+        forcedLiquidationPrice !== null ||
+        tabCurPrice > 0
+      );
+
+      // 理論幾何尺寸計算（以充裕的安全裕度為準）
+      let estimatedTopOffset = circleRadius + 8;
+      let estimatedBottomOffset = circleRadius + 8;
+      let estimatedHalfWidth = circleRadius + 16;
+
+      if (hasInfo) {
+        // 行 1 (拆分交易 / 剩餘股數 / 已購預購數量 / 無庫存)
+        const row1Width = splitStageDetail ? 240 : 190;
+        // 行 2 (未實現損益)
+        const row2Width = hasHoldingOrPnL ? 170 : 0;
+        // 行 3 (基準 / 平倉)
+        const row3Width = (basePositionPrice !== null || forcedLiquidationPrice !== null) ? 190 : 0;
+
+        let rowCount = 1; // 只要 hasInfo 為 true，第 1 行必然會渲染 (含無庫存)
+        if (splitStageDetail?.companionStage) rowCount += 1.5;
+        if (hasHoldingOrPnL) rowCount++;
+        if (basePositionPrice !== null || forcedLiquidationPrice !== null) rowCount++;
+
+        const maxContentWidth = Math.max(circleSize, row1Width, row2Width, row3Width);
+        const totalInfoHeight = rowCount * 26 + 14;
+
+        estimatedBottomOffset = circleRadius + 4 + totalInfoHeight + 12;
+        estimatedHalfWidth = Math.max(circleRadius + 18, maxContentWidth / 2 + 16);
+      }
+
+      // 若 DOM 已存在且能測量，讀取實際 DOM 尺寸做雙重強化
+      const yPx = (pos.y / 100) * canvasHeight;
+      let measuredTopY = yPx - estimatedTopOffset;
+      let measuredBottomY = yPx + estimatedBottomOffset;
+      let finalHalfWidth = estimatedHalfWidth;
+
+      if (canvasEl) {
+        try {
+          const domTag = canvasEl.querySelector(`[data-tag-symbol="${sym}"]`) as HTMLElement | null;
+          if (domTag) {
+            const canvasRect = canvasEl.getBoundingClientRect();
+            const tagRect = domTag.getBoundingClientRect();
+            const childElements = Array.from(domTag.querySelectorAll("*"));
+            
+            let minTop = tagRect.top;
+            let maxBottom = tagRect.bottom;
+            let minLeft = tagRect.left;
+            let maxRight = tagRect.right;
+
+            childElements.forEach((el) => {
+              const rect = el.getBoundingClientRect();
+              if (rect.width > 0 && rect.height > 0) {
+                minTop = Math.min(minTop, rect.top);
+                maxBottom = Math.max(maxBottom, rect.bottom);
+                minLeft = Math.min(minLeft, rect.left);
+                maxRight = Math.max(maxRight, rect.right);
+              }
+            });
+
+            const domTopY = minTop - canvasRect.top;
+            const domBottomY = maxBottom - canvasRect.top;
+            const domHalfW = Math.max((maxRight - minLeft) / 2 + 14, circleRadius + 16);
+
+            measuredTopY = Math.min(measuredTopY, domTopY - 6);
+            measuredBottomY = Math.max(measuredBottomY, domBottomY + 8);
+            finalHalfWidth = Math.max(finalHalfWidth, domHalfW);
+          }
+        } catch {
+          // fallback to estimated
+        }
+      }
+
       working[sym] = {
-        x: pos.x, // 百分比
-        y: pos.y, // 百分比
-        size: diameter,
+        sym,
+        x: pos.x,
+        y: pos.y,
+        topYPx: measuredTopY,
+        bottomYPx: measuredBottomY,
+        halfWidthPx: Math.max(finalHalfWidth, 80),
       };
     });
 
@@ -1268,85 +3222,185 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
       originalX[sym] = working[sym].x;
     });
 
-    const iterations = 80;
-    const paddingX = 8; // 水平額外安全間隔 (px)
-    const minXPercent = 4.0; // 邊界保護 (4%)
-    const maxXPercent = 96.0; // 邊界保護 (96%)
+    const minXPercent = 4.0; // 邊界保護 (4.0%)
+    const maxXPercent = 96.0; // 邊界保護 (96.0%)
+    const paddingX = 22; // 水平安全間距 (px)
+    const verticalSafetyMargin = 10; // 垂直重疊判定安全容許裕度 (px)
 
+    // 輔助判定：兩標籤在垂直 Y 軸方向是否重疊 (含下方資訊框覆蓋)
+    const isVerticallyOverlapping = (a: TagBoundingGeometry, b: TagBoundingGeometry): boolean => {
+      return (
+        a.topYPx < b.bottomYPx + verticalSafetyMargin &&
+        b.topYPx < a.bottomYPx + verticalSafetyMargin
+      );
+    };
+
+    // 1. 群組平行左右連鎖排斥與區間完全展開 (Graph Connected Components Clustering & Spread)
+    const visited = new Set<string>();
+    symbols.forEach((startSym) => {
+      if (visited.has(startSym)) return;
+
+      const cluster: string[] = [startSym];
+      visited.add(startSym);
+
+      // BFS 連鎖搜尋所有垂直方向重疊的個股
+      const queue = [startSym];
+      while (queue.length > 0) {
+        const currentSym = queue.shift()!;
+        const currentGeo = working[currentSym];
+
+        symbols.forEach((otherSym) => {
+          if (visited.has(otherSym)) return;
+          const otherGeo = working[otherSym];
+          if (isVerticallyOverlapping(currentGeo, otherGeo)) {
+            visited.add(otherSym);
+            cluster.push(otherSym);
+            queue.push(otherSym);
+          }
+        });
+      }
+
+      if (cluster.length > 1) {
+        // 依目前 X 座標由左至右排序
+        cluster.sort((a, b) => working[a].x - working[b].x);
+
+        // 計算此群組安全無重疊排列所需的總寬度 (px)
+        let requiredTotalWidthPx = 0;
+        for (let c = 0; c < cluster.length - 1; c++) {
+          const geo1 = working[cluster[c]];
+          const geo2 = working[cluster[c + 1]];
+          requiredTotalWidthPx += geo1.halfWidthPx + geo2.halfWidthPx + paddingX;
+        }
+
+        const requiredTotalWidthPercent = (requiredTotalWidthPx / canvasWidth) * 100;
+        const availableWidthPercent = maxXPercent - minXPercent;
+
+        if (requiredTotalWidthPercent <= availableWidthPercent) {
+          // 以原始群組重心為基準置中散開
+          const avgX = cluster.reduce((sum, s) => sum + working[s].x, 0) / cluster.length;
+          let currentX = avgX - requiredTotalWidthPercent / 2;
+
+          if (currentX < minXPercent) {
+            currentX = minXPercent;
+          } else if (currentX + requiredTotalWidthPercent > maxXPercent) {
+            currentX = maxXPercent - requiredTotalWidthPercent;
+          }
+
+          working[cluster[0]].x = Math.max(minXPercent, Math.min(maxXPercent, Math.round(currentX * 100) / 100));
+          for (let c = 0; c < cluster.length - 1; c++) {
+            const geo1 = working[cluster[c]];
+            const geo2 = working[cluster[c + 1]];
+            const stepPercent = ((geo1.halfWidthPx + geo2.halfWidthPx + paddingX) / canvasWidth) * 100;
+            currentX += stepPercent;
+            working[cluster[c + 1]].x = Math.max(minXPercent, Math.min(maxXPercent, Math.round(currentX * 100) / 100));
+          }
+        } else {
+          // 若標籤密集超出總寬度，在可用寬度內均勻鋪開排列
+          const stepPercent = availableWidthPercent / (cluster.length - 1);
+          cluster.forEach((s, idx) => {
+            working[s].x = Math.round((minXPercent + idx * stepPercent) * 100) / 100;
+          });
+        }
+      }
+    });
+
+    // 2. 跨群組全域物理排斥微調放鬆 (200 輪 Relaxation Pass)
+    const iterations = 200;
     for (let iter = 0; iter < iterations; iter++) {
-      let anyCollisionInThisRound = false;
+      let anyCollision = false;
+      const damping = Math.max(0.7, 0.98 - (iter / iterations) * 0.25);
 
       for (let i = 0; i < n; i++) {
         const symA = symbols[i];
         const a = working[symA];
         const aPxX = (a.x / 100) * canvasWidth;
-        const aPxY = (a.y / 100) * canvasHeight;
-        const radiusA = a.size / 2;
 
         for (let j = i + 1; j < n; j++) {
           const symB = symbols[j];
           const b = working[symB];
           const bPxX = (b.x / 100) * canvasWidth;
-          const bPxY = (b.y / 100) * canvasHeight;
-          const radiusB = b.size / 2;
 
-          const dy = Math.abs(aPxY - bPxY);
-          const combinedRadius = radiusA + radiusB + paddingX;
-
-          // 若 Y 軸距離小於兩球半徑加安全間距，則上下有交疊風險，必須在 X 軸拉開足夠距離
-          if (dy < combinedRadius) {
-            // 水平安全距離：至少需達到兩球半徑和加上緩衝間隙
-            const minSafeDistanceX = Math.max(
-              radiusA + radiusB + paddingX,
-              Math.sqrt(Math.max(0, combinedRadius * combinedRadius - dy * dy)) + paddingX
-            );
-
+          if (isVerticallyOverlapping(a, b)) {
+            const minSafeDistanceX = a.halfWidthPx + b.halfWidthPx + paddingX;
             const dx = bPxX - aPxX;
             const absDx = Math.abs(dx);
 
             if (absDx < minSafeDistanceX) {
-              anyCollisionInThisRound = true;
+              anyCollision = true;
               const overlap = minSafeDistanceX - absDx;
-              const shiftPx = (overlap / 2) * 0.65; // 阻尼係數
+              const shiftPx = (overlap / 2) * damping;
               const shiftPercent = (shiftPx / canvasWidth) * 100;
 
               if (absDx < 0.1) {
-                // 兩者 X 幾乎完全一樣，依符號字母順序固定一左一右推開
                 const dir = symA.localeCompare(symB) < 0 ? -1 : 1;
                 a.x = Math.max(minXPercent, Math.min(maxXPercent, a.x - shiftPercent * dir));
                 b.x = Math.max(minXPercent, Math.min(maxXPercent, b.x + shiftPercent * dir));
               } else if (dx > 0) {
-                // B 在 A 右側：A 往左推，B 往右推
-                a.x = Math.max(minXPercent, Math.min(maxXPercent, a.x - shiftPercent));
-                b.x = Math.max(minXPercent, Math.min(maxXPercent, b.x + shiftPercent));
+                a.x = Math.max(minXPercent, a.x - shiftPercent);
+                b.x = Math.min(maxXPercent, b.x + shiftPercent);
               } else {
-                // B 在 A 左側：A 往右推，B 往左推
-                a.x = Math.max(minXPercent, Math.min(maxXPercent, a.x + shiftPercent));
-                b.x = Math.max(minXPercent, Math.min(maxXPercent, b.x - shiftPercent));
+                a.x = Math.min(maxXPercent, a.x + shiftPercent);
+                b.x = Math.max(minXPercent, b.x - shiftPercent);
               }
             }
           }
         }
       }
 
-      if (!anyCollisionInThisRound) {
+      if (!anyCollision && iter > 25) {
         break;
       }
     }
 
-    // 產生新位置映射 (嚴格保持 Y 座標不變，且顏色邊框等屬性 100% 完整保留)
+    // 3. 終極保底硬性防撞掃描 (100 次強制間隔修正，確保 100% 絕對 0 遮擋)
+    for (let iter = 0; iter < 100; iter++) {
+      let moved = false;
+      for (let i = 0; i < n; i++) {
+        const symA = symbols[i];
+        const a = working[symA];
+        const aPxX = (a.x / 100) * canvasWidth;
+
+        for (let j = i + 1; j < n; j++) {
+          const symB = symbols[j];
+          const b = working[symB];
+          const bPxX = (b.x / 100) * canvasWidth;
+
+          if (isVerticallyOverlapping(a, b)) {
+            const minSafeDistanceX = a.halfWidthPx + b.halfWidthPx + paddingX;
+            const dx = bPxX - aPxX;
+            const absDx = Math.abs(dx);
+
+            if (absDx < minSafeDistanceX) {
+              moved = true;
+              const overlap = minSafeDistanceX - absDx;
+              const shiftPercent = ((overlap / 2 + 1) / canvasWidth) * 100;
+              if (dx >= 0) {
+                a.x = Math.max(minXPercent, a.x - shiftPercent);
+                b.x = Math.min(maxXPercent, b.x + shiftPercent);
+              } else {
+                a.x = Math.min(maxXPercent, a.x + shiftPercent);
+                b.x = Math.max(minXPercent, b.x - shiftPercent);
+              }
+            }
+          }
+        }
+      }
+      if (!moved) break;
+    }
+
+    // 產生新位置映射 (嚴格保持 Y 座標 100% 不變，且顏色邊框等屬性完整保留)
     let totalMovedCount = 0;
     const newPositions: PositionMap = { ...inputPositions };
     symbols.forEach((sym) => {
       const diff = Math.abs(working[sym].x - originalX[sym]);
-      if (diff > 0.15) {
+      if (diff > 0.05) {
         totalMovedCount++;
       }
       if (newPositions[sym]) {
         newPositions[sym] = {
           ...newPositions[sym],
           x: Math.round(working[sym].x * 100) / 100,
-          // Y 座標嚴格保持傳入之 Y 座標
+          // Y 座標嚴格保持傳入之 Y 座標 (100% 不變)
           y: inputPositions[sym].y,
           // 保持既有顏色邊框與各項設定
           color: inputPositions[sym].color,
@@ -1362,8 +3416,8 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     return { positions: newPositions, movedCount: totalMovedCount };
   };
 
-  // 一鍵避開重疊：保持 Y 軸（現價相對高度）不變，純水平調整 X 軸使標籤彼此錯開
-  const handleAvoidOverlap = () => {
+  // 一鍵避開重疊：保持 Y 軸（現價相對高度）不變，平行左右移動散開重疊的個股標籤並即時自動儲存
+  const handleAvoidOverlap = async () => {
     playClickSound();
     const entries = Object.entries(positions);
     if (entries.length <= 1) {
@@ -1380,13 +3434,14 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     if (movedCount > 0) {
       setPositions(newPositions);
       setHasUnsavedChanges(true);
+      await savePositionsDirectly(newPositions, tagSizeOffset);
       playSuccessSound();
-      toast.success(`已完成水平避開重疊！共微調了 ${movedCount} 檔股票標籤位置（現價高度維持不變）。`, {
+      toast.success(`已完成平行左右避開重疊！共微調散開了 ${movedCount} 檔股票標籤（現價高度維持不變）。`, {
         id: "avoid-overlap",
         duration: 3500,
       });
     } else {
-      toast.info("目前畫布上所有股票標籤已均勻分散，無重疊需要調整。");
+      toast.info("目前畫布上所有股票標籤已均勻平行分散，無重疊需要調整。");
     }
   };
 
@@ -1396,20 +3451,23 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     setIsUpdatingPositions(true);
 
     try {
-      // 1. 嚴格檢查是否有勾選任何卡片（以 Tickbox 勾選為準，未勾選者完全忽略不參考）
-      if (!selectedCardIds || selectedCardIds.size === 0) {
-        toast.info("請先在卡片列表中勾選要同步的個股卡片（勾選圓形 Tickbox），未勾選之卡片將被忽略。");
-        setIsUpdatingPositions(false);
-        return;
+      // 1. 優先以 Tickbox 勾選卡片為主；若未在外部勾選，則自動針對畫布上現存的股票代號進行同步更新
+      let checkedTabs: StockTab[] = [];
+      if (selectedCardIds && selectedCardIds.size > 0) {
+        checkedTabs = allTabs.filter(
+          (t) => selectedCardIds.has(t.id) && (t.symbol || "").trim() !== ""
+        );
+      } else {
+        const canvasSymbols = new Set(Object.keys(positions).map((s) => s.trim().toUpperCase()));
+        if (canvasSymbols.size > 0) {
+          checkedTabs = allTabs.filter(
+            (t) => t.status !== "COMPLETED" && canvasSymbols.has((t.symbol || "").trim().toUpperCase())
+          );
+        }
       }
 
-      // 取得所有「有勾選 Tickbox」的個股卡片 (未勾選之卡片即使代號名稱相同也絕對忽略)
-      const checkedTabs = allTabs.filter(
-        (t) => selectedCardIds.has(t.id) && (t.symbol || "").trim() !== ""
-      );
-
       if (checkedTabs.length === 0) {
-        toast.error("所勾選的卡片已不存在或代號空白，請重新勾選後再試");
+        toast.info("請先在卡片列表中勾選要同步的個股卡片（勾選圓形 Tickbox），或先新增股票標籤至畫布。");
         setIsUpdatingPositions(false);
         return;
       }
@@ -1443,10 +3501,15 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
             const dividerCount = analysis.allDividers.length;
             const hasPrice = t.currentPrice && t.currentPrice > 0 ? 1 : 0;
             const isEligible = analysis.isEligible ? 100 : 0;
-            const updateTime = t.updatedAt?.toMillis?.() || 0;
+            const modeMatchBonus =
+              (activeTradeModeTab === "real" && t.tradeType === "real") ||
+              (activeTradeModeTab === "simulated" && t.tradeType !== "real")
+                ? 500
+                : 0;
+            const updateTime = getTimestampMillis(t.updatedAt) || getTimestampMillis(t.createdAt);
             return {
               tab: t,
-              score: isEligible + dividerCount * 10 + hasPrice * 5,
+              score: modeMatchBonus + isEligible + dividerCount * 10 + hasPrice * 5,
               updateTime,
             };
           });
@@ -1578,17 +3641,18 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
   // 單檔股票依卡片分隔線與現價重新校準座標
   const handleCalibrateSingleStock = useCallback(
     (sym: string) => {
-      const tab = allStockMap.get(sym);
+      const tab = allStockMap.get(sym) || allTabs.find((t) => (t.symbol || "").trim().toUpperCase() === sym);
       if (!tab) {
         toast.error(`找不到股票「${sym}」的資料`);
         return;
       }
+      const strat = strategiesMap?.[tab.id] || (tab as any).strategy;
       const stat = statsMap?.[tab.id];
       const avgCost = stat?.totalQuantity !== 0 ? stat?.averagePrice : undefined;
       const holdingQty = stat?.totalQuantity ?? (tab as any).holdingQuantity;
       const targetY = calculateCanvasYFromDividers(
         tab,
-        (tab as any).strategy,
+        strat,
         avgCost,
         holdingQty
       );
@@ -1598,23 +3662,24 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
         return;
       }
 
-      setPositions((prev) => ({
-        ...prev,
+      const newPos = {
+        ...positions,
         [sym]: {
-          ...prev[sym],
+          ...positions[sym],
           y: targetY,
-          shape: "circle",
-          sizeOffset: prev[sym]?.sizeOffset ?? tagSizeOffset,
+          shape: "circle" as const,
+          sizeOffset: positions[sym]?.sizeOffset ?? tagSizeOffset,
           updatedAt: new Date().toISOString(),
         },
-      }));
-      setHasUnsavedChanges(true);
+      };
+      setPositions(newPos);
+      savePositionsDirectly(newPos, tagSizeOffset);
       playSuccessSound();
       toast.success(`已將「${sym}」依卡片分隔線精準校準至 Y: ${targetY.toFixed(1)}%`, {
         id: `calib-${sym}`,
       });
     },
-    [allStockMap, statsMap, tagSizeOffset]
+    [allStockMap, allTabs, statsMap, strategiesMap, tagSizeOffset, positions, savePositionsDirectly]
   );
 
   // 全域所有畫布股票一鍵依卡片分隔線重新校準座標
@@ -1624,14 +3689,15 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     const newPositions: PositionMap = { ...positions };
 
     activeCanvasSymbols.forEach((sym) => {
-      const tab = allStockMap.get(sym);
+      const tab = allStockMap.get(sym) || allTabs.find((t) => (t.symbol || "").trim().toUpperCase() === sym);
       if (!tab) return;
+      const strat = strategiesMap?.[tab.id] || (tab as any).strategy;
       const stat = statsMap?.[tab.id];
       const avgCost = stat?.totalQuantity !== 0 ? stat?.averagePrice : undefined;
       const holdingQty = stat?.totalQuantity ?? (tab as any).holdingQuantity;
       const targetY = calculateCanvasYFromDividers(
         tab,
-        (tab as any).strategy,
+        strat,
         avgCost,
         holdingQty
       );
@@ -1648,12 +3714,12 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     });
 
     setPositions(newPositions);
-    setHasUnsavedChanges(true);
+    savePositionsDirectly(newPositions, tagSizeOffset);
     playSuccessSound();
     toast.success(`已將畫布上 ${count} 檔股票依各自卡片分隔線重新校準座標`, {
       id: "calib-all",
     });
-  }, [activeCanvasSymbols, allStockMap, positions, statsMap, tagSizeOffset]);
+  }, [activeCanvasSymbols, allStockMap, positions, statsMap, strategiesMap, tagSizeOffset, savePositionsDirectly]);
 
   // 儲存位置、形狀與大小 (Save button 或 Shift + S，0ms 秒存)
   const handleSavePositions = useCallback(() => {
@@ -1746,6 +3812,27 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
         return;
       }
 
+      // 快捷鍵 Alt + 左右按鍵 切換虛擬交易 | 真實交易 tab
+      if (
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        (e.key === "ArrowLeft" || e.key === "ArrowRight" || e.code === "ArrowLeft" || e.code === "ArrowRight")
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        const nextMode = e.key === "ArrowLeft"
+          ? (activeTradeModeTab === "simulated" ? "real" : "simulated")
+          : (activeTradeModeTab === "real" ? "simulated" : "real");
+        handleTradeModeTabChange(nextMode);
+        toast.info(nextMode === "real" ? "已切換至：真實交易 (Alt + →)" : "已切換至：虛擬交易 (Alt + ←)", {
+          id: "trade-mode-toggle",
+          duration: 1200,
+        });
+        return;
+      }
+
       if (e.key === "Escape") {
         if (isMainTabDropdownOpen || isSubTabDropdownOpen || isStockDropdownOpen) {
           setIsMainTabDropdownOpen(false);
@@ -1760,7 +3847,7 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, handleSavePositions, onClose, isMainTabDropdownOpen, isSubTabDropdownOpen, isStockDropdownOpen]);
+  }, [isOpen, handleSavePositions, onClose, isMainTabDropdownOpen, isSubTabDropdownOpen, isStockDropdownOpen, activeTradeModeTab]);
 
   // 滑鼠與觸控拖曳標籤
   const handleTagPointerDown = (
@@ -1787,12 +3874,34 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
     const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
 
+    const currentPanY = canvasPanYRef.current;
     const tagPixelX = canvasRect.left + (currentX / 100) * canvasRect.width;
-    const tagPixelY = canvasRect.top + (currentY / 100) * canvasRect.height;
+    const tagPixelY = canvasRect.top + currentPanY + (currentY / 100) * canvasRect.height;
 
     const startClientX = clientX;
     const startClientY = clientY;
     let hasMoved = false;
+
+    // 記錄初始位置快照，便於按住 Shift 水平移動或群組同步移動
+    const initialPositions = { ...positions };
+    const cleanSym = symbol.trim().toUpperCase();
+    const isSymSelected = selectedTagSymbols.includes(cleanSym);
+
+    // 監聽 Shift 鍵即時按下/放開狀態
+    let isShiftHeld = "shiftKey" in e && Boolean((e as React.MouseEvent).shiftKey);
+
+    const handleKeyDownDuringDrag = (ke: KeyboardEvent) => {
+      if (ke.key === "Shift") {
+        isShiftHeld = true;
+      }
+    };
+    const handleKeyUpDuringDrag = (ke: KeyboardEvent) => {
+      if (ke.key === "Shift") {
+        isShiftHeld = false;
+      }
+    };
+    window.addEventListener("keydown", handleKeyDownDuringDrag);
+    window.addEventListener("keyup", handleKeyUpDuringDrag);
 
     draggingSymbolRef.current = symbol;
     dragOffsetRef.current = {
@@ -1815,30 +3924,78 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
         moveEvent.preventDefault();
       }
 
+      const isShift =
+        isShiftHeld || Boolean("shiftKey" in moveEvent && (moveEvent as MouseEvent).shiftKey);
+
       const rect = canvasRef.current.getBoundingClientRect();
-      const targetPixelX = curMoveX - dragOffsetRef.current.offsetX;
-      const targetPixelY = curMoveY - dragOffsetRef.current.offsetY;
-
-      // 限制於畫布邊界內 [2%, 96%]
-      const rawPctX = ((targetPixelX - rect.left) / rect.width) * 100;
-      const rawPctY = ((targetPixelY - rect.top) / rect.height) * 100;
-
-      const boundedX = Math.max(2, Math.min(96, rawPctX));
-      const boundedY = Math.max(2, Math.min(96, rawPctY));
-
       const activeSymbol = draggingSymbolRef.current;
-      setPositions((prev) => ({
-        ...prev,
-        [activeSymbol]: {
-          ...prev[activeSymbol],
-          x: parseFloat(boundedX.toFixed(2)),
-          y: parseFloat(boundedY.toFixed(2)),
-          shape: "circle",
-          sizeOffset: prev[activeSymbol]?.sizeOffset ?? 0,
-          updatedAt: new Date().toISOString(),
-        },
-      }));
-      setHasUnsavedChanges(true);
+
+      if (isShift) {
+        // 【按下 Shift 水平方向移動】：嚴格鎖定 Y 軸高度（現價相對高度維持 100% 不變），僅允許在水平 X 軸自由左右平移
+        const targetPixelX = curMoveX - dragOffsetRef.current.offsetX;
+        const rawPctX = ((targetPixelX - rect.left) / rect.width) * 100;
+        const boundedX = Math.max(2, Math.min(96, rawPctX));
+        const deltaX = boundedX - currentX;
+
+        // 若當前拖曳的股票為勾選狀態，且同時有勾選其他股票，則所有勾選的股票一同水平位移 deltaX，各自維持各自原先的 Y 軸高度
+        if (isSymSelected && selectedTagSymbols.length > 1) {
+          setPositions((prev) => {
+            const next = { ...prev };
+            const nowIso = new Date().toISOString();
+            selectedTagSymbols.forEach((s) => {
+              const basePos = initialPositions[s] || prev[s];
+              if (basePos) {
+                const newX = Math.max(2, Math.min(96, basePos.x + deltaX));
+                next[s] = {
+                  ...basePos,
+                  x: parseFloat(newX.toFixed(2)),
+                  y: basePos.y, // 鎖定 Y 軸高度不變
+                  updatedAt: nowIso,
+                };
+              }
+            });
+            return next;
+          });
+        } else {
+          // 單檔股票水平移動：Y 軸嚴格鎖定於起始位置
+          const origY = initialPositions[activeSymbol]?.y ?? currentY;
+          setPositions((prev) => ({
+            ...prev,
+            [activeSymbol]: {
+              ...prev[activeSymbol],
+              x: parseFloat(boundedX.toFixed(2)),
+              y: origY, // 鎖定 Y 軸高度不變
+              shape: "circle",
+              sizeOffset: prev[activeSymbol]?.sizeOffset ?? 0,
+              updatedAt: new Date().toISOString(),
+            },
+          }));
+        }
+        setHasUnsavedChanges(true);
+      } else {
+        // 原本的定位與自由拖曳功能 (保持完全不變)
+        const targetPixelX = curMoveX - dragOffsetRef.current.offsetX;
+        const targetPixelY = curMoveY - dragOffsetRef.current.offsetY;
+
+        const rawPctX = ((targetPixelX - rect.left) / rect.width) * 100;
+        const rawPctY = ((targetPixelY - (rect.top + canvasPanYRef.current)) / rect.height) * 100;
+
+        const boundedX = Math.max(2, Math.min(96, rawPctX));
+        const boundedY = Math.max(2, Math.min(96, rawPctY));
+
+        setPositions((prev) => ({
+          ...prev,
+          [activeSymbol]: {
+            ...prev[activeSymbol],
+            x: parseFloat(boundedX.toFixed(2)),
+            y: parseFloat(boundedY.toFixed(2)),
+            shape: "circle",
+            sizeOffset: prev[activeSymbol]?.sizeOffset ?? 0,
+            updatedAt: new Date().toISOString(),
+          },
+        }));
+        setHasUnsavedChanges(true);
+      }
     };
 
     const handlePointerUp = (upEvent: MouseEvent | TouchEvent) => {
@@ -1848,6 +4005,8 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
       window.removeEventListener("mouseup", handlePointerUp);
       window.removeEventListener("touchmove", handlePointerMove);
       window.removeEventListener("touchend", handlePointerUp);
+      window.removeEventListener("keydown", handleKeyDownDuringDrag);
+      window.removeEventListener("keyup", handleKeyUpDuringDrag);
 
       // 若滑鼠或手指沒有實質位移（單純點擊一下），則切換勾選狀態 (已勾選 -> 取消勾選；未勾選 -> 勾選)
       if (!hasMoved && activeSym) {
@@ -1890,8 +4049,9 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     const clientX = "touches" in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
     const clientY = "touches" in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
 
+    const currentPanY = canvasPanYRef.current;
     const startCanvasX = clientX - canvasRect.left;
-    const startCanvasY = clientY - canvasRect.top;
+    const startCanvasY = clientY - canvasRect.top - currentPanY;
 
     let isMarquee = false;
     let latestCurX = startCanvasX;
@@ -1904,7 +4064,7 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
 
       const rect = canvasRef.current.getBoundingClientRect();
       latestCurX = curClientX - rect.left;
-      latestCurY = curClientY - rect.top;
+      latestCurY = curClientY - rect.top - canvasPanYRef.current;
 
       const dist = Math.hypot(latestCurX - startCanvasX, latestCurY - startCanvasY);
       if (dist > 5) {
@@ -2032,263 +4192,66 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
   return (
     <div className="fixed inset-0 z-[99999] bg-white flex flex-col select-none overflow-hidden font-sans">
       {/* Top Header Bar - Nike Athletic High-Contrast Aesthetic */}
-      <header className="w-full bg-[#111111] text-white border-b border-zinc-800 px-3.5 sm:px-5 py-2.5 flex items-center justify-between gap-3 shadow-lg z-50 shrink-0 relative overflow-visible">
-        {/* Left: Cascading Navigation Dropdowns */}
-        <div className="flex items-center gap-2.5 py-0.5 relative z-40 overflow-visible flex-wrap">
+      <header className="w-full bg-[#111111] text-white border-b border-zinc-800/90 px-3 sm:px-4 py-2 flex items-center justify-between gap-3 shadow-md z-50 shrink-0 relative overflow-visible">
+        {/* Left: Primary Navigation & Stock Selector & Action Buttons (支援滑鼠 drag and scroll 左右滑動) */}
+        <div
+          ref={topBarDrag.ref}
+          {...topBarDrag.props}
+          className="flex items-center gap-2.5 relative z-40 overflow-x-auto scrollbar-hide no-scrollbar flex-1 min-w-0 select-none cursor-grab active:cursor-grabbing py-0.5"
+        >
           {/* Main Title Badge - Nike Bold Style */}
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-white text-black rounded-full shadow-sm shrink-0 select-none">
+          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white text-black rounded-full shadow-sm shrink-0 select-none">
             <SlidersHorizontal className="w-3.5 h-3.5 text-black stroke-[2.5]" />
             <span className="font-black text-xs tracking-wider uppercase font-sans">
               視覺線看板
             </span>
           </div>
 
-          {/* 1. 交易總覽主分頁選單 (持有中 / 真實交易 / 已完成 / 全部交易) */}
-          <div className="relative shrink-0 z-30" ref={mainTabDropdownRef}>
+          {/* 交易模式切換 Tabs (僅保留 虛擬交易 | 真實交易，支援快捷鍵 Alt + ← / →) */}
+          <div className="flex items-center bg-zinc-900/95 p-0.5 rounded-full border border-zinc-700/80 shadow-inner shrink-0">
+            {/* 虛擬交易 (模擬交易) */}
             <button
               type="button"
-              onClick={() => {
-                playClickSound();
-                setIsMainTabDropdownOpen(!isMainTabDropdownOpen);
-                setIsSubTabDropdownOpen(false);
-                setIsStockDropdownOpen(false);
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900/90 hover:bg-zinc-800 text-zinc-100 rounded-full text-xs font-bold transition-all border border-zinc-700/80 cursor-pointer active:scale-95"
+              onClick={() => handleTradeModeTabChange("simulated")}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black transition-all cursor-pointer select-none active:scale-95 ${
+                activeTradeModeTab === "simulated"
+                  ? "bg-white text-black shadow-md ring-1 ring-white"
+                  : "text-zinc-300 hover:text-white hover:bg-zinc-800/60"
+              }`}
+              title="僅顯示虛擬交易 (模擬交易) 個股標籤 (快捷鍵: Alt + ←)"
             >
-              <MainIcon className="w-3.5 h-3.5 text-[#D2F800]" />
-              <span className="text-zinc-400 font-medium text-[11px]">分類</span>
-              <span className="font-black text-white tracking-wide">{mainTabDisplayInfo.title}</span>
-              <span className="text-[10px] px-2 py-0.2 rounded-full font-mono font-black bg-zinc-800 text-zinc-300 border border-zinc-700">
-                {mainTabDisplayInfo.count}
+              <Activity className={`w-3.5 h-3.5 ${activeTradeModeTab === "simulated" ? "text-emerald-600 stroke-[2.5]" : "text-emerald-400"}`} />
+              <span>虛擬交易</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-black ${
+                activeTradeModeTab === "simulated" ? "bg-black text-white" : "bg-zinc-800 text-zinc-300"
+              }`}>
+                {simulatedCanvasCount}
               </span>
-              <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />
             </button>
 
-            {isMainTabDropdownOpen && (
-              <div className="absolute top-full left-0 mt-2 w-60 bg-[#18181b] border border-zinc-700 rounded-2xl shadow-2xl p-2 z-[100] space-y-1 backdrop-blur-md">
-                <div className="px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-zinc-400 border-b border-zinc-800 mb-1">
-                  選擇交易總覽主分類
-                </div>
-                {/* 持有中 */}
-                <button
-                  type="button"
-                  onClick={() => handleSelectMainTab("active")}
-                  className={`w-full px-3 py-2 rounded-xl text-left text-xs font-black flex items-center justify-between transition-all cursor-pointer ${
-                    mainTabFilter === "active"
-                      ? "bg-white text-black shadow-md"
-                      : "hover:bg-zinc-800/80 text-zinc-300"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <Activity className="w-3.5 h-3.5 text-emerald-500" />
-                    <span>持有中 (模擬交易)</span>
-                  </div>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-black ${
-                    mainTabFilter === "active" ? "bg-black text-white" : "bg-zinc-800 text-zinc-400"
-                  }`}>
-                    {allTabs.filter((t) => t.status !== "COMPLETED" && t.tradeType !== "real").length}
-                  </span>
-                </button>
-
-                {/* 真實交易 */}
-                <button
-                  type="button"
-                  onClick={() => handleSelectMainTab("real")}
-                  className={`w-full px-3 py-2 rounded-xl text-left text-xs font-black flex items-center justify-between transition-all cursor-pointer ${
-                    mainTabFilter === "real"
-                      ? "bg-[#D2F800] text-black shadow-md"
-                      : "hover:bg-zinc-800/80 text-zinc-300"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <ShieldCheck className="w-3.5 h-3.5 text-teal-400" />
-                    <span>真實交易</span>
-                  </div>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-black ${
-                    mainTabFilter === "real" ? "bg-black text-[#D2F800]" : "bg-zinc-800 text-zinc-400"
-                  }`}>
-                    {allTabs.filter((t) => t.status !== "COMPLETED" && t.tradeType === "real").length}
-                  </span>
-                </button>
-
-                {/* 已完成 */}
-                <button
-                  type="button"
-                  onClick={() => handleSelectMainTab("completed")}
-                  className={`w-full px-3 py-2 rounded-xl text-left text-xs font-black flex items-center justify-between transition-all cursor-pointer ${
-                    mainTabFilter === "completed"
-                      ? "bg-purple-600 text-white shadow-md"
-                      : "hover:bg-zinc-800/80 text-zinc-300"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-purple-400" />
-                    <span>已完成 (歷史)</span>
-                  </div>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-black ${
-                    mainTabFilter === "completed" ? "bg-black text-white" : "bg-zinc-800 text-zinc-400"
-                  }`}>
-                    {allTabs.filter((t) => t.status === "COMPLETED").length}
-                  </span>
-                </button>
-
-                {/* 全部交易 */}
-                <button
-                  type="button"
-                  onClick={() => handleSelectMainTab("all")}
-                  className={`w-full px-3 py-2 rounded-xl text-left text-xs font-black flex items-center justify-between transition-all cursor-pointer ${
-                    mainTabFilter === "all"
-                      ? "bg-white text-black shadow-md"
-                      : "hover:bg-zinc-800/80 text-zinc-300"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <Layers className="w-3.5 h-3.5 text-amber-400" />
-                    <span>全部交易</span>
-                  </div>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-black ${
-                    mainTabFilter === "all" ? "bg-black text-white" : "bg-zinc-800 text-zinc-400"
-                  }`}>
-                    {allTabs.length}
-                  </span>
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* 2. 子分頁分類選單 (動態對應所選主分頁之子分頁) */}
-          <div className="relative shrink-0 z-20" ref={subTabDropdownRef}>
+            {/* 真實交易 */}
             <button
               type="button"
-              onClick={() => {
-                playClickSound();
-                setIsSubTabDropdownOpen(!isSubTabDropdownOpen);
-                setIsMainTabDropdownOpen(false);
-                setIsStockDropdownOpen(false);
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900/90 hover:bg-zinc-800 text-zinc-100 rounded-full text-xs font-bold transition-all border border-zinc-700/80 cursor-pointer active:scale-95"
+              onClick={() => handleTradeModeTabChange("real")}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black transition-all cursor-pointer select-none active:scale-95 ${
+                activeTradeModeTab === "real"
+                  ? "bg-[#D2F800] text-black shadow-md ring-1 ring-[#D2F800]"
+                  : "text-zinc-300 hover:text-white hover:bg-zinc-800/60"
+              }`}
+              title="僅顯示真實交易個股標籤 (快捷鍵: Alt + →)"
             >
-              <FolderOpen className="w-3.5 h-3.5 text-zinc-400" />
-              <span className="text-zinc-400 font-medium text-[11px]">子分頁</span>
-              <span className="font-black text-white tracking-wide">
-                {getSubTabLabel(selectedSubTab)}
+              <ShieldCheck className={`w-3.5 h-3.5 ${activeTradeModeTab === "real" ? "text-black stroke-[2.5]" : "text-teal-400"}`} />
+              <span>真實交易</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-black ${
+                activeTradeModeTab === "real" ? "bg-black text-[#D2F800]" : "bg-zinc-800 text-zinc-300"
+              }`}>
+                {realCanvasCount}
               </span>
-              <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />
             </button>
-
-            {isSubTabDropdownOpen && (
-              <div className="absolute top-full left-0 mt-2 w-64 bg-[#18181b] border border-zinc-700 rounded-2xl shadow-2xl p-2 z-[100] space-y-1 backdrop-blur-md">
-                <div className="px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-zinc-400 border-b border-zinc-800 mb-1">
-                  選擇「{mainTabDisplayInfo.title}」子分頁
-                </div>
-
-                {/* 全部子分頁 */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedSubTab("all");
-                    setIsSubTabDropdownOpen(false);
-                    playClickSound();
-                  }}
-                  className={`w-full px-3 py-2 rounded-xl text-left text-xs font-black flex items-center justify-between transition-all cursor-pointer ${
-                    selectedSubTab === "all" ? "bg-white text-black" : "hover:bg-zinc-800 text-zinc-300"
-                  }`}
-                >
-                  <span>全部子分頁</span>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-black ${
-                    selectedSubTab === "all" ? "bg-black text-white" : "bg-zinc-800 text-zinc-400"
-                  }`}>
-                    {mainTabFilteredPool.length} 檔
-                  </span>
-                </button>
-
-                {mainTabFilter === "completed" ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedSubTab("real");
-                        setIsSubTabDropdownOpen(false);
-                        playClickSound();
-                      }}
-                      className={`w-full px-3 py-2 rounded-xl text-left text-xs font-black flex items-center justify-between transition-all cursor-pointer ${
-                        selectedSubTab === "real" ? "bg-teal-500 text-black" : "hover:bg-zinc-800 text-zinc-300"
-                      }`}
-                    >
-                      <div className="flex items-center gap-1.5">
-                        <ShieldCheck className="w-3.5 h-3.5" />
-                        <span>真實交易完成</span>
-                      </div>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-black ${
-                        selectedSubTab === "real" ? "bg-black text-white" : "bg-zinc-800 text-zinc-400"
-                      }`}>
-                        {allTabs.filter((t) => t.status === "COMPLETED" && t.tradeType === "real").length} 檔
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedSubTab("simulated");
-                        setIsSubTabDropdownOpen(false);
-                        playClickSound();
-                      }}
-                      className={`w-full px-3 py-2 rounded-xl text-left text-xs font-black flex items-center justify-between transition-all cursor-pointer ${
-                        selectedSubTab === "simulated" ? "bg-emerald-500 text-black" : "hover:bg-zinc-800 text-zinc-300"
-                      }`}
-                    >
-                      <div className="flex items-center gap-1.5">
-                        <Activity className="w-3.5 h-3.5" />
-                        <span>虛擬交易完成</span>
-                      </div>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-black ${
-                        selectedSubTab === "simulated" ? "bg-black text-white" : "bg-zinc-800 text-zinc-400"
-                      }`}>
-                        {allTabs.filter((t) => t.status === "COMPLETED" && t.tradeType !== "real").length} 檔
-                      </span>
-                    </button>
-                  </>
-                ) : (
-                  SUB_TABS_LIST.map((subTabKey) => {
-                    const conf = HOLDING_CONFIG[subTabKey];
-                    const TabIcon = conf.icon;
-                    const isCur = selectedSubTab === subTabKey;
-                    const subLabel = getSubTabLabel(subTabKey);
-
-                    const count = mainTabFilteredPool.filter(
-                      (t) => (t.holdingStatus || "候選名單") === subTabKey
-                    ).length;
-
-                    return (
-                      <button
-                        key={subTabKey}
-                        type="button"
-                        onClick={() => {
-                          setSelectedSubTab(subTabKey);
-                          setIsSubTabDropdownOpen(false);
-                          playClickSound();
-                        }}
-                        className={`w-full px-3 py-2 rounded-xl text-left text-xs font-black flex items-center justify-between transition-all cursor-pointer ${
-                          isCur
-                            ? "bg-[#D2F800] text-black shadow-md"
-                            : "hover:bg-zinc-800 text-zinc-300"
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <TabIcon className="w-3.5 h-3.5" />
-                          <span>{subLabel}</span>
-                        </div>
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-black ${
-                          isCur ? "bg-black text-[#D2F800]" : "bg-zinc-800 text-zinc-400"
-                        }`}>
-                          {count} 檔
-                        </span>
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-            )}
           </div>
+
+          {/* 分隔線 */}
+          <div className="w-[1px] h-4 bg-zinc-800 shrink-0" />
 
           {/* 3. 區塊股票選單 (選擇區塊股票並個別新增/刪除) - Nike Volt Highlighted Capsule */}
           <div className="relative shrink-0 z-10" ref={stockDropdownRef}>
@@ -2300,23 +4263,35 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
                 setIsMainTabDropdownOpen(false);
                 setIsSubTabDropdownOpen(false);
               }}
-              className="flex items-center gap-2 px-3.5 py-1.5 bg-[#D2F800] hover:bg-[#bce000] text-black rounded-full text-xs font-black transition-all cursor-pointer shadow-sm active:scale-95"
+              className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 py-1.5 bg-[#D2F800] hover:bg-[#bce000] text-black rounded-full text-xs font-black transition-all cursor-pointer shadow-sm active:scale-95 hover:shadow-md select-none"
             >
               <Tag className="w-3.5 h-3.5 text-black stroke-[2.5]" />
-              <span className="font-extrabold text-black/80 text-[11px]">
+              <span className="font-extrabold text-black/80 text-[11px] hidden md:inline">
                 {selectedSubTab === "all" ? "選擇區塊股票" : `${getSubTabLabel(selectedSubTab)}股票`}:
               </span>
-              <span className="font-black tracking-tight text-black">
-                圖表已有 {activeCanvasSymbols.length} 檔
+              <span className="font-black tracking-tight text-black text-[11px] sm:text-xs">
+                <span className="hidden sm:inline">圖表已有 </span>{activeCanvasSymbols.length} 檔
               </span>
-              <span className="bg-black text-[#D2F800] text-[10px] px-2 py-0.2 rounded-full font-mono font-black">
+              <span className="bg-black text-[#D2F800] text-[10px] px-1.5 sm:px-2 py-0.2 rounded-full font-mono font-black">
                 {availableBlockStocks.length}
               </span>
-              <ChevronDown className="w-3.5 h-3.5 text-black stroke-[2.5]" />
+              <ChevronDown className={`w-3.5 h-3.5 text-black stroke-[2.5] transition-transform duration-200 ${isStockDropdownOpen ? "rotate-180" : ""}`} />
             </button>
 
             {isStockDropdownOpen && (
-              <div className="absolute top-full left-0 mt-2 w-88 bg-[#18181b] border border-zinc-700 rounded-2xl shadow-2xl p-3 z-[100] space-y-2.5 backdrop-blur-md">
+              <div
+                className="fixed w-88 bg-[#18181b] border border-zinc-700 rounded-2xl shadow-2xl p-3 z-[999999] space-y-2.5 backdrop-blur-md"
+                style={{
+                  top: (stockDropdownRef.current?.getBoundingClientRect().bottom ?? 48) + 8,
+                  left: Math.max(
+                    8,
+                    Math.min(
+                      stockDropdownRef.current?.getBoundingClientRect().left ?? 16,
+                      (typeof window !== "undefined" ? window.innerWidth : 1200) - 364
+                    )
+                  ),
+                }}
+              >
                 {/* Header */}
                 <div className="flex items-center justify-between pb-2 border-b border-zinc-800 text-xs font-black text-zinc-200">
                   <div className="flex items-center gap-1.5">
@@ -2416,9 +4391,9 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
                                 真實
                               </span>
                             )}
-                            {tab.currentPrice && (
+                            {(tab.currentPrice || livePrices[sym]) && (
                               <span className="text-[10px] text-zinc-400 font-mono">
-                                ${Number(tab.currentPrice).toFixed(1)}
+                                ${Number(tab.currentPrice || livePrices[sym]).toFixed(1)}
                               </span>
                             )}
                           </div>
@@ -2460,95 +4435,227 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
             )}
           </div>
 
-          {/* 3.8 一鍵「更新位置」按鈕 (自動同步目前分隔線現價 + 同時避開重疊 + 保持原本顏色邊框) */}
-          <button
-            type="button"
-            onClick={handleUpdatePositions}
-            disabled={isUpdatingPositions}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-950/80 hover:bg-emerald-900/90 text-emerald-300 border border-emerald-700/80 hover:border-emerald-500 rounded-full text-xs font-black transition-all cursor-pointer shadow-sm active:scale-95 shrink-0 disabled:opacity-50"
-            title="一鍵更新位置：自動同步目前所有股票之分隔線現價，同時自動水平避開重疊，並完整保留原本顏色邊框與尺寸"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 text-emerald-400 stroke-[2.2] ${isUpdatingPositions ? "animate-spin" : ""}`} />
-            <span className="hidden sm:inline">更新位置</span>
-            <span className="sm:hidden">更新</span>
-          </button>
+          {/* 分隔線 */}
+          <div className="w-[1px] h-4 bg-zinc-800 shrink-0" />
 
-          {/* 4. 一鍵同步分隔線現價至畫布按鈕 (涵蓋「持有中」與「真實交易」所有子分頁卡片) */}
-          <button
-            type="button"
-            onClick={handleSyncDividersFromCards}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800/90 hover:bg-zinc-700 text-[#D2F800] border border-zinc-700 hover:border-[#D2F800]/50 rounded-full text-xs font-black transition-all cursor-pointer shadow-sm active:scale-95 shrink-0"
-            title="一鍵同步「持有中」與「真實交易」下所有子分頁個股卡片之現價與分隔線相對位置"
-          >
-            <SlidersHorizontal className="w-3.5 h-3.5 text-[#D2F800]" />
-            <span className="hidden sm:inline">一鍵同步分隔線現價</span>
-            <span className="sm:hidden">同步線</span>
-          </button>
-
-          {/* 4.5. 一鍵避開重疊按鈕 (保持 Y 軸現價高度不變，純水平 X 軸微調避開重疊) */}
-          <button
-            type="button"
-            onClick={handleAvoidOverlap}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800/90 hover:bg-zinc-700 text-sky-300 border border-zinc-700 hover:border-sky-400/50 rounded-full text-xs font-black transition-all cursor-pointer shadow-sm active:scale-95 shrink-0"
-            title="一鍵將上下重疊的股票標籤往左/右水平調整位置以避開重疊（現價相對高度維持不變）"
-          >
-            <MoveHorizontal className="w-3.5 h-3.5 text-sky-400 stroke-[2.2]" />
-            <span className="hidden sm:inline">一鍵避開重疊</span>
-            <span className="sm:hidden">避開重疊</span>
-          </button>
-
-          {/* 5. 一鍵「重置」按鈕 (刪除畫布上所有個股標籤) */}
-          <button
-            type="button"
-            onClick={handleResetAllCanvas}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-950/80 hover:bg-rose-900 text-rose-200 border border-rose-800/80 hover:border-rose-600 rounded-full text-xs font-black transition-all cursor-pointer shadow-sm active:scale-95 shrink-0"
-            title="一鍵重置並刪除畫布上所有個股標籤"
-          >
-            <RotateCcw className="w-3.5 h-3.5 text-rose-300 stroke-[2.5]" />
-            <span className="tracking-wide">重置</span>
-          </button>
-
-          {/* 隱藏的檔案上傳 Input 用於匯入位置 */}
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileImport}
-            accept=".json,application/json"
-            className="hidden"
-          />
-
-          {/* 匯出 / 匯入位置訊息整合操作群組 (放置在同一個膠囊區塊內) */}
-          <div className="flex items-center bg-zinc-900/90 border border-zinc-700/90 rounded-full p-0.5 shadow-sm shrink-0">
-            {/* 匯出股票儲存位置訊息按鈕 */}
+          {/* 截圖中的操作按鈕組 (放在第一列)：更新位置 | 同步分隔線 | 避開重疊 | 重置 */}
+          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+            {/* 0. 一鍵「更新現價」按鈕 */}
             <button
               type="button"
-              onClick={handleExportPositions}
-              className="flex items-center gap-1.5 px-2.5 py-1 text-zinc-200 hover:text-white hover:bg-zinc-800 rounded-full text-xs font-black transition-all cursor-pointer select-none active:scale-95 shrink-0"
-              title="匯出畫布上所有股票的儲存位置、尺寸與顏色訊息 (JSON 格式備份)"
+              onClick={handleRefreshAllCanvasPrices}
+              disabled={isRefreshingAllPrices}
+              className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 bg-sky-950/90 hover:bg-sky-900 text-sky-300 border border-sky-500/80 hover:border-sky-400 rounded-full text-xs font-black transition-all cursor-pointer shadow-sm active:scale-95 hover:scale-[1.02] shrink-0 disabled:opacity-50 select-none"
+              title="一鍵更新畫布所有股票最新即時現價（從 Yahoo Finance 即時抓取）"
             >
-              <Download className="w-3.5 h-3.5 text-sky-400" />
-              <span className="hidden sm:inline">匯出位置訊息</span>
-              <span className="sm:hidden">匯出</span>
+              <RefreshCw className={`w-3.5 h-3.5 text-sky-400 stroke-[2.2] ${isRefreshingAllPrices ? "animate-spin" : ""}`} />
+              <span className="hidden xl:inline">更新現價</span>
+              <span className="xl:hidden">現價</span>
             </button>
 
-            {/* 分隔線 */}
-            <div className="w-[1px] h-3.5 bg-zinc-700 mx-0.5" />
-
-            {/* 匯入股票儲存位置訊息按鈕 */}
+            {/* 1. 一鍵「更新位置」按鈕 */}
             <button
               type="button"
-              onClick={handleTriggerImport}
-              className="flex items-center gap-1.5 px-2.5 py-1 text-zinc-200 hover:text-white hover:bg-zinc-800 rounded-full text-xs font-black transition-all cursor-pointer select-none active:scale-95 shrink-0"
-              title="匯入先前備份的股票儲存位置訊息檔案 (JSON 格式)"
+              onClick={handleUpdatePositions}
+              disabled={isUpdatingPositions}
+              className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 bg-emerald-950/90 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/80 hover:border-emerald-400 rounded-full text-xs font-black transition-all cursor-pointer shadow-sm active:scale-95 hover:scale-[1.02] hover:shadow-emerald-950/50 shrink-0 disabled:opacity-50 select-none"
+              title="一鍵更新位置：自動同步目前所有股票之分隔線現價，同時自動水平避開重疊，並完整保留原本顏色邊框與尺寸"
             >
-              <Upload className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="hidden sm:inline">匯入位置訊息</span>
-              <span className="sm:hidden">匯入</span>
+              <RefreshCw className={`w-3.5 h-3.5 text-emerald-400 stroke-[2.2] ${isUpdatingPositions ? "animate-spin" : ""}`} />
+              <span className="hidden xl:inline">更新位置</span>
+              <span className="xl:hidden">更新</span>
+            </button>
+
+            {/* 2. 一鍵同步分隔線現價至畫布按鈕 */}
+            <button
+              type="button"
+              onClick={handleSyncDividersFromCards}
+              className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-[#D2F800] border border-zinc-700/90 hover:border-[#D2F800]/50 rounded-full text-xs font-black transition-all cursor-pointer shadow-sm active:scale-95 hover:scale-[1.02] shrink-0 select-none"
+              title="一鍵同步「持有中」與「真實交易」下所有子分頁個股卡片之現價與分隔線相對位置"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5 text-[#D2F800]" />
+              <span className="hidden xl:inline">同步分隔線</span>
+              <span className="xl:hidden">同步</span>
+            </button>
+
+            {/* 3. 匯出 / 匯入位置訊息整合操作群組 (取代原「避開重疊」位置) */}
+            <div className="flex items-center bg-zinc-900 border border-zinc-700/90 hover:border-zinc-500/70 rounded-full p-0.5 shadow-sm shrink-0 transition-colors">
+              {/* 隱藏的檔案上傳 Input 用於匯入位置 */}
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileImport}
+                accept=".json,application/json"
+                className="hidden"
+              />
+
+              {/* 匯出股票儲存位置訊息按鈕 */}
+              <button
+                type="button"
+                onClick={handleExportPositions}
+                className="flex items-center gap-1 sm:gap-1.5 px-2.5 py-1 text-zinc-200 hover:text-white hover:bg-zinc-800 rounded-full text-xs font-black transition-all cursor-pointer select-none active:scale-95 shrink-0"
+                title="匯出畫布上所有股票的儲存位置、尺寸與顏色訊息 (JSON 格式備份)"
+              >
+                <Download className="w-3.5 h-3.5 text-sky-400 stroke-[2.2]" />
+                <span>匯出位置</span>
+              </button>
+
+              {/* 分隔線 */}
+              <div className="w-[1px] h-3.5 bg-zinc-700 mx-0.5" />
+
+              {/* 匯入股票儲存位置訊息按鈕 */}
+              <button
+                type="button"
+                onClick={handleTriggerImport}
+                className="flex items-center gap-1 sm:gap-1.5 px-2.5 py-1 text-zinc-200 hover:text-white hover:bg-zinc-800 rounded-full text-xs font-black transition-all cursor-pointer select-none active:scale-95 shrink-0"
+                title="匯入先前備份的股票儲存位置訊息檔案 (JSON 格式)"
+              >
+                <Upload className="w-3.5 h-3.5 text-emerald-400 stroke-[2.2]" />
+                <span>匯入位置</span>
+              </button>
+            </div>
+
+            {/* 4. 一鍵「重置」按鈕 */}
+            <button
+              type="button"
+              onClick={handleResetAllCanvas}
+              className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1.5 bg-zinc-900 hover:bg-rose-950/80 text-rose-300 hover:text-rose-200 border border-zinc-700/80 hover:border-rose-700/80 rounded-full text-xs font-black transition-all cursor-pointer shadow-sm active:scale-95 hover:scale-[1.02] shrink-0 select-none"
+              title="一鍵重置並刪除畫布上所有個股標籤"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-rose-400 stroke-[2.5]" />
+              <span>重置</span>
             </button>
           </div>
+        </div>
 
+        {/* Right: Actions, Status & Save Button */}
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Status Indicator */}
+          <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 text-[11px] font-black rounded-full border border-zinc-800 bg-zinc-900 text-zinc-300">
+            {hasUnsavedChanges ? (
+              <span className="flex items-center gap-1.5 text-amber-400 font-black animate-pulse">
+                <span className="w-2 h-2 rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)]" />
+                未儲存 (Shift+S)
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5 text-[#D2F800] font-black">
+                <span className="w-2 h-2 rounded-full bg-[#D2F800] shadow-[0_0_8px_rgba(210,248,0,0.8)]" />
+                已儲存 ({activeCanvasSymbols.length} 檔)
+              </span>
+            )}
+          </div>
+
+          {/* 顯示 / 隱藏標籤開關 (包含隱藏數量 badge 與狀態) */}
+          <button
+            type="button"
+            onClick={() => {
+              const next = !showHiddenTags;
+              setShowHiddenTags(next);
+              playClickSound();
+              if (next) {
+                toast.info(`已開啟「顯示隱藏」，畫布上顯示 ${hiddenCount} 檔已隱藏股票（半透明標示）`, {
+                  id: "toggle-show-hidden",
+                });
+              } else {
+                toast.info("已關閉「顯示隱藏」", { id: "toggle-show-hidden" });
+              }
+            }}
+            title={
+              showHiddenTags
+                ? `目前顯示所有標籤 (包含 ${hiddenCount} 檔已隱藏，點擊關閉)`
+                : `點擊顯示被隱藏的 ${hiddenCount} 檔股票標籤`
+            }
+            className={`px-3 py-1.5 rounded-full border text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 ${
+              showHiddenTags
+                ? "bg-amber-400 text-black border-amber-300 shadow-[0_0_10px_rgba(251,191,36,0.35)]"
+                : hiddenCount > 0
+                ? "bg-zinc-900 border-amber-500/60 text-amber-300 hover:bg-zinc-800"
+                : "bg-zinc-900 border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+            }`}
+          >
+            {showHiddenTags ? (
+              <>
+                <Eye className="w-3.5 h-3.5 text-black stroke-[2.5]" />
+                <span className="hidden sm:inline">顯示隱藏</span>
+                <span className="sm:hidden">顯示</span>
+                {hiddenCount > 0 && (
+                  <span className="px-1.5 py-0.2 bg-black/20 text-black text-[10px] rounded-full font-mono font-black">
+                    {hiddenCount}
+                  </span>
+                )}
+              </>
+            ) : (
+              <>
+                <EyeOff className="w-3.5 h-3.5 text-current stroke-[2.2]" />
+                <span className="hidden sm:inline">顯示隱藏</span>
+                <span className="sm:hidden">顯示</span>
+                {hiddenCount > 0 && (
+                  <span className="px-1.5 py-0.2 bg-amber-500/20 text-amber-300 text-[10px] rounded-full font-mono font-black">
+                    {hiddenCount}
+                  </span>
+                )}
+              </>
+            )}
+          </button>
+
+          {/* 一鍵全部解除隱藏按鈕 (當處於顯示隱藏模式且有隱藏標籤時提供快捷按鈕) */}
+          {showHiddenTags && hiddenCount > 0 && (
+            <button
+              type="button"
+              onClick={handleUnhideAll}
+              className="px-2.5 py-1.5 rounded-full border border-emerald-500/80 bg-emerald-950/70 hover:bg-emerald-900 text-emerald-200 text-xs font-black transition-all cursor-pointer flex items-center gap-1 active:scale-95 shadow-sm animate-in fade-in"
+              title={`一鍵解除全部 ${hiddenCount} 檔股票標籤的隱藏狀態`}
+            >
+              <Eye className="w-3 h-3 text-emerald-400" />
+              <span className="hidden md:inline">全部取消隱藏</span>
+              <span className="md:hidden">全部取消</span>
+            </button>
+          )}
+
+          {/* 儲存按鈕 (Nike Premium Black/Volt Save + Shortcut Shift+S) */}
+          <button
+            type="button"
+            onClick={handleSavePositions}
+            disabled={isSaving}
+            className={`px-4 py-1.5 rounded-full text-xs font-black transition-all cursor-pointer flex items-center gap-2 active:scale-95 shadow-md ${
+              hasUnsavedChanges
+                ? "bg-amber-400 hover:bg-amber-300 text-black shadow-amber-400/30 animate-pulse"
+                : "bg-white hover:bg-zinc-200 text-black shadow-white/20"
+            }`}
+          >
+            <Save className="w-3.5 h-3.5 text-black stroke-[2.5]" />
+            <span className="tracking-wide uppercase">儲存位置</span>
+            <span className="hidden lg:inline-block px-1.5 py-0.2 bg-black/15 text-black text-[10px] rounded-full font-mono font-black">
+              Shift+S
+            </span>
+          </button>
+
+          {/* Close Button */}
+          <button
+            type="button"
+            onClick={() => {
+              playClickSound();
+              triggerFullscreenOverview();
+              onClose();
+            }}
+            title="關閉並以全螢幕返回交易總覽 (Esc)"
+            className="p-1.5 rounded-full text-zinc-400 hover:text-white hover:bg-zinc-800 transition-all cursor-pointer active:scale-90"
+          >
+            <X className="w-4 h-4 stroke-[2.5]" />
+          </button>
+        </div>
+      </header>
+
+      {/* Sub Toolbar - Tag Selection, Style Tools & Live Data Bar (支援滑鼠 drag and scroll 左右滑動) */}
+      <div
+        ref={subBarDrag.ref}
+        {...subBarDrag.props}
+        className="w-full bg-[#161618] text-white border-b border-zinc-800/80 px-3 sm:px-4 py-1.5 flex items-center justify-between gap-3 shadow-sm z-40 shrink-0 relative overflow-x-auto scrollbar-hide no-scrollbar select-none cursor-grab active:cursor-grabbing"
+      >
+        {/* Left: Tag Selection, Style Tools & Live Data */}
+        <div className="flex items-center gap-2 shrink-0">
           {/* 6. 圓形標籤管理工具：框選模式 / 勾選選取 / 隱藏標籤 / 圓形尺寸調整 (-/+) / 重設 */}
-          <div className="flex items-center gap-1.5 bg-zinc-900/90 border border-zinc-700/90 rounded-full px-2 py-1 shadow-sm shrink-0 flex-wrap">
+          <div className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-700/90 rounded-full px-2 py-0.5 shadow-sm shrink-0">
             {/* 框選模式按鈕 */}
             <button
               type="button"
@@ -2683,11 +4790,11 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
 
             {/* 顏色選擇區塊 (當股票處於 tickbox 勾選狀態時在大小按鈕旁顯示) */}
             {selectedTagSymbols.length > 0 && (
-              <div className="flex items-center gap-1.5 bg-zinc-950 border border-zinc-700 rounded-full px-2 py-0.5 shadow-sm animate-in fade-in zoom-in-95 duration-150">
-                <span className="text-[10px] font-black text-zinc-400 mr-0.5 select-none hidden sm:inline uppercase tracking-wider">
+              <div className="flex items-center gap-1 sm:gap-1.5 bg-zinc-950 border border-zinc-700 rounded-full px-1.5 sm:px-2 py-0.5 shadow-sm animate-in fade-in zoom-in-95 duration-150 shrink-0">
+                <span className="text-[10px] font-black text-zinc-400 mr-0.5 select-none hidden md:inline uppercase tracking-wider">
                   邊框:
                 </span>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-0.5 sm:gap-1">
                   {TAG_COLOR_OPTIONS.map((c) => {
                     const isAllThisColor = c.isDefault
                       ? selectedTagSymbols.every((s) => !positions[s]?.color || positions[s]?.color === "#000000")
@@ -2699,9 +4806,9 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
                         type="button"
                         onClick={() => handleSetTagColor(c.isDefault ? undefined : c.bg)}
                         title={`${c.label} ${c.isDefault ? "(1px 黑色預設)" : "(6px 邊框)"}`}
-                        className={`w-4 h-4 rounded-full transition-all cursor-pointer relative hover:scale-125 shrink-0 ${
+                        className={`w-3.5 h-3.5 rounded-full transition-all cursor-pointer relative hover:scale-125 shrink-0 ${
                           isAllThisColor
-                            ? "ring-2 ring-[#D2F800] ring-offset-1 ring-offset-black scale-120 shadow-xs"
+                            ? "ring-2 ring-[#D2F800] ring-offset-1 ring-offset-black scale-110 shadow-xs"
                             : "hover:ring-1 hover:ring-zinc-400 opacity-90 hover:opacity-100"
                         }`}
                         style={{
@@ -2715,56 +4822,12 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
               </div>
             )}
 
-            {/* 攤平進度選擇組 (#1, #2, #3, #4) (當股票處於勾選狀態時顯示，點擊自動儲存) */}
-            {selectedTagSymbols.length > 0 && (
-              <div className="flex items-center gap-1 bg-zinc-950 border border-amber-500/50 rounded-full px-2 py-0.5 shadow-sm animate-in fade-in zoom-in-95 duration-150">
-                <span className="text-[10px] font-black text-amber-400 mr-0.5 select-none hidden sm:inline uppercase tracking-wider flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-                  攤平:
-                </span>
-                <div className="flex items-center gap-0.5">
-                  {(["#1", "#2", "#3", "#4"] as const).map((step) => {
-                    const isAllThisStep = selectedTagSymbols.every((s) => positions[s]?.dcaProgress === step);
-                    const hasSomeThisStep = selectedTagSymbols.some((s) => positions[s]?.dcaProgress === step);
 
-                    return (
-                      <button
-                        key={step}
-                        type="button"
-                        onClick={() => handleSetDcaProgress(step)}
-                        title={`將勾選的 ${selectedTagSymbols.length} 檔股票標籤設定為攤平進度 ${step} (再次點擊可取消，已支援自動儲存)`}
-                        className={`px-1.5 py-0.5 rounded-full text-[10.5px] font-mono font-black transition-all cursor-pointer select-none active:scale-90 ${
-                          isAllThisStep
-                            ? "bg-[#D2F800] text-black shadow-xs ring-1 ring-white scale-105"
-                            : hasSomeThisStep
-                            ? "bg-zinc-800 text-[#D2F800] border border-[#D2F800]/50"
-                            : "bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white"
-                        }`}
-                      >
-                        {step}
-                      </button>
-                    );
-                  })}
 
-                  {/* 清除進度按鈕 (如果有選中的股票有設定進度) */}
-                  {selectedTagSymbols.some((s) => !!positions[s]?.dcaProgress) && (
-                    <button
-                      type="button"
-                      onClick={() => handleSetDcaProgress(undefined)}
-                      title="清除所選股票之攤平進度 (自動儲存)"
-                      className="p-1 rounded-full text-zinc-400 hover:text-rose-400 hover:bg-zinc-800 transition-colors ml-0.5 cursor-pointer"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* 單選個股即時數據資訊膠囊 (顯示攤平進度、已購/預計股數與未實現損益) */}
+            {/* 單選個股即時數據資訊膠囊 (顯示攤平進度、拆分交易、已購/預計股數、基準倉位/強制平倉與未實現損益) */}
             {selectedTagSymbols.length === 1 && (() => {
               const sym = selectedTagSymbols[0];
-              const tab = allStockMap.get(sym);
+              const tab = allStockMap.get(sym) || allTabs.find((t) => (t.symbol || "").trim().toUpperCase() === sym);
               const stat = tab ? statsMap?.[tab.id] : undefined;
               const pos = positions[sym];
               const holdingQty =
@@ -2775,7 +4838,10 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
                 stat?.averagePrice !== undefined && stat.averagePrice > 0
                   ? stat.averagePrice
                   : tab?.averageCost || 0;
-              const curPrice = tab?.currentPrice ? Number(tab.currentPrice) : 0;
+              const curPrice =
+                tab?.currentPrice !== undefined && tab.currentPrice !== null && Number(tab.currentPrice) > 0
+                  ? Number(tab.currentPrice)
+                  : (livePrices[sym] || 0);
               let pnl = stat?.unrealizedPnL || 0;
               if (holdingQty > 0 && avgCost > 0 && curPrice > 0) {
                 pnl = (curPrice - avgCost) * holdingQty;
@@ -2783,32 +4849,91 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
                 pnl = (avgCost - curPrice) * Math.abs(holdingQty);
               }
               const planQty = tab?.plannedBuyQty || 0;
-              const dca = pos?.dcaProgress;
+              const strat = tab ? (strategiesMap?.[tab.id] || (tab as any)?.strategy) : undefined;
+              const cardTrades = tab ? (tradesMap?.[tab.id] || (tab as any)?.trades || []) : [];
+              const dca = getEffectiveDcaProgress(pos?.dcaProgress, tab, cardTrades, holdingQty, planQty, strat);
+              const splitOpt = findSplitTradeOption(dca);
+              const splitDetail = calculateSplitTradeStageDetail(tab, dca, planQty, holdingQty, strat);
+              const { basePrice, forceClosePrice } = getStockBaseAndForceClosePrices(tab, strat, curPrice);
 
               return (
-                <div className="hidden lg:flex items-center gap-2 bg-zinc-950 border border-zinc-700/80 rounded-full px-2.5 py-0.5 text-[10.5px] font-mono text-zinc-300 shadow-sm animate-in fade-in select-none">
-                  <span className="font-sans font-black text-white">{sym}</span>
-                  {dca && (
-                    <span className="text-[#D2F800] bg-[#D2F800]/15 border border-[#D2F800]/50 px-1 py-0.2 rounded text-[9.5px] font-black">
-                      {dca}
+                <div className="hidden lg:flex items-center gap-1.5 xl:gap-2 bg-zinc-950/95 border border-zinc-700/80 rounded-full px-2.5 py-0.5 text-[11px] font-mono text-zinc-300 shadow-sm animate-in fade-in select-none max-w-full overflow-x-auto no-scrollbar shrink">
+                  <span className="font-sans font-black text-white shrink-0">{sym}</span>
+                  {splitDetail ? (
+                    <span
+                      className={`px-1.5 py-0.2 rounded text-[10px] font-black border shrink-0 ${splitDetail.badgeBg} ${splitDetail.badgeText} ${splitDetail.badgeBorder}`}
+                    >
+                      {splitDetail.fullStageName}
+                    </span>
+                  ) : dca ? (
+                    <span
+                      className={`px-1.5 py-0.2 rounded text-[10px] font-black border shrink-0 ${
+                        splitOpt
+                          ? `${splitOpt.badgeBg} ${splitOpt.badgeText} ${splitOpt.badgeBorder}`
+                          : "text-[#D2F800] bg-[#D2F800]/15 border-[#D2F800]/50"
+                      }`}
+                    >
+                      {splitOpt ? splitOpt.label : dca}
+                    </span>
+                  ) : null}
+                  {splitDetail && (
+                    <span className="text-purple-300 font-bold shrink-0">
+                      [可用剩餘: <strong className="text-purple-200 font-black">{splitDetail.stageRemaining.toLocaleString()}</strong> 股]
                     </span>
                   )}
-                  <span>
-                    已購: <strong className="text-white font-black">{holdingQty.toLocaleString()}</strong>
-                    {planQty > 0 && (
-                      <span className="text-zinc-400">
-                        {" "}/ 預計: <strong className="text-amber-300 font-bold">{planQty.toLocaleString()}</strong>
-                      </span>
+                  {splitDetail?.companionStage && (
+                    <span className="text-cyan-300 font-bold bg-cyan-950/80 px-1.5 py-0.2 rounded border border-cyan-500/40 text-[10px] shrink-0">
+                      <span className="hidden xl:inline">{splitDetail.companionStage.fullStageName}: 預購 </span>
+                      <span className="xl:hidden">{splitDetail.companionStage.stageName}: 預</span>
+                      <strong className="text-amber-300 font-black">{splitDetail.companionStage.stageSize.toLocaleString()}</strong> 股 / 餘 <strong className="text-purple-200 font-black">{splitDetail.companionStage.stageRemaining.toLocaleString()}</strong> 股
+                    </span>
+                  )}
+                  <span className="shrink-0" title={splitDetail ? `總持股: ${holdingQty.toLocaleString()} / 總預計: ${planQty.toLocaleString()} 股` : undefined}>
+                    {splitDetail ? (
+                      <>
+                        <span className="hidden 2xl:inline">階段已購: </span>
+                        <span className="2xl:hidden">已購: </span>
+                        <strong className="text-cyan-300 font-black">{splitDetail.stageBought.toLocaleString()}</strong>
+                        <span className="text-zinc-400">
+                          {" "}/ <span className="hidden 2xl:inline">階段預計: </span><strong className="text-amber-300 font-bold">{splitDetail.stageSize.toLocaleString()}</strong>
+                        </span>
+                        {" "}股
+                        <span className="text-zinc-500 text-[10px] ml-1.5 font-normal hidden 2xl:inline">
+                          (總持股: {holdingQty.toLocaleString()}{planQty > 0 ? ` / 總預計: ${planQty.toLocaleString()}` : ""} 股)
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        已購: <strong className="text-white font-black">{holdingQty.toLocaleString()}</strong>
+                        {planQty > 0 && (
+                          <span className="text-zinc-400">
+                            {" "}/ 預計: <strong className="text-amber-300 font-bold">{planQty.toLocaleString()}</strong>
+                          </span>
+                        )}
+                        {" "}股
+                      </>
                     )}
-                    {" "}股
                   </span>
+
+                  {/* 基準倉位 / 強制平倉 價位標籤 */}
+                  {basePrice !== null && (
+                    <span className="text-amber-300 bg-amber-950/80 border border-amber-500/50 px-1.5 py-0.2 rounded font-black text-[10px] shrink-0">
+                      基準: ${basePrice >= 100 ? basePrice.toFixed(1) : basePrice.toFixed(2)}
+                    </span>
+                  )}
+                  {forceClosePrice !== null && (
+                    <span className="text-rose-300 bg-rose-950/80 border border-rose-500/50 px-1.5 py-0.2 rounded font-black text-[10px] shrink-0">
+                      平倉: ${forceClosePrice >= 100 ? forceClosePrice.toFixed(1) : forceClosePrice.toFixed(2)}
+                    </span>
+                  )}
+
                   {(holdingQty !== 0 || pnl !== 0) && (
                     <span
-                      className={`font-black px-1.5 py-0.2 rounded ${
+                      className={`font-black px-1.5 py-0.2 rounded shrink-0 ${
                         pnl > 0
-                          ? "text-emerald-300 bg-emerald-950/80 border border-emerald-500/40"
+                          ? "text-emerald-300 bg-emerald-950/80 border border-emerald-500/40 shadow-xs"
                           : pnl < 0
-                          ? "text-rose-300 bg-rose-950/80 border border-rose-500/40"
+                          ? "text-rose-300 bg-rose-950/80 border border-rose-500/40 shadow-xs"
                           : "text-zinc-300 bg-zinc-900 border border-zinc-700/60"
                       }`}
                     >
@@ -2820,176 +4945,15 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
             })()}
           </div>
         </div>
-
-        {/* Right: Actions & Save Button */}
-        <div className="flex items-center gap-2 shrink-0">
-          {/* Status Indicator */}
-          <div className="hidden xl:flex items-center gap-1.5 px-3 py-1 text-[11px] font-black rounded-full border border-zinc-800 bg-zinc-900 text-zinc-300">
-            {hasUnsavedChanges ? (
-              <span className="flex items-center gap-1.5 text-amber-400 font-black animate-pulse">
-                <span className="w-2 h-2 rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)]" />
-                未儲存 (Shift+S)
-              </span>
-            ) : (
-              <span className="flex items-center gap-1.5 text-[#D2F800] font-black">
-                <span className="w-2 h-2 rounded-full bg-[#D2F800] shadow-[0_0_8px_rgba(210,248,0,0.8)]" />
-                已儲存 ({activeCanvasSymbols.length} 檔)
-              </span>
-            )}
-          </div>
-
-          {/* 顯示 / 隱藏標籤開關 (包含隱藏數量 badge 與狀態) */}
-          <button
-            type="button"
-            onClick={() => {
-              const next = !showHiddenTags;
-              setShowHiddenTags(next);
-              playClickSound();
-              if (next) {
-                toast.info(`已開啟「顯示隱藏」，畫布上顯示 ${hiddenCount} 檔已隱藏股票（半透明標示）`, {
-                  id: "toggle-show-hidden",
-                });
-              } else {
-                toast.info("已關閉「顯示隱藏」", { id: "toggle-show-hidden" });
-              }
-            }}
-            title={
-              showHiddenTags
-                ? `目前顯示所有標籤 (包含 ${hiddenCount} 檔已隱藏，點擊關閉)`
-                : `點擊顯示被隱藏的 ${hiddenCount} 檔股票標籤`
-            }
-            className={`px-3 py-1.5 rounded-full border text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 ${
-              showHiddenTags
-                ? "bg-amber-400 text-black border-amber-300 shadow-[0_0_10px_rgba(251,191,36,0.35)]"
-                : hiddenCount > 0
-                ? "bg-zinc-900 border-amber-500/60 text-amber-300 hover:bg-zinc-800"
-                : "bg-zinc-900 border-zinc-700 text-zinc-300 hover:bg-zinc-800"
-            }`}
-          >
-            {showHiddenTags ? (
-              <>
-                <Eye className="w-3.5 h-3.5 text-black stroke-[2.5]" />
-                <span className="hidden sm:inline">顯示隱藏</span>
-                <span className="sm:hidden">顯示</span>
-                {hiddenCount > 0 && (
-                  <span className="px-1.5 py-0.2 bg-black/20 text-black text-[10px] rounded-full font-mono font-black">
-                    {hiddenCount}
-                  </span>
-                )}
-              </>
-            ) : (
-              <>
-                <EyeOff className="w-3.5 h-3.5 text-current stroke-[2.2]" />
-                <span className="hidden sm:inline">顯示隱藏</span>
-                <span className="sm:hidden">顯示</span>
-                {hiddenCount > 0 && (
-                  <span className="px-1.5 py-0.2 bg-amber-500/20 text-amber-300 text-[10px] rounded-full font-mono font-black">
-                    {hiddenCount}
-                  </span>
-                )}
-              </>
-            )}
-          </button>
-
-          {/* 一鍵全部解除隱藏按鈕 (當處於顯示隱藏模式且有隱藏標籤時提供快捷按鈕) */}
-          {showHiddenTags && hiddenCount > 0 && (
-            <button
-              type="button"
-              onClick={handleUnhideAll}
-              className="px-2.5 py-1.5 rounded-full border border-emerald-500/80 bg-emerald-950/70 hover:bg-emerald-900 text-emerald-200 text-xs font-black transition-all cursor-pointer flex items-center gap-1 active:scale-95 shadow-sm animate-in fade-in"
-              title={`一鍵解除全部 ${hiddenCount} 檔股票標籤的隱藏狀態`}
-            >
-              <Eye className="w-3 h-3 text-emerald-400" />
-              <span className="hidden md:inline">全部取消隱藏</span>
-              <span className="md:hidden">全部取消</span>
-            </button>
-          )}
-
-          {/* 輔助線測試 / 座標診斷開關 (統一基準點、縮放平移校驗、輔助線測試) */}
-          <button
-            type="button"
-            onClick={() => {
-              const next = !showAuxiliaryTestLines;
-              setShowAuxiliaryTestLines(next);
-              playClickSound();
-              if (next) {
-                toast.info("已開啟「輔助線測試」：顯示 6 大主軸基準線、5 大區間中線與即時座標換算診斷", {
-                  id: "auxiliary-lines-toggle",
-                });
-              } else {
-                toast.info("已關閉「輔助線測試」", { id: "auxiliary-lines-toggle" });
-              }
-            }}
-            title="開啟/關閉輔助線測試：顯示高精準基準線刻度、區間中線、現價水平射線與座標換算診斷 HUD"
-            className={`px-3 py-1.5 rounded-full border text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 ${
-              showAuxiliaryTestLines
-                ? "bg-[#D2F800] text-black border-[#D2F800] shadow-[0_0_10px_rgba(210,248,0,0.4)]"
-                : "bg-zinc-900 border-zinc-700 text-zinc-300 hover:bg-zinc-800"
-            }`}
-          >
-            <Crosshair className={`w-3.5 h-3.5 ${showAuxiliaryTestLines ? "text-black animate-spin" : "text-current"}`} />
-            <span className="hidden md:inline">輔助線測試</span>
-            <span className="md:hidden">輔助線</span>
-          </button>
-
-          {/* Toggle Line Labels */}
-          <button
-            type="button"
-            onClick={() => {
-              setShowLineLabels(!showLineLabels);
-              playClickSound();
-            }}
-            title="切換線條說明文字"
-            className={`px-3 py-1.5 rounded-full border text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 ${
-              showLineLabels
-                ? "bg-white text-black border-white"
-                : "bg-zinc-900 border-zinc-700 text-zinc-300 hover:bg-zinc-800"
-            }`}
-          >
-            <Info className="w-3.5 h-3.5 text-current" />
-            <span className="hidden md:inline">線條標籤</span>
-          </button>
-
-          {/* 儲存按鈕 (Nike Premium Black/Volt Save + Shortcut Shift+S) */}
-          <button
-            type="button"
-            onClick={handleSavePositions}
-            disabled={isSaving}
-            className={`px-4 py-1.5 rounded-full text-xs font-black transition-all cursor-pointer flex items-center gap-2 active:scale-95 shadow-md ${
-              hasUnsavedChanges
-                ? "bg-amber-400 hover:bg-amber-300 text-black shadow-amber-400/30 animate-pulse"
-                : "bg-white hover:bg-zinc-200 text-black shadow-white/20"
-            }`}
-          >
-            <Save className="w-3.5 h-3.5 text-black stroke-[2.5]" />
-            <span className="tracking-wide uppercase">儲存位置</span>
-            <span className="hidden lg:inline-block px-1.5 py-0.2 bg-black/15 text-black text-[10px] rounded-full font-mono font-black">
-              Shift+S
-            </span>
-          </button>
-
-          {/* Close Button */}
-          <button
-            type="button"
-            onClick={() => {
-              playClickSound();
-              triggerFullscreenOverview();
-              onClose();
-            }}
-            title="關閉並以全螢幕返回交易總覽 (Esc)"
-            className="p-1.5 rounded-full text-zinc-400 hover:text-white hover:bg-zinc-800 transition-all cursor-pointer active:scale-90"
-          >
-            <X className="w-4 h-4 stroke-[2.5]" />
-          </button>
-        </div>
-      </header>
+      </div>
 
       {/* Main Visualizer Fullscreen Canvas with Depth of Field */}
       <main
         ref={canvasRef}
         onMouseDown={handleCanvasPointerDown}
         onTouchStart={handleCanvasPointerDown}
-        className={`flex-1 relative w-full h-full bg-[#F4F5F8] select-none overflow-hidden ${
+        onDoubleClick={handleCanvasDoubleClick}
+        className={`flex-1 relative w-full h-full bg-[#1e2024] select-none overflow-hidden ${
           isBoxSelectMode ? "cursor-crosshair" : "cursor-default"
         }`}
       >
@@ -2998,7 +4962,7 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
           className="absolute inset-0 pointer-events-none z-0"
           style={{
             background:
-              "radial-gradient(ellipse 95% 85% at 50% 48%, rgba(255, 255, 255, 0.45) 0%, rgba(238, 242, 248, 0.45) 55%, rgba(208, 216, 228, 0.65) 100%)",
+              "radial-gradient(ellipse 95% 85% at 50% 48%, rgba(38, 41, 46, 0.5) 0%, rgba(26, 28, 32, 0.75) 55%, rgba(18, 19, 22, 0.95) 100%)",
           }}
         />
 
@@ -3007,17 +4971,22 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
           className="absolute inset-x-0 top-0 h-32 pointer-events-none z-0"
           style={{
             background:
-              "linear-gradient(to bottom, rgba(15, 23, 42, 0.07) 0%, transparent 100%)",
+              "linear-gradient(to bottom, rgba(0, 0, 0, 0.4) 0%, transparent 100%)",
           }}
         />
         <div
           className="absolute inset-x-0 bottom-0 h-32 pointer-events-none z-0"
           style={{
             background:
-              "linear-gradient(to top, rgba(15, 23, 42, 0.09) 0%, transparent 100%)",
+              "linear-gradient(to top, rgba(0, 0, 0, 0.5) 0%, transparent 100%)",
           }}
         />
 
+        {/* 畫布視角垂直動態平移層 (Canvas Viewport Pan Y Layer - 滾動滑鼠滾輪上下平移，不改變股票真實座標位置) */}
+        <div
+          className="w-full h-full absolute inset-0 will-change-transform transition-transform duration-75 ease-out pointer-events-none"
+          style={{ transform: `translateY(${canvasPanY}px)` }}
+        >
         {/* Box Selection (Marquee) Visual Overlay */}
         {selectionBox && (
           <div
@@ -3061,22 +5030,22 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
               className="w-full transition-all"
               style={{
                 height: line.color === "#000000" ? "4px" : "3.5px",
-                backgroundColor: line.color,
+                backgroundColor: line.color === "#000000" ? "#27272a" : line.color,
                 boxShadow:
                   line.color === "#000000"
-                    ? "0 0 10px rgba(0,0,0,0.22)"
+                    ? "0 0 0 1.5px rgba(255, 255, 255, 0.35), 0 0 12px rgba(0, 0, 0, 0.8)"
                     : `0 0 10px ${line.color}55`,
               }}
             />
 
             {/* Left Axis Letter Badge in Gray font (D, B, G, Y, R) */}
             <div
-              className="absolute left-3 sm:left-4 -top-3 px-1.5 py-0.5 rounded text-[11px] sm:text-xs font-mono font-black text-zinc-400 bg-white/90 border border-zinc-200 shadow-xs pointer-events-none select-none drop-shadow-[0_1px_1px_rgba(0,0,0,0.05)] flex items-center gap-1"
+              className="absolute left-3 sm:left-4 -top-3 px-1.5 py-0.5 rounded text-[11px] sm:text-xs font-mono font-black text-zinc-200 bg-zinc-900/90 border border-zinc-700 shadow-xs pointer-events-none select-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)] flex items-center gap-1"
               title={`${line.axis}軸 (${line.label})`}
             >
               <span>{line.axis}</span>
               {showAuxiliaryTestLines && (
-                <span className="text-[9.5px] font-bold text-zinc-600 font-mono">
+                <span className="text-[9.5px] font-bold text-zinc-400 font-mono">
                   {line.yPercent.toFixed(1)}%
                 </span>
               )}
@@ -3085,15 +5054,15 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
             {/* Line label with Nike typography at the right margin */}
             {showLineLabels && (
               <div
-                className="absolute right-4 -top-5 px-3 py-1 rounded-full text-[11px] font-black pointer-events-none tracking-wider flex items-center gap-2 shadow-lg border border-black/10 backdrop-blur-md"
+                className="absolute right-4 -top-5 px-3 py-1 rounded-full text-[11px] font-black pointer-events-none tracking-wider flex items-center gap-2 shadow-lg border border-white/15 backdrop-blur-md"
                 style={{
-                  color: "#000000",
-                  backgroundColor: "rgba(255, 255, 255, 0.96)",
+                  color: "#ffffff",
+                  backgroundColor: "rgba(24, 25, 28, 0.92)",
                 }}
               >
                 <span className="text-zinc-400 font-mono font-black mr-0.5">{line.axis}</span>
-                <span className="text-black font-black uppercase">{line.label}</span>
-                <span className="text-[9.5px] text-zinc-500 font-mono font-bold">[{line.desc}]</span>
+                <span className="text-white font-black uppercase">{line.label}</span>
+                <span className="text-[9.5px] text-zinc-400 font-mono font-bold">[{line.desc}]</span>
               </div>
             )}
           </div>
@@ -3164,7 +5133,9 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
         {activeCanvasSymbols.map((sym) => {
           const pos = positions[sym];
           if (!pos) return null;
-          const tab = allStockMap.get(sym);
+          const tab =
+            allStockMap.get(sym) ||
+            allTabs.find((t) => (t.symbol || "").trim().toUpperCase() === sym);
           const stat = tab ? statsMap?.[tab.id] : undefined;
           const conf = HOLDING_CONFIG[tab?.holdingStatus || "候選名單"];
 
@@ -3192,13 +5163,16 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
               ? stat.averagePrice
               : tab?.averageCost || 0;
           const curPriceNum =
-            tab?.currentPrice !== undefined && tab.currentPrice !== null
+            tab?.currentPrice !== undefined && tab.currentPrice !== null && Number(tab.currentPrice) > 0
               ? Number(tab.currentPrice)
-              : 0;
+              : (livePrices[sym] || 0);
 
           // 2. 預計購買數量 (Planned Buy Quantity)
+          const strat = tab ? (strategiesMap?.[tab.id] || (tab as any)?.strategy) : undefined;
+          const rowsSys2 = tab?.averagingRowsSys2 || strat?.averagingRowsSys2;
+          const rowsSys1 = tab?.averagingRows || strat?.averagingRows;
           const batchPlannedSizes: number[] = [0, 1, 2, 3].map((i) => {
-            const row = tab?.averagingRowsSys2?.[i];
+            const row = rowsSys2?.[i];
             const q1 = parseFloat(row?.quantity || "") || 0;
             const q2 = parseFloat(row?.quantity2 || "") || 0;
             if (q1 + q2 > 0) return q1 + q2;
@@ -3209,7 +5183,7 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
             return 0;
           });
           const totalSys2Planned = batchPlannedSizes.reduce((a, b) => a + b, 0);
-          const totalSys1Planned = (tab?.averagingRows || []).reduce((sum, r) => {
+          const totalSys1Planned = (rowsSys1 || []).reduce((sum: number, r: any) => {
             const q1 = parseFloat(r?.quantity || "") || 0;
             const q2 = parseFloat(r?.quantity2 || "") || 0;
             return sum + q1 + q2;
@@ -3223,38 +5197,28 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
               ? totalSys1Planned
               : 0;
 
-          // 3. 目前攤平欄位號碼 (#1, #2, #3, #4)
-          const effectiveDcaProgress = (() => {
-            if (pos.dcaProgress) return pos.dcaProgress;
-            // 自動偵測系統二或系統一已購買欄位
-            if (tab?.averagingRowsSys2?.[3]?.bought) return "#4";
-            if (tab?.averagingRowsSys2?.[2]?.bought) return "#3";
-            if (tab?.averagingRowsSys2?.[1]?.bought) return "#2";
-            if (tab?.averagingRowsSys2?.[0]?.bought) return "#1";
-            if (tab?.averagingRows?.[3]?.bought) return "#4";
-            if (tab?.averagingRows?.[2]?.bought) return "#3";
-            if (tab?.averagingRows?.[1]?.bought) return "#2";
-            if (tab?.averagingRows?.[0]?.bought) return "#1";
-            // 若有持有數量且有批次規劃，推算目前處於哪一批
-            if (effectiveHoldingQty > 0 && totalSys2Planned > 0) {
-              if (
-                effectiveHoldingQty >=
-                  batchPlannedSizes[0] + batchPlannedSizes[1] + batchPlannedSizes[2] &&
-                batchPlannedSizes[3] > 0
-              )
-                return "#4";
-              if (
-                effectiveHoldingQty >= batchPlannedSizes[0] + batchPlannedSizes[1] &&
-                batchPlannedSizes[2] > 0
-              )
-                return "#3";
-              if (effectiveHoldingQty >= batchPlannedSizes[0] && batchPlannedSizes[1] > 0)
-                return "#2";
-              return "#1";
-            }
-            if (effectiveHoldingQty > 0) return "#1";
-            return undefined;
-          })();
+          // 3. 目前攤平欄位號碼 (#1, #2, #3, #4) 或拆分交易選項
+          const cardTrades = tab ? (tradesMap?.[tab.id] || (tab as any)?.trades || []) : [];
+          const effectiveDcaProgress = getEffectiveDcaProgress(
+            pos.dcaProgress,
+            tab,
+            cardTrades,
+            effectiveHoldingQty,
+            effectivePlannedBuyQty,
+            strat
+          );
+
+          // 拆分交易選項與基準倉位/強制平倉價位計算
+          const splitOpt = findSplitTradeOption(effectiveDcaProgress);
+          const splitStageDetail = calculateSplitTradeStageDetail(
+            tab,
+            effectiveDcaProgress,
+            effectivePlannedBuyQty,
+            effectiveHoldingQty,
+            strat
+          );
+          const { basePrice: basePositionPrice, forceClosePrice: forcedLiquidationPrice } =
+            getStockBaseAndForceClosePrices(tab, strat, curPriceNum);
 
           // 4. 未實現損益金額 (Unrealized PnL)
           const effectiveUnrealizedPnL = (() => {
@@ -3273,14 +5237,28 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
 
           // 格式化最新現價
           const formattedCurrentPrice = (() => {
-            if (tab?.currentPrice !== undefined && tab.currentPrice !== null) {
-              const num = Number(tab.currentPrice);
-              if (!isNaN(num) && num > 0) {
-                return `$${num >= 100 ? num.toFixed(1) : num.toFixed(2)}`;
-              }
+            if (curPriceNum > 0) {
+              return `$${curPriceNum >= 100 ? curPriceNum.toFixed(1) : curPriceNum.toFixed(2)}`;
             }
             return null;
           })();
+
+          // 判定是否已經進行第一批、第二批、第三批、第四批交易或拆分交易
+          // 規則：若持有數量為 0 (或小於等於 0)，代表沒有任何交易，不須顯示「(交易中)」標籤
+          const isBatchTrading = Boolean(effectiveHoldingQty && Math.abs(effectiveHoldingQty) > 0);
+
+          // 計算四批次交易進度摘要資訊 (第一批15%, 第二批25%, 第三批35%, 第四批25%)
+          // 支援自訂每批/拆分股數與自動累進階梯，若目前已經在第四批則 nextBatch 為 null
+          const batchProgress = getStockBatchProgressSummary(
+            tab,
+            strat,
+            effectivePlannedBuyQty,
+            effectiveHoldingQty,
+            effectiveDcaProgress
+          );
+
+          // 判斷是否接近畫布頂部 (若 y < 16% 則快顯對話窗改顯示於圓圈下方，避免被畫布頂部裁切)
+          const isNearTop = pos.y < 16;
 
           return (
             <div
@@ -3293,7 +5271,7 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
                   handleJumpToCard(tab.id, sym, e);
                 }
               }}
-              className={`absolute z-20 cursor-grab active:cursor-grabbing transform -translate-x-1/2 -translate-y-1/2 group flex flex-col items-center select-none ${
+              className={`absolute z-20 hover:z-50 group select-none pointer-events-auto ${
                 isHidden ? "opacity-60 hover:opacity-100" : ""
               }`}
               style={{
@@ -3301,193 +5279,522 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
                 top: `${pos.y}%`,
               }}
             >
-              {/* Android Flat Design Spherical Tag - 運動球體標籤 (內部純白 #FFFFFF, 依設定顯示 6px 套用純色或 1px 預設黑, 勾選不改變邊框顏色, 內部文字 #000000) */}
-              <div
-                className={`relative flex flex-col items-center justify-center rounded-full transition-all select-none bg-white shadow-md hover:shadow-lg hover:scale-105 ${
-                  isHidden ? "border-dashed ring-1 ring-amber-500/50" : ""
-                }`}
-                style={{
-                  width: `${circleSize}px`,
-                  height: `${circleSize}px`,
-                  backgroundColor: "#FFFFFF",
-                  border: `${borderThickness} ${isHidden ? "dashed" : "solid"} ${tagBorderColor}`,
-                  boxShadow: isHidden
-                    ? "0 1px 4px rgba(0,0,0,0.08)"
-                    : "0 2px 6px rgba(0,0,0,0.10), 0 1px 3px rgba(0,0,0,0.06)",
-                }}
-                title={
-                  `【${sym}】${isHidden ? "(隱藏中)\n" : "\n"}` +
-                  `最新現價: ${formattedCurrentPrice || "-"}\n` +
-                  (effectiveAvgPrice > 0 ? `平均成本: $${effectiveAvgPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n` : "") +
-                  (effectiveDcaProgress ? `目前攤平: ${effectiveDcaProgress}\n` : "") +
-                  (effectivePlannedBuyQty > 0 ? `預計購買: ${effectivePlannedBuyQty.toLocaleString()} 股\n` : "") +
-                  (effectiveHoldingQty > 0 ? `已購數量: ${effectiveHoldingQty.toLocaleString()} 股\n` : "") +
-                  (hasHoldingOrPnL ? `未實現損益: ${effectiveUnrealizedPnL >= 0 ? "+" : "-"}$${Math.abs(effectiveUnrealizedPnL).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n` : "") +
-                  `分類: ${tab?.holdingStatus || "候選名單"}\n` +
-                  `模式: ${tab?.tradeType === "real" ? "真實交易" : "模擬交易"}\n` +
-                  (isSelected && tab ? "雙擊或點擊原點前往視覺圖示化卡片" : "拖曳至任意位置")
-                }
-              >
-                {/* 隱藏標籤指示徽章 (當處於顯示隱藏模式下醒目標示) */}
-                {isHidden && (
-                  <div className="absolute -top-3.5 px-1.5 py-0.2 bg-zinc-900/95 text-amber-300 border border-amber-500/60 rounded-full text-[8.5px] font-black flex items-center gap-0.5 pointer-events-none shadow-md z-30 tracking-tight">
-                    <EyeOff className="w-2.5 h-2.5 text-amber-300 stroke-[2.5]" />
-                    <span>隱藏中</span>
+              {/* 基準點：以圓圈幾何中心為絕對定位基準 (0, 0)，嚴格錨定於 (pos.x%, pos.y%) */}
+              <div className="absolute top-0 left-0 -translate-x-1/2 -translate-y-1/2 flex items-center justify-center cursor-grab active:cursor-grabbing">
+                {/* 輔助測試十字瞄準線 (當開啟輔助線測試時標記圓圈精準中心) */}
+                {showAuxiliaryTestLines && (
+                  <div className="absolute pointer-events-none w-8 h-8 flex items-center justify-center opacity-75 z-30">
+                    <div className="absolute w-full h-[1px] bg-sky-500 shadow-xs" />
+                    <div className="absolute h-full w-[1px] bg-sky-500 shadow-xs" />
+                    <div className="w-1.5 h-1.5 rounded-full bg-sky-600 ring-1 ring-white" />
                   </div>
                 )}
-                {/* Tickbox positioned at top-left of circle */}
-                <button
-                  type="button"
-                  onClick={(e) => handleToggleTagSelection(sym, e)}
-                  title={isSelected ? "取消勾選" : "勾選以個別調整尺寸與邊框顏色"}
-                  className={`absolute -top-1.5 -left-1.5 rounded-full flex items-center justify-center transition-all cursor-pointer z-10 ${
-                    isSelected
-                      ? "bg-[#D2F800] text-black border border-white shadow-xs scale-110"
-                      : "bg-zinc-800 text-transparent border border-zinc-500 hover:border-zinc-300 opacity-60 group-hover:opacity-100"
-                  }`}
-                  style={{
-                    width: `${Math.max(13, 15 + Math.round(effectiveSizeOffset * 0.2))}px`,
-                    height: `${Math.max(13, 15 + Math.round(effectiveSizeOffset * 0.2))}px`,
-                  }}
-                >
-                  <Check
-                    style={{
-                      width: `${Math.max(8, 10 + Math.round(effectiveSizeOffset * 0.2))}px`,
-                      height: `${Math.max(8, 10 + Math.round(effectiveSizeOffset * 0.2))}px`,
-                    }}
-                    className={isSelected ? "opacity-100 stroke-[3.5]" : "opacity-0"}
-                  />
-                </button>
 
-                {/* Status Dot (當處於勾選狀態時，點擊原點跳轉至該股視覺圖示化卡片) */}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    if (isSelected && tab) {
-                      handleJumpToCard(tab.id, sym, e);
-                    }
-                  }}
-                  disabled={!isSelected}
-                  title={
-                    isSelected && tab
-                      ? `點擊前往「${sym}」視覺圖示化卡片`
-                      : `${sym} (${tab?.holdingStatus || "候選名單"})`
-                  }
-                  className={`rounded-full ${conf?.dot || "bg-emerald-500"} shrink-0 mb-0.5 transition-all z-10 ${
-                    isSelected
-                      ? "cursor-pointer hover:scale-150 ring-2 ring-[#D2F800] active:scale-90 shadow-xs animate-pulse"
-                      : "cursor-default ring-1 ring-black/15"
-                  }`}
-                  style={{
-                    width: `${Math.max(5, dotSize)}px`,
-                    height: `${Math.max(5, dotSize)}px`,
-                  }}
-                />
-
-                {/* Stock Symbol - 內部文字極致黑 #000000 */}
-                <span
-                  className="font-black font-sans tracking-tight leading-none text-center uppercase z-10 select-none text-black"
-                  style={{
-                    fontSize: `${symbolFontSize}px`,
-                    color: "#000000",
-                  }}
-                >
-                  {sym}
-                </span>
-
-                {/* Latest Current Price - 最新現價 (內部文字極致黑 #000000) */}
-                {formattedCurrentPrice ? (
-                  <span
-                    className="font-mono font-black tracking-tight leading-none text-center mt-0.5 z-10 select-none text-black"
-                    style={{
-                      fontSize: `${priceFontSize}px`,
-                      color: "#000000",
-                    }}
-                  >
-                    {formattedCurrentPrice}
-                  </span>
-                ) : (
-                  <span
-                    className="font-mono font-bold leading-none text-center mt-0.5 z-10 opacity-30 select-none text-black"
-                    style={{
-                      fontSize: `${priceFontSize}px`,
-                      color: "#000000",
-                    }}
-                  >
-                    $--
-                  </span>
-                )}
-
-                {/* Delete button on hover / touch */}
-                <button
-                  type="button"
-                  onClick={(e) => handleRemoveStockFromCanvas(sym, e)}
-                  title={`從圖表刪除 ${sym}`}
-                  className="opacity-0 group-hover:opacity-100 absolute -top-1.5 -right-1.5 rounded-full bg-rose-600 hover:bg-rose-500 text-white flex items-center justify-center transition-all cursor-pointer shadow-sm z-20 active:scale-90"
-                  style={{
-                    width: `${btnSize}px`,
-                    height: `${btnSize}px`,
-                  }}
-                >
-                  <X style={{ width: `${Math.max(8, btnSize - 6)}px`, height: `${Math.max(8, btnSize - 6)}px` }} className="stroke-[2.5]" />
-                </button>
-              </div>
-
-              {/* 攤平進度 (#1~#4)、預計/已購數量與未實現損益標籤資訊卡 */}
-              {(effectiveDcaProgress || effectivePlannedBuyQty > 0 || effectiveHoldingQty > 0 || effectiveUnrealizedPnL !== 0) && (
+                {/* Android Flat Design Spherical Tag - 運動球體標籤 (內部純白 #FFFFFF, 依設定顯示 6px 套用純色或 1px 預設黑, 勾選不改變邊框顏色, 內部文字 #000000) */}
                 <div
-                  className="mt-1 flex flex-col items-center gap-0.5 pointer-events-none select-none z-10 animate-in fade-in zoom-in-95 duration-150"
+                  className={`relative flex flex-col items-center justify-center rounded-full transition-all select-none bg-white shadow-md hover:shadow-lg hover:scale-105 ${
+                    isHidden ? "border-dashed ring-1 ring-amber-500/50" : ""
+                  }`}
                   style={{
-                    maxWidth: `${Math.max(130, circleSize + 60)}px`,
+                    width: `${circleSize}px`,
+                    height: `${circleSize}px`,
+                    backgroundColor: "#FFFFFF",
+                    border: `${borderThickness} ${isHidden ? "dashed" : "solid"} ${tagBorderColor}`,
+                    boxShadow: isHidden
+                      ? "0 1px 4px rgba(0,0,0,0.08)"
+                      : "0 2px 6px rgba(0,0,0,0.10), 0 1px 3px rgba(0,0,0,0.06)",
                   }}
                 >
-                  {/* 第 1 列：目前攤平欄位號碼 (#1~#4) + 預計購買數量 & 已購數量 */}
-                  <div className="px-2 py-0.5 rounded-full bg-zinc-950/95 border border-zinc-700/80 shadow-md backdrop-blur-xs flex items-center justify-center gap-1.5 whitespace-nowrap">
-                    {effectiveDcaProgress && (
-                      <span className="font-mono font-black text-[#D2F800] bg-[#D2F800]/15 border border-[#D2F800]/60 px-1 py-0.2 rounded text-[9.5px] leading-tight tracking-tight">
-                        {effectiveDcaProgress}
-                      </span>
+                  {/* 隱藏標籤指示徽章 (當處於顯示隱藏模式下醒目標示) */}
+                  {isHidden && (
+                    <div className="absolute -top-3.5 px-1.5 py-0.2 bg-zinc-900/95 text-amber-300 border border-amber-500/60 rounded-full text-[8.5px] font-black flex items-center gap-0.5 pointer-events-none shadow-md z-30 tracking-tight">
+                      <EyeOff className="w-2.5 h-2.5 text-amber-300 stroke-[2.5]" />
+                      <span>隱藏中</span>
+                    </div>
+                  )}
+                  {/* Tickbox positioned at top-left of circle */}
+                  <button
+                    type="button"
+                    onClick={(e) => handleToggleTagSelection(sym, e)}
+                    title={isSelected ? "取消勾選 (已勾選時可按住 Shift 拖曳水平方向移動)" : "勾選以個別調整尺寸與邊框顏色，或按住 Shift 水平方向移動"}
+                    className={`absolute -top-1.5 -left-1.5 rounded-full flex items-center justify-center transition-all cursor-pointer z-10 ${
+                      isSelected
+                        ? "bg-[#D2F800] text-black border border-white shadow-xs scale-110"
+                        : "bg-zinc-800 text-transparent border border-zinc-500 hover:border-zinc-300 opacity-60 group-hover:opacity-100"
+                    }`}
+                    style={{
+                      width: `${Math.max(13, 15 + Math.round(effectiveSizeOffset * 0.2))}px`,
+                      height: `${Math.max(13, 15 + Math.round(effectiveSizeOffset * 0.2))}px`,
+                    }}
+                  >
+                    <Check
+                      style={{
+                        width: `${Math.max(8, 10 + Math.round(effectiveSizeOffset * 0.2))}px`,
+                        height: `${Math.max(8, 10 + Math.round(effectiveSizeOffset * 0.2))}px`,
+                      }}
+                      className={isSelected ? "opacity-100 stroke-[3.5]" : "opacity-0"}
+                    />
+                  </button>
+
+                  {/* Status Dot (當處於勾選狀態時，點擊原點跳轉至該股視覺圖示化卡片) */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      if (isSelected && tab) {
+                        handleJumpToCard(tab.id, sym, e);
+                      }
+                    }}
+                    disabled={!isSelected}
+                    title={
+                      isSelected && tab
+                        ? `點擊前往「${sym}」視覺圖示化卡片`
+                        : `${sym} (${tab?.holdingStatus || "候選名單"})`
+                    }
+                    className={`rounded-full ${conf?.dot || "bg-emerald-500"} shrink-0 mb-0.5 transition-all z-10 ${
+                      isSelected
+                        ? "cursor-pointer hover:scale-150 ring-2 ring-[#D2F800] active:scale-90 shadow-xs animate-pulse"
+                        : "cursor-default ring-1 ring-black/15"
+                    }`}
+                    style={{
+                      width: `${Math.max(5, dotSize)}px`,
+                      height: `${Math.max(5, dotSize)}px`,
+                    }}
+                  />
+
+                  {/* Stock Symbol - 內部文字極致黑 #000000 */}
+                  <span
+                    className="font-black font-sans tracking-tight leading-none text-center uppercase z-10 select-none text-black"
+                    style={{
+                      fontSize: `${symbolFontSize}px`,
+                      color: "#000000",
+                    }}
+                  >
+                    {sym}
+                  </span>
+
+                  {/* Latest Current Price - 最新現價 (內部文字極致黑 #000000) */}
+                  {formattedCurrentPrice ? (
+                    <span
+                      className="font-mono font-black tracking-tight leading-none text-center mt-0.5 z-10 select-none text-black"
+                      style={{
+                        fontSize: `${priceFontSize}px`,
+                        color: "#000000",
+                      }}
+                    >
+                      {formattedCurrentPrice}
+                    </span>
+                  ) : (
+                    <span
+                      className="font-mono font-bold leading-none text-center mt-0.5 z-10 opacity-30 select-none text-black"
+                      style={{
+                        fontSize: `${priceFontSize}px`,
+                        color: "#000000",
+                      }}
+                    >
+                      $--
+                    </span>
+                  )}
+
+                  {/* Delete button on hover / touch */}
+                  <button
+                    type="button"
+                    onClick={(e) => handleRemoveStockFromCanvas(sym, e)}
+                    title={`從圖表刪除 ${sym}`}
+                    className="opacity-0 group-hover:opacity-100 absolute -top-1.5 -right-1.5 rounded-full bg-rose-600 hover:bg-rose-500 text-white flex items-center justify-center transition-all cursor-pointer shadow-sm z-20 active:scale-90"
+                    style={{
+                      width: `${btnSize}px`,
+                      height: `${btnSize}px`,
+                    }}
+                  >
+                    <X style={{ width: `${Math.max(8, btnSize - 6)}px`, height: `${Math.max(8, btnSize - 6)}px` }} className="stroke-[2.5]" />
+                  </button>
+
+                  {/* 交易中標示徽章 (持有數量 > 0 且進行交易中時顯示 #CDFF3D 背景、黑色文字小標籤 (交易中)) */}
+                  {isBatchTrading && (
+                    <div
+                      className="absolute -bottom-2 px-1.5 py-0.2 bg-[#CDFF3D] text-black border border-black/40 rounded-full text-[8px] font-black shadow-xs tracking-tight flex items-center justify-center pointer-events-none z-20 whitespace-nowrap"
+                      style={{ backgroundColor: "#CDFF3D", color: "#000000" }}
+                    >
+                      <span>(交易中)</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* 滑鼠移動到該股票圓圈上時顯示的快顯對話窗 (全面取代原先灰色對話窗，字級加大 5px 帶來清晰體驗) */}
+                <div
+                  className={`absolute left-0 -translate-x-1/2 flex items-center pointer-events-none select-none z-50 transition-all duration-150 opacity-0 group-hover:opacity-100 scale-95 group-hover:scale-100 drop-shadow-2xl ${
+                    isNearTop ? "flex-col-reverse" : "flex-col"
+                  }`}
+                  style={{
+                    ...(isNearTop
+                      ? { top: `${circleSize / 2 + (isBatchTrading ? 32 : 26)}px` }
+                      : { bottom: `${circleSize / 2 + 12}px` }),
+                  }}
+                >
+                  <div className="bg-zinc-950/95 backdrop-blur-md border border-zinc-700/90 rounded-xl p-3.5 shadow-2xl flex flex-col gap-2 min-w-[350px] whitespace-nowrap ring-1 ring-white/10 text-left">
+                    {/* 標頭：個股代碼、現價與交易狀態 (原字級均 +5px) */}
+                    <div className="flex items-center justify-between border-b border-zinc-800 pb-2 px-0.5">
+                      <div className="flex items-center gap-2.5">
+                        <span className="text-white font-black text-[19px] tracking-tight">{sym}</span>
+                        {formattedCurrentPrice && (
+                          <span className="text-[#CDFF3D] font-mono font-black text-[17px]">{formattedCurrentPrice}</span>
+                        )}
+                        {isHidden && (
+                          <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[14px] px-1.5 py-0.5 rounded font-black">
+                            隱藏中
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {isBatchTrading && (
+                          <span className="bg-[#CDFF3D] text-black text-[14px] px-2 py-0.5 rounded-xs font-black">
+                            交易中
+                          </span>
+                        )}
+                        <span className={`text-[14.5px] px-2 py-0.5 rounded font-bold ${
+                          tab?.tradeType === "real"
+                            ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                            : "bg-sky-500/20 text-sky-300 border border-sky-500/30"
+                        }`}>
+                          {tab?.tradeType === "real" ? "真實交易" : "模擬交易"}
+                        </span>
+                        <span className="text-zinc-400 text-[15px] font-medium">
+                          {tab?.holdingStatus || "候選名單"}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* (目前) 批次資訊 - 高對比黃綠高亮 (原字級均 +5px) */}
+                    <div className="flex flex-col bg-zinc-900/90 rounded-lg px-2.5 py-2 border border-[#CDFF3D]/50 shadow-inner">
+                      <div className="flex items-center justify-between text-[16px] leading-none">
+                        <div className="flex items-center gap-2">
+                          <span className="bg-[#CDFF3D] text-black text-[14.5px] px-1.5 py-0.5 rounded-xs font-black tracking-tight shrink-0">
+                            目前
+                          </span>
+                          <span className="font-black text-[#CDFF3D] text-[16.5px]">
+                            {batchProgress.currentBatch.batchTitle}
+                          </span>
+                        </div>
+                        {batchProgress.currentBatch.remainingQty > 0 ? (
+                          <span className="text-[15px] text-zinc-400 font-mono">
+                            剩餘: <strong className="text-zinc-200">{batchProgress.currentBatch.remainingQty.toLocaleString()}</strong> 股
+                          </span>
+                        ) : (
+                          <span className="text-[15px] text-[#CDFF3D] font-bold">該批已滿額</span>
+                        )}
+                      </div>
+                      <div className="text-[16px] text-zinc-200 mt-2 flex items-center justify-between font-mono">
+                        <span>
+                          總計預購股數: <strong className="text-white font-black">{batchProgress.currentBatch.plannedQty.toLocaleString()}</strong> 股
+                        </span>
+                        <span className="text-zinc-500 font-bold mx-1.5">|</span>
+                        <span>
+                          已購股數: <strong className="text-[#CDFF3D] font-black">{batchProgress.currentBatch.boughtQty.toLocaleString()}</strong> 股
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* (下一批) 批次資訊 - 若目前在第四批則不顯示 (原字級均 +5px) */}
+                    {batchProgress.nextBatch && (
+                      <div className="flex flex-col bg-zinc-900/70 rounded-lg px-2.5 py-2 border border-sky-500/40">
+                        <div className="flex items-center justify-between text-[16px] leading-none">
+                          <div className="flex items-center gap-2">
+                            <span className="bg-sky-500 text-black text-[14.5px] px-1.5 py-0.5 rounded-xs font-black tracking-tight shrink-0">
+                              下一批
+                            </span>
+                            <span className="font-black text-sky-300 text-[16.5px]">
+                              {batchProgress.nextBatch.batchTitle}
+                            </span>
+                          </div>
+                          <span className="text-[15px] text-zinc-400 font-mono">
+                            剩餘: <strong className="text-zinc-300">{batchProgress.nextBatch.remainingQty.toLocaleString()}</strong> 股
+                          </span>
+                        </div>
+                        <div className="text-[16px] text-zinc-300 mt-2 flex items-center justify-between font-mono">
+                          <span>
+                            總計預購股數: <strong className="text-white font-black">{batchProgress.nextBatch.plannedQty.toLocaleString()}</strong> 股
+                          </span>
+                          <span className="text-zinc-500 font-bold mx-1.5">|</span>
+                          <span>
+                            已購股數: <strong className="text-sky-300 font-black">{batchProgress.nextBatch.boughtQty.toLocaleString()}</strong> 股
+                          </span>
+                        </div>
+                      </div>
                     )}
 
-                    <div className="flex items-center gap-1 text-[9.5px] font-mono leading-tight tracking-tight text-zinc-300">
-                      {effectiveHoldingQty > 0 ? (
-                        <span>
-                          已 <strong className="text-white font-black">{effectiveHoldingQty.toLocaleString()}</strong>
-                          {effectivePlannedBuyQty > 0 && (
-                            <span className="text-zinc-400">
-                              {" "}/ 預 <span className="text-amber-300 font-bold">{effectivePlannedBuyQty.toLocaleString()}</span>
-                            </span>
-                          )}
-                        </span>
-                      ) : effectivePlannedBuyQty > 0 ? (
-                        <span>
-                          預 <strong className="text-amber-300 font-bold">{effectivePlannedBuyQty.toLocaleString()}</strong> 股
-                        </span>
-                      ) : (
-                        <span className="text-zinc-500">無庫存</span>
-                      )}
+                    {/* 拆分階段細部資訊 (若有拆分交易，原字級均 +5px) */}
+                    {splitStageDetail && (
+                      <div className="flex flex-col bg-zinc-900/50 rounded-lg px-2.5 py-1.5 border border-purple-500/30 text-[15px]">
+                        <div className="flex items-center justify-between text-purple-300 font-bold">
+                          <span>拆分階段: {splitStageDetail.fullStageName}</span>
+                          <span className="text-zinc-400 font-mono">
+                            剩餘: <strong className="text-purple-200">{splitStageDetail.stageRemaining.toLocaleString()}</strong> 股
+                          </span>
+                        </div>
+                        <div className="text-zinc-400 mt-1 font-mono flex items-center justify-between">
+                          <span>階段預計: <strong className="text-zinc-200">{splitStageDetail.stageSize.toLocaleString()}</strong> 股</span>
+                          <span className="text-zinc-500 mx-1.5">|</span>
+                          <span>階段已購: <strong className="text-purple-300">{splitStageDetail.stageBought.toLocaleString()}</strong> 股</span>
+                        </div>
+                        {splitStageDetail.companionStage && (
+                          <div className="text-[14.5px] text-amber-300/90 mt-1 border-t border-purple-900/40 pt-1">
+                            伴隨: {splitStageDetail.companionStage.fullStageName} (預計 {splitStageDetail.companionStage.stageSize.toLocaleString()} / 已購 {splitStageDetail.companionStage.stageBought.toLocaleString()} / 餘 {splitStageDetail.companionStage.stageRemaining.toLocaleString()})
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* 持股成本、未實現損益、基準/強平價位區塊 (原字級均 +5px) */}
+                    {(effectiveHoldingQty > 0 || hasHoldingOrPnL || basePositionPrice !== null || forcedLiquidationPrice !== null) && (
+                      <div className="grid grid-cols-2 gap-2 bg-zinc-900/50 rounded-lg p-2 border border-zinc-800 text-[15px]">
+                        {effectiveAvgPrice > 0 && (
+                          <div className="text-zinc-400 font-mono">
+                            成本: <strong className="text-white">${effectiveAvgPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                          </div>
+                        )}
+                        {effectiveHoldingQty > 0 && (
+                          <div className="text-zinc-400 font-mono text-right">
+                            持股: <strong className="text-zinc-200">{effectiveHoldingQty.toLocaleString()}</strong> 股
+                          </div>
+                        )}
+                        {hasHoldingOrPnL && (
+                          <div className="text-zinc-400 font-mono col-span-2 flex items-center justify-between">
+                            <span>未實現損益:</span>
+                            <strong className={`font-black ${effectiveUnrealizedPnL >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                              {effectiveUnrealizedPnL >= 0 ? "+" : "-"}${Math.abs(effectiveUnrealizedPnL).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </strong>
+                          </div>
+                        )}
+                        {(basePositionPrice !== null || forcedLiquidationPrice !== null) && (
+                          <div className="col-span-2 flex items-center justify-between text-[14.5px] text-zinc-400 border-t border-zinc-800 pt-1.5 font-mono">
+                            {basePositionPrice !== null && (
+                              <span>基準倉位: <strong className="text-zinc-200">${basePositionPrice.toFixed(2)}</strong></span>
+                            )}
+                            {forcedLiquidationPrice !== null && (
+                              <span>強平價: <strong className="text-rose-400">${forcedLiquidationPrice.toFixed(2)}</strong></span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* 底部快捷提示 (原字級均 +5px) */}
+                    <div className="text-[14px] text-zinc-400 text-center border-t border-zinc-800/80 pt-1.5">
+                      {isSelected && tab ? "雙擊或點擊原點前往卡片 • 按住 Shift 鎖定水平拖曳" : "按住拖曳移動 • 按住 Shift 鎖定水平"}
                     </div>
                   </div>
 
-                  {/* 第 2 列：未實現損益金額 (當有持股或損益時顯示，明確標記正負與金額) */}
-                  {hasHoldingOrPnL && (
-                    <div
-                      className={`px-2 py-0.5 rounded-full text-[9.5px] font-mono font-black border shadow-xs flex items-center gap-1 whitespace-nowrap backdrop-blur-xs ${
-                        effectiveUnrealizedPnL > 0
-                          ? "bg-emerald-950/90 text-emerald-300 border-emerald-500/50"
-                          : effectiveUnrealizedPnL < 0
-                          ? "bg-rose-950/90 text-rose-300 border-rose-500/50"
-                          : "bg-zinc-900/90 text-zinc-300 border-zinc-700/60"
-                      }`}
-                    >
-                      <span className="text-[8.5px] opacity-80 uppercase tracking-tight">未實現</span>
-                      <span>
-                        {effectiveUnrealizedPnL > 0
-                          ? `+$${effectiveUnrealizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                          : effectiveUnrealizedPnL < 0
-                          ? `-$${Math.abs(effectiveUnrealizedPnL).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                          : "$0.00"}
-                      </span>
+                  {/* 指示箭頭 */}
+                  <div
+                    className={`w-0 h-0 border-x-5 border-x-transparent ${
+                      isNearTop
+                        ? "border-b-6 border-b-zinc-800 -mb-px"
+                        : "border-t-6 border-t-zinc-800 -mt-px"
+                    }`}
+                  />
+                </div>
+              </div>
+
+              {/* 攤平進度 (#1~#4) / 拆分交易 (含當前第幾批拆分與剩餘可用股數)、預計/已購數量、未實現損益與基準倉位/強制平倉價位 - 懸掛於圓圈下方，不影響圓圈中心座標基準 */}
+              {(effectiveDcaProgress || effectivePlannedBuyQty > 0 || effectiveHoldingQty > 0 || effectiveUnrealizedPnL !== 0 || basePositionPrice !== null || forcedLiquidationPrice !== null) && (
+                <div
+                  className="absolute left-0 -translate-x-1/2 flex flex-col items-center pointer-events-none select-none z-10 animate-in fade-in zoom-in-95 duration-150"
+                  style={{
+                    top: isBatchTrading ? `${circleSize / 2 + 5}px` : `${circleSize / 2 + 3}px`,
+                    width: "max-content",
+                    minWidth: "140px",
+                    maxWidth: `${Math.max(210, circleSize + 125)}px`,
+                  }}
+                >
+                  {/* 【批次明細列表】：每一批次單行整合，實心圓點 + 批次名稱與百分比(粗體) + 已/預股數(較小較淡接在後方) + 餘 X 股靠右 */}
+                  {(splitStageDetail || effectiveDcaProgress || effectivePlannedBuyQty > 0 || effectiveHoldingQty > 0) && (() => {
+                    // 輔助函式：提取批次名稱 (例如 "第四批" -> "第4批", "第三批" -> "第3批", "第二批" -> "第2批", "第一批" -> "第1批")
+                    const extractBatchLabel = (group?: string, name?: string) => {
+                      const source = (group || "") + " " + (name || "");
+                      if (source.includes("第四批") || source.includes("第4批") || source.includes("#4")) return "第4批";
+                      if (source.includes("第三批") || source.includes("第3批") || source.includes("#3")) return "第3批";
+                      if (source.includes("第二批") || source.includes("第2批") || source.includes("#2")) return "第2批";
+                      if (source.includes("第一批") || source.includes("第1批") || source.includes("#1")) return "第1批";
+                      return "第1批";
+                    };
+
+                    // 輔助函式：提取階段百分比文字
+                    const extractPercent = (name?: string) => {
+                      if (!name) return "";
+                      const m = name.match(/(\d+%)/);
+                      return m ? m[1] : "";
+                    };
+
+                    // 輔助函式：根據批次取得圓點顏色（高對比且與拆分交易選項色彩一致）
+                    const getDotColor = (label: string, isCompanion = false) => {
+                      if (label.includes("4")) return isCompanion ? "#f472b6" : "#c084fc";
+                      if (label.includes("3")) return isCompanion ? "#facc15" : "#fb923c";
+                      if (label.includes("2")) return isCompanion ? "#4ade80" : "#2dd4bf";
+                      return isCompanion ? "#22d3ee" : "#38bdf8";
+                    };
+
+                    // 輔助函式：格式化次要文字（已 X／預 Y 或 預購 X 股）
+                    const formatSubLine = (bought: number, size: number, isCurrentWithStock: boolean) => {
+                      if (bought > 0 || isCurrentWithStock) {
+                        return `已 ${bought.toLocaleString()}／預 ${size.toLocaleString()}`;
+                      }
+                      if (size > 0) {
+                        return `預購 ${size.toLocaleString()} 股`;
+                      }
+                      return "";
+                    };
+
+                    if (splitStageDetail) {
+                      const batchLabel1 = extractBatchLabel(
+                        splitStageDetail.batchGroup,
+                        splitStageDetail.fullStageName || splitStageDetail.stageName
+                      );
+                      const pct1 = extractPercent(splitStageDetail.fullStageName || splitStageDetail.stageName);
+                      const sub1 = formatSubLine(
+                        splitStageDetail.stageBought,
+                        splitStageDetail.stageSize,
+                        effectiveHoldingQty > 0
+                      );
+
+                      const comp = splitStageDetail.companionStage;
+                      const batchLabel2 = comp
+                        ? extractBatchLabel(undefined, comp.fullStageName || comp.stageName)
+                        : "";
+                      const pct2 = comp ? extractPercent(comp.fullStageName || comp.stageName) : "";
+                      const sub2 = comp
+                        ? formatSubLine(comp.stageBought, comp.stageSize, false)
+                        : "";
+
+                      return (
+                        <div className="w-full flex flex-col">
+                          {/* 當前階段：單行呈現，動態顯示對應批次，已/預股數接在批次後方 */}
+                          <div className="flex items-center justify-between gap-1.5 w-full leading-tight py-0.5">
+                            <div className="flex items-center gap-1 min-w-0">
+                              {/* 實心圓點：動態批次顏色 */}
+                              <span
+                                className="w-1.5 h-1.5 rounded-full shrink-0 shadow-xs ring-1 ring-white/30"
+                                style={{ backgroundColor: getDotColor(batchLabel1, false) }}
+                              />
+                              <span className="text-[11px] font-sans font-bold text-white tracking-tight whitespace-nowrap drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                                {batchLabel1}{pct1 ? " " : ""}{pct1 && <strong className="font-mono font-black text-white">{pct1}</strong>}
+                              </span>
+                              {sub1 && (
+                                <span className="text-[9.5px] font-mono font-medium text-zinc-400 tracking-tight whitespace-nowrap ml-1 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                                  {sub1}
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[11px] font-sans font-bold text-white tracking-tight whitespace-nowrap pl-1.5 ml-auto drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                              餘 {splitStageDetail.stageRemaining.toLocaleString()} 股
+                            </span>
+                          </div>
+
+                          {/* 伴隨階段：單行呈現，動態顯示對應伴隨批次 */}
+                          {comp && (
+                            <div className="flex items-center justify-between gap-1.5 w-full leading-tight py-0.5 mt-0.5">
+                              <div className="flex items-center gap-1 min-w-0">
+                                {/* 實心圓點：動態伴隨批次顏色 */}
+                                <span
+                                  className="w-1.5 h-1.5 rounded-full shrink-0 shadow-xs ring-1 ring-white/30"
+                                  style={{ backgroundColor: getDotColor(batchLabel2, true) }}
+                                />
+                                <span className="text-[11px] font-sans font-bold text-white tracking-tight whitespace-nowrap drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                                  {batchLabel2}{pct2 ? " " : ""}{pct2 && <strong className="font-mono font-black text-white">{pct2}</strong>}
+                                </span>
+                                {sub2 && (
+                                  <span className="text-[9.5px] font-mono font-medium text-zinc-400 tracking-tight whitespace-nowrap ml-1 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                                    {sub2}
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-[11px] font-sans font-bold text-white tracking-tight whitespace-nowrap pl-1.5 ml-auto drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                                餘 {comp.stageRemaining.toLocaleString()} 股
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+
+                    // 非拆分交易模式下的攤平進度或預購
+                    const batchLabel = effectiveDcaProgress
+                      ? (effectiveDcaProgress.includes("4") ? "第4批" :
+                         effectiveDcaProgress.includes("3") ? "第3批" :
+                         effectiveDcaProgress.includes("2") ? "第2批" :
+                         effectiveDcaProgress.includes("1") ? "第1批" :
+                         `第${effectiveDcaProgress.replace("#", "")}批`)
+                      : "第1批";
+                    const remShares = Math.max(0, effectivePlannedBuyQty - effectiveHoldingQty);
+                    const subText = effectiveHoldingQty > 0
+                      ? `已 ${effectiveHoldingQty.toLocaleString()}／預 ${effectivePlannedBuyQty.toLocaleString()}`
+                      : effectivePlannedBuyQty > 0
+                      ? `預購 ${effectivePlannedBuyQty.toLocaleString()} 股`
+                      : "";
+
+                    return (
+                      <div className="w-full flex flex-col">
+                        <div className="flex items-center justify-between gap-1.5 w-full leading-tight py-0.5">
+                          <div className="flex items-center gap-1 min-w-0">
+                            <span className="w-1.5 h-1.5 rounded-full shrink-0 shadow-xs ring-1 ring-white/30" style={{ backgroundColor: "#0e7490" }} />
+                            <span className="text-[11px] font-sans font-bold text-white tracking-tight whitespace-nowrap drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                              {batchLabel}
+                            </span>
+                            {subText && (
+                              <span className="text-[9.5px] font-mono font-medium text-zinc-400 tracking-tight whitespace-nowrap ml-1 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                                {subText}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[11px] font-sans font-bold text-white tracking-tight whitespace-nowrap pl-1.5 ml-auto drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                            餘 {remShares.toLocaleString()} 股
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* 【底部損益區】：與批次列表之間留適度垂直間距 */}
+                  {(hasHoldingOrPnL || basePositionPrice !== null || forcedLiquidationPrice !== null) && (
+                    <div className="flex flex-col items-center w-full mt-1.5">
+                      {/* 置中顯示「未實現 −$X.XX」，字級明顯大於其他文字、粗體，虧損紅色，獲利綠色 */}
+                      {hasHoldingOrPnL && (
+                        <div className="flex items-center justify-center whitespace-nowrap leading-tight">
+                          <span
+                            className={`font-mono font-black text-[13.5px] tracking-tight drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] ${
+                              effectiveUnrealizedPnL < 0
+                                ? "text-[#ef4444]"
+                                : effectiveUnrealizedPnL > 0
+                                ? "text-[#10b981]"
+                                : "text-zinc-300"
+                            }`}
+                          >
+                            {effectiveUnrealizedPnL < 0
+                              ? `未實現 -$${Math.abs(effectiveUnrealizedPnL).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                              : effectiveUnrealizedPnL > 0
+                              ? `未實現 +$${effectiveUnrealizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                              : "未實現 $0.00"}
+                          </span>
+                        </div>
+                      )}
+
+                      {/* 下方置中顯示一行「基準 X.XX → 平倉 X.XX」，改成白色粗體 */}
+                      {(basePositionPrice !== null || forcedLiquidationPrice !== null) && (
+                        <div className="flex items-center justify-center text-[10.5px] font-mono font-bold text-white leading-tight mt-0.5 whitespace-nowrap drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                          {basePositionPrice !== null && forcedLiquidationPrice !== null ? (
+                            <span>
+                              基準 {basePositionPrice >= 100 ? basePositionPrice.toFixed(1) : basePositionPrice.toFixed(2)} → 平倉 {forcedLiquidationPrice >= 100 ? forcedLiquidationPrice.toFixed(1) : forcedLiquidationPrice.toFixed(2)}
+                            </span>
+                          ) : basePositionPrice !== null ? (
+                            <span>
+                              基準 {basePositionPrice >= 100 ? basePositionPrice.toFixed(1) : basePositionPrice.toFixed(2)}
+                            </span>
+                          ) : (
+                            <span>
+                              平倉 {forcedLiquidationPrice! >= 100 ? forcedLiquidationPrice!.toFixed(1) : forcedLiquidationPrice!.toFixed(2)}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -3495,6 +5802,32 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
             </div>
           );
         })}
+        </div>
+
+        {/* 視角平移指示與一鍵復位膠囊 (當使用者使用滑鼠滾輪上下移動時顯示，點擊或雙擊空白處可復位) */}
+        {canvasPanY !== 0 && (
+          <div className="absolute top-4 right-4 z-40 flex items-center gap-2 bg-zinc-950/90 border border-zinc-700/90 rounded-full px-3 py-1.5 shadow-2xl backdrop-blur-md text-xs font-mono animate-in fade-in zoom-in-95 duration-150 pointer-events-auto select-none">
+            <span className="text-zinc-300 flex items-center gap-1">
+              <MoveVertical className="w-3.5 h-3.5 text-[#CDFF3D]" />
+              <span>視角位移:</span>
+              <strong className="text-[#CDFF3D]">
+                {canvasPanY > 0 ? `+${Math.round(canvasPanY)}` : Math.round(canvasPanY)}px
+              </strong>
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                playClickSound();
+                setCanvasPanY(0);
+                toast.info("已恢復預設置中視角");
+              }}
+              className="px-2.5 py-0.5 rounded-full bg-[#CDFF3D] hover:bg-[#b8ea2e] text-black font-black text-[11px] cursor-pointer transition-all active:scale-95 shadow-sm"
+              title="恢復畫布至預設置中視角 (雙擊空白處亦可復位)"
+            >
+              復位
+            </button>
+          </div>
+        )}
 
         {/* Bottom Coordinate Diagnostic & Calibration HUD (當開啟輔助線測試時顯示) */}
         {showAuxiliaryTestLines && activeCanvasSymbols.length > 0 && (() => {
@@ -3505,7 +5838,9 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
               ? selectedTagSymbols[0]
               : activeCanvasSymbols[0];
 
-          const diagTab = activeDiagSym ? allStockMap.get(activeDiagSym) : undefined;
+          const diagTab = activeDiagSym
+            ? allStockMap.get(activeDiagSym) || allTabs.find((t) => (t.symbol || "").trim().toUpperCase() === activeDiagSym)
+            : undefined;
           const stat = diagTab ? statsMap?.[diagTab.id] : undefined;
           const avgCost = stat?.totalQuantity !== 0 ? stat?.averagePrice : undefined;
           const holdingQty = stat?.totalQuantity ?? (diagTab as any)?.holdingQuantity;
@@ -3676,14 +6011,14 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
         {/* Empty state hint */}
         {activeCanvasSymbols.length === 0 && (
           <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center pointer-events-none">
-            <div className="w-16 h-16 rounded-full bg-black text-white flex items-center justify-center mb-4 shadow-2xl">
+            <div className="w-16 h-16 rounded-full bg-zinc-900 border border-zinc-700 text-white flex items-center justify-center mb-4 shadow-2xl">
               <Tag className="w-7 h-7 text-[#D2F800]" />
             </div>
-            <p className="font-black text-lg sm:text-xl text-black uppercase tracking-wider mb-1.5">
+            <p className="font-black text-lg sm:text-xl text-white uppercase tracking-wider mb-1.5">
               圖表上目前沒有任何美股標籤
             </p>
-            <p className="text-xs text-zinc-600 max-w-md leading-relaxed mb-4 font-medium">
-              請點選上方「<strong className="text-black font-black">選擇區塊股票</strong>」選單，勾選欲呈現的股票代號新增至視覺線上；拖曳至理想位置後，按下「<strong className="text-black font-black">儲存位置 (Shift+S)</strong>」即可保存。
+            <p className="text-xs text-zinc-400 max-w-md leading-relaxed mb-4 font-medium">
+              請點選上方「<strong className="text-white font-black">選擇區塊股票</strong>」選單，勾選欲呈現的股票代號新增至視覺線上；拖曳至理想位置後，按下「<strong className="text-white font-black">儲存位置 (Shift+S)</strong>」即可保存。
             </p>
             <button
               type="button"
@@ -3691,7 +6026,7 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
                 playClickSound();
                 setIsStockDropdownOpen(true);
               }}
-              className="pointer-events-auto px-5 py-2.5 bg-black hover:bg-zinc-800 text-[#D2F800] rounded-full text-xs font-black tracking-wider uppercase flex items-center gap-2 transition-all shadow-lg cursor-pointer active:scale-95"
+              className="pointer-events-auto px-5 py-2.5 bg-black hover:bg-zinc-800 text-[#D2F800] rounded-full text-xs font-black tracking-wider uppercase flex items-center gap-2 transition-all shadow-lg cursor-pointer active:scale-95 border border-zinc-700"
             >
               <Plus className="w-4 h-4 text-[#D2F800] stroke-[3]" />
               <span>新增美股標籤</span>
@@ -3700,14 +6035,15 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
         )}
 
         {/* Bottom Helper Bar - Nike Precision Track Aesthetic */}
-        <div className="absolute bottom-3 left-5 right-5 flex items-center justify-between text-[11px] text-zinc-500 font-mono pointer-events-none">
+        <div className="absolute bottom-3 left-5 right-5 flex items-center justify-between text-[11px] text-zinc-400 font-mono pointer-events-none">
           <div className="flex items-center gap-4">
+            <span className="text-[#CDFF3D] font-bold">• 滾輪上下平移視角 (雙擊空白處復位)</span>
             <span>• 拖曳標籤任意定位 (DRAG TO POSITION)</span>
-            <span>• 懸停標籤可點擊 <strong className="text-rose-600 font-bold">✕</strong> 刪除</span>
-            <span>• 儲存快速鍵 <strong className="text-black font-black">SHIFT + S</strong></span>
+            <span>• 懸停標籤可點擊 <strong className="text-rose-400 font-bold">✕</strong> 刪除</span>
+            <span>• 儲存快速鍵 <strong className="text-white font-black">SHIFT + S</strong></span>
           </div>
           <div>
-            <span className="uppercase tracking-wider">圖表共有 <strong className="text-black font-black text-xs">{activeCanvasSymbols.length}</strong> 檔標籤</span>
+            <span className="uppercase tracking-wider">圖表共有 <strong className="text-white font-black text-xs">{activeCanvasSymbols.length}</strong> 檔標籤</span>
           </div>
         </div>
       </main>

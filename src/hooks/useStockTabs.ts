@@ -100,6 +100,15 @@ export function useStockTabs() {
   }, [user]);
 
   const updateTradeType = useCallback(async (id: string, tradeType: 'simulated' | 'real') => {
+    setTabs(prev => {
+      const next = prev.map(t => (t.id === id ? { ...t, tradeType } : t));
+      if (user?.uid) {
+        try {
+          safeLocalStorage.setItem(`cached_stock_tabs_v3_${user.uid}`, JSON.stringify(next));
+        } catch (e) {}
+      }
+      return next;
+    });
     try {
       await updateDoc(doc(db, 'stockTabs', id), {
         tradeType,
@@ -109,9 +118,18 @@ export function useStockTabs() {
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `stockTabs/${id}`);
     }
-  }, []);
+  }, [user?.uid]);
 
   const updateTabStatus = useCallback(async (id: string, status: 'ACTIVE' | 'COMPLETED', finalPnL?: number) => {
+    setTabs(prev => {
+      const next = prev.map(t => (t.id === id ? { ...t, status, ...(finalPnL !== undefined ? { finalPnL } : {}) } : t));
+      if (user?.uid) {
+        try {
+          safeLocalStorage.setItem(`cached_stock_tabs_v3_${user.uid}`, JSON.stringify(next));
+        } catch (e) {}
+      }
+      return next;
+    });
     try {
       const data: any = {
         status,
@@ -125,9 +143,18 @@ export function useStockTabs() {
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `stockTabs/${id}`);
     }
-  }, []);
+  }, [user?.uid]);
 
   const updateCurrentPrice = useCallback(async (id: string, price: number) => {
+    setTabs(prev => {
+      const next = prev.map(t => (t.id === id ? { ...t, currentPrice: price } : t));
+      if (user?.uid) {
+        try {
+          safeLocalStorage.setItem(`cached_stock_tabs_v3_${user.uid}`, JSON.stringify(next));
+        } catch (e) {}
+      }
+      return next;
+    });
     try {
       await updateDoc(doc(db, 'stockTabs', id), {
         currentPrice: price
@@ -136,9 +163,18 @@ export function useStockTabs() {
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `stockTabs/${id}`);
     }
-  }, []);
+  }, [user?.uid]);
 
   const updateTabHidden = useCallback(async (id: string, isHidden: boolean) => {
+    setTabs(prev => {
+      const next = prev.map(t => (t.id === id ? { ...t, isHidden } : t));
+      if (user?.uid) {
+        try {
+          safeLocalStorage.setItem(`cached_stock_tabs_v3_${user.uid}`, JSON.stringify(next));
+        } catch (e) {}
+      }
+      return next;
+    });
     try {
       await updateDoc(doc(db, 'stockTabs', id), {
         isHidden,
@@ -148,7 +184,7 @@ export function useStockTabs() {
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `stockTabs/${id}`);
     }
-  }, []);
+  }, [user?.uid]);
 
   const updateTabOrder = useCallback(async (updates: { id: string, sortOrder: number }[]) => {
     try {
@@ -165,8 +201,18 @@ export function useStockTabs() {
   }, []);
 
   const updateTab = useCallback(async (id: string, data: Partial<StockTab>) => {
-    // Optimistically update local tabs state immediately for zero-latency response
-    setTabs(prev => prev.map(t => t.id === id ? { ...t, ...data } : t));
+    // Optimistically update local tabs state and persistent cache immediately for zero-latency response
+    setTabs(prev => {
+      const next = prev.map(t => (t.id === id ? { ...t, ...data } : t));
+      if (user?.uid) {
+        try {
+          safeLocalStorage.setItem(`cached_stock_tabs_v3_${user.uid}`, JSON.stringify(next));
+        } catch (e) {
+          // ignore
+        }
+      }
+      return next;
+    });
     try {
       await updateDoc(doc(db, 'stockTabs', id), {
         ...data,
@@ -175,16 +221,25 @@ export function useStockTabs() {
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `stockTabs/${id}`);
     }
-  }, []);
+  }, [user?.uid]);
 
   const deleteTab = useCallback(async (id: string) => {
+    setTabs(prev => {
+      const next = prev.filter(t => t.id !== id);
+      if (user?.uid) {
+        try {
+          safeLocalStorage.setItem(`cached_stock_tabs_v3_${user.uid}`, JSON.stringify(next));
+        } catch (e) {}
+      }
+      return next;
+    });
     try {
       await deleteDoc(doc(db, 'stockTabs', id));
       toast.success('股票分頁已刪除');
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `stockTabs/${id}`);
     }
-  }, []);
+  }, [user?.uid]);
 
   return { tabs, loading, addTab, updateTabStatus, updateCurrentPrice, updateTradeType, updateTabHidden, updateTabOrder, updateTab, deleteTab };
 }

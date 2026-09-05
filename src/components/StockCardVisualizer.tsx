@@ -1446,11 +1446,12 @@ export const StockCardVisualizer: React.FC<Props> = ({
         };
       } else if (initial.type === 'divider') {
         const newY = Math.max(0, Math.min(100, (initial.y ?? initial.y1 ?? 0) + dy));
+        const roundedY = Math.round(newY * 100) / 100;
         return {
           ...ann,
-          y: newY,
-          y1: newY,
-          y2: newY,
+          y: roundedY,
+          y1: roundedY,
+          y2: roundedY,
           x1: 0,
           x2: 100,
         };
@@ -1646,8 +1647,9 @@ export const StockCardVisualizer: React.FC<Props> = ({
       setEraserHoverPoint(coords);
       eraseAnnotationsAt(coords, false);
     } else if (currentMode === 'divider') {
+      const fixedY = Math.max(0, Math.min(100, Math.round(coords.y * 100) / 100));
       const newId = `div-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      activeNewDividerIdRef.current = newId;
+      activeNewDividerIdRef.current = null;
       const newAnn: ChartAnnotation = {
         id: newId,
         type: 'divider',
@@ -1655,12 +1657,15 @@ export const StockCardVisualizer: React.FC<Props> = ({
         strokeWidth: activeThicknessRef.current,
         x1: 0,
         x2: 100,
-        y1: coords.y,
-        y2: coords.y,
-        y: coords.y,
+        y1: fixedY,
+        y2: fixedY,
+        y: fixedY,
       };
       pushToHistoryAndSave([...localAnnotationsRef.current, newAnn], true);
-      toast.success("已新增水平線 (Divider)", { duration: 1000 });
+      toast.success("已新增水平分隔線，位置已固定 (如需移動請切換至「拖曳」模式)", { duration: 1500 });
+      setMode('cursor');
+      modeRef.current = 'cursor';
+      setHoverPoint(null);
     } else if (currentMode === 'text') {
       setInputCoords(coords);
       setInputText('');
@@ -1686,23 +1691,6 @@ export const StockCardVisualizer: React.FC<Props> = ({
       }
     } else if (currentMode === 'divider') {
       setHoverPoint(coords);
-      // Real-time drag support when mouse is held down right after divider creation
-      if (activeNewDividerIdRef.current) {
-        const activeId = activeNewDividerIdRef.current;
-        const updated = localAnnotationsRef.current.map((ann) => {
-          if (ann.id === activeId) {
-            return {
-              ...ann,
-              y: coords.y,
-              y1: coords.y,
-              y2: coords.y,
-            };
-          }
-          return ann;
-        });
-        setLocalAnnotations(updated);
-        localAnnotationsRef.current = updated;
-      }
     }
 
     if (!isDrawingRef.current || !startPointRef.current) return;
@@ -1713,7 +1701,6 @@ export const StockCardVisualizer: React.FC<Props> = ({
   const finishDrawing = () => {
     if (activeNewDividerIdRef.current) {
       activeNewDividerIdRef.current = null;
-      onUpdateAnnotationsRef.current?.(localAnnotationsRef.current);
     }
 
     if (!isDrawingRef.current || !startPointRef.current || !activePointRef.current) {
@@ -1809,8 +1796,9 @@ export const StockCardVisualizer: React.FC<Props> = ({
       setEraserHoverPoint(coords);
       eraseAnnotationsAt(coords, false);
     } else if (currentMode === 'divider') {
+      const fixedY = Math.max(0, Math.min(100, Math.round(coords.y * 100) / 100));
       const newId = `div-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      activeNewDividerIdRef.current = newId;
+      activeNewDividerIdRef.current = null;
       const newAnn: ChartAnnotation = {
         id: newId,
         type: 'divider',
@@ -1818,12 +1806,15 @@ export const StockCardVisualizer: React.FC<Props> = ({
         strokeWidth: activeThicknessRef.current,
         x1: 0,
         x2: 100,
-        y1: coords.y,
-        y2: coords.y,
-        y: coords.y,
+        y1: fixedY,
+        y2: fixedY,
+        y: fixedY,
       };
       pushToHistoryAndSave([...localAnnotationsRef.current, newAnn], true);
-      toast.success("已新增水平線 (Divider)", { duration: 1000 });
+      toast.success("已新增水平分隔線，位置已固定 (如需移動請切換至「拖曳」模式)", { duration: 1500 });
+      setMode('cursor');
+      modeRef.current = 'cursor';
+      setHoverPoint(null);
     } else if (currentMode === 'text') {
       setInputCoords(coords);
       setInputText('');
@@ -1852,22 +1843,6 @@ export const StockCardVisualizer: React.FC<Props> = ({
       }
     } else if (currentMode === 'divider') {
       setHoverPoint(coords);
-      if (activeNewDividerIdRef.current) {
-        const activeId = activeNewDividerIdRef.current;
-        const updated = localAnnotationsRef.current.map((ann) => {
-          if (ann.id === activeId) {
-            return {
-              ...ann,
-              y: coords.y,
-              y1: coords.y,
-              y2: coords.y,
-            };
-          }
-          return ann;
-        });
-        setLocalAnnotations(updated);
-        localAnnotationsRef.current = updated;
-      }
     }
 
     if (!isDrawingRef.current || !startPointRef.current) return;
@@ -3363,7 +3338,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
           })}
 
           {/* Visual indicator deletion dots & close icons during Interactive cursor mode */}
-          {mode === 'cursor' && localAnnotations.map((ann) => {
+          {mode === 'cursor' && localAnnotations.filter(ann => ann.type !== 'divider').map((ann) => {
             const center = getCenterCoords(ann);
             return (
               <div
@@ -3374,31 +3349,27 @@ export const StockCardVisualizer: React.FC<Props> = ({
                   transform: 'translate(-50%, -50%)',
                   touchAction: 'none',
                 }}
-                className="absolute z-[45] pointer-events-auto group/del p-1 cursor-pointer"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleDeleteAnnotation(ann.id);
-                }}
-                onTouchStart={(e) => {
-                  e.stopPropagation();
-                  if (e.cancelable) e.preventDefault();
-                  handleDeleteAnnotation(ann.id);
-                }}
+                className="absolute z-[45] pointer-events-auto group/del p-1"
               >
                 {/* Micro circle representing annotation target anchor */}
                 <div 
-                  className="w-2.5 h-2.5 sm:w-1.5 sm:h-1.5 rounded-full border border-black/50 shadow shadow-black flex items-center justify-center transition-all duration-200 cursor-pointer group-hover/del:scale-125 bg-white/30" 
+                  className="w-2.5 h-2.5 sm:w-1.5 sm:h-1.5 rounded-full border border-black/50 shadow shadow-black flex items-center justify-center transition-all duration-200 group-hover/del:scale-125 bg-white/30" 
                   style={{ backgroundColor: ann.color }}
                 />
                 
-                {/* Deletion handle triggers on hover or tap */}
+                {/* Deletion handle triggers ONLY on deliberate click of the close button */}
                 <button
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
                     handleDeleteAnnotation(ann.id);
                   }}
-                  className="hidden group-hover/del:flex absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4.5 h-4.5 items-center justify-center bg-red-600 hover:bg-red-500 text-white rounded-full shadow-lg border border-white/25 text-[8px] font-black transition-colors"
+                  onTouchStart={(e) => {
+                    e.stopPropagation();
+                    if (e.cancelable) e.preventDefault();
+                    handleDeleteAnnotation(ann.id);
+                  }}
+                  className="hidden group-hover/del:flex absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4.5 h-4.5 items-center justify-center bg-red-600 hover:bg-red-500 text-white rounded-full shadow-lg border border-white/25 text-[8px] font-black transition-colors cursor-pointer"
                   title="刪除此備註"
                 >
                   ✕
