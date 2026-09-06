@@ -509,6 +509,7 @@ export default function Dashboard() {
   const [aiMobileActiveTab, setAiMobileActiveTab] = useState<"controls" | "preview">("controls");
   const [aiSelectedSymbol, setAiSelectedSymbol] = useState("");
   const [aiSelectedPromptId, setAiSelectedPromptId] = useState("fundamental");
+  const [isAiPromptDropdownOpen, setIsAiPromptDropdownOpen] = useState(false);
   const [aiPromptText, setAiPromptText] = useState("");
   const [aiHtmlFiles, setAiHtmlFiles] = useState<any[]>([]);
   const [selectedPreviewUrl, setSelectedPreviewUrl] = useState<string | null>(null);
@@ -542,10 +543,52 @@ export default function Dashboard() {
   const [confirmDeletePromptId, setConfirmDeletePromptId] = useState<string | null>(null);
   const [confirmDeleteFileId, setConfirmDeleteFileId] = useState<number | null>(null);
 
-  const handleSavePrompts = (updated: typeof dynamicPrompts) => {
+  const handleSavePrompts = async (updated: typeof dynamicPrompts) => {
     setDynamicPrompts(updated);
     safeLocalStorage.setItem("custom_prompt_templates", JSON.stringify(updated));
+    if (user?.uid) {
+      try {
+        await fetch("/api/user-prompts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: user.uid, prompts: updated }),
+        });
+      } catch (err) {
+        console.error("Failed to sync prompts to server:", err);
+      }
+    }
   };
+
+  // 跨裝置同步指令模版：確保電腦版、平板與手機的下拉選單模版資料完全一致
+  useEffect(() => {
+    if (!user?.uid) return;
+    const syncPromptsCrossDevice = async () => {
+      try {
+        const res = await fetch(`/api/user-prompts?userId=${encodeURIComponent(user.uid)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && Array.isArray(data.prompts) && data.prompts.length > 0) {
+            setDynamicPrompts(data.prompts);
+            safeLocalStorage.setItem("custom_prompt_templates", JSON.stringify(data.prompts));
+          } else {
+            // 後端尚未有儲存紀錄時，將本機已存在的模版（例如電腦版現有模版）自動上傳至後端備份
+            const localSaved = safeLocalStorage.getItem("custom_prompt_templates");
+            const promptsToUpload = localSaved ? JSON.parse(localSaved) : dynamicPrompts;
+            if (Array.isArray(promptsToUpload) && promptsToUpload.length > 0) {
+              await fetch("/api/user-prompts", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ userId: user.uid, prompts: promptsToUpload }),
+              });
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Failed to sync prompts cross-device:", err);
+      }
+    };
+    syncPromptsCrossDevice();
+  }, [user?.uid]);
 
   const uniqueActiveStocks = useMemo(() => {
     const seen = new Set<string>();
@@ -10226,76 +10269,88 @@ export default function Dashboard() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[99999] bg-[#0a0a0a] flex flex-col p-4 sm:p-6 text-white select-none overflow-hidden"
+            data-lenis-prevent
+            className="fixed inset-0 z-[99999] bg-black/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 text-white overflow-y-auto"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) {
+                setIsAiAnalysisOpen(false);
+                setIsAiPromptDropdownOpen(false);
+              }
+            }}
           >
-            {/* Top Bar */}
-            <div className="w-full flex items-center justify-between border-b border-white/5 pb-4 opacity-90">
-              <div className="flex items-center gap-2">
-                <span className="text-[#e5484d] text-base leading-none animate-pulse">●</span>
-                <span className="text-[13px] font-semibold tracking-wider text-zinc-400 font-sans">
-                  AI 搜尋分析與 Airtap 回傳 · AI FOCUS ANALYTICS
-                </span>
-              </div>
-              <div className="flex items-center gap-4">
-                <span className="text-xs text-zinc-500 font-sans">
-                  ESC 鍵可退出 AI 分析模式
-                </span>
-                <button
-                  onClick={() => setIsAiAnalysisOpen(false)}
-                  className="w-8 h-8 rounded-full border border-white/10 hover:border-white/20 bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/80 hover:text-white transition-all cursor-pointer text-xs"
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 10 }}
+              transition={{ duration: 0.2 }}
+              data-lenis-prevent
+              className="w-full max-w-2xl bg-[#141416] border border-white/10 rounded-2xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden my-auto"
+            >
+              {/* Modal Header */}
+              <div className="flex items-center justify-between px-4 sm:px-6 py-3.5 border-b border-white/10 bg-[#18181b]/70">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#e5484d] to-rose-600 flex items-center justify-center shadow-md shadow-[#e5484d]/20 shrink-0">
+                    <Sparkles className="w-4 h-4 text-white" />
+                  </div>
+                  <div className="flex flex-col min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm sm:text-base font-bold text-white tracking-wide truncate">
+                        AI 搜尋分析指令
+                      </span>
+                      {aiSelectedSymbol && (
+                        <div className="relative shrink-0">
+                          <select
+                            value={aiSelectedSymbol}
+                            onChange={(e) => {
+                              setAiSelectedSymbol(e.target.value);
+                              playClickSound();
+                            }}
+                            className="bg-[#e5484d]/20 hover:bg-[#e5484d]/30 text-[#ff7176] border border-[#e5484d]/40 rounded-full px-2.5 py-0.5 text-xs font-black cursor-pointer appearance-none pr-5 focus:outline-none"
+                            title="切換分析個股"
+                          >
+                            {uniqueActiveStocks.map((s) => (
+                              <option key={s.symbol} value={s.symbol} className="bg-[#18181b] text-white">
+                                {s.symbol} {s.companyName ? `(${s.companyName})` : ""}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown className="w-3 h-3 text-[#ff7176] absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        </div>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-zinc-400">
+                      一鍵生成 DeepSeek 專業分析 Prompt
+                    </span>
+                  </div>
+                </div>
 
-            {/* Mobile Tab Switcher */}
-            <div className="flex sm:hidden items-center justify-center gap-2 mt-3 pt-2 border-t border-white/5">
-              <button
-                type="button"
-                onClick={() => {
-                  setAiMobileActiveTab("controls");
-                  playClickSound();
-                }}
-                className={`flex-1 py-2 text-xs font-bold rounded-lg border transition-all ${
-                  aiMobileActiveTab === "controls"
-                    ? "bg-[#e5484d] text-white border-[#e5484d]"
-                    : "bg-white/5 text-zinc-400 border-white/5"
-                }`}
-              >
-                指令控制台
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setAiMobileActiveTab("preview");
-                  playClickSound();
-                }}
-                className={`flex-1 py-2 text-xs font-bold rounded-lg border transition-all flex items-center justify-center gap-1.5 ${
-                  aiMobileActiveTab === "preview"
-                    ? "bg-emerald-600 text-white border-emerald-600"
-                    : "bg-white/5 text-zinc-400 border-white/5"
-                }`}
-              >
-                <span>網頁報告預覽</span>
-                {selectedPreviewUrl && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-pulse" />
-                )}
-              </button>
-            </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      playClickSound();
+                      setIsAiAnalysisOpen(false);
+                      setIsAiPromptDropdownOpen(false);
+                    }}
+                    className="w-8 h-8 rounded-full border border-white/10 hover:border-white/20 bg-white/5 hover:bg-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition-all cursor-pointer text-xs"
+                    title="關閉 (ESC)"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
 
-            {/* Main Section */}
-            <div className="flex-1 w-full flex flex-col lg:flex-row min-h-0 relative mt-4 overflow-hidden gap-6">
-              {/* Left Column */}
-              <div className={`w-full lg:w-[420px] shrink-0 flex-col gap-4 lg:border-r lg:border-white/5 lg:pr-6 justify-start py-2 overflow-y-auto scrollbar-hide ${aiMobileActiveTab === "controls" ? "flex" : "hidden lg:flex"}`}>
-                
+              {/* Modal Body */}
+              <div
+                data-lenis-prevent
+                className="p-4 sm:p-6 overflow-y-auto overscroll-contain flex flex-col gap-4 max-h-[calc(92vh-130px)]"
+              >
                 {isPromptManagerOpen ? (
+                  /* Prompt Manager Mode */
                   <div className="flex flex-col gap-4 animate-fadeIn">
-                    {/* Header */}
                     <div className="flex items-center justify-between border-b border-white/5 pb-2">
-                      <div className="flex items-center gap-1.5 text-xs font-bold text-amber-500 tracking-wider">
-                        <Settings className="w-3.5 h-3.5 text-amber-500 animate-spin" />
-                        <span>管理指令模版 PROMPT MANAGE</span>
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-amber-400 tracking-wider">
+                        <Settings className="w-3.5 h-3.5 text-amber-400 animate-spin" />
+                        <span>管理指令模版 PROMPT TEMPLATES</span>
                       </div>
                       <button
                         onClick={() => {
@@ -10307,275 +10362,232 @@ export default function Dashboard() {
                           setEditingPromptNote("");
                           playClickSound();
                         }}
-                        className="text-[10px] text-zinc-400 hover:text-white bg-white/5 px-2.5 py-1 rounded transition-all border border-white/5 cursor-pointer"
+                        className="text-xs text-zinc-300 hover:text-white bg-white/10 hover:bg-white/15 px-3 py-1 rounded-lg transition-all border border-white/10 cursor-pointer font-bold"
                       >
                         返回分析
                       </button>
                     </div>
 
-                    {/* Editor list */}
-                    <div className="flex flex-col gap-3">
-                      {editingPromptId ? (
-                        <div className="p-3 bg-white/5 rounded-lg border border-amber-500/20 flex flex-col gap-2.5">
-                          <div className="text-[10px] font-bold text-amber-400 flex items-center gap-1">
-                            <Edit3 className="w-3 h-3 text-amber-400" />
-                            <span>正在編輯指令</span>
-                          </div>
-                          
-                          <div className="flex flex-col gap-1">
-                            <label className="text-[9px] text-zinc-400 font-bold">模版名稱</label>
-                            <input
-                              type="text"
-                              value={editingPromptName}
-                              onChange={(e) => setEditingPromptName(e.target.value)}
-                              className="w-full bg-[#161616] border border-white/10 text-white rounded px-2.5 py-1.5 text-xs focus:outline-none focus:border-red-500"
-                            />
-                          </div>
-
-                          <div className="flex flex-col gap-1">
-                            <label className="text-[9px] text-zinc-400 font-bold">模版備註 (選填)</label>
-                            <input
-                              type="text"
-                              placeholder="輸入模版備註 (選填)"
-                              value={editingPromptNote}
-                              onChange={(e) => setEditingPromptNote(e.target.value)}
-                              className="w-full bg-[#161616] border border-white/10 text-white rounded px-2.5 py-1.5 text-xs focus:outline-none focus:border-red-500"
-                            />
-                          </div>
-
-                          <div className="flex flex-col gap-1">
-                            <label className="text-[9px] text-zinc-400 font-bold">
-                              模版內容 (支援 &#123;symbol&#125;, &#123;companyName&#125;)
-                            </label>
-                            <textarea
-                              value={editingPromptTemplate}
-                              onChange={(e) => setEditingPromptTemplate(e.target.value)}
-                              rows={5}
-                              className="w-full bg-[#161616] border border-white/10 text-white rounded p-2 text-xs focus:outline-none focus:border-red-500 resize-none leading-relaxed"
-                            />
-                          </div>
-
-                          <div className="flex items-center gap-2 pt-1">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (!editingPromptName.trim() || !editingPromptTemplate.trim()) {
-                                  toast.error("請填寫模版名稱與內容");
-                                  return;
-                                }
-                                const updated = dynamicPrompts.map((p) =>
-                                  p.id === editingPromptId
-                                    ? {
-                                        ...p,
-                                        name: editingPromptName.trim(),
-                                        template: editingPromptTemplate.trim(),
-                                        note: editingPromptNote.trim() || undefined,
-                                      }
-                                    : p
-                                );
-                                handleSavePrompts(updated);
-                                setEditingPromptId(null);
-                                toast.success("模版已更新");
-                                playClickSound();
-                              }}
-                              className="flex-1 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded transition-all cursor-pointer"
-                            >
-                              儲存修改
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setEditingPromptId(null)}
-                              className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold rounded transition-all cursor-pointer"
-                            >
-                              取消
-                            </button>
-                          </div>
+                    {/* New or Edit Form */}
+                    {editingPromptId ? (
+                      <div className="p-3.5 bg-white/5 rounded-xl border border-amber-500/30 flex flex-col gap-3">
+                        <div className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
+                          <Edit3 className="w-3.5 h-3.5 text-amber-400" />
+                          <span>正在編輯模版</span>
                         </div>
-                      ) : (
-                        <div className="p-3 bg-white/[0.02] rounded-lg border border-white/5 flex flex-col gap-2.5">
-                          <div className="text-[10px] font-bold text-zinc-400 flex items-center gap-1">
-                            <Plus className="w-3 h-3 text-zinc-400" />
-                            <span>新增指令模版</span>
-                          </div>
-
-                          <div className="flex flex-col gap-1">
-                            <label className="text-[9px] text-zinc-500 font-bold">模版名稱</label>
-                            <input
-                              type="text"
-                              placeholder="例：基本面深入檢視"
-                              value={newPromptName}
-                              onChange={(e) => setNewPromptName(e.target.value)}
-                              className="w-full bg-[#161616] border border-white/10 text-white rounded px-2.5 py-1.5 text-xs focus:outline-none focus:border-red-500"
-                            />
-                          </div>
-
-                          <div className="flex flex-col gap-1">
-                            <label className="text-[9px] text-zinc-500 font-bold">模版備註 (選填)</label>
-                            <input
-                              type="text"
-                              placeholder="輸入模版備註 (選填)"
-                              value={newPromptNote}
-                              onChange={(e) => setNewPromptNote(e.target.value)}
-                              className="w-full bg-[#161616] border border-white/10 text-white rounded px-2.5 py-1.5 text-xs focus:outline-none focus:border-red-500"
-                            />
-                          </div>
-
-                          <div className="flex flex-col gap-1">
-                            <label className="text-[9px] text-zinc-500 font-bold">
-                              模版內容 (支援 &#123;symbol&#125;, &#123;companyName&#125;)
-                            </label>
-                            <textarea
-                              placeholder="請輸入指令內容，可包含變數 &#123;symbol&#125; 與 &#123;companyName&#125;..."
-                              value={newPromptTemplate}
-                              onChange={(e) => setNewPromptTemplate(e.target.value)}
-                              rows={3}
-                              className="w-full bg-[#161616] border border-white/10 text-white rounded p-2 text-xs focus:outline-none focus:border-red-500 resize-none leading-relaxed"
-                            />
-                          </div>
-
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[11px] text-zinc-400 font-bold">模版名稱</label>
+                          <input
+                            type="text"
+                            value={editingPromptName}
+                            onChange={(e) => setEditingPromptName(e.target.value)}
+                            className="w-full bg-[#18181b] border border-white/10 text-white rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[11px] text-zinc-400 font-bold">模版備註 (選填)</label>
+                          <input
+                            type="text"
+                            placeholder="輸入模版備註"
+                            value={editingPromptNote}
+                            onChange={(e) => setEditingPromptNote(e.target.value)}
+                            className="w-full bg-[#18181b] border border-white/10 text-white rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[11px] text-zinc-400 font-bold">
+                            模版內容 (支援 &#123;symbol&#125;, &#123;companyName&#125;)
+                          </label>
+                          <textarea
+                            value={editingPromptTemplate}
+                            onChange={(e) => setEditingPromptTemplate(e.target.value)}
+                            rows={4}
+                            className="w-full bg-[#18181b] border border-white/10 text-white rounded-lg p-2.5 text-xs focus:outline-none focus:border-amber-500 resize-none font-mono leading-relaxed"
+                          />
+                        </div>
+                        <div className="flex items-center gap-2 pt-1">
                           <button
                             type="button"
                             onClick={() => {
-                              if (!newPromptName.trim() || !newPromptTemplate.trim()) {
+                              if (!editingPromptName.trim() || !editingPromptTemplate.trim()) {
                                 toast.error("請填寫模版名稱與內容");
                                 return;
                               }
-                              const newP = {
-                                id: `prompt_${Date.now()}`,
-                                name: newPromptName.trim(),
-                                template: newPromptTemplate.trim(),
-                                note: newPromptNote.trim() || undefined,
-                              };
-                              const updated = [...dynamicPrompts, newP];
+                              const updated = dynamicPrompts.map((p) =>
+                                p.id === editingPromptId
+                                  ? {
+                                      ...p,
+                                      name: editingPromptName.trim(),
+                                      template: editingPromptTemplate.trim(),
+                                      note: editingPromptNote.trim() || undefined,
+                                    }
+                                  : p
+                              );
                               handleSavePrompts(updated);
-                              setNewPromptName("");
-                              setNewPromptTemplate("");
-                              setNewPromptNote("");
-                              setAiSelectedPromptId(newP.id);
-                              toast.success("已新增指令模版");
+                              setEditingPromptId(null);
+                              toast.success("模版已更新");
                               playClickSound();
                             }}
-                            className="w-full py-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded transition-all cursor-pointer border border-white/10"
+                            className="flex-1 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-lg transition-all cursor-pointer"
                           >
-                            確認新增
+                            儲存修改
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingPromptId(null)}
+                            className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold rounded-lg transition-all cursor-pointer"
+                          >
+                            取消
                           </button>
                         </div>
-                      )}
+                      </div>
+                    ) : (
+                      <div className="p-3.5 bg-white/[0.02] rounded-xl border border-white/10 flex flex-col gap-3">
+                        <div className="text-xs font-bold text-zinc-300 flex items-center gap-1.5">
+                          <Plus className="w-3.5 h-3.5 text-zinc-400" />
+                          <span>新增指令模版</span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <input
+                            type="text"
+                            placeholder="模版名稱 (例：總經面分析)"
+                            value={newPromptName}
+                            onChange={(e) => setNewPromptName(e.target.value)}
+                            className="w-full bg-[#18181b] border border-white/10 text-white rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[#e5484d]"
+                          />
+                          <input
+                            type="text"
+                            placeholder="模版備註 (選填)"
+                            value={newPromptNote}
+                            onChange={(e) => setNewPromptNote(e.target.value)}
+                            className="w-full bg-[#18181b] border border-white/10 text-white rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[#e5484d]"
+                          />
+                        </div>
+                        <textarea
+                          placeholder="請輸入指令內容，可包含變數 &#123;symbol&#125; 與 &#123;companyName&#125;..."
+                          value={newPromptTemplate}
+                          onChange={(e) => setNewPromptTemplate(e.target.value)}
+                          rows={3}
+                          className="w-full bg-[#18181b] border border-white/10 text-white rounded-lg p-2.5 text-xs focus:outline-none focus:border-[#e5484d] resize-none font-mono leading-relaxed"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!newPromptName.trim() || !newPromptTemplate.trim()) {
+                              toast.error("請填寫模版名稱與內容");
+                              return;
+                            }
+                            const newP = {
+                              id: `prompt_${Date.now()}`,
+                              name: newPromptName.trim(),
+                              template: newPromptTemplate.trim(),
+                              note: newPromptNote.trim() || undefined,
+                            };
+                            const updated = [...dynamicPrompts, newP];
+                            handleSavePrompts(updated);
+                            setNewPromptName("");
+                            setNewPromptTemplate("");
+                            setNewPromptNote("");
+                            setAiSelectedPromptId(newP.id);
+                            toast.success("已新增指令模版");
+                            playClickSound();
+                          }}
+                          className="w-full py-2 bg-white/10 hover:bg-white/15 text-white text-xs font-bold rounded-lg transition-all cursor-pointer border border-white/10"
+                        >
+                          確認新增模版
+                        </button>
+                      </div>
+                    )}
 
-                      {/* Templates list with edit/delete buttons */}
-                      {/* Templates list with edit/delete buttons */}
-                      <div className="flex flex-col gap-2 mt-2">
-                        {dynamicPrompts.map((prompt) => (
-                          <div
-                            key={prompt.id}
-                            className="p-2.5 bg-white/[0.03] hover:bg-white/[0.06] border border-white/5 rounded-lg flex items-start justify-between gap-2 transition-all"
-                          >
-                            <div className="flex flex-col gap-0.5 flex-1 min-w-0">
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-xs font-bold text-white truncate">{prompt.name}</span>
-                                {prompt.note && (
-                                  <span className="text-[10px] text-zinc-400 bg-white/5 px-1.5 py-0.5 rounded border border-white/5 truncate">
-                                    {prompt.note}
-                                  </span>
-                                )}
-                              </div>
-                              <p className="text-[10px] text-zinc-500 line-clamp-2 leading-relaxed">
-                                {prompt.template}
-                              </p>
-                            </div>
-                            <div className="flex items-center gap-1 shrink-0">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setEditingPromptId(prompt.id);
-                                  setEditingPromptName(prompt.name);
-                                  setEditingPromptTemplate(prompt.template);
-                                  setEditingPromptNote(prompt.note || "");
-                                  playClickSound();
-                                }}
-                                className="p-1 text-zinc-400 hover:text-amber-400 transition-all rounded hover:bg-white/5"
-                                title="編輯模版"
-                              >
-                                <Edit3 className="w-3.5 h-3.5" />
-                              </button>
-                              {confirmDeletePromptId === prompt.id ? (
-                                <div className="flex items-center gap-1">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const updated = dynamicPrompts.filter((p) => p.id !== prompt.id);
-                                      handleSavePrompts(updated);
-                                      if (aiSelectedPromptId === prompt.id && updated.length > 0) {
-                                        setAiSelectedPromptId(updated[0].id);
-                                      }
-                                      setConfirmDeletePromptId(null);
-                                      toast.success("已刪除模版");
-                                      playClickSound();
-                                    }}
-                                    className="px-1.5 py-0.5 bg-red-600 hover:bg-red-500 text-[10px] text-white font-bold rounded"
-                                  >
-                                    確定
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setConfirmDeletePromptId(null)}
-                                    className="px-1.5 py-0.5 bg-zinc-700 text-[10px] text-zinc-300 rounded"
-                                  >
-                                    取消
-                                  </button>
-                                </div>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => setConfirmDeletePromptId(prompt.id)}
-                                  className="p-1 text-zinc-400 hover:text-red-400 transition-all rounded hover:bg-white/5"
-                                  title="刪除模版"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
+                    {/* Template list */}
+                    <div
+                      data-lenis-prevent
+                      onWheel={(e) => e.stopPropagation()}
+                      className="flex flex-col gap-2 max-h-60 overflow-y-auto overscroll-contain pr-1"
+                    >
+                      {dynamicPrompts.map((prompt) => (
+                        <div
+                          key={prompt.id}
+                          className="p-3 bg-white/[0.03] hover:bg-white/[0.06] border border-white/5 rounded-xl flex items-start justify-between gap-3 transition-all"
+                        >
+                          <div className="flex flex-col gap-1 flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-bold text-white truncate">{prompt.name}</span>
+                              {prompt.note && (
+                                <span className="text-[10px] text-zinc-400 bg-white/5 px-2 py-0.5 rounded border border-white/5 truncate">
+                                  {prompt.note}
+                                </span>
                               )}
                             </div>
+                            <p className="text-[11px] text-zinc-400 line-clamp-2 leading-relaxed font-mono">
+                              {prompt.template}
+                            </p>
                           </div>
-                        ))}
-                      </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingPromptId(prompt.id);
+                                setEditingPromptName(prompt.name);
+                                setEditingPromptTemplate(prompt.template);
+                                setEditingPromptNote(prompt.note || "");
+                                playClickSound();
+                              }}
+                              className="p-1.5 text-zinc-400 hover:text-amber-400 rounded-lg hover:bg-white/5 transition-all"
+                              title="編輯"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                            {confirmDeletePromptId === prompt.id ? (
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const updated = dynamicPrompts.filter((p) => p.id !== prompt.id);
+                                    handleSavePrompts(updated);
+                                    if (aiSelectedPromptId === prompt.id && updated.length > 0) {
+                                      setAiSelectedPromptId(updated[0].id);
+                                    }
+                                    setConfirmDeletePromptId(null);
+                                    toast.success("已刪除模版");
+                                    playClickSound();
+                                  }}
+                                  className="px-2 py-1 bg-red-600 hover:bg-red-500 text-[10px] text-white font-bold rounded"
+                                >
+                                  確定
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeletePromptId(null)}
+                                  className="px-2 py-1 bg-zinc-700 text-[10px] text-zinc-300 rounded"
+                                >
+                                  取消
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeletePromptId(prompt.id)}
+                                className="p-1.5 text-zinc-400 hover:text-red-400 rounded-lg hover:bg-white/5 transition-all"
+                                title="刪除"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 ) : (
+                  /* Standard Prompt Execution View */
                   <div className="flex flex-col gap-4 animate-fadeIn">
-                    {/* Stock Selector */}
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider flex items-center justify-between">
-                        <span>1. 選擇分析個股</span>
-                        <span className="text-[10px] font-normal text-zinc-500">
-                          共 {uniqueActiveStocks.length} 檔持股
-                        </span>
-                      </label>
-                      <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto p-1 bg-white/[0.02] border border-white/5 rounded-lg">
-                        {uniqueActiveStocks.map((stock) => (
-                          <button
-                            key={stock.symbol}
-                            type="button"
-                            onClick={() => {
-                              setAiSelectedSymbol(stock.symbol);
-                              playClickSound();
-                            }}
-                            className={`px-2.5 py-1 text-xs font-bold rounded transition-all cursor-pointer ${
-                              aiSelectedSymbol === stock.symbol
-                                ? "bg-[#e5484d] text-white shadow-sm"
-                                : "bg-white/5 text-zinc-400 hover:bg-white/10 hover:text-white"
-                            }`}
-                          >
-                            {stock.symbol}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Prompt Template Selector */}
+                    {/* Prompt Template Selector (Dropdown Mode) */}
                     <div className="flex flex-col gap-1.5">
                       <div className="flex items-center justify-between">
-                        <label className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">
-                          2. 選擇分析指令模版
+                        <label className="text-xs font-bold text-zinc-300 flex items-center gap-1.5">
+                          <span>選擇指令模版</span>
+                          <span className="text-[10px] text-zinc-500 font-normal">PROMPT TEMPLATE</span>
                         </label>
                         <button
                           type="button"
@@ -10583,247 +10595,223 @@ export default function Dashboard() {
                             setIsPromptManagerOpen(true);
                             playClickSound();
                           }}
-                          className="text-[10px] text-amber-400 hover:text-amber-300 flex items-center gap-1 font-bold cursor-pointer"
+                          className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1.5 font-bold transition-all cursor-pointer px-2 py-0.5 rounded hover:bg-amber-400/10"
                         >
-                          <Settings className="w-3 h-3" />
+                          <Settings className="w-3.5 h-3.5" />
                           <span>管理模版</span>
                         </button>
                       </div>
-                      <select
-                        value={aiSelectedPromptId}
-                        onChange={(e) => {
-                          setAiSelectedPromptId(e.target.value);
-                          playClickSound();
-                        }}
-                        className="w-full bg-[#161616] border border-white/10 text-white rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-red-500 cursor-pointer"
-                      >
-                        {dynamicPrompts.map((prompt) => (
-                          <option key={prompt.id} value={prompt.id}>
-                            {prompt.name} {prompt.note ? `(${prompt.note})` : ""}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
 
-                    {/* Prompt Preview & Quick Actions */}
-                    <div className="flex flex-col gap-1.5">
-                      <div className="flex items-center justify-between">
-                        <label className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">
-                          3. 指令內容與執行
-                        </label>
+                      <div className="relative w-full">
+                        {/* Custom Dropdown Trigger Button */}
                         <button
                           type="button"
+                          id="ai-prompt-template-trigger"
                           onClick={() => {
-                            navigator.clipboard.writeText(aiPromptText);
-                            toast.success("已複製指令內容");
+                            setIsAiPromptDropdownOpen(!isAiPromptDropdownOpen);
                             playClickSound();
                           }}
-                          className="text-[10px] text-zinc-400 hover:text-white flex items-center gap-1 cursor-pointer"
+                          className={`w-full bg-[#18181b] border text-left flex items-center justify-between text-white rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-medium transition-all shadow-inner cursor-pointer ${
+                            isAiPromptDropdownOpen
+                              ? "border-[#e5484d] ring-1 ring-[#e5484d]/40"
+                              : "border-white/15 hover:border-white/25"
+                          }`}
                         >
-                          <Copy className="w-3 h-3" />
-                          <span>僅複製文字</span>
+                          <span className="truncate pr-2">
+                            {dynamicPrompts.find((p) => p.id === aiSelectedPromptId)?.name || "選擇指令模版..."}
+                          </span>
+                          <ChevronDown
+                            className={`w-4 h-4 text-zinc-400 shrink-0 transition-transform duration-200 ${
+                              isAiPromptDropdownOpen ? "rotate-180 text-white" : ""
+                            }`}
+                          />
                         </button>
+
+                        {/* Dropdown Menu Popup - 比例適中、嚴格鎖定寬度不外溢、文字單行截斷 */}
+                        {isAiPromptDropdownOpen && (
+                          <>
+                            {/* Backdrop for click outside */}
+                            <div
+                              className="fixed inset-0 z-40"
+                              onClick={() => setIsAiPromptDropdownOpen(false)}
+                            />
+                            <div
+                              data-lenis-prevent
+                              onWheel={(e) => e.stopPropagation()}
+                              className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-[#18181b] border border-white/20 rounded-xl shadow-2xl py-1 max-h-56 overflow-y-auto overscroll-contain divide-y divide-white/5 backdrop-blur-xl"
+                            >
+                              {dynamicPrompts.map((t) => {
+                                const isSelected = t.id === aiSelectedPromptId;
+                                return (
+                                  <button
+                                    key={t.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setAiSelectedPromptId(t.id);
+                                      setIsAiPromptDropdownOpen(false);
+                                      playClickSound();
+                                    }}
+                                    className={`w-full text-left px-3.5 py-2 text-xs sm:text-sm flex items-center justify-between gap-2 transition-colors cursor-pointer ${
+                                      isSelected
+                                        ? "bg-[#e5484d]/15 text-[#ff7176] font-semibold"
+                                        : "text-zinc-200 hover:bg-white/10 hover:text-white"
+                                    }`}
+                                  >
+                                    <span className="truncate flex-1" title={t.name}>
+                                      {t.name}
+                                    </span>
+                                    {isSelected && (
+                                      <Check className="w-3.5 h-3.5 text-[#ff7176] shrink-0" />
+                                    )}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </>
+                        )}
                       </div>
-                      <textarea
-                        value={aiPromptText}
-                        onChange={(e) => setAiPromptText(e.target.value)}
-                        rows={4}
-                        className="w-full bg-[#161616] border border-white/10 text-white rounded-lg p-2.5 text-xs focus:outline-none focus:border-red-500 resize-none leading-relaxed"
-                      />
-                      <button
-                        type="button"
-                        onClick={handlePasteOnDeepseek}
-                        className="w-full py-2.5 bg-gradient-to-r from-[#e5484d] to-red-600 hover:from-red-500 hover:to-red-600 text-white text-xs font-bold rounded-lg transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer mt-1"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                        <span>複製指令並開啓 Deepseek</span>
-                      </button>
+
+                      {/* Note card if available */}
+                      {(() => {
+                        const currentPrompt = dynamicPrompts.find((p) => p.id === aiSelectedPromptId);
+                        if (!currentPrompt?.note) return null;
+                        return (
+                          <div className="px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs flex items-center gap-2">
+                            <span className="font-bold shrink-0">說明:</span>
+                            <span className="text-zinc-300 truncate">{currentPrompt.note}</span>
+                          </div>
+                        );
+                      })()}
                     </div>
 
-                    {/* File Upload & Manage Section */}
-                    <div className="flex flex-col gap-2 pt-2 border-t border-white/5">
+                    {/* Prompt Preview & Edit Textarea */}
+                    <div className="flex flex-col gap-1.5">
                       <div className="flex items-center justify-between">
-                        <label className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">
-                          4. HTML 分析報告管理
+                        <label className="text-xs font-bold text-zinc-300 flex items-center gap-1.5">
+                          <span>指令預覽與編輯</span>
+                          <span className="text-[10px] text-zinc-500 font-normal">PROMPT CONTENT</span>
                         </label>
-                        <div className="flex items-center gap-1 bg-white/5 p-0.5 rounded border border-white/5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-mono text-zinc-500">
+                            {aiPromptText.length} 字元
+                          </span>
                           <button
                             type="button"
                             onClick={() => {
-                              setAiLeftTab("upload");
+                              navigator.clipboard.writeText(aiPromptText);
+                              toast.success("已複製指令內容至剪貼簿");
                               playClickSound();
                             }}
-                            className={`px-2 py-0.5 text-[10px] font-bold rounded transition-all ${
-                              aiLeftTab === "upload"
-                                ? "bg-white/10 text-white"
-                                : "text-zinc-400 hover:text-white"
-                            }`}
+                            className="text-xs text-zinc-400 hover:text-white flex items-center gap-1 px-2 py-0.5 rounded bg-white/5 hover:bg-white/10 transition-all cursor-pointer"
                           >
-                            上傳報告
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setAiLeftTab("preview");
-                              playClickSound();
-                            }}
-                            className={`px-2 py-0.5 text-[10px] font-bold rounded transition-all ${
-                              aiLeftTab === "preview"
-                                ? "bg-white/10 text-white"
-                                : "text-zinc-400 hover:text-white"
-                            }`}
-                          >
-                            報告清單 ({aiHtmlFiles.length})
+                            <Copy className="w-3 h-3" />
+                            <span>僅複製文字</span>
                           </button>
                         </div>
                       </div>
 
-                      {aiLeftTab === "upload" ? (
-                        <div className="p-3 bg-white/[0.02] border border-dashed border-white/10 rounded-lg flex flex-col gap-2.5">
+                      <textarea
+                        data-lenis-prevent
+                        value={aiPromptText}
+                        onChange={(e) => setAiPromptText(e.target.value)}
+                        onWheel={(e) => e.stopPropagation()}
+                        rows={6}
+                        className="w-full bg-[#18181b] border border-white/15 text-zinc-100 rounded-xl p-3 text-xs sm:text-sm font-mono focus:outline-none focus:border-[#e5484d] leading-relaxed resize-none shadow-inner overflow-y-auto overscroll-contain select-text"
+                      />
+                    </div>
+
+                    {/* Big Action Button */}
+                    <button
+                      type="button"
+                      onClick={handlePasteOnDeepseek}
+                      className="w-full py-3 sm:py-3.5 bg-gradient-to-r from-[#e5484d] via-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg shadow-[#e5484d]/25 active:scale-[0.99]"
+                    >
+                      <Copy className="w-4 h-4" />
+                      <span>複製指令並開啓 Deepseek 進行分析</span>
+                      <ExternalLink className="w-3.5 h-3.5 opacity-80" />
+                    </button>
+
+                    {/* Compact HTML Reports Section (Upload & Saved list with direct new tab links) */}
+                    <div className="flex flex-col gap-2 pt-3 border-t border-white/10">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <FileText className="w-3.5 h-3.5 text-emerald-400" />
+                          <span className="text-xs font-bold text-zinc-300">
+                            HTML 分析報告 ({aiHtmlFiles.length})
+                          </span>
+                        </div>
+                        <label className="text-xs text-emerald-400 hover:text-emerald-300 flex items-center gap-1 font-bold cursor-pointer px-2 py-0.5 rounded bg-emerald-500/10 hover:bg-emerald-500/20 transition-all">
+                          <Upload className="w-3 h-3" />
+                          <span>上傳新報告</span>
                           <input
                             type="file"
                             accept=".html,.htm"
                             onChange={handleAiFileChange}
-                            className="text-xs text-zinc-400 file:mr-2 file:py-1 file:px-2.5 file:rounded file:border-0 file:text-xs file:font-bold file:bg-white/10 file:text-white hover:file:bg-white/20 cursor-pointer"
+                            className="hidden"
                           />
-                          {aiUploadFile && (
-                            <div className="text-[10px] text-emerald-400 flex items-center gap-1">
-                              <span>已選取檔案: {aiUploadFile.name}</span>
-                            </div>
-                          )}
+                        </label>
+                      </div>
+
+                      {/* Upload confirmation bar if a file is chosen */}
+                      {aiUploadContent && (
+                        <div className="p-2.5 bg-emerald-950/40 border border-emerald-500/40 rounded-xl flex items-center justify-between gap-2">
+                          <div className="text-xs text-emerald-300 truncate">
+                            檔案已選取: {aiUploadFile?.name}
+                          </div>
                           <button
                             type="button"
                             onClick={handleAiUploadSubmit}
-                            disabled={isAiUploading || !aiUploadContent}
-                            className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                            disabled={isAiUploading}
+                            className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold rounded-lg shrink-0 flex items-center gap-1 cursor-pointer"
                           >
-                            <Upload className="w-3.5 h-3.5" />
-                            <span>{isAiUploading ? "上傳中..." : "確認上傳 HTML 報告"}</span>
+                            {isAiUploading ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Upload className="w-3.5 h-3.5" />
+                            )}
+                            <span>確認上傳</span>
                           </button>
                         </div>
-                      ) : (
-                        <div className="flex flex-col gap-1.5 max-h-48 overflow-y-auto">
-                          {aiHtmlFiles.length === 0 ? (
-                            <div className="text-center py-6 text-xs text-zinc-500">
-                              尚未上傳此個股的 HTML 報告
-                            </div>
-                          ) : (
-                            aiHtmlFiles.map((file) => (
-                              <div
-                                key={file.id}
-                                onClick={() => {
-                                  setSelectedPreviewUrl(`/api/html-files/${file.id}/content`);
-                                  setSelectedPreviewLinkTitle(file.fileName);
-                                  setAiMobileActiveTab("preview");
-                                  playClickSound();
-                                }}
-                                className={`p-2 rounded-lg border transition-all flex items-center justify-between gap-2 cursor-pointer ${
-                                  selectedPreviewUrl === `/api/html-files/${file.id}/content`
-                                    ? "bg-emerald-950/40 border-emerald-500/40 text-emerald-300"
-                                    : "bg-white/[0.02] hover:bg-white/5 border-white/5 text-zinc-300"
-                                }`}
+                      )}
+
+                      {/* Compact reports list */}
+                      {aiHtmlFiles.length > 0 && (
+                        <div className="flex flex-col gap-1.5 max-h-36 overflow-y-auto pr-1">
+                          {aiHtmlFiles.map((f: any) => (
+                            <div
+                              key={f.id}
+                              className="p-2 bg-white/[0.02] hover:bg-white/5 border border-white/5 hover:border-white/15 rounded-lg flex items-center justify-between gap-2 transition-all"
+                            >
+                              <a
+                                href={`/api/html-files/${f.id}/content`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="flex items-center gap-2 min-w-0 flex-1 group cursor-pointer"
+                                title="在新分頁開啟完整報告"
                               >
-                                <div className="flex items-center gap-2 min-w-0 flex-1">
-                                  <FileText className="w-3.5 h-3.5 shrink-0 text-emerald-400" />
-                                  <div className="flex flex-col min-w-0">
-                                    <span className="text-xs font-bold truncate">{file.fileName}</span>
-                                    <span className="text-[9px] text-zinc-500">
-                                      {file.createdAt ? new Date(file.createdAt).toLocaleString("zh-TW") : ""}
-                                    </span>
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-1 shrink-0">
-                                  {confirmDeleteFileId === file.id ? (
-                                    <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                                      <button
-                                        type="button"
-                                        onClick={(e) => handleAiDeleteHtmlFile(e, file.id)}
-                                        className="px-1.5 py-0.5 bg-red-600 hover:bg-red-500 text-[10px] text-white font-bold rounded"
-                                      >
-                                        刪除
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => setConfirmDeleteFileId(null)}
-                                        className="px-1.5 py-0.5 bg-zinc-700 text-[10px] text-zinc-300 rounded"
-                                      >
-                                        取消
-                                      </button>
-                                    </div>
-                                  ) : (
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setConfirmDeleteFileId(file.id);
-                                      }}
-                                      className="p-1 text-zinc-500 hover:text-red-400 rounded"
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            ))
-                          )}
+                                <FileText className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                <span className="text-xs font-mono text-zinc-300 group-hover:text-emerald-300 truncate">
+                                  {f.fileName}
+                                </span>
+                                <ExternalLink className="w-3 h-3 text-zinc-500 group-hover:text-emerald-300 shrink-0 opacity-70" />
+                              </a>
+                              <button
+                                type="button"
+                                onClick={(e) => handleAiDeleteHtmlFile(e, f.id)}
+                                className="p-1 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded transition-all cursor-pointer"
+                                title="刪除報告"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ))}
                         </div>
                       )}
                     </div>
                   </div>
                 )}
               </div>
-
-              {/* Right Column: Preview Iframe */}
-              <div
-                className={`flex-1 flex-col min-h-0 bg-[#121212] rounded-xl border border-white/5 overflow-hidden ${
-                  aiMobileActiveTab === "preview" ? "flex" : "hidden lg:flex"
-                }`}
-              >
-                {selectedPreviewUrl ? (
-                  <div className="w-full h-full flex flex-col">
-                    <div className="flex items-center justify-between px-4 py-2 border-b border-white/5 bg-[#161616]">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <FileText className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                        <span className="text-xs font-bold text-zinc-200 truncate">
-                          {selectedPreviewLinkTitle || "HTML 報告預覽"}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <a
-                          href={selectedPreviewUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="px-2 py-1 bg-white/5 hover:bg-white/10 rounded text-[10px] font-bold text-zinc-300 hover:text-white flex items-center gap-1 transition-all"
-                        >
-                          <ExternalLink className="w-3 h-3" />
-                          <span>在新分頁開啟</span>
-                        </a>
-                      </div>
-                    </div>
-                    <div className="flex-1 w-full h-full bg-white relative">
-                      <iframe
-                        src={selectedPreviewUrl}
-                        title="AI Analysis Report Preview"
-                        className="w-full h-full border-0"
-                        sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
-                      />
-                    </div>
-                  </div>
-                ) : (
-                  <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center text-zinc-500 gap-3">
-                    <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-zinc-400">
-                      <FileText className="w-6 h-6 opacity-40" />
-                    </div>
-                    <div className="flex flex-col gap-1 max-w-sm">
-                      <span className="text-sm font-bold text-zinc-400">尚未選取 HTML 分析報告</span>
-                      <span className="text-xs text-zinc-600">
-                        請在左側選取已上傳的 HTML 報告以進行即時渲染預覽，或上傳由 AI 產生的分析報告。
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
+            </motion.div>
           </motion.div>
         </AnimatePresence>
       )}

@@ -1,6 +1,7 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
+import fs from "fs";
 import { GoogleGenAI, Type } from "@google/genai";
 import "dotenv/config";
 import { db } from "./src/db/index.ts";
@@ -181,6 +182,64 @@ async function startServer() {
     } catch (err: any) {
       console.error("Error deleting HTML file:", err);
       res.status(500).json({ error: "刪除 HTML 檔案時出錯: " + err.message });
+    }
+  });
+
+  // Cross-device User AI Prompt Templates Storage
+  const PROMPTS_FILE = path.join(process.cwd(), "data", "user_prompts.json");
+
+  function getUserPromptsData(): Record<string, any[]> {
+    try {
+      if (fs.existsSync(PROMPTS_FILE)) {
+        const raw = fs.readFileSync(PROMPTS_FILE, "utf-8");
+        return JSON.parse(raw);
+      }
+    } catch (err) {
+      console.error("Failed to read user prompts file:", err);
+    }
+    return {};
+  }
+
+  function saveUserPromptsData(data: Record<string, any[]>) {
+    try {
+      const dir = path.dirname(PROMPTS_FILE);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(PROMPTS_FILE, JSON.stringify(data, null, 2), "utf-8");
+    } catch (err) {
+      console.error("Failed to write user prompts file:", err);
+    }
+  }
+
+  app.get("/api/user-prompts", (req, res) => {
+    try {
+      const { userId } = req.query;
+      if (!userId || typeof userId !== "string") {
+        return res.status(400).json({ error: "缺少 userId" });
+      }
+      const data = getUserPromptsData();
+      const prompts = data[userId] || [];
+      res.json({ success: true, prompts });
+    } catch (err: any) {
+      console.error("Error fetching user prompts:", err);
+      res.status(500).json({ error: "讀取指令模版時出錯: " + err.message });
+    }
+  });
+
+  app.post("/api/user-prompts", (req, res) => {
+    try {
+      const { userId, prompts } = req.body;
+      if (!userId || !Array.isArray(prompts)) {
+        return res.status(400).json({ error: "缺少必要欄位：userId, prompts (陣列)" });
+      }
+      const data = getUserPromptsData();
+      data[userId] = prompts;
+      saveUserPromptsData(data);
+      res.json({ success: true, prompts });
+    } catch (err: any) {
+      console.error("Error saving user prompts:", err);
+      res.status(500).json({ error: "儲存指令模版時出錯: " + err.message });
     }
   });
 
