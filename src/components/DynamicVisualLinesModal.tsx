@@ -35,11 +35,16 @@ import {
   Ruler,
   HelpCircle,
   MoveVertical,
+  ArrowLeft,
+  ChevronUp,
 } from "lucide-react";
 import { toast } from "sonner";
 import { playClickSound, playSuccessSound } from "../lib/audio";
 import { StockTab } from "../types";
 import { getTimestampMillis } from "../lib/dateUtils";
+import { System2PlanningChart } from "./System2PlanningChart";
+import { getVisualPriceLevels } from "../lib/visualLevels";
+import { generateAveragingDownRows, calculateStats } from "../lib/calculations";
 import {
   syncSubTabDividersToCanvas,
   formatTagDate,
@@ -1465,6 +1470,7 @@ interface DynamicVisualLinesModalProps {
       realizedPnL?: number;
     }
   >;
+  maxStrategyRiskPool60?: number;
 }
 
 // 6 Horizontal Visual Lines (黑色: D軸, 藍色: B軸, 綠色: G軸, 黃色: Y軸, 紅色: R軸)
@@ -1707,6 +1713,7 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
   strategiesMap,
   tradesMap,
   statsMap,
+  maxStrategyRiskPool60,
 }) => {
   // 1. 交易總覽主分頁選單 ("active" | "real" | "completed" | "all")
   const [mainTabFilter, setMainTabFilter] = useState<"active" | "real" | "completed" | "all">(
@@ -1735,6 +1742,9 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
   // 3. 搜尋股票代號
   const [stockSearchQuery, setStockSearchQuery] = useState("");
 
+  // 篩選標籤：只顯示交易中
+  const [showOnlyTrading, setShowOnlyTrading] = useState<boolean>(false);
+
   // 下拉選單開關
   const [isMainTabDropdownOpen, setIsMainTabDropdownOpen] = useState(false);
   const [isSubTabDropdownOpen, setIsSubTabDropdownOpen] = useState(false);
@@ -1749,9 +1759,7 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
   const [selectedDiagnosticSymbol, setSelectedDiagnosticSymbol] = useState<string | null>(null);
   const [hoveredDiagnosticSymbol, setHoveredDiagnosticSymbol] = useState<string | null>(null);
 
-  // 框選模式開關 (可點擊切換，或在畫布空白處直接拖曳框選)
-  const [isBoxSelectMode, setIsBoxSelectMode] = useState(false);
-  // 框選矩形區域 (像素座標)
+  // 框選矩形區域 (像素座標，滑鼠在畫布空白處拖曳即自動框選)
   const [selectionBox, setSelectionBox] = useState<{
     startX: number;
     startY: number;
@@ -1764,6 +1772,12 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
 
   // 勾選的個別股票標籤（用於個別尺寸調整、顏色套用或隱藏操作）
   const [selectedTagSymbols, setSelectedTagSymbols] = useState<string[]>([]);
+
+  // Primial 分批進場金字塔動態互動圖表視圖開關與當前聚焦個股 (Alt+Z)
+  const [showPyramidView, setShowPyramidView] = useState<boolean>(false);
+  const [activePyramidSymbol, setActivePyramidSymbol] = useState<string>("");
+  const [collapsedCards, setCollapsedCards] = useState<Record<string, boolean>>({});
+  const pyramidScrollContainerRef = useRef<HTMLDivElement>(null);
 
   // 全域標籤尺寸調整偏移量 (每次 +/- 2px，儲存至 localStorage)
   const [tagSizeOffset, setTagSizeOffset] = useState<number>(() => {
@@ -1789,6 +1803,14 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
   });
   const [isFetchingPriceMap, setIsFetchingPriceMap] = useState<Record<string, boolean>>({});
   const [isRefreshingAllPrices, setIsRefreshingAllPrices] = useState(false);
+  const attemptedAutoFetchSymbolsRef = useRef<Set<string>>(new Set());
+
+  // Modal 關閉時清空已嘗試自動抓取的標籤紀錄
+  useEffect(() => {
+    if (!isOpen) {
+      attemptedAutoFetchSymbolsRef.current.clear();
+    }
+  }, [isOpen]);
 
   // 抓取指定個股的最新即時現價
   const fetchLivePriceForSymbol = useCallback(
@@ -2360,20 +2382,68 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     return Object.values(positions).filter((p) => Boolean(p?.hidden)).length;
   }, [positions]);
 
-  // 目前在圖表畫布上呈現的標籤清單 (依交易模式 Tabs 與隱藏設定過濾)
-  const activeCanvasSymbols = useMemo(() => {
-    const symbols = Object.keys(positions).filter((sym) => isSymbolMatchTradeMode(sym));
-    if (showHiddenTags) {
-      return symbols;
-    }
-    return symbols.filter((sym) => !positions[sym]?.hidden);
-  }, [positions, showHiddenTags, isSymbolMatchTradeMode]);
+  // 判斷股票是否為「交易中」狀態 (依使用者規定：只會顯示籌碼管理中有持有數量的，持有數量為 0 股的不算交易中)
+  const isStockTrading = useCallback(
+    (sym: string) => {
+      const cleanSym = sym.trim().toUpperCase();
+      const tab =
+        allStockMap.get(cleanSym) ||
+        allTabs.find((t) => (t.symbol || "").trim().toUpperCase() === cleanSym);
+      const tabId = tab?.id || cleanSym;
 
-  // 自動偵測畫布上現價缺失或為 0 的個股 (例如 INTC)，並於背景自動抓取最新現價
+      // 1. 若該個股在籌碼管理中有交易紀錄 trades，透過 calculateStats 計算精準持有股數
+      const trades = tradesMap?.[tabId] || tradesMap?.[cleanSym];
+      if (trades && trades.length > 0) {
+        const stats = calculateStats(trades, tab?.currentPrice);
+        return Math.abs(stats.totalQuantity) > 0;
+      }
+
+      // 2. 若 tradesMap 包含該股票且為空陣列，代表在籌碼管理中目前為 0 筆交易，持有數量為 0 股
+      if (tradesMap && (tabId in tradesMap || cleanSym in tradesMap)) {
+        return false;
+      }
+
+      // 3. 檢查傳入的 statsMap (籌碼統計數據)
+      const stat = statsMap?.[tabId] || statsMap?.[cleanSym];
+      if (stat?.totalQuantity !== undefined) {
+        return Math.abs(stat.totalQuantity) > 0;
+      }
+
+      // 4. 若無交易紀錄與 statsMap，最後檢查 tab 自身儲存之 holdingQuantity
+      const tabQty =
+        typeof tab?.holdingQuantity === "number"
+          ? tab.holdingQuantity
+          : parseFloat(String(tab?.holdingQuantity || 0));
+      return Math.abs(tabQty) > 0;
+    },
+    [allStockMap, allTabs, statsMap, tradesMap]
+  );
+
+  // 當前交易模式下處於「交易中」的畫布標籤數量
+  const tradingSymbolsCount = useMemo(() => {
+    return Object.keys(positions).filter(
+      (sym) => isSymbolMatchTradeMode(sym) && isStockTrading(sym)
+    ).length;
+  }, [positions, isSymbolMatchTradeMode, isStockTrading]);
+
+  // 目前在圖表畫布上呈現的標籤清單 (依交易模式 Tabs、隱藏設定與只顯示交易中過濾)
+  const activeCanvasSymbols = useMemo(() => {
+    let symbols = Object.keys(positions).filter((sym) => isSymbolMatchTradeMode(sym));
+    if (!showHiddenTags) {
+      symbols = symbols.filter((sym) => !positions[sym]?.hidden);
+    }
+    if (showOnlyTrading) {
+      symbols = symbols.filter((sym) => isStockTrading(sym));
+    }
+    return symbols;
+  }, [positions, showHiddenTags, isSymbolMatchTradeMode, showOnlyTrading, isStockTrading]);
+
+  // 自動偵測畫布上現價缺失或為 0 的個股 (例如 INTC)，並於背景自動抓取最新現價 (每檔個股只自動嘗試一次，避免失敗時無限循環觸發)
   useEffect(() => {
     if (!isOpen || activeCanvasSymbols.length === 0) return;
 
     const missingSymbols = activeCanvasSymbols.filter((sym) => {
+      if (attemptedAutoFetchSymbolsRef.current.has(sym)) return false;
       const tab =
         allStockMap.get(sym) ||
         allTabs.find((t) => (t.symbol || "").trim().toUpperCase() === sym);
@@ -2382,14 +2452,14 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
         tab.currentPrice !== null &&
         Number(tab.currentPrice) > 0;
       const hasLivePrice = (livePrices[sym] ?? 0) > 0;
-      const isFetching = isFetchingPriceMap[sym];
-      return !hasTabPrice && !hasLivePrice && !isFetching;
+      return !hasTabPrice && !hasLivePrice;
     });
 
     if (missingSymbols.length > 0) {
+      missingSymbols.forEach((s) => attemptedAutoFetchSymbolsRef.current.add(s));
       fetchPricesForSymbols(missingSymbols, false);
     }
-  }, [isOpen, activeCanvasSymbols, allStockMap, allTabs, livePrices, isFetchingPriceMap, fetchPricesForSymbols]);
+  }, [isOpen, activeCanvasSymbols, allStockMap, allTabs, livePrices, fetchPricesForSymbols]);
 
   // 判斷勾選的股票標籤是否全部為隱藏狀態
   const isAllSelectedHidden = useMemo(() => {
@@ -3731,6 +3801,390 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     });
   }, [positions, tagSizeOffset, savePositionsDirectly]);
 
+  // 切換 Primial 分批進場金字塔動態互動圖表 (Alt+Z)
+  const handleTogglePyramidView = useCallback(() => {
+    if (showPyramidView) {
+      setShowPyramidView(false);
+      playClickSound();
+      return;
+    }
+    if (selectedTagSymbols.length === 0) {
+      playClickSound();
+      toast.info("請先在畫布上框選或勾選股票標籤 (可多選)，再開啟分批進場金字塔動態互動圖表 (Alt+Z)", {
+        id: "primial-need-selection",
+        duration: 3500,
+      });
+      return;
+    }
+    playSuccessSound();
+    setShowPyramidView(true);
+    setActivePyramidSymbol(selectedTagSymbols[0]);
+  }, [showPyramidView, selectedTagSymbols]);
+
+  // 跳轉至指定個股卡片並將畫面上下置中
+  const handleJumpToPyramidStock = useCallback((symbol: string) => {
+    const cleanSym = symbol.trim().toUpperCase();
+    setActivePyramidSymbol(cleanSym);
+    playClickSound();
+    // 若該卡片目前為收合狀態，自動展開以便完整呈現圖表內容
+    setCollapsedCards((prev) => (prev[cleanSym] ? { ...prev, [cleanSym]: false } : prev));
+    setTimeout(() => {
+      const cardEl = document.getElementById(`pyramid-card-${cleanSym}`);
+      if (cardEl) {
+        cardEl.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }, 40);
+  }, []);
+
+  // 單獨展開/收合卡片
+  const toggleCardCollapse = useCallback((symbol: string) => {
+    playClickSound();
+    setCollapsedCards((prev) => ({
+      ...prev,
+      [symbol]: !prev[symbol],
+    }));
+  }, []);
+
+  // 全部展開/收合
+  const toggleAllCardsCollapse = useCallback(() => {
+    playClickSound();
+    const allCollapsed = selectedTagSymbols.every((sym) => Boolean(collapsedCards[sym]));
+    const nextState: Record<string, boolean> = {};
+    selectedTagSymbols.forEach((sym) => {
+      nextState[sym] = !allCollapsed;
+    });
+    setCollapsedCards(nextState);
+  }, [selectedTagSymbols, collapsedCards]);
+
+  // 計算個股 Primial 金字塔圖表所有必要資料
+  const getStockPyramidData = useCallback(
+    (symbol: string) => {
+      const cleanSym = symbol.trim().toUpperCase();
+      const candidateTabs = allTabs.filter(
+        (t) => (t.symbol || "").trim().toUpperCase() === cleanSym
+      );
+      const tab =
+        allStockMap.get(cleanSym) ||
+        candidateTabs.find((t) => t.status !== "COMPLETED") ||
+        candidateTabs[0];
+      const tabId = tab?.id || cleanSym;
+      const strategy = strategiesMap?.[tabId] || strategiesMap?.[cleanSym];
+
+      // 取得歷史交易 (若當前 tabId 無資料，跨候選 tab 或 tab.trades 補全)
+      let trades: any[] = tradesMap?.[tabId] || tradesMap?.[cleanSym] || [];
+      if ((!trades || trades.length === 0) && candidateTabs.length > 0) {
+        for (const cTab of candidateTabs) {
+          if (tradesMap?.[cTab.id] && tradesMap[cTab.id].length > 0) {
+            trades = tradesMap[cTab.id];
+            break;
+          }
+        }
+      }
+      if ((!trades || trades.length === 0) && Array.isArray((tab as any)?.trades) && (tab as any).trades.length > 0) {
+        trades = (tab as any).trades;
+      }
+
+      // 取得統計數據
+      let stats = statsMap?.[tabId] || statsMap?.[cleanSym];
+      if (!stats && candidateTabs.length > 0) {
+        for (const cTab of candidateTabs) {
+          if (statsMap?.[cTab.id]) {
+            stats = statsMap[cTab.id];
+            break;
+          }
+        }
+      }
+
+      // 現價
+      const liveP = livePrices[cleanSym];
+      const currentPrice =
+        typeof liveP === "number" && liveP > 0
+          ? liveP
+          : tab?.currentPrice && tab.currentPrice > 0
+          ? tab.currentPrice
+          : stats?.averagePrice && stats.averagePrice > 0
+          ? stats.averagePrice
+          : 0;
+
+      // 若 stats 缺少或持有數為 0，且存在 trades，透過 calculateStats 即時動態計算精準持有數據
+      if ((!stats || stats.totalQuantity === undefined || stats.totalQuantity === 0) && trades && trades.length > 0) {
+        stats = calculateStats(trades, currentPrice);
+      }
+
+      // 平均成本
+      const holdingAvgPrice =
+        stats?.averagePrice && stats.averagePrice > 0
+          ? stats.averagePrice
+          : typeof tab?.averageCost === "number" && tab.averageCost > 0
+          ? tab.averageCost
+          : parseFloat(String(tab?.averageCost)) || 0;
+
+      // 持有股數
+      let holdingQty =
+        stats?.totalQuantity !== undefined && stats.totalQuantity !== 0
+          ? stats.totalQuantity
+          : typeof tab?.holdingQuantity === "number" && tab.holdingQuantity > 0
+          ? tab.holdingQuantity
+          : parseFloat(String(tab?.holdingQuantity)) || 0;
+
+      // 資金池與預計購買量計算
+      const currentRiskPool =
+        maxStrategyRiskPool60 && maxStrategyRiskPool60 > 0 ? maxStrategyRiskPool60 : 100000;
+      const plannedPercent =
+        tab?.plannedBuyPercent !== undefined && tab?.plannedBuyPercent !== null
+          ? tab.plannedBuyPercent
+          : 0;
+      const usableCapital = currentRiskPool * (plannedPercent / 100);
+      const calculatedPlannedQty =
+        currentPrice > 0 && usableCapital > 0
+          ? Math.floor(usableCapital / currentPrice)
+          : plannedPercent === 0
+          ? 0
+          : tab?.plannedBuyQty || 0;
+      const plannedQty = calculatedPlannedQty;
+
+      // 向下攤平試算設定 (系統2)
+      const { sys2: defaultSys2 } = generateAveragingDownRows(
+        holdingAvgPrice > 0 ? holdingAvgPrice : currentPrice
+      );
+      const averagingRowsSys2 =
+        tab?.averagingRowsSys2 &&
+        Array.isArray(tab.averagingRowsSys2) &&
+        tab.averagingRowsSys2.length > 0
+          ? tab.averagingRowsSys2
+          : defaultSys2;
+
+      // 四批金字塔配置比例 (15%, 25%, 35%, 25%)
+      const size1 = Math.ceil(plannedQty * 0.15);
+      const size1_a = Math.round(plannedQty * 0.07);
+      const size1_b = Math.max(0, size1 - size1_a);
+
+      const size2 = Math.ceil(plannedQty * 0.25);
+      const size2_a = Math.round(plannedQty * 0.1);
+      const size2_b = Math.max(0, size2 - size2_a);
+
+      const size3 = Math.ceil(plannedQty * 0.35);
+      const size3_a = Math.round(plannedQty * 0.15);
+      const size3_b = Math.max(0, size3 - size3_a);
+
+      const size4 = Math.ceil(plannedQty * 0.25);
+      const size4_a = Math.round(plannedQty * 0.1);
+      const size4_b = Math.max(0, size4 - size4_a);
+
+      // 檢查 averagingRowsSys2 勾選標記為已購入的股數
+      const checkedRowsBought = averagingRowsSys2.reduce((sum: number, r: any, idx: number) => {
+        if (!r?.bought) return sum;
+        const q1 = r?.quantity ? parseFloat(r.quantity) : 0;
+        const q2 = r?.quantity2 ? parseFloat(r.quantity2) : 0;
+        const target = q1 + q2 > 0 ? q1 + q2 : [size1, size2, size3, size4][idx] || 0;
+        return sum + target;
+      }, 0);
+
+      const totalBought = Math.max(0, holdingQty, checkedRowsBought);
+      holdingQty = Math.max(holdingQty, totalBought);
+
+      const bought1_a = Math.min(totalBought, size1_a);
+      const remaining1_a = Math.max(0, size1_a - bought1_a);
+      const remAfter1_a = Math.max(0, totalBought - size1_a);
+      const bought1_b = Math.min(remAfter1_a, size1_b);
+      const remaining1_b = Math.max(0, size1_b - bought1_b);
+      const isRow0Bought = Boolean(averagingRowsSys2?.[0]?.bought);
+      const bought1 = isRow0Bought ? size1 : (bought1_a + bought1_b);
+      const remaining1 = Math.max(0, size1 - bought1);
+
+      const remAfter1 = Math.max(0, totalBought - size1);
+      const bought2_a = Math.min(remAfter1, size2_a);
+      const remaining2_a = Math.max(0, size2_a - bought2_a);
+      const remAfter2_a = Math.max(0, remAfter1 - size2_a);
+      const bought2_b = Math.min(remAfter2_a, size2_b);
+      const remaining2_b = Math.max(0, size2_b - bought2_b);
+      const isRow1Bought = Boolean(averagingRowsSys2?.[1]?.bought);
+      const bought2 = isRow1Bought ? size2 : (bought2_a + bought2_b);
+      const remaining2 = Math.max(0, size2 - bought2);
+
+      const remAfter2 = Math.max(0, remAfter1 - size2);
+      const bought3_a = Math.min(remAfter2, size3_a);
+      const remaining3_a = Math.max(0, size3_a - bought3_a);
+      const remAfter3_a = Math.max(0, remAfter2 - size3_a);
+      const bought3_b = Math.min(remAfter3_a, size3_b);
+      const remaining3_b = Math.max(0, size3_b - bought3_b);
+      const isRow2Bought = Boolean(averagingRowsSys2?.[2]?.bought);
+      const bought3 = isRow2Bought ? size3 : (bought3_a + bought3_b);
+      const remaining3 = Math.max(0, size3 - bought3);
+
+      const remAfter3 = Math.max(0, totalBought - size1 - size2 - size3);
+      const bought4_a = Math.min(remAfter3, size4_a);
+      const remaining4_a = Math.max(0, size4_a - bought4_a);
+      const remAfter4_a = Math.max(0, remAfter3 - size4_a);
+      const bought4_b = Math.min(remAfter4_a, size4_b);
+      const remaining4_b = Math.max(0, size4_b - bought4_b);
+      const isRow3Bought = Boolean(averagingRowsSys2?.[3]?.bought);
+      const bought4 = isRow3Bought ? size4 : (bought4_a + bought4_b);
+      const remaining4 = Math.max(0, size4 - bought4);
+
+      const batchConfigList = [
+        {
+          index: 0,
+          name: "第一批 (15%)",
+          size: size1,
+          bought: bought1,
+          remaining: remaining1,
+          split1: {
+            name: "第一批拆分交易(7%)",
+            shortLabel: "拆分 7%",
+            size: size1_a,
+            bought: bought1_a,
+            remaining: remaining1_a,
+            percent: "7%",
+          },
+          split2: {
+            name: "第一批交易(8%)",
+            shortLabel: "拆分 8%",
+            size: size1_b,
+            bought: bought1_b,
+            remaining: remaining1_b,
+            percent: "8%",
+          },
+        },
+        {
+          index: 1,
+          name: "第二批 (25%)",
+          size: size2,
+          bought: bought2,
+          remaining: remaining2,
+          split1: {
+            name: "第二批拆分交易(10%)",
+            shortLabel: "拆分 10%",
+            size: size2_a,
+            bought: bought2_a,
+            remaining: remaining2_a,
+            percent: "10%",
+          },
+          split2: {
+            name: "第二批拆分交易(15%)",
+            shortLabel: "拆分 15%",
+            size: size2_b,
+            bought: bought2_b,
+            remaining: remaining2_b,
+            percent: "15%",
+          },
+        },
+        {
+          index: 2,
+          name: "第三批 (35%)",
+          size: size3,
+          bought: bought3,
+          remaining: remaining3,
+          split1: {
+            name: "第三批拆分交易(15%)",
+            shortLabel: "拆分 15%",
+            size: size3_a,
+            bought: bought3_a,
+            remaining: remaining3_a,
+            percent: "15%",
+          },
+          split2: {
+            name: "第三批拆分交易(20%)",
+            shortLabel: "拆分 20%",
+            size: size3_b,
+            bought: bought3_b,
+            remaining: remaining3_b,
+            percent: "20%",
+          },
+        },
+        {
+          index: 3,
+          name: "第四批 (25%)",
+          size: size4,
+          bought: bought4,
+          remaining: remaining4,
+          split1: {
+            name: "第四批拆分交易 (10%)",
+            shortLabel: "拆分 10%",
+            size: size4_a,
+            bought: bought4_a,
+            remaining: remaining4_a,
+            percent: "10%",
+          },
+          split2: {
+            name: "第四批拆分交易 (15%)",
+            shortLabel: "拆分 15%",
+            size: size4_b,
+            bought: bought4_b,
+            remaining: remaining4_b,
+            percent: "15%",
+          },
+        },
+      ];
+
+      // 關鍵防線
+      const visualLevels = getVisualPriceLevels(tab, strategy, (tab as any)?.plannedOrders);
+
+      // 公司英文名稱
+      const companyName = tab?.companyName || (tab as any)?.cardTitle || (tab as any)?.name || "";
+
+      return {
+        symbol: cleanSym,
+        tab,
+        companyName,
+        currentPrice,
+        holdingAvgPrice,
+        holdingQty,
+        usableCapital,
+        plannedQty,
+        batchConfigList,
+        averagingRowsSys2,
+        trades,
+        visualLevels,
+      };
+    },
+    [
+      allStockMap,
+      allTabs,
+      strategiesMap,
+      tradesMap,
+      statsMap,
+      livePrices,
+      maxStrategyRiskPool60,
+    ]
+  );
+
+  // 當處於 Primial 視圖時，監聽滾動事件使頂部 Tabs 與畫面中最近的個股卡片雙向連動
+  useEffect(() => {
+    if (!showPyramidView || selectedTagSymbols.length === 0) return;
+
+    const container = pyramidScrollContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      const containerRect = container.getBoundingClientRect();
+      const containerCenterY = containerRect.top + containerRect.height / 2;
+
+      let closestSymbol = selectedTagSymbols[0];
+      let minDistance = Infinity;
+
+      selectedTagSymbols.forEach((sym) => {
+        const el = document.getElementById(`pyramid-card-${sym}`);
+        if (el) {
+          const rect = el.getBoundingClientRect();
+          const elCenterY = rect.top + rect.height / 2;
+          const distance = Math.abs(elCenterY - containerCenterY);
+          if (distance < minDistance) {
+            minDistance = distance;
+            closestSymbol = sym;
+          }
+        }
+      });
+
+      if (closestSymbol) {
+        setActivePyramidSymbol((prev) => (prev !== closestSymbol ? closestSymbol : prev));
+      }
+    };
+
+    container.addEventListener("scroll", handleScroll, { passive: true });
+    return () => container.removeEventListener("scroll", handleScroll);
+  }, [showPyramidView, selectedTagSymbols]);
+
   const lastHKeyPressTimeRef = useRef<number>(0);
 
   // 鍵盤快速鍵 (Shift + S, Alt + W, Escape, Double H / Shift + H)
@@ -3812,6 +4266,20 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
         return;
       }
 
+      // 快捷鍵 Alt + Z 切換 Primial 分批進場金字塔動態互動圖表
+      if (
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        (e.key === "z" || e.key === "Z" || e.code === "KeyZ")
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        handleTogglePyramidView();
+        return;
+      }
+
       // 快捷鍵 Alt + 左右按鍵 切換虛擬交易 | 真實交易 tab
       if (
         e.altKey &&
@@ -3834,6 +4302,11 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
       }
 
       if (e.key === "Escape") {
+        if (showPyramidView) {
+          setShowPyramidView(false);
+          playClickSound();
+          return;
+        }
         if (isMainTabDropdownOpen || isSubTabDropdownOpen || isStockDropdownOpen) {
           setIsMainTabDropdownOpen(false);
           setIsSubTabDropdownOpen(false);
@@ -3847,7 +4320,7 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, handleSavePositions, onClose, isMainTabDropdownOpen, isSubTabDropdownOpen, isStockDropdownOpen, activeTradeModeTab]);
+  }, [isOpen, handleSavePositions, onClose, isMainTabDropdownOpen, isSubTabDropdownOpen, isStockDropdownOpen, activeTradeModeTab, handleTogglePyramidView, showPyramidView]);
 
   // 滑鼠與觸控拖曳標籤
   const handleTagPointerDown = (
@@ -4253,187 +4726,30 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
           {/* 分隔線 */}
           <div className="w-[1px] h-4 bg-zinc-800 shrink-0" />
 
-          {/* 3. 區塊股票選單 (選擇區塊股票並個別新增/刪除) - Nike Volt Highlighted Capsule */}
-          <div className="relative shrink-0 z-10" ref={stockDropdownRef}>
-            <button
-              type="button"
-              onClick={() => {
-                playClickSound();
-                setIsStockDropdownOpen(!isStockDropdownOpen);
-                setIsMainTabDropdownOpen(false);
-                setIsSubTabDropdownOpen(false);
-              }}
-              className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 py-1.5 bg-[#D2F800] hover:bg-[#bce000] text-black rounded-full text-xs font-black transition-all cursor-pointer shadow-sm active:scale-95 hover:shadow-md select-none"
+          {/* 「只顯示交易中」按鈕標籤 (取代原先選擇區塊股票下拉選單) */}
+          <button
+            type="button"
+            onClick={() => {
+              playClickSound();
+              setShowOnlyTrading((prev) => !prev);
+            }}
+            className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 py-1.5 rounded-full text-xs font-black transition-all cursor-pointer shadow-sm active:scale-95 select-none shrink-0 ${
+              showOnlyTrading
+                ? "bg-[#D2F800] hover:bg-[#bce000] text-black ring-2 ring-[#D2F800]/60 shadow-[0_0_12px_rgba(210,248,0,0.35)]"
+                : "bg-zinc-900/95 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-700/80"
+            }`}
+            title={showOnlyTrading ? "目前僅顯示交易中股票標籤（點擊切換為顯示全部）" : "點擊僅顯示進行交易中的股票標籤"}
+          >
+            <Tag className={`w-3.5 h-3.5 ${showOnlyTrading ? "text-black stroke-[2.5]" : "text-[#D2F800] stroke-[2.5]"}`} />
+            <span>只顯示交易中</span>
+            <span
+              className={`text-[10px] px-1.5 sm:px-2 py-0.2 rounded-full font-mono font-black ${
+                showOnlyTrading ? "bg-black text-[#D2F800]" : "bg-zinc-800 text-zinc-400"
+              }`}
             >
-              <Tag className="w-3.5 h-3.5 text-black stroke-[2.5]" />
-              <span className="font-extrabold text-black/80 text-[11px] hidden md:inline">
-                {selectedSubTab === "all" ? "選擇區塊股票" : `${getSubTabLabel(selectedSubTab)}股票`}:
-              </span>
-              <span className="font-black tracking-tight text-black text-[11px] sm:text-xs">
-                <span className="hidden sm:inline">圖表已有 </span>{activeCanvasSymbols.length} 檔
-              </span>
-              <span className="bg-black text-[#D2F800] text-[10px] px-1.5 sm:px-2 py-0.2 rounded-full font-mono font-black">
-                {availableBlockStocks.length}
-              </span>
-              <ChevronDown className={`w-3.5 h-3.5 text-black stroke-[2.5] transition-transform duration-200 ${isStockDropdownOpen ? "rotate-180" : ""}`} />
-            </button>
-
-            {isStockDropdownOpen && (
-              <div
-                className="fixed w-88 bg-[#18181b] border border-zinc-700 rounded-2xl shadow-2xl p-3 z-[999999] space-y-2.5 backdrop-blur-md"
-                style={{
-                  top: (stockDropdownRef.current?.getBoundingClientRect().bottom ?? 48) + 8,
-                  left: Math.max(
-                    8,
-                    Math.min(
-                      stockDropdownRef.current?.getBoundingClientRect().left ?? 16,
-                      (typeof window !== "undefined" ? window.innerWidth : 1200) - 364
-                    )
-                  ),
-                }}
-              >
-                {/* Header */}
-                <div className="flex items-center justify-between pb-2 border-b border-zinc-800 text-xs font-black text-zinc-200">
-                  <div className="flex items-center gap-1.5">
-                    <ListPlus className="w-4 h-4 text-[#D2F800]" />
-                    <span className="tracking-wide">
-                      {selectedSubTab === "all"
-                        ? `所有「${mainTabDisplayInfo.title}」美股`
-                        : `「${getSubTabLabel(selectedSubTab)}」美股清單`}
-                    </span>
-                  </div>
-                  <span className="text-[11px] text-zinc-400 font-mono">
-                    共 {availableBlockStocks.length} 檔
-                  </span>
-                </div>
-
-                {/* Search input */}
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
-                  <input
-                    type="text"
-                    value={stockSearchQuery}
-                    onChange={(e) => setStockSearchQuery(e.target.value)}
-                    placeholder="搜尋股票代號或名稱..."
-                    className="w-full pl-9 pr-3 py-1.5 bg-zinc-900 border border-zinc-700 rounded-xl text-xs font-mono font-bold text-white placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-[#D2F800]"
-                  />
-                </div>
-
-                {/* Quick Action Buttons */}
-                <div className="flex items-center gap-1.5 pt-0.5">
-                  <button
-                    type="button"
-                    onClick={handleAddAllBlockStocks}
-                    className="flex-1 py-1.5 px-2.5 bg-white hover:bg-zinc-200 text-black text-[11px] font-black rounded-xl transition-all flex items-center justify-center gap-1 cursor-pointer active:scale-95"
-                    title="一鍵將此區塊所有股票標籤新增至圖表"
-                  >
-                    <Plus className="w-3.5 h-3.5 text-black stroke-[3]" />
-                    <span>全部新增</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleSyncDividersFromCards}
-                    className="flex-1 py-1.5 px-2.5 bg-zinc-800 hover:bg-zinc-700 text-[#D2F800] text-[11px] font-black rounded-xl transition-all flex items-center justify-center gap-1 border border-zinc-700 hover:border-[#D2F800]/50 cursor-pointer active:scale-95"
-                    title="一鍵將此區塊內符合分隔線條件之卡片，同步現價相對位置至畫布"
-                  >
-                    <SlidersHorizontal className="w-3 h-3 text-[#D2F800]" />
-                    <span>同步分隔線</span>
-                  </button>
-                  {activeCanvasSymbols.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={handleClearAllCanvas}
-                      className="py-1.5 px-2.5 bg-rose-950/80 hover:bg-rose-900 text-rose-300 text-[11px] font-black rounded-xl transition-all flex items-center gap-1 border border-rose-800/80 cursor-pointer active:scale-95"
-                      title="清空圖表上所有標籤"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>清空</span>
-                    </button>
-                  )}
-                </div>
-
-                {/* Stock List with Add / Remove Buttons */}
-                <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
-                  {availableBlockStocks
-                    .filter((t) => {
-                      const q = stockSearchQuery.toLowerCase();
-                      return (
-                        t.symbol.toLowerCase().includes(q) ||
-                        (t.companyName && t.companyName.toLowerCase().includes(q))
-                      );
-                    })
-                    .map((tab) => {
-                      const sym = tab.symbol.trim().toUpperCase();
-                      const isOnCanvas = Boolean(positions[sym]);
-                      const conf = HOLDING_CONFIG[tab.holdingStatus || "候選名單"];
-                      const subLabel = getSubTabLabel(tab.holdingStatus || "候選名單");
-
-                      return (
-                        <div
-                          key={sym}
-                          className={`w-full px-3 py-2 rounded-xl text-xs flex items-center justify-between transition-all border ${
-                            isOnCanvas
-                              ? "bg-zinc-900/90 border-[#D2F800]/50 text-white font-bold"
-                              : "bg-zinc-900/40 border-zinc-800 text-zinc-300 hover:bg-zinc-800/60"
-                          }`}
-                        >
-                          <div className="flex items-center gap-2">
-                            <span className="font-black font-sans text-xs tracking-wider text-white">
-                              {sym}
-                            </span>
-                            <span className={`text-[10px] px-2 py-0.2 rounded-full font-black ${
-                              isOnCanvas ? "bg-[#D2F800] text-black" : "bg-zinc-800 text-zinc-400"
-                            }`}>
-                              {subLabel}
-                            </span>
-                            {tab.tradeType === "real" && (
-                              <span className="text-[10px] px-1.5 py-0.2 bg-teal-500/20 text-teal-300 border border-teal-500/30 rounded-full font-black">
-                                真實
-                              </span>
-                            )}
-                            {(tab.currentPrice || livePrices[sym]) && (
-                              <span className="text-[10px] text-zinc-400 font-mono">
-                                ${Number(tab.currentPrice || livePrices[sym]).toFixed(1)}
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Action Button */}
-                          <div>
-                            {isOnCanvas ? (
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveStockFromCanvas(sym)}
-                                className="px-2.5 py-1 bg-rose-900/60 hover:bg-rose-800 text-rose-200 border border-rose-700/60 rounded-lg text-[10.5px] font-black flex items-center gap-1 transition-all cursor-pointer"
-                                title="從圖表上移除此標籤"
-                              >
-                                <X className="w-3 h-3" />
-                                <span>移除</span>
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => handleAddStockToCanvas(sym, tab)}
-                                className="px-3 py-1 bg-white hover:bg-zinc-200 text-black rounded-lg text-[10.5px] font-black flex items-center gap-1 transition-all cursor-pointer"
-                              >
-                                <Plus className="w-3 h-3 text-black stroke-[3]" />
-                                <span>新增</span>
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-
-                  {availableBlockStocks.length === 0 && (
-                    <div className="py-6 text-center text-xs text-zinc-500">
-                      此區塊目前沒有任何美股
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
+              {tradingSymbolsCount} 檔
+            </span>
+          </button>
 
           {/* 分隔線 */}
           <div className="w-[1px] h-4 bg-zinc-800 shrink-0" />
@@ -4478,7 +4794,31 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
               <span className="xl:hidden">同步</span>
             </button>
 
-            {/* 3. 匯出 / 匯入位置訊息整合操作群組 (取代原「避開重疊」位置) */}
+            {/* 2.5 Primial (分批進場金字塔動態互動圖表) 按鈕 */}
+            <button
+              type="button"
+              onClick={handleTogglePyramidView}
+              className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-full text-xs font-black transition-all cursor-pointer shadow-sm active:scale-95 hover:scale-[1.02] shrink-0 select-none ${
+                selectedTagSymbols.length > 0
+                  ? "bg-amber-400 hover:bg-amber-300 text-black border border-amber-300 shadow-[0_0_12px_rgba(251,191,36,0.45)]"
+                  : "bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-700/90 hover:border-zinc-500"
+              }`}
+              title={
+                selectedTagSymbols.length > 0
+                  ? `Primial (分批進場金字塔動態互動圖表) - 已選取 ${selectedTagSymbols.length} 檔 (Alt+Z)`
+                  : "Primial (分批進場金字塔動態互動圖表) - 框選或勾選股票後點擊或按 Alt+Z 開啟"
+              }
+            >
+              <Layers className={`w-3.5 h-3.5 ${selectedTagSymbols.length > 0 ? "text-black stroke-[2.5]" : "text-amber-400 stroke-[2.2]"}`} />
+              <span>Primial</span>
+              {selectedTagSymbols.length > 0 && (
+                <span className="px-1.5 py-0.2 bg-black/20 text-black text-[10px] rounded-full font-mono font-black">
+                  {selectedTagSymbols.length}
+                </span>
+              )}
+            </button>
+
+            {/* 3. 匯出 / 匯入位置訊息整合操作群組 (Icon 按鈕設計) */}
             <div className="flex items-center bg-zinc-900 border border-zinc-700/90 hover:border-zinc-500/70 rounded-full p-0.5 shadow-sm shrink-0 transition-colors">
               {/* 隱藏的檔案上傳 Input 用於匯入位置 */}
               <input
@@ -4489,29 +4829,27 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
                 className="hidden"
               />
 
-              {/* 匯出股票儲存位置訊息按鈕 */}
+              {/* 匯出股票儲存位置訊息按鈕 (Icon 按鈕) */}
               <button
                 type="button"
                 onClick={handleExportPositions}
-                className="flex items-center gap-1 sm:gap-1.5 px-2.5 py-1 text-zinc-200 hover:text-white hover:bg-zinc-800 rounded-full text-xs font-black transition-all cursor-pointer select-none active:scale-95 shrink-0"
-                title="匯出畫布上所有股票的儲存位置、尺寸與顏色訊息 (JSON 格式備份)"
+                className="w-7 h-7 flex items-center justify-center text-zinc-200 hover:text-white hover:bg-zinc-800 rounded-full transition-all cursor-pointer select-none active:scale-95 shrink-0"
+                title="匯出位置 (JSON 格式備份)"
               >
                 <Download className="w-3.5 h-3.5 text-sky-400 stroke-[2.2]" />
-                <span>匯出位置</span>
               </button>
 
               {/* 分隔線 */}
-              <div className="w-[1px] h-3.5 bg-zinc-700 mx-0.5" />
+              <div className="w-[1px] h-3 bg-zinc-700 mx-0.5" />
 
-              {/* 匯入股票儲存位置訊息按鈕 */}
+              {/* 匯入股票儲存位置訊息按鈕 (Icon 按鈕) */}
               <button
                 type="button"
                 onClick={handleTriggerImport}
-                className="flex items-center gap-1 sm:gap-1.5 px-2.5 py-1 text-zinc-200 hover:text-white hover:bg-zinc-800 rounded-full text-xs font-black transition-all cursor-pointer select-none active:scale-95 shrink-0"
-                title="匯入先前備份的股票儲存位置訊息檔案 (JSON 格式)"
+                className="w-7 h-7 flex items-center justify-center text-zinc-200 hover:text-white hover:bg-zinc-800 rounded-full transition-all cursor-pointer select-none active:scale-95 shrink-0"
+                title="匯入位置 (JSON 格式)"
               >
                 <Upload className="w-3.5 h-3.5 text-emerald-400 stroke-[2.2]" />
-                <span>匯入位置</span>
               </button>
             </div>
 
@@ -4545,7 +4883,7 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
             )}
           </div>
 
-          {/* 顯示 / 隱藏標籤開關 (包含隱藏數量 badge 與狀態) */}
+          {/* 顯示 / 隱藏標籤開關 (Icon 按鈕設計，包含隱藏數量角標與狀態) */}
           <button
             type="button"
             onClick={() => {
@@ -4562,10 +4900,10 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
             }}
             title={
               showHiddenTags
-                ? `目前顯示所有標籤 (包含 ${hiddenCount} 檔已隱藏，點擊關閉)`
-                : `點擊顯示被隱藏的 ${hiddenCount} 檔股票標籤`
+                ? `顯示隱藏標籤 (已開啟，目前含 ${hiddenCount} 檔已隱藏，點擊關閉)`
+                : `顯示隱藏標籤 (目前有 ${hiddenCount} 檔已隱藏，點擊檢視)`
             }
-            className={`px-3 py-1.5 rounded-full border text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 ${
+            className={`relative w-8 h-8 rounded-full border text-xs font-black transition-all cursor-pointer flex items-center justify-center active:scale-95 shrink-0 ${
               showHiddenTags
                 ? "bg-amber-400 text-black border-amber-300 shadow-[0_0_10px_rgba(251,191,36,0.35)]"
                 : hiddenCount > 0
@@ -4574,27 +4912,18 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
             }`}
           >
             {showHiddenTags ? (
-              <>
-                <Eye className="w-3.5 h-3.5 text-black stroke-[2.5]" />
-                <span className="hidden sm:inline">顯示隱藏</span>
-                <span className="sm:hidden">顯示</span>
-                {hiddenCount > 0 && (
-                  <span className="px-1.5 py-0.2 bg-black/20 text-black text-[10px] rounded-full font-mono font-black">
-                    {hiddenCount}
-                  </span>
-                )}
-              </>
+              <Eye className="w-4 h-4 text-black stroke-[2.5]" />
             ) : (
-              <>
-                <EyeOff className="w-3.5 h-3.5 text-current stroke-[2.2]" />
-                <span className="hidden sm:inline">顯示隱藏</span>
-                <span className="sm:hidden">顯示</span>
-                {hiddenCount > 0 && (
-                  <span className="px-1.5 py-0.2 bg-amber-500/20 text-amber-300 text-[10px] rounded-full font-mono font-black">
-                    {hiddenCount}
-                  </span>
-                )}
-              </>
+              <EyeOff className="w-4 h-4 text-current stroke-[2.2]" />
+            )}
+            {hiddenCount > 0 && (
+              <span
+                className={`absolute -top-1 -right-1 px-1 min-w-[15px] h-[15px] flex items-center justify-center text-[9px] rounded-full font-mono font-black leading-none shadow-sm ${
+                  showHiddenTags ? "bg-black text-amber-400" : "bg-amber-500 text-black"
+                }`}
+              >
+                {hiddenCount}
+              </span>
             )}
           </button>
 
@@ -4612,22 +4941,19 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
             </button>
           )}
 
-          {/* 儲存按鈕 (Nike Premium Black/Volt Save + Shortcut Shift+S) */}
+          {/* 儲存按鈕 (Icon 按鈕設計，支援 Shift+S 快捷鍵) */}
           <button
             type="button"
             onClick={handleSavePositions}
             disabled={isSaving}
-            className={`px-4 py-1.5 rounded-full text-xs font-black transition-all cursor-pointer flex items-center gap-2 active:scale-95 shadow-md ${
+            title={hasUnsavedChanges ? "儲存位置 (Shift+S，有未儲存變更)" : "儲存位置 (Shift+S)"}
+            className={`w-8 h-8 rounded-full text-xs font-black transition-all cursor-pointer flex items-center justify-center active:scale-95 shadow-md shrink-0 ${
               hasUnsavedChanges
                 ? "bg-amber-400 hover:bg-amber-300 text-black shadow-amber-400/30 animate-pulse"
                 : "bg-white hover:bg-zinc-200 text-black shadow-white/20"
             }`}
           >
-            <Save className="w-3.5 h-3.5 text-black stroke-[2.5]" />
-            <span className="tracking-wide uppercase">儲存位置</span>
-            <span className="hidden lg:inline-block px-1.5 py-0.2 bg-black/15 text-black text-[10px] rounded-full font-mono font-black">
-              Shift+S
-            </span>
+            <Save className="w-4 h-4 text-black stroke-[2.5]" />
           </button>
 
           {/* Close Button */}
@@ -4656,29 +4982,6 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
         <div className="flex items-center gap-2 shrink-0">
           {/* 6. 圓形標籤管理工具：框選模式 / 勾選選取 / 隱藏標籤 / 圓形尺寸調整 (-/+) / 重設 */}
           <div className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-700/90 rounded-full px-2 py-0.5 shadow-sm shrink-0">
-            {/* 框選模式按鈕 */}
-            <button
-              type="button"
-              onClick={() => {
-                setIsBoxSelectMode(!isBoxSelectMode);
-                playClickSound();
-                toast.info(!isBoxSelectMode ? "已開啟框選模式：直接在畫布上拖曳即可框選多檔股票標籤" : "已切換回標準模式", { id: "box-mode" });
-              }}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-black transition-all cursor-pointer select-none active:scale-95 ${
-                isBoxSelectMode
-                  ? "bg-sky-400 text-black shadow-sm"
-                  : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
-              }`}
-              title={
-                isBoxSelectMode
-                  ? "目前處於框選模式 (在畫布上拖曳滑鼠即可框選)"
-                  : "框選功能：在畫布空白處直接拖曳滑鼠即可框選複數股票標籤"
-              }
-            >
-              <BoxSelect className="w-3.5 h-3.5 text-current stroke-[2.2]" />
-              <span className="hidden sm:inline">框選</span>
-            </button>
-
             {/* 勾選 / 全選按鈕 */}
             <button
               type="button"
@@ -4707,12 +5010,12 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
               )}
             </button>
 
-            {/* 隱藏標籤按鈕 (當有股票處於勾選狀態時顯示) */}
+            {/* 隱藏標籤按鈕 (當有股票處於勾選狀態時顯示，Icon 按鈕設計) */}
             {selectedTagSymbols.length > 0 && (
               <button
                 type="button"
                 onClick={handleToggleHideSelected}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-black transition-all cursor-pointer select-none active:scale-95 animate-in fade-in zoom-in-95 duration-150 ${
+                className={`w-6 h-6 flex items-center justify-center rounded-full text-[11px] font-black transition-all cursor-pointer select-none active:scale-95 animate-in fade-in zoom-in-95 duration-150 shrink-0 ${
                   isAllSelectedHidden
                     ? "bg-emerald-500 text-black hover:bg-emerald-400 shadow-sm"
                     : "bg-amber-500/90 text-black hover:bg-amber-400 shadow-sm"
@@ -4724,15 +5027,9 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
                 }
               >
                 {isAllSelectedHidden ? (
-                  <>
-                    <Eye className="w-3.5 h-3.5 text-black stroke-[2.5]" />
-                    <span>解除隱藏</span>
-                  </>
+                  <Eye className="w-3.5 h-3.5 text-black stroke-[2.5]" />
                 ) : (
-                  <>
-                    <EyeOff className="w-3.5 h-3.5 text-black stroke-[2.5]" />
-                    <span>隱藏標籤</span>
-                  </>
+                  <EyeOff className="w-3.5 h-3.5 text-black stroke-[2.5]" />
                 )}
               </button>
             )}
@@ -4953,9 +5250,7 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
         onMouseDown={handleCanvasPointerDown}
         onTouchStart={handleCanvasPointerDown}
         onDoubleClick={handleCanvasDoubleClick}
-        className={`flex-1 relative w-full h-full bg-[#1e2024] select-none overflow-hidden ${
-          isBoxSelectMode ? "cursor-crosshair" : "cursor-default"
-        }`}
+        className="flex-1 relative w-full h-full bg-[#1e2024] select-none overflow-hidden cursor-default"
       >
         {/* Optical Depth of Field Ambient Lighting Layer */}
         <div
@@ -6015,22 +6310,38 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
               <Tag className="w-7 h-7 text-[#D2F800]" />
             </div>
             <p className="font-black text-lg sm:text-xl text-white uppercase tracking-wider mb-1.5">
-              圖表上目前沒有任何美股標籤
+              {showOnlyTrading ? "目前沒有符合「交易中」的股票標籤" : "圖表上目前沒有任何美股標籤"}
             </p>
             <p className="text-xs text-zinc-400 max-w-md leading-relaxed mb-4 font-medium">
-              請點選上方「<strong className="text-white font-black">選擇區塊股票</strong>」選單，勾選欲呈現的股票代號新增至視覺線上；拖曳至理想位置後，按下「<strong className="text-white font-black">儲存位置 (Shift+S)</strong>」即可保存。
+              {showOnlyTrading
+                ? "您已開啟「只顯示交易中」篩選。點擊下方按鈕可切換顯示全部股票標籤。"
+                : "可點選上方「同步分隔線」自動將卡片中符合條件的個股同步至畫布，拖曳至理想位置後按下「儲存位置」即可保存。"}
             </p>
-            <button
-              type="button"
-              onClick={() => {
-                playClickSound();
-                setIsStockDropdownOpen(true);
-              }}
-              className="pointer-events-auto px-5 py-2.5 bg-black hover:bg-zinc-800 text-[#D2F800] rounded-full text-xs font-black tracking-wider uppercase flex items-center gap-2 transition-all shadow-lg cursor-pointer active:scale-95 border border-zinc-700"
-            >
-              <Plus className="w-4 h-4 text-[#D2F800] stroke-[3]" />
-              <span>新增美股標籤</span>
-            </button>
+            {showOnlyTrading ? (
+              <button
+                type="button"
+                onClick={() => {
+                  playClickSound();
+                  setShowOnlyTrading(false);
+                }}
+                className="pointer-events-auto px-5 py-2.5 bg-[#D2F800] hover:bg-[#bce000] text-black rounded-full text-xs font-black tracking-wider uppercase flex items-center gap-2 transition-all shadow-lg cursor-pointer active:scale-95"
+              >
+                <Tag className="w-4 h-4 text-black stroke-[2.5]" />
+                <span>切換顯示全部標籤</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  playClickSound();
+                  handleSyncDividersFromCards();
+                }}
+                className="pointer-events-auto px-5 py-2.5 bg-zinc-900 hover:bg-zinc-800 text-[#D2F800] rounded-full text-xs font-black tracking-wider uppercase flex items-center gap-2 transition-all shadow-lg cursor-pointer active:scale-95 border border-zinc-700 hover:border-[#D2F800]/50"
+              >
+                <SlidersHorizontal className="w-4 h-4 text-[#D2F800]" />
+                <span>從卡片同步標籤至畫布</span>
+              </button>
+            )}
           </div>
         )}
 
@@ -6041,12 +6352,144 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
             <span>• 拖曳標籤任意定位 (DRAG TO POSITION)</span>
             <span>• 懸停標籤可點擊 <strong className="text-rose-400 font-bold">✕</strong> 刪除</span>
             <span>• 儲存快速鍵 <strong className="text-white font-black">SHIFT + S</strong></span>
+            <span>• Primial 金字塔 <strong className="text-amber-400 font-black">ALT + Z</strong></span>
           </div>
           <div>
             <span className="uppercase tracking-wider">圖表共有 <strong className="text-white font-black text-xs">{activeCanvasSymbols.length}</strong> 檔標籤</span>
           </div>
         </div>
       </main>
+
+      {/* Primial 分批進場金字塔動態互動圖表視圖 (Alt+Z) */}
+      {showPyramidView && (
+        <div className="fixed inset-0 z-[100] flex flex-col h-screen w-screen max-h-screen bg-[#0f1115] text-white select-none overflow-hidden animate-in fade-in duration-150">
+          {/* Primial 頂部導航欄 (Sticky Header) */}
+          <div className="w-full bg-[#18181b] border-b border-zinc-800 px-3 sm:px-5 py-2.5 flex items-center justify-between gap-3 shadow-lg z-30 shrink-0">
+            {/* 左側：返回畫布按鈕 + 標題 */}
+            <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  playClickSound();
+                  setShowPyramidView(false);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 active:scale-95 text-zinc-100 hover:text-white rounded-full text-xs font-black transition-all cursor-pointer shadow-sm border border-zinc-700/80"
+                title="返回視覺線看板 (Esc / Alt+Z)"
+              >
+                <ArrowLeft className="w-3.5 h-3.5 stroke-[2.5]" />
+                <span>返回畫布</span>
+                <span className="hidden sm:inline text-[10px] text-zinc-400 font-mono font-normal">(Esc / Alt+Z)</span>
+              </button>
+
+              <div className="h-4 w-[1px] bg-zinc-700 hidden sm:block" />
+
+              <div className="flex items-center gap-2">
+                <span className="text-sm sm:text-base font-black text-white tracking-tight flex items-center gap-1.5">
+                  <Layers className="w-4 h-4 text-amber-400" />
+                  <span>Primial</span>
+                  <span className="hidden md:inline text-xs font-bold text-zinc-400">分批進場金字塔動態互動圖表</span>
+                </span>
+                <span className="px-2 py-0.5 bg-amber-400/15 border border-amber-400/30 text-amber-300 text-xs font-black rounded-full">
+                  已選取 {selectedTagSymbols.length} 檔
+                </span>
+              </div>
+            </div>
+
+            {/* 中間：個股的名字 Tab (可點擊快速跳轉到該股，並將畫面上下置中) */}
+            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar scrollbar-hide py-1 max-w-[45vw] sm:max-w-[55vw] lg:max-w-[60vw]">
+              {selectedTagSymbols.map((symbol) => {
+                const cleanSym = symbol.trim().toUpperCase();
+                const isActive = (activePyramidSymbol || selectedTagSymbols[0]) === cleanSym;
+                const pData = getStockPyramidData(cleanSym);
+                return (
+                  <button
+                    key={cleanSym}
+                    type="button"
+                    onClick={() => handleJumpToPyramidStock(cleanSym)}
+                    className={`px-3 py-1.5 rounded-full text-xs font-black transition-all cursor-pointer shrink-0 flex items-center gap-1.5 active:scale-95 select-none ${
+                      isActive
+                        ? "bg-amber-400 text-black shadow-[0_0_10px_rgba(251,191,36,0.5)] ring-2 ring-amber-300 font-mono"
+                        : "bg-zinc-800/90 hover:bg-zinc-700 text-zinc-300 hover:text-white border border-zinc-700/60 font-mono"
+                    }`}
+                    title={`點擊快速跳轉到 ${cleanSym} 並將畫面上下置中`}
+                  >
+                    <span>{cleanSym}</span>
+                    {pData.currentPrice > 0 && (
+                      <span className={`text-[10px] font-mono ${isActive ? "text-zinc-900 font-bold" : "text-zinc-400"}`}>
+                        ${pData.currentPrice.toFixed(2)}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* 右側：全部展開/收合 + 關閉 */}
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={toggleAllCardsCollapse}
+                className="px-2.5 sm:px-3 py-1.5 bg-zinc-800/80 hover:bg-zinc-700 text-zinc-200 hover:text-white rounded-full text-xs font-bold transition-all border border-zinc-700/60 cursor-pointer active:scale-95 shrink-0"
+              >
+                {selectedTagSymbols.every((sym) => Boolean(collapsedCards[sym])) ? "全部展開" : "全部收合"}
+              </button>
+
+              <button
+                type="button"
+                onClick={onClose}
+                className="w-7 h-7 flex items-center justify-center text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-full transition-all cursor-pointer active:scale-95 shrink-0"
+                title="關閉看板"
+              >
+                <X className="w-4 h-4 stroke-[2.5]" />
+              </button>
+            </div>
+          </div>
+
+          {/* 滾動內容區塊：個股金字塔互動圖表卡片列表 (上下區塊適當縮小，邊界左右擴張，min-h-0 h-full 原生滾動，置中完整顯示) */}
+          <div
+            ref={pyramidScrollContainerRef}
+            data-scrollable="true"
+            onWheel={(e) => {
+              e.stopPropagation();
+            }}
+            className="flex-1 min-h-0 h-full overflow-y-auto px-2 sm:px-4 lg:px-6 py-2.5 sm:py-3 space-y-4 bg-[#f3f4f6] scrollbar-hide no-scrollbar [&::-webkit-scrollbar]:hidden [scrollbar-width:none] [-ms-overflow-style:none] overscroll-contain focus:outline-none scroll-smooth"
+          >
+            {selectedTagSymbols.map((symbol) => {
+              const cleanSym = symbol.trim().toUpperCase();
+              const pData = getStockPyramidData(cleanSym);
+              const isCollapsed = Boolean(collapsedCards[cleanSym]);
+
+              return (
+                <div
+                  key={cleanSym}
+                  id={`pyramid-card-${cleanSym}`}
+                  className="w-full max-w-[99%] xl:max-w-[98%] 2xl:max-w-[1880px] mx-auto bg-white rounded-xl border border-zinc-200/90 shadow-sm p-2.5 sm:p-3.5 transition-all duration-200 hover:shadow-md"
+                >
+                  {/* 卡片主體：分批進場金字塔動態互動圖表 (整合代號/公司名與收合功能，移除重複雙標題，上下微縮置中完整顯示) */}
+                  <System2PlanningChart
+                    compact={true}
+                    symbol={cleanSym}
+                    companyName={pData.companyName || pData.tab?.companyName || cleanSym}
+                    isExpanded={!isCollapsed}
+                    onToggleExpand={() => toggleCardCollapse(cleanSym)}
+                    currentPrice={pData.currentPrice}
+                    holdingAvgPrice={pData.holdingAvgPrice}
+                    holdingQty={pData.holdingQty}
+                    batches={pData.batchConfigList}
+                    averagingRowsSys2={pData.averagingRowsSys2}
+                    includeCurrentHolding={true}
+                    refPnLPointSys2=""
+                    usableCapital={pData.usableCapital}
+                    plannedQty={pData.plannedQty}
+                    trades={pData.trades}
+                    visualLevels={pData.visualLevels}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

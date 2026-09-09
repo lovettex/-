@@ -408,8 +408,21 @@ export const StockCardVisualizer: React.FC<Props> = ({
   const localAnnotationsRef = useRef<ChartAnnotation[]>(localAnnotations);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const draggingIdRef = useRef<string | null>(null);
+  const lastLocalCommitTimeRef = useRef<number>(0);
+  const lastTabIdRef = useRef<string | undefined>(tabId);
 
   React.useEffect(() => {
+    // If tabId changed (e.g. user switched stock cards or tabs), reset the local commit lock
+    if (lastTabIdRef.current !== tabId) {
+      lastTabIdRef.current = tabId;
+      lastLocalCommitTimeRef.current = 0;
+    }
+
+    // Protection against Firestore in-flight stale snapshot echo (cooldown window of 2200ms after last local edit)
+    if (Date.now() - lastLocalCommitTimeRef.current < 2200) {
+      return;
+    }
+
     // Only synchronize from props if we do not have an active pending debounce or active user interaction
     if (!saveTimeoutRef.current && !isDrawingRef.current && !isErasingRef.current && !draggingIdRef.current) {
       const incoming = annotations || EMPTY_ANNOTATIONS;
@@ -425,7 +438,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
       setLocalAnnotations(incoming);
       localAnnotationsRef.current = incoming;
     }
-  }, [annotations]);
+  }, [annotations, tabId]);
 
   React.useEffect(() => {
     return () => {
@@ -634,6 +647,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
   const [history, setHistory] = useState<ChartAnnotation[][]>([]);
 
   const commitAnnotations = (nextAnnotations: ChartAnnotation[], immediate = false) => {
+    lastLocalCommitTimeRef.current = Date.now();
     setLocalAnnotations(nextAnnotations);
     localAnnotationsRef.current = nextAnnotations;
 
@@ -1399,6 +1413,28 @@ export const StockCardVisualizer: React.FC<Props> = ({
   const dragStartCoords = useRef<{ x: number; y: number } | null>(null);
   const dragInitialAnn = useRef<ChartAnnotation | null>(null);
 
+  // Price scale dynamic bidirectional projection reference for magnetic snapping & price anchoring
+  const priceScaleRef = useRef<{
+    getYPct: (p: number) => number;
+    getPriceFromYPct: (y: number) => number;
+    uniqueSortedPrices: number[];
+  }>({
+    getYPct: () => 50,
+    getPriceFromYPct: () => 0,
+    uniqueSortedPrices: [],
+  });
+
+  // Calculate visual Y for an annotation, anchoring to its exact price when price is available
+  const getAnnotationY = (ann: ChartAnnotation): number => {
+    if (ann.price && ann.price > 0 && typeof priceScaleRef.current.getYPct === 'function') {
+      const yFromPrice = priceScaleRef.current.getYPct(ann.price);
+      if (typeof yFromPrice === 'number' && !isNaN(yFromPrice)) {
+        return yFromPrice;
+      }
+    }
+    return ann.y ?? ann.y1 ?? 0;
+  };
+
   const onUpdateAnnotationsRef = useRef(onUpdateAnnotations);
   React.useEffect(() => {
     onUpdateAnnotationsRef.current = onUpdateAnnotations;
@@ -1409,7 +1445,9 @@ export const StockCardVisualizer: React.FC<Props> = ({
   const getRelativeCoords = (clientX: number, clientY: number) => {
     if (!canvasRef.current) return { x: 0, y: 0 };
     const rect = canvasRef.current.getBoundingClientRect();
-    if (!rect.width || !rect.height) return { x: 0, y: 0 };
+    if (!rect.width || !rect.height || rect.width < 50 || rect.height < 50) {
+      return dragStartCoords.current || { x: 50, y: 50 };
+    }
     const rawX = ((clientX - rect.left) / rect.width) * 100;
     const rawY = ((clientY - rect.top) / rect.height) * 100;
     const x = Number.isFinite(rawX) ? Math.max(0, Math.min(100, rawX)) : 0;
@@ -1444,16 +1482,49 @@ export const StockCardVisualizer: React.FC<Props> = ({
           x: Math.max(0, Math.min(100, (initial.x ?? 0) + dx)),
           y: Math.max(0, Math.min(100, (initial.y ?? 0) + dy)),
         };
-      } else if (initial.type === 'divider') {
-        const newY = Math.max(0, Math.min(100, (initial.y ?? initial.y1 ?? 0) + dy));
+      } else if (
+        initial.type === 'divider' ||
+        (initial.type === 'line' &&
+          Math.abs((initial.y2 ?? initial.y1 ?? 0) - (initial.y1 ?? 0)) < 8 &&
+          Math.abs((initial.x2 ?? 100) - (initial.x1 ?? 0)) >= 10)
+      ) {
+        const rawY = Math.max(0, Math.min(100, (initial.y ?? initial.y1 ?? 0) + dy));
+        const { getYPct, getPriceFromYPct, uniqueSortedPrices } = priceScaleRef.current;
+
+        let newY = rawY;
+        let newPrice: number | undefined = undefined;
+
+        // Magnetic Snapping: snap to key prices if within 1.6% threshold
+        if (uniqueSortedPrices && uniqueSortedPrices.length > 0) {
+          let minDiff = 1.6;
+          for (const p of uniqueSortedPrices) {
+            const pY = getYPct(p);
+            const diff = Math.abs(rawY - pY);
+            if (diff < minDiff) {
+              minDiff = diff;
+              newY = pY;
+              newPrice = p;
+            }
+          }
+        }
+
+        if (newPrice === undefined && getPriceFromYPct) {
+          const calcP = getPriceFromYPct(newY);
+          if (calcP > 0) {
+            newPrice = Math.round(calcP * 100) / 100;
+          }
+        }
+
         const roundedY = Math.round(newY * 100) / 100;
         return {
           ...ann,
+          type: 'divider' as const,
           y: roundedY,
           y1: roundedY,
           y2: roundedY,
           x1: 0,
           x2: 100,
+          price: newPrice && newPrice > 0 ? newPrice : undefined,
         };
       } else if (initial.type === 'line' || initial.type === 'arrow') {
         return {
@@ -1473,7 +1544,8 @@ export const StockCardVisualizer: React.FC<Props> = ({
 
   const handleDragEnd = () => {
     if (draggingId) {
-      onUpdateAnnotationsRef.current?.(localAnnotationsRef.current);
+      lastLocalCommitTimeRef.current = Date.now();
+      commitAnnotations(localAnnotationsRef.current, true);
     }
     draggingIdRef.current = null;
     setDraggingId(null);
@@ -1526,8 +1598,18 @@ export const StockCardVisualizer: React.FC<Props> = ({
 
   const isPointNearAnnotation = (coords: { x: number; y: number }, ann: ChartAnnotation): boolean => {
     if (ann.type === 'divider') {
-      const dy = Math.abs(coords.y - (ann.y ?? ann.y1 ?? 0));
+      const dividerY = getAnnotationY(ann);
+      const dy = Math.abs(coords.y - dividerY);
       return dy <= 4.0;
+    }
+    if (ann.type === 'line') {
+      const isDivider =
+        Math.abs((ann.y2 ?? ann.y1 ?? 0) - (ann.y1 ?? 0)) < 8 &&
+        Math.abs((ann.x2 ?? 100) - (ann.x1 ?? 0)) >= 10;
+      if (isDivider) {
+        const dividerY = getAnnotationY(ann);
+        return Math.abs(coords.y - dividerY) <= 4.0;
+      }
     }
     if (ann.type === 'line' || ann.type === 'arrow') {
       const x1 = ann.x1 ?? 0;
@@ -1575,12 +1657,33 @@ export const StockCardVisualizer: React.FC<Props> = ({
   };
 
   const handleClearAll = () => {
-    if (!localAnnotationsRef.current || localAnnotationsRef.current.length === 0) {
+    const currentList = localAnnotationsRef.current;
+    if (!currentList || currentList.length === 0) {
       toast("目前尚無任何繪圖標記", { icon: 'ℹ️' });
       return;
     }
-    pushToHistoryAndSave([], true);
-    toast.success("已一鍵刪除所有繪圖標記 (可點選上一步還原)");
+
+    const isDividerAnn = (ann: ChartAnnotation) =>
+      ann.type === 'divider' ||
+      (ann.type === 'line' &&
+        Math.abs((ann.y2 ?? ann.y1 ?? 0) - (ann.y1 ?? 0)) < 8 &&
+        Math.abs((ann.x2 ?? 100) - (ann.x1 ?? 0)) >= 10);
+
+    const dividers = currentList.filter(isDividerAnn);
+    const nonDividers = currentList.filter((a) => !isDividerAnn(a));
+
+    if (dividers.length > 0 && nonDividers.length > 0) {
+      // Priority protect axis dividers: clear freehand/sketches first
+      pushToHistoryAndSave(dividers, true);
+      toast.success(`已清除 ${nonDividers.length} 個手繪標記 (已保留基準分隔線，再次點選可刪除分隔線)`);
+    } else if (dividers.length > 0 && nonDividers.length === 0) {
+      // Only dividers remain: user clicks again to clear them
+      pushToHistoryAndSave([], true);
+      toast.success("已清除所有基準分隔線 (可點選上一步還原)");
+    } else {
+      pushToHistoryAndSave([], true);
+      toast.success("已一鍵刪除所有繪圖標記 (可點選上一步還原)");
+    }
   };
 
   const handleDeleteAnnotation = (idToDelete: string) => {
@@ -1647,7 +1750,34 @@ export const StockCardVisualizer: React.FC<Props> = ({
       setEraserHoverPoint(coords);
       eraseAnnotationsAt(coords, false);
     } else if (currentMode === 'divider') {
-      const fixedY = Math.max(0, Math.min(100, Math.round(coords.y * 100) / 100));
+      const rawY = coords.y;
+      const { getYPct, getPriceFromYPct, uniqueSortedPrices } = priceScaleRef.current;
+
+      let targetY = rawY;
+      let targetPrice: number | undefined = undefined;
+
+      // Magnetic snapping to key prices within 1.8% threshold
+      if (uniqueSortedPrices && uniqueSortedPrices.length > 0) {
+        let minDiff = 1.8;
+        for (const p of uniqueSortedPrices) {
+          const pY = getYPct(p);
+          const diff = Math.abs(rawY - pY);
+          if (diff < minDiff) {
+            minDiff = diff;
+            targetY = pY;
+            targetPrice = p;
+          }
+        }
+      }
+
+      if (targetPrice === undefined && getPriceFromYPct) {
+        const calcP = getPriceFromYPct(targetY);
+        if (calcP > 0) {
+          targetPrice = Math.round(calcP * 100) / 100;
+        }
+      }
+
+      const fixedY = Math.max(0, Math.min(100, Math.round(targetY * 100) / 100));
       const newId = `div-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       activeNewDividerIdRef.current = null;
       const newAnn: ChartAnnotation = {
@@ -1660,9 +1790,11 @@ export const StockCardVisualizer: React.FC<Props> = ({
         y1: fixedY,
         y2: fixedY,
         y: fixedY,
+        price: targetPrice && targetPrice > 0 ? targetPrice : undefined,
       };
       pushToHistoryAndSave([...localAnnotationsRef.current, newAnn], true);
-      toast.success("已新增水平分隔線，位置已固定 (如需移動請切換至「拖曳」模式)", { duration: 1500 });
+      const priceMsg = targetPrice ? ` (錨定價格 $${targetPrice.toFixed(2)})` : '';
+      toast.success(`已新增水平分隔線${priceMsg}，位置已固定 (如需移動請切換至「拖曳」模式)`, { duration: 1800 });
       setMode('cursor');
       modeRef.current = 'cursor';
       setHoverPoint(null);
@@ -1796,7 +1928,34 @@ export const StockCardVisualizer: React.FC<Props> = ({
       setEraserHoverPoint(coords);
       eraseAnnotationsAt(coords, false);
     } else if (currentMode === 'divider') {
-      const fixedY = Math.max(0, Math.min(100, Math.round(coords.y * 100) / 100));
+      const rawY = coords.y;
+      const { getYPct, getPriceFromYPct, uniqueSortedPrices } = priceScaleRef.current;
+
+      let targetY = rawY;
+      let targetPrice: number | undefined = undefined;
+
+      // Magnetic snapping to key prices within 1.8% threshold
+      if (uniqueSortedPrices && uniqueSortedPrices.length > 0) {
+        let minDiff = 1.8;
+        for (const p of uniqueSortedPrices) {
+          const pY = getYPct(p);
+          const diff = Math.abs(rawY - pY);
+          if (diff < minDiff) {
+            minDiff = diff;
+            targetY = pY;
+            targetPrice = p;
+          }
+        }
+      }
+
+      if (targetPrice === undefined && getPriceFromYPct) {
+        const calcP = getPriceFromYPct(targetY);
+        if (calcP > 0) {
+          targetPrice = Math.round(calcP * 100) / 100;
+        }
+      }
+
+      const fixedY = Math.max(0, Math.min(100, Math.round(targetY * 100) / 100));
       const newId = `div-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       activeNewDividerIdRef.current = null;
       const newAnn: ChartAnnotation = {
@@ -1809,9 +1968,11 @@ export const StockCardVisualizer: React.FC<Props> = ({
         y1: fixedY,
         y2: fixedY,
         y: fixedY,
+        price: targetPrice && targetPrice > 0 ? targetPrice : undefined,
       };
       pushToHistoryAndSave([...localAnnotationsRef.current, newAnn], true);
-      toast.success("已新增水平分隔線，位置已固定 (如需移動請切換至「拖曳」模式)", { duration: 1500 });
+      const priceMsg = targetPrice ? ` (錨定價格 $${targetPrice.toFixed(2)})` : '';
+      toast.success(`已新增水平分隔線${priceMsg}，位置已固定 (如需移動請切換至「拖曳」模式)`, { duration: 1800 });
       setMode('cursor');
       modeRef.current = 'cursor';
       setHoverPoint(null);
@@ -2076,6 +2237,33 @@ export const StockCardVisualizer: React.FC<Props> = ({
       return 50;
     };
 
+    const getPriceFromYPct = (yPct: number): number => {
+      if (uniqueSortedPrices.length === 0) return 0;
+      if (uniqueSortedPrices.length === 1) return uniqueSortedPrices[0];
+      const n = uniqueSortedPrices.length;
+      if (yPct >= bottomY) return uniqueSortedPrices[0];
+      if (yPct <= topY) return uniqueSortedPrices[n - 1];
+
+      for (let i = 0; i < n - 1; i++) {
+        const yLow = bottomY - (i / (n - 1)) * (bottomY - topY);
+        const yHigh = bottomY - ((i + 1) / (n - 1)) * (bottomY - topY);
+        if (yPct <= yLow && yPct >= yHigh) {
+          if (yHigh === yLow) return uniqueSortedPrices[i];
+          const ratio = (yLow - yPct) / (yLow - yHigh);
+          const pLow = uniqueSortedPrices[i];
+          const pHigh = uniqueSortedPrices[i + 1];
+          return pLow + ratio * (pHigh - pLow);
+        }
+      }
+      return uniqueSortedPrices[0];
+    };
+
+    priceScaleRef.current = {
+      getYPct,
+      getPriceFromYPct,
+      uniqueSortedPrices,
+    };
+
     const isAlert = (p: number) => {
       return false;
     };
@@ -2182,6 +2370,8 @@ export const StockCardVisualizer: React.FC<Props> = ({
       sls,
       entries,
       getYPct,
+      getPriceFromYPct,
+      uniqueSortedPrices,
       leftLabels,
       rightLabels,
       entryLabels,
@@ -2204,6 +2394,8 @@ export const StockCardVisualizer: React.FC<Props> = ({
     sls,
     entries,
     getYPct,
+    getPriceFromYPct,
+    uniqueSortedPrices,
     leftLabels,
     rightLabels,
     entryLabels,
@@ -2788,8 +2980,9 @@ export const StockCardVisualizer: React.FC<Props> = ({
               );
             }
             if (ann.type === 'divider') {
-              const dividerY = ann.y ?? ann.y1 ?? 0;
+              const dividerY = getAnnotationY(ann);
               const axisLetter = getAxisLetterForColor(ann.color);
+              const isBeingDragged = draggingId === ann.id;
               return (
                 <g key={ann.id} className="pointer-events-auto">
                   {/* Invisible wide hit target for divider */}
@@ -2835,10 +3028,11 @@ export const StockCardVisualizer: React.FC<Props> = ({
                     y1={dividerY}
                     x2="100"
                     y2={dividerY}
-                    stroke={ann.color}
-                    strokeWidth={ann.strokeWidth}
+                    stroke={isBeingDragged ? '#f59e0b' : ann.color}
+                    strokeWidth={isBeingDragged ? Number(ann.strokeWidth || 4) + 1 : ann.strokeWidth}
+                    strokeDasharray={isBeingDragged ? '4 2' : 'none'}
                     vectorEffect="non-scaling-stroke"
-                    opacity={mode === 'eraser' || mode === 'move' ? "0.75" : "0.85"}
+                    opacity={isBeingDragged ? '1' : (mode === 'eraser' || mode === 'move' ? '0.8' : '0.85')}
                     className={`transition-all ${
                       mode === 'eraser'
                         ? 'cursor-pointer hover:stroke-red-500 hover:opacity-100 transition-all duration-150 [stroke-dasharray:none]'
@@ -2881,12 +3075,12 @@ export const StockCardVisualizer: React.FC<Props> = ({
                       x="98.5"
                       y={dividerY - 1.2}
                       textAnchor="end"
-                      fill="#9ca3af"
+                      fill={isBeingDragged ? '#f59e0b' : '#9ca3af'}
                       fontSize="3.8"
                       fontWeight="800"
-                      className="select-none pointer-events-none font-mono tracking-wider opacity-85"
+                      className="select-none pointer-events-none font-mono tracking-wider opacity-90"
                     >
-                      {axisLetter}
+                      {axisLetter} {ann.price && ann.price > 0 ? `$${ann.price.toFixed(2)}` : ''}
                     </text>
                   )}
                 </g>
@@ -3031,34 +3225,62 @@ export const StockCardVisualizer: React.FC<Props> = ({
             />
           )}
 
-          {mode === 'divider' && hoverPoint && (
-            <g className="pointer-events-none">
-              <line
-                x1="0"
-                y1={hoverPoint.y}
-                x2="100"
-                y2={hoverPoint.y}
-                stroke={activeColor}
-                strokeWidth={activeThickness}
-                strokeDasharray="4 4"
-                vectorEffect="non-scaling-stroke"
-                opacity="0.8"
-              />
-              {getAxisLetterForColor(activeColor) && (
-                <text
-                  x="98.5"
-                  y={hoverPoint.y - 1.2}
-                  textAnchor="end"
-                  fill="#9ca3af"
-                  fontSize="3.8"
-                  fontWeight="800"
-                  className="select-none pointer-events-none font-mono tracking-wider opacity-85"
-                >
-                  {getAxisLetterForColor(activeColor)}
-                </text>
-              )}
-            </g>
-          )}
+          {mode === 'divider' && hoverPoint && (() => {
+            const rawY = hoverPoint.y;
+            const { getYPct, getPriceFromYPct, uniqueSortedPrices } = priceScaleRef.current;
+            let targetY = rawY;
+            let targetPrice: number | undefined = undefined;
+
+            if (uniqueSortedPrices && uniqueSortedPrices.length > 0) {
+              let minDiff = 1.8;
+              for (const p of uniqueSortedPrices) {
+                const pY = getYPct(p);
+                const diff = Math.abs(rawY - pY);
+                if (diff < minDiff) {
+                  minDiff = diff;
+                  targetY = pY;
+                  targetPrice = p;
+                }
+              }
+            }
+
+            if (targetPrice === undefined && getPriceFromYPct) {
+              const calcP = getPriceFromYPct(targetY);
+              if (calcP > 0) {
+                targetPrice = Math.round(calcP * 100) / 100;
+              }
+            }
+
+            const axisLetter = getAxisLetterForColor(activeColor);
+            return (
+              <g className="pointer-events-none">
+                <line
+                  x1="0"
+                  y1={targetY}
+                  x2="100"
+                  y2={targetY}
+                  stroke={activeColor}
+                  strokeWidth={activeThickness}
+                  strokeDasharray="4 4"
+                  vectorEffect="non-scaling-stroke"
+                  opacity="0.85"
+                />
+                {axisLetter && (
+                  <text
+                    x="98.5"
+                    y={targetY - 1.2}
+                    textAnchor="end"
+                    fill="#9ca3af"
+                    fontSize="3.8"
+                    fontWeight="800"
+                    className="select-none pointer-events-none font-mono tracking-wider opacity-90"
+                  >
+                    {axisLetter} {targetPrice && targetPrice > 0 ? `$${targetPrice.toFixed(2)}` : ''}
+                  </text>
+                )}
+              </g>
+            );
+          })()}
 
           {/* Visual eraser pointer indicator */}
           {mode === 'eraser' && eraserHoverPoint && (
@@ -3291,9 +3513,10 @@ export const StockCardVisualizer: React.FC<Props> = ({
               );
             }
             if (ann.type === 'divider') {
-              const dividerY = ann.y ?? ann.y1 ?? 0;
+              const dividerY = getAnnotationY(ann);
               const axisLetter = getAxisLetterForColor(ann.color);
               if (!axisLetter) return null;
+              const isBeingDragged = draggingId === ann.id;
               return (
                 <div
                   key={`axis-lbl-${ann.id}`}
@@ -3302,10 +3525,17 @@ export const StockCardVisualizer: React.FC<Props> = ({
                     top: `${dividerY}%`,
                     transform: 'translateY(-50%)',
                   }}
-                  className="absolute z-30 pointer-events-none select-none text-[11px] sm:text-[12px] font-black font-mono text-zinc-400 tracking-wider leading-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]"
-                  title={`${axisLetter}軸 (${ann.color})`}
+                  className={`absolute z-30 pointer-events-none select-none text-[11px] sm:text-[12px] font-black font-mono tracking-wider leading-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)] flex items-center gap-1 ${
+                    isBeingDragged ? 'text-amber-400 scale-110' : 'text-zinc-400'
+                  }`}
+                  title={`${axisLetter}軸 (${ann.color}) ${ann.price ? `$${ann.price}` : ''}`}
                 >
-                  {axisLetter}
+                  <span>{axisLetter}</span>
+                  {ann.price && ann.price > 0 && (
+                    <span className="text-[9px] sm:text-[10px] opacity-85 font-mono">
+                      ${ann.price.toFixed(2)}
+                    </span>
+                  )}
                 </div>
               );
             }
@@ -3314,10 +3544,11 @@ export const StockCardVisualizer: React.FC<Props> = ({
                 Math.abs((ann.y2 ?? ann.y1 ?? 0) - (ann.y1 ?? 0)) < 8 &&
                 Math.abs((ann.x2 ?? 100) - (ann.x1 ?? 0)) >= 10;
               if (isDivider) {
-                const dividerY = (ann.y1 + ann.y2) / 2;
+                const dividerY = getAnnotationY(ann);
                 const axisLetter = getAxisLetterForColor(ann.color);
                 if (!axisLetter) return null;
-                const rightX = Math.max(ann.x1, ann.x2);
+                const rightX = Math.max(ann.x1 ?? 0, ann.x2 ?? 100);
+                const isBeingDragged = draggingId === ann.id;
                 return (
                   <div
                     key={`axis-lbl-${ann.id}`}
@@ -3326,10 +3557,17 @@ export const StockCardVisualizer: React.FC<Props> = ({
                       top: `${dividerY}%`,
                       transform: 'translate(-100%, -50%)',
                     }}
-                    className="absolute z-30 pointer-events-none select-none text-[11px] sm:text-[12px] font-black font-mono text-zinc-400 tracking-wider leading-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]"
-                    title={`${axisLetter}軸 (${ann.color})`}
+                    className={`absolute z-30 pointer-events-none select-none text-[11px] sm:text-[12px] font-black font-mono tracking-wider leading-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)] flex items-center gap-1 ${
+                      isBeingDragged ? 'text-amber-400 scale-110' : 'text-zinc-400'
+                    }`}
+                    title={`${axisLetter}軸 (${ann.color}) ${ann.price ? `$${ann.price}` : ''}`}
                   >
-                    {axisLetter}
+                    <span>{axisLetter}</span>
+                    {ann.price && ann.price > 0 && (
+                      <span className="text-[9px] sm:text-[10px] opacity-85 font-mono">
+                        ${ann.price.toFixed(2)}
+                      </span>
+                    )}
                   </div>
                 );
               }
@@ -3692,7 +3930,14 @@ export const StockCardVisualizer: React.FC<Props> = ({
             {/* 一鍵刪除視覺圖示化的所有繪圖按鈕 */}
             <button
               type="button"
-              title={localAnnotations.length > 0 ? `一鍵刪除所有繪圖 (${localAnnotations.length} 個標記)` : "一鍵刪除所有繪圖 (目前無繪圖)"}
+              title={(() => {
+                if (localAnnotations.length === 0) return "一鍵刪除所有繪圖 (目前無繪圖)";
+                const hasDividers = localAnnotations.some(a => a.type === 'divider' || (a.type === 'line' && Math.abs((a.y2 ?? a.y1 ?? 0) - (a.y1 ?? 0)) < 8 && Math.abs((a.x2 ?? 100) - (a.x1 ?? 0)) >= 10));
+                const hasOther = localAnnotations.some(a => !(a.type === 'divider' || (a.type === 'line' && Math.abs((a.y2 ?? a.y1 ?? 0) - (a.y1 ?? 0)) < 8 && Math.abs((a.x2 ?? 100) - (a.x1 ?? 0)) >= 10)));
+                if (hasDividers && hasOther) return "一鍵清除手繪筆跡標記 (智慧保護重要基準分隔線)";
+                if (hasDividers) return `一鍵清除所有基準分隔線 (${localAnnotations.length} 條)`;
+                return `一鍵刪除所有繪圖 (${localAnnotations.length} 個標記)`;
+              })()}
               onClick={handleClearAll}
               className={`p-1 sm:p-0.5 rounded transition-all shrink-0 flex items-center gap-0.5 cursor-pointer ${
                 localAnnotations.length > 0

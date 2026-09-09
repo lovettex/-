@@ -37,6 +37,8 @@ export interface StockTab {
   averageCost?: number;
   stopLossPrice?: number;
   takeProfitPrice?: number;
+  supportPrice?: number;
+  resistancePrice?: number;
   averagingRows?: { price: string; quantity: string; quantity2?: string; bought?: boolean; riskFlag?: boolean }[];
   refPnLPoint?: number | string;
   includeCurrentHolding?: boolean;
@@ -59,6 +61,8 @@ export interface ChartAnnotation {
   height?: number;
   text?: string;
   fontSize?: number;
+  price?: number;
+  isLocked?: boolean;
 }
 
 export interface Trade {

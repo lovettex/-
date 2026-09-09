@@ -57,7 +57,6 @@ import { Badge } from "../components/ui/badge";
 import {
   Plus,
   TrendingUp,
-  Target,
   Clock,
   Activity,
   TrendingDown,
@@ -1101,8 +1100,8 @@ export default function Dashboard() {
     tabs.forEach((tab) => {
       const trades = activeTabTrades[tab.id] || [];
       const st = calculateStats(trades as any, tab?.currentPrice);
-      const effectiveHoldingQuantity = st.totalQuantity !== 0 ? st.totalQuantity : (tab.holdingQuantity || 0);
-      const effectiveAveragePrice = (st.totalQuantity !== 0 && st.averagePrice > 0) ? st.averagePrice : (tab.averageCost || 0);
+      const effectiveHoldingQuantity = trades.length > 0 ? st.totalQuantity : (tab.holdingQuantity || 0);
+      const effectiveAveragePrice = (trades.length > 0 && st.averagePrice > 0) ? st.averagePrice : (tab.averageCost || 0);
       const curPrice = Number(tab.currentPrice || 0);
       let unrealizedPnL = st.unrealizedPnL || 0;
       if (effectiveHoldingQuantity > 0 && effectiveAveragePrice > 0 && curPrice > 0) {
@@ -3740,9 +3739,11 @@ export default function Dashboard() {
   }, [tabs, activeTabTrades, playSuccessSound]);
 
   // further categorize visible tabs based on holdingStatus for rendering
-  const currentSubTabVisibleTabs = effectiveVisibleActiveTabs.filter(
-    (t) => getDisplayHoldingStatus(t.holdingStatus) === activeHoldingSubTab,
-  );
+  const currentSubTabVisibleTabs = useMemo(() => {
+    return effectiveVisibleActiveTabs.filter(
+      (t) => getDisplayHoldingStatus(t.holdingStatus) === activeHoldingSubTab,
+    );
+  }, [effectiveVisibleActiveTabs, activeHoldingSubTab]);
 
   // Automatically reset card definition filter if it has no items in the active sub tab
   useEffect(() => {
@@ -6646,51 +6647,6 @@ export default function Dashboard() {
                         <InteractiveButton
                           noGlow
                           as="button"
-                          onClick={async () => {
-                            playClickSound();
-                            if (!selectedCardIds || selectedCardIds.size === 0) {
-                              toast.info("請先在卡片列表中勾選要同步的個股卡片（勾選圓形 Tickbox），再點擊一鍵同步");
-                              return;
-                            }
-                            const targetTabs = tabs.filter(
-                              (tab) =>
-                                tab.status !== "COMPLETED" &&
-                                selectedCardIds.has(tab.id) &&
-                                (activeViewTab === "real"
-                                  ? tab.tradeType === "real"
-                                  : activeViewTab === "active"
-                                  ? tab.tradeType !== "real"
-                                  : true)
-                            );
-                            if (targetTabs.length === 0) {
-                              toast.error("所勾選的卡片中沒有可同步的有效個股卡片");
-                              return;
-                            }
-                            const res = await syncSubTabDividersToCanvas(
-                              targetTabs,
-                              user?.uid,
-                              activeTabStrategies,
-                              activeTabStatsMap
-                            );
-                            if (res.updatedCount > 0) {
-                              playSuccessSound();
-                              toast.success(
-                                `已成功同步所勾選的 ${res.updatedCount} 檔卡片分隔線現價相對位置至視覺線畫布！(${res.updatedSymbols.join(", ")})`
-                              );
-                            } else {
-                              toast.info(
-                                "所勾選的卡片中尚未包含分隔線（請在視覺圖示化卡片上繪製分隔線後再同步）"
-                              );
-                            }
-                          }}
-                          title="一鍵同步所勾選卡片之分隔線現價相對位置至動態視覺線畫布"
-                          className="p-2 bg-zinc-50 border border-zinc-200 text-zinc-500 hover:text-emerald-700 hover:bg-emerald-50/60 rounded-md transition-all cursor-pointer flex items-center justify-center"
-                        >
-                          <Target className="w-4 h-4 text-emerald-600" />
-                        </InteractiveButton>
-                        <InteractiveButton
-                          noGlow
-                          as="button"
                           onClick={() => setIsManageHiddenOpen(true)}
                           title="管理持有中股票"
                           className="p-2 bg-zinc-50 border border-zinc-200 text-zinc-500 hover:text-zinc-850 hover:bg-zinc-100 rounded-md transition-all cursor-pointer"
@@ -6779,52 +6735,6 @@ export default function Dashboard() {
                           >
                             <SlidersHorizontal className="w-3 h-3" />
                             視覺線
-                          </InteractiveButton>
-                          <InteractiveButton
-                            noGlow
-                            as="button"
-                            onClick={async () => {
-                              playClickSound();
-                              if (!selectedCardIds || selectedCardIds.size === 0) {
-                                toast.info("請先在卡片列表中勾選要同步的個股卡片（勾選圓形 Tickbox），再點擊一鍵同步");
-                                return;
-                              }
-                              const targetTabs = tabs.filter(
-                                (tab) =>
-                                  tab.status !== "COMPLETED" &&
-                                  selectedCardIds.has(tab.id) &&
-                                  (activeViewTab === "real"
-                                    ? tab.tradeType === "real"
-                                    : activeViewTab === "active"
-                                    ? tab.tradeType !== "real"
-                                    : true)
-                              );
-                              if (targetTabs.length === 0) {
-                                toast.error("所勾選的卡片中沒有可同步的有效個股卡片");
-                                return;
-                              }
-                              const res = await syncSubTabDividersToCanvas(
-                                targetTabs,
-                                user?.uid,
-                                activeTabStrategies,
-                                activeTabStatsMap
-                              );
-                              if (res.updatedCount > 0) {
-                                playSuccessSound();
-                                toast.success(
-                                  `已同步所勾選的 ${res.updatedCount} 檔股票分隔線現價 (${res.updatedSymbols.join(", ")})`
-                                );
-                              } else {
-                                toast.info(
-                                  "所勾選的卡片中尚未包含分隔線（請在視覺圖示化卡片上繪製分隔線後再同步）"
-                                );
-                              }
-                            }}
-                            className="px-2.5 py-1 bg-zinc-50 border border-zinc-200 text-zinc-650 hover:text-emerald-700 hover:bg-emerald-50/60 rounded-lg transition-all text-[11px] flex items-center gap-1 font-extrabold cursor-pointer"
-                            title="一鍵同步所勾選卡片之分隔線現價相對位置至動態視覺線畫布"
-                          >
-                            <Target className="w-3 h-3 text-emerald-600" />
-                            同步線
                           </InteractiveButton>
                           <InteractiveButton
                             noGlow
@@ -10189,6 +10099,7 @@ export default function Dashboard() {
         selectedCardIds={selectedCardIds}
         userId={user?.uid}
         initialTradeType={activeViewTab === "real" ? "real" : activeViewTab === "active" ? "active" : "all"}
+        maxStrategyRiskPool60={maxStrategyRiskPool60}
         strategiesMap={activeTabStrategies}
         statsMap={activeTabStatsMap}
         tradesMap={activeTabTrades}

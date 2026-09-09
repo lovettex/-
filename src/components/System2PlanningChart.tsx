@@ -1,0 +1,1930 @@
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import {
+  Chart as ChartJS,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend,
+  ChartData,
+  ChartOptions,
+  Plugin,
+} from 'chart.js';
+import { Chart } from 'react-chartjs-2';
+import { Trade } from '../types';
+import { formatTimestamp } from '../lib/dateUtils';
+import {
+  ChevronDown,
+  ChevronUp,
+  History,
+  Sparkles,
+  Layers,
+} from 'lucide-react';
+
+// Register Chart.js components
+ChartJS.register(
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend
+);
+
+export interface VisualPriceLevel {
+  id: string;
+  type: 'support' | 'stopLoss' | 'resistance' | 'takeProfit';
+  label: string; // e.g. "支撐" | "止損" | "壓力" | "止盈"
+  price: number;
+  color: string; // #facc15, #ef4444, #f87171, #10b981
+  note?: string;
+}
+
+export interface BatchInfo {
+  index: number;
+  name: string;
+  size: number;
+  bought: number;
+  remaining: number;
+  split1: {
+    name: string;
+    shortLabel: string;
+    size: number;
+    bought: number;
+    remaining: number;
+    percent: string;
+  };
+  split2: {
+    name: string;
+    shortLabel: string;
+    size: number;
+    bought: number;
+    remaining: number;
+    percent: string;
+  };
+}
+
+export interface AveragingRowData {
+  price: string;
+  quantity: string;
+  quantity2?: string;
+  bought?: boolean;
+  riskFlag?: boolean;
+}
+
+interface System2PlanningChartProps {
+  currentPrice: number;
+  holdingAvgPrice: number;
+  holdingQty: number;
+  batches: BatchInfo[];
+  averagingRowsSys2: AveragingRowData[];
+  includeCurrentHolding: boolean;
+  refPnLPointSys2?: string;
+  usableCapital?: number;
+  plannedQty?: number;
+  trades?: Trade[];
+  visualLevels?: VisualPriceLevel[];
+  compact?: boolean;
+  symbol?: string;
+  companyName?: string;
+  isExpanded?: boolean;
+  onToggleExpand?: () => void;
+  onBatchClick?: (
+    batchIndex: number,
+    batchName: string,
+    split1Qty: number,
+    split2Qty: number,
+    targetSplit?: 1 | 2
+  ) => void;
+}
+
+export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
+  currentPrice,
+  holdingAvgPrice,
+  holdingQty,
+  batches,
+  averagingRowsSys2,
+  includeCurrentHolding,
+  usableCapital = 0,
+  plannedQty = 0,
+  trades = [],
+  visualLevels = [],
+  compact = false,
+  symbol,
+  companyName,
+  isExpanded: propIsExpanded,
+  onToggleExpand,
+  onBatchClick,
+}) => {
+  const [internalExpanded, setInternalExpanded] = useState<boolean>(true);
+  const isExpanded = propIsExpanded !== undefined ? propIsExpanded : internalExpanded;
+  const handleToggleExpand = () => {
+    if (onToggleExpand) {
+      onToggleExpand();
+    } else {
+      setInternalExpanded((prev) => !prev);
+    }
+  };
+
+  const [showTrades, setShowTrades] = useState<boolean>(true);
+  const [showAvgCost, setShowAvgCost] = useState<boolean>(true);
+
+  // 關鍵防線四種類別獨立複選狀態 (支撐、止損、壓力、止盈)
+  // 預設只顯示「支撐」，止損、壓力、止盈預設為 false，可由用戶點擊選單隨時複選啟用
+  const [selectedLevelTypes, setSelectedLevelTypes] = useState<{
+    support: boolean;
+    stopLoss: boolean;
+    resistance: boolean;
+    takeProfit: boolean;
+  }>({
+    support: true,
+    stopLoss: false,
+    resistance: false,
+    takeProfit: false,
+  });
+  const [isLevelsDropdownOpen, setIsLevelsDropdownOpen] = useState<boolean>(false);
+  const levelsDropdownRef = useRef<HTMLDivElement>(null);
+
+  // 點擊下拉選單外部自動收合
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (levelsDropdownRef.current && !levelsDropdownRef.current.contains(event.target as Node)) {
+        setIsLevelsDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  const [yAxisMode, setYAxisMode] = useState<'shares' | 'percent'>('shares');
+  const [hoveredItem, setHoveredItem] = useState<{
+    type: 'step' | 'trade' | 'visualLevel' | 'avgCost' | 'currentPrice';
+    data: any;
+  } | null>(null);
+  const [selectedItem, setSelectedItem] = useState<{
+    type: 'step' | 'trade' | 'visualLevel' | 'avgCost' | 'currentPrice';
+    data: any;
+  } | null>(null);
+
+  // Normalize numeric values safely
+  const currentPriceNum = useMemo(() => {
+    return typeof currentPrice === 'number' ? currentPrice : parseFloat(String(currentPrice)) || 0;
+  }, [currentPrice]);
+
+  const holdingAvgPriceNum = useMemo(() => {
+    return typeof holdingAvgPrice === 'number' ? holdingAvgPrice : parseFloat(String(holdingAvgPrice)) || 0;
+  }, [holdingAvgPrice]);
+
+  // System 2 four-stage config (-3%, -6%, -9%, -12%)
+  const stepConfigs = useMemo(
+    () => [
+      { index: 0, label: '第1批', dropPct: 3, percent: 15, name: '第一批 (15%)', subtitle: '初期試探' },
+      { index: 1, label: '第2批', dropPct: 6, percent: 25, name: '第二批 (25%)', subtitle: '基準倉位' },
+      { index: 2, label: '第3批', dropPct: 9, percent: 35, name: '第三批 (35%)', subtitle: '防守加碼' },
+      { index: 3, label: '第4批', dropPct: 12, percent: 25, name: '第四批 (25%)', subtitle: '強制平倉防線' },
+    ],
+    []
+  );
+
+  // 計算有效持有股數 (優先取 holdingQty，次取 trades 計算之淨買入股數，再取 batch 中的已購買總和)
+  const effectiveHoldingShares = useMemo(() => {
+    if (typeof holdingQty === 'number' && holdingQty > 0) {
+      return holdingQty;
+    }
+    const netTradeShares = (trades || []).reduce((sum, t) => {
+      const q = typeof t.quantity === 'number' ? t.quantity : parseFloat(String(t.quantity)) || 0;
+      if (t.type === 'BUY') return sum + q;
+      if (t.type === 'SELL') return sum - q;
+      return sum;
+    }, 0);
+    if (netTradeShares > 0) {
+      return netTradeShares;
+    }
+    const propBatchesBought = (batches || []).reduce((acc, b) => acc + (b?.bought || 0), 0);
+    return Math.max(0, propBatchesBought);
+  }, [holdingQty, trades, batches]);
+
+  // Compute calculated values for each pyramid step
+  const stepItems = useMemo(() => {
+    const baseRef = currentPrice > 0 ? currentPrice : (holdingAvgPrice > 0 ? holdingAvgPrice : 100);
+
+    // 第一階段：計算各批預定股數 targetQty
+    const rawSteps = stepConfigs.map((cfg) => {
+      const row = averagingRowsSys2?.[cfg.index];
+      const batch = batches?.[cfg.index];
+
+      // Step price: user manual input or formula from current price
+      const manualPrice = row?.price ? parseFloat(row.price) : 0;
+      const stepPrice = manualPrice > 0
+        ? manualPrice
+        : Math.round(baseRef * (1 - cfg.dropPct / 100) * 100) / 100;
+
+      // Planned quantity
+      const q1 = row?.quantity ? parseFloat(row.quantity) : (batch?.split1?.size || 0);
+      const q2 = row?.quantity2 ? parseFloat(row.quantity2) : (batch?.split2?.size || 0);
+      let targetQty = q1 + q2 > 0 ? q1 + q2 : (batch?.size || 0);
+      if (targetQty <= 0 && plannedQty > 0) {
+        targetQty = Math.ceil(plannedQty * (cfg.percent / 100));
+      }
+
+      return {
+        cfg,
+        row,
+        batch,
+        stepPrice,
+        targetQty,
+      };
+    });
+
+    // 第二階段：依階梯向下遞進分配已購買股數 (支援 holdingQty 級聯分配、batch.bought 與 row.bought 勾選)
+    let remainingHolding = effectiveHoldingShares;
+
+    return rawSteps.map(({ cfg, row, batch, stepPrice, targetQty }) => {
+      // 1. 級聯持有股數填補
+      const cascadeBought = Math.min(remainingHolding, targetQty);
+      remainingHolding = Math.max(0, remainingHolding - cascadeBought);
+
+      // 2. 來自 batch prop 的已購股數
+      const batchBought = typeof batch?.bought === 'number' ? batch.bought : 0;
+
+      // 3. 來自 averagingRowsSys2 勾選標記為「已購入」
+      const rowBought = row?.bought ? targetQty : 0;
+
+      // 取各來源的最大值，確保只要任何一個管道有已購紀錄，圖表就能精準顯示
+      const boughtQty = Math.max(cascadeBought, batchBought, rowBought);
+
+      const remainingQty = batch?.remaining !== undefined
+        ? Math.min(batch.remaining, Math.max(0, targetQty - boughtQty))
+        : Math.max(0, targetQty - boughtQty);
+
+      const isReached =
+        (currentPrice > 0 && currentPrice <= stepPrice) ||
+        (targetQty > 0 && boughtQty >= targetQty) ||
+        boughtQty > 0 ||
+        Boolean(row?.bought);
+
+      const stepCost = stepPrice * targetQty;
+
+      return {
+        ...cfg,
+        price: stepPrice,
+        size: targetQty,
+        bought: boughtQty,
+        remaining: remainingQty,
+        isReached,
+        stepCost,
+        split1: batch?.split1,
+        split2: batch?.split2,
+      };
+    });
+  }, [stepConfigs, averagingRowsSys2, batches, currentPrice, holdingAvgPrice, plannedQty, effectiveHoldingShares]);
+
+  // Filter & sort past trades (valid prices and positive quantities)
+  const validTrades = useMemo(() => {
+    return (trades || [])
+      .filter((t) => typeof t.price === 'number' && t.price > 0 && typeof t.quantity === 'number' && t.quantity > 0)
+      .map((t) => ({
+        ...t,
+        dateFormatted: formatTimestamp(t.tradeDate, 'yyyy-MM-dd') || '未知日期',
+      }));
+  }, [trades]);
+
+  const buyTrades = useMemo(() => validTrades.filter((t) => t.type === 'BUY'), [validTrades]);
+  const sellTrades = useMemo(() => validTrades.filter((t) => t.type === 'SELL'), [validTrades]);
+
+  // Overall statistics
+  const totalPlannedShares = useMemo(() => stepItems.reduce((acc, s) => acc + s.size, 0), [stepItems]);
+  const totalBoughtShares = useMemo(() => stepItems.reduce((acc, s) => acc + s.bought, 0), [stepItems]);
+  const totalTradesCount = validTrades.length;
+
+  // 視覺關鍵防線（琥珀黃:支撐、警示紅:止損、玫瑰粉:壓力、翡翠綠:止盈）
+  // 優先採用用戶/策略自訂防線；若未設定任何或部分防線，則智慧補充預設參考防線，保證按鈕打開時完整視覺化呈現
+  const effectiveVisualLevels = useMemo<VisualPriceLevel[]>(() => {
+    const list: VisualPriceLevel[] = [];
+    const hasType = (t: string) => (visualLevels || []).some((l) => l.type === t);
+
+    // 1. 先加入所有已設定的自訂防線
+    if (visualLevels && visualLevels.length > 0) {
+      visualLevels.forEach((vl) => {
+        const p = typeof vl.price === 'number' ? vl.price : parseFloat(String(vl.price));
+        if (!isNaN(p) && p > 0) {
+          list.push({
+            ...vl,
+            price: p,
+          });
+        }
+      });
+    }
+
+    // 2. 如果關鍵防線尚未由用戶設定，且有目前價格，依據經典交易比例自動提供參考防線，讓圖表虛線與圖例百分之百呈現
+    if (currentPriceNum > 0) {
+      if (!hasType('support')) {
+        list.push({
+          id: 'auto-support',
+          type: 'support',
+          label: '支撐',
+          price: Math.round(currentPriceNum * 0.95 * 100) / 100,
+          color: '#d97706', // 琥珀黃
+          note: '系統參考支撐 (-5%)',
+        });
+      }
+      if (!hasType('stopLoss')) {
+        list.push({
+          id: 'auto-stoploss',
+          type: 'stopLoss',
+          label: '止損',
+          price: Math.round(currentPriceNum * 0.92 * 100) / 100,
+          color: '#dc2626', // 警示紅
+          note: '系統參考止損 (-8%)',
+        });
+      }
+      if (!hasType('resistance')) {
+        list.push({
+          id: 'auto-resistance',
+          type: 'resistance',
+          label: '壓力',
+          price: Math.round(currentPriceNum * 1.05 * 100) / 100,
+          color: '#e11d48', // 玫瑰粉
+          note: '系統參考壓力 (+5%)',
+        });
+      }
+      if (!hasType('takeProfit')) {
+        list.push({
+          id: 'auto-takeprofit',
+          type: 'takeProfit',
+          label: '止盈',
+          price: Math.round(currentPriceNum * 1.12 * 100) / 100,
+          color: '#059669', // 翡翠綠
+          note: '系統參考止盈 (+12%)',
+        });
+      }
+    }
+
+    return list.sort((a, b) => a.price - b.price);
+  }, [visualLevels, currentPriceNum]);
+
+  // 關鍵防線四種型別設定 (支撐、止損、壓力、止盈)
+  const LEVEL_TYPE_CONFIGS = useMemo(
+    () => [
+      { type: 'support' as const, label: '支撐', color: '#d97706', textColor: 'text-amber-700' },
+      { type: 'stopLoss' as const, label: '止損', color: '#dc2626', textColor: 'text-red-700' },
+      { type: 'resistance' as const, label: '壓力', color: '#e11d48', textColor: 'text-rose-700' },
+      { type: 'takeProfit' as const, label: '止盈', color: '#059669', textColor: 'text-emerald-700' },
+    ],
+    []
+  );
+
+  // 各類別防線檔數統計
+  const countByType = useMemo(() => {
+    const counts: Record<string, number> = {
+      support: 0,
+      stopLoss: 0,
+      resistance: 0,
+      takeProfit: 0,
+    };
+    effectiveVisualLevels.forEach((vl) => {
+      if (counts[vl.type] !== undefined) {
+        counts[vl.type]++;
+      }
+    });
+    return counts;
+  }, [effectiveVisualLevels]);
+
+  // 實際依據下拉複選狀態過濾後欲呈現的關鍵防線
+  const displayedVisualLevels = useMemo(() => {
+    return effectiveVisualLevels.filter((lvl) => selectedLevelTypes[lvl.type]);
+  }, [effectiveVisualLevels, selectedLevelTypes]);
+
+  const activeTypesCount = useMemo(() => {
+    return Object.values(selectedLevelTypes).filter(Boolean).length;
+  }, [selectedLevelTypes]);
+
+  const isAllLevelsSelected = useMemo(() => {
+    return activeTypesCount === LEVEL_TYPE_CONFIGS.length;
+  }, [activeTypesCount, LEVEL_TYPE_CONFIGS.length]);
+
+  // 下拉按鈕動態文字
+  const levelsButtonLabel = useMemo(() => {
+    const activeLabels = LEVEL_TYPE_CONFIGS
+      .filter((cfg) => selectedLevelTypes[cfg.type])
+      .map((cfg) => cfg.label);
+
+    if (activeLabels.length === 0) {
+      return '關鍵防線 (未勾選 · 0 檔)';
+    }
+    if (activeLabels.length === LEVEL_TYPE_CONFIGS.length) {
+      return `關鍵防線 (支撐/止損/壓力/止盈) (${displayedVisualLevels.length} 檔)`;
+    }
+    return `關鍵防線 (${activeLabels.join('/')}) (${displayedVisualLevels.length} 檔)`;
+  }, [selectedLevelTypes, displayedVisualLevels.length, LEVEL_TYPE_CONFIGS]);
+
+  const toggleLevelType = (type: 'support' | 'stopLoss' | 'resistance' | 'takeProfit') => {
+    setSelectedLevelTypes((prev) => ({
+      ...prev,
+      [type]: !prev[type],
+    }));
+  };
+
+  const selectAllLevelTypes = () => {
+    setSelectedLevelTypes({
+      support: true,
+      stopLoss: true,
+      resistance: true,
+      takeProfit: true,
+    });
+  };
+
+  const deselectAllLevelTypes = () => {
+    setSelectedLevelTypes({
+      support: false,
+      stopLoss: false,
+      resistance: false,
+      takeProfit: false,
+    });
+  };
+
+  // Compute X-axis boundaries (including currentPrice, holdingAvgPrice, step prices, trade prices, and displayed visual levels)
+  const { minX, maxX } = useMemo(() => {
+    const allPrices: number[] = [];
+    if (currentPriceNum > 0) allPrices.push(currentPriceNum);
+    if (showAvgCost && holdingAvgPriceNum > 0) allPrices.push(holdingAvgPriceNum);
+    stepItems.forEach((s) => allPrices.push(s.price));
+    if (showTrades) {
+      validTrades.forEach((t) => allPrices.push(t.price));
+    }
+    if (displayedVisualLevels.length > 0) {
+      displayedVisualLevels.forEach((vl) => {
+        const p = typeof vl.price === 'number' ? vl.price : parseFloat(String(vl.price));
+        if (!isNaN(p) && p > 0 && isFinite(p)) {
+          allPrices.push(p);
+        }
+      });
+    }
+
+    if (allPrices.length === 0) return { minX: 60, maxX: 100 };
+    const min = Math.min(...allPrices);
+    const max = Math.max(...allPrices);
+    const span = max - min || 10;
+    // 全選防線狀態下給予更加平衡的邊界比例，避免圖表被壓縮
+    const padding = isAllLevelsSelected ? span * 0.09 + 1.2 : span * 0.12 + 1.5;
+
+    return {
+      minX: Math.max(0, Math.floor((min - padding) * 10) / 10),
+      maxX: Math.ceil((max + padding) * 10) / 10,
+    };
+  }, [currentPriceNum, holdingAvgPriceNum, showAvgCost, stepItems, validTrades, showTrades, displayedVisualLevels, isAllLevelsSelected]);
+
+  // Sorted step items by price ascending
+  const sortedStepItems = useMemo(() => {
+    return [...stepItems].sort((a, b) => a.price - b.price);
+  }, [stepItems]);
+
+  const maxYValue = useMemo(() => {
+    let maxVal = 0;
+    stepItems.forEach((s) => {
+      const val = yAxisMode === 'shares' ? s.size : s.percent;
+      if (val > maxVal) maxVal = val;
+    });
+    if (showTrades && yAxisMode === 'shares') {
+      validTrades.forEach((t) => {
+        if (t.quantity > maxVal) maxVal = t.quantity;
+      });
+    }
+    return maxVal > 0 ? maxVal * 1.35 : 50; // give ample headroom for multi-line text annotations
+  }, [stepItems, validTrades, showTrades, yAxisMode]);
+
+  // Datasets for Chart.js
+  const chartData: ChartData<'line'> = useMemo(() => {
+    // 1. Pyramid steps dataset (connected points)
+    const stepPoints = sortedStepItems.map((s) => ({
+      x: s.price,
+      y: yAxisMode === 'shares' ? s.size : s.percent,
+      raw: s,
+    }));
+
+    const datasets: any[] = [
+      {
+        type: 'line' as const,
+        label: '分批進場金字塔',
+        data: stepPoints,
+        showLine: true,
+        borderColor: '#cbd5e1', // slate-300
+        borderWidth: 2,
+        borderDash: [4, 4],
+        tension: 0.1,
+        pointRadius: 7,
+        pointHoverRadius: 11,
+        pointBackgroundColor: sortedStepItems.map((s) => (s.isReached ? '#10b981' : '#ffffff')),
+        pointBorderColor: sortedStepItems.map((s) => (s.isReached ? '#059669' : '#94a3b8')),
+        pointBorderWidth: 2.5,
+        order: 2,
+      },
+    ];
+
+    // 2. Past BUY trades
+    if (showTrades && buyTrades.length > 0) {
+      datasets.push({
+        type: 'line' as const,
+        label: `歷史買入交易 (${buyTrades.length} 筆)`,
+        data: buyTrades.map((t) => ({
+          x: t.price,
+          y: yAxisMode === 'shares' ? t.quantity : 15,
+          raw: t,
+        })),
+        showLine: false,
+        pointStyle: 'rectRot' as const, // diamond 🔷
+        pointRadius: 8,
+        pointHoverRadius: 12,
+        pointBackgroundColor: '#3b82f6', // blue-500
+        pointBorderColor: '#ffffff',
+        pointBorderWidth: 2,
+        order: 1,
+      });
+    }
+
+    // 3. Past SELL trades (if any)
+    if (showTrades && sellTrades.length > 0) {
+      datasets.push({
+        type: 'line' as const,
+        label: `歷史賣出交易 (${sellTrades.length} 筆)`,
+        data: sellTrades.map((t) => ({
+          x: t.price,
+          y: yAxisMode === 'shares' ? t.quantity : 15,
+          raw: t,
+        })),
+        showLine: false,
+        pointStyle: 'triangle' as const,
+        pointRadius: 8,
+        pointHoverRadius: 12,
+        pointBackgroundColor: '#f97316', // orange-500
+        pointBorderColor: '#ffffff',
+        pointBorderWidth: 2,
+        order: 1,
+      });
+    }
+
+    return {
+      datasets,
+    };
+  }, [sortedStepItems, yAxisMode, showTrades, buyTrades, sellTrades, displayedVisualLevels]);
+
+  const chartRef = useRef<any>(null);
+  const renderedLinesRef = useRef<{ id: string; type: string; renderX: number; data: any }[]>([]);
+
+  const drawDataRef = useRef({
+    currentPriceNum,
+    holdingAvgPriceNum,
+    showAvgCost,
+    displayedVisualLevels,
+    stepItems,
+    sortedStepItems,
+    yAxisMode,
+    showTrades,
+    buyTrades,
+    sellTrades,
+    isAllLevelsSelected,
+  });
+
+  drawDataRef.current = {
+    currentPriceNum,
+    holdingAvgPriceNum,
+    showAvgCost,
+    displayedVisualLevels,
+    stepItems,
+    sortedStepItems,
+    yAxisMode,
+    showTrades,
+    buyTrades,
+    sellTrades,
+    isAllLevelsSelected,
+  };
+
+  useEffect(() => {
+    if (chartRef.current) {
+      chartRef.current.update();
+    }
+  }, [
+    displayedVisualLevels,
+    currentPriceNum,
+    holdingAvgPriceNum,
+    showAvgCost,
+    yAxisMode,
+    showTrades,
+    buyTrades,
+    sellTrades,
+    isAllLevelsSelected,
+  ]);
+
+  // Custom Chart.js annotation plugin:
+  // 1. Vertical PURPLE dashed line & clean tag for currentPrice (top only, no obstructive bottom badge)
+  // 2. Vertical ORANGE dashed line & clean tag for holdingAvgPrice (top only, no obstructive bottom badge)
+  // 3. Vertical DASHED LINES & clean tags for visual levels (支撐/止損/壓力/止盈) with collision-avoiding placement
+  // 4. Labels above each pyramid step: "$價格 -跌幅%" and "已購買 X / 預購入 Y 股"
+  // 5. Historical trades: Direct price and shares tag labels directly on the canvas!
+  const customAnnotationPlugin = useMemo<Plugin<'line'>>(() => {
+    return {
+      id: 'pyramidAndCurrentPricePlugin',
+      afterDraw: (chart) => {
+        const { ctx, chartArea, scales } = chart;
+        const xScale = scales.x;
+        const yScale = scales.y;
+
+        if (!xScale || !yScale || !chartArea) return;
+
+        // Extract latest values from ref to completely eliminate stale closure issues
+        const {
+          currentPriceNum,
+          holdingAvgPriceNum,
+          showAvgCost,
+          displayedVisualLevels,
+          stepItems,
+          sortedStepItems,
+          yAxisMode,
+          showTrades,
+          buyTrades,
+          sellTrades,
+          isAllLevelsSelected,
+        } = drawDataRef.current;
+
+        // Collect all active vertical dashed lines & their labels
+        interface DashedLineConfig {
+          id: string;
+          type: string;
+          xPos: number;
+          price: number;
+          fullText: string;
+          lineColor: string;
+          textColor: string;
+          priority: number;
+          isTriggered: boolean;
+          rawItem: any;
+        }
+
+        const lineConfigs: DashedLineConfig[] = [];
+
+        // 1. Current price (目前價格) - 紫色虛線 (當前市價即時生效，觸發綠點)
+        if (currentPriceNum > 0) {
+          const xPos = xScale.getPixelForValue(currentPriceNum);
+          if (xPos >= chartArea.left - 5 && xPos <= chartArea.right + 5) {
+            lineConfigs.push({
+              id: 'current-price',
+              type: 'currentPrice',
+              xPos,
+              price: currentPriceNum,
+              fullText: `目前價格 $${currentPriceNum.toFixed(2)}`,
+              lineColor: '#9333ea', // purple-600
+              textColor: '#7e22ce', // purple-700
+              priority: 6,
+              isTriggered: true,
+              rawItem: { price: currentPriceNum, avgCost: holdingAvgPriceNum },
+            });
+          }
+        }
+
+        // 2. Holding average price (平均成本) - #EEABFF 虛線 (市價達到或高於成本價視為觸發回本)
+        if (showAvgCost && holdingAvgPriceNum > 0) {
+          const xPos = xScale.getPixelForValue(holdingAvgPriceNum);
+          if (xPos >= chartArea.left - 5 && xPos <= chartArea.right + 5) {
+            const isTriggered = currentPriceNum > 0 && currentPriceNum >= holdingAvgPriceNum;
+            lineConfigs.push({
+              id: 'avg-cost',
+              type: 'avgCost',
+              xPos,
+              price: holdingAvgPriceNum,
+              fullText: `平均成本 $${holdingAvgPriceNum.toFixed(2)}`,
+              lineColor: '#EEABFF',
+              textColor: '#EEABFF',
+              priority: 5,
+              isTriggered,
+              rawItem: { price: holdingAvgPriceNum, quantity: holdingQty, currentPrice: currentPriceNum },
+            });
+          }
+        }
+
+        // 3. Visual levels (支撐 / 止損 / 壓力 / 止盈) - 彩色虛線 (依下拉複選型別分別顯示)
+        if (displayedVisualLevels && displayedVisualLevels.length > 0) {
+          displayedVisualLevels.forEach((lvl, idx) => {
+            const price = typeof lvl.price === 'number' ? lvl.price : parseFloat(String(lvl.price));
+            if (isNaN(price) || price <= 0) return;
+            const xPos = xScale.getPixelForValue(price);
+            if (xPos >= chartArea.left - 5 && xPos <= chartArea.right + 5) {
+              let textColor = lvl.color;
+              let priority = 1;
+              let isTriggered = false;
+
+              if (lvl.type === 'support') {
+                textColor = '#b45309'; // amber-700
+                priority = 1;
+                // 支撐：市價跌至或破支撐價視為觸發
+                isTriggered = currentPriceNum > 0 && currentPriceNum <= price;
+              } else if (lvl.type === 'stopLoss') {
+                textColor = '#b91c1c'; // red-700
+                priority = 2;
+                // 止損：市價跌破或達到止損價視為觸發
+                isTriggered = currentPriceNum > 0 && currentPriceNum <= price;
+              } else if (lvl.type === 'resistance') {
+                textColor = '#be123c'; // rose-700
+                priority = 3;
+                // 壓力：市價漲至或突破壓力價視為觸發
+                isTriggered = currentPriceNum > 0 && currentPriceNum >= price;
+              } else if (lvl.type === 'takeProfit') {
+                textColor = '#047857'; // emerald-700
+                priority = 4;
+                // 止盈：市價漲至或達到止盈目標價視為觸發
+                isTriggered = currentPriceNum > 0 && currentPriceNum >= price;
+              }
+
+              lineConfigs.push({
+                id: `lvl-${lvl.id || idx}`,
+                type: lvl.type,
+                xPos,
+                price,
+                fullText: `${lvl.label} $${price.toFixed(2)}`,
+                lineColor: lvl.color,
+                textColor,
+                priority,
+                isTriggered,
+                rawItem: lvl,
+              });
+            }
+          });
+        }
+
+        // Sort items by price ascending; if identical price, sort by priority
+        lineConfigs.sort((a, b) => {
+          if (Math.abs(a.price - b.price) > 0.001) {
+            return a.price - b.price;
+          }
+          return a.priority - b.priority;
+        });
+
+        // 4. 若是關鍵防線全選狀態，調整虛線之間距離的比例，避免視覺太過壅擠
+        const renderXList = lineConfigs.map((item) => item.xPos);
+        if (isAllLevelsSelected && lineConfigs.length > 1) {
+          const chartWidth = chartArea.right - chartArea.left;
+          // 動態計算舒適的最小間距 (30px ~ 40px)
+          const minGap = Math.min(40, Math.max(26, (chartWidth - 50) / (lineConfigs.length + 1)));
+          const minBound = chartArea.left + 16;
+          const maxBound = chartArea.right - 16;
+
+          // 進行多輪比例舒緩與間距調整
+          for (let iter = 0; iter < 15; iter++) {
+            for (let i = 0; i < renderXList.length - 1; i++) {
+              const gap = renderXList[i + 1] - renderXList[i];
+              if (gap < minGap) {
+                const push = (minGap - gap) / 2;
+                renderXList[i] -= push;
+                renderXList[i + 1] += push;
+              }
+            }
+            // 邊界保護防止超出圖表畫布
+            if (renderXList[0] < minBound) {
+              const shift = minBound - renderXList[0];
+              for (let i = 0; i < renderXList.length; i++) renderXList[i] += shift;
+            }
+            if (renderXList[renderXList.length - 1] > maxBound) {
+              const shift = renderXList[renderXList.length - 1] - maxBound;
+              for (let i = 0; i < renderXList.length; i++) renderXList[i] -= shift;
+            }
+          }
+        }
+
+        // Calculate upward-stacked positions for all labels
+        // 統一在各自虛線正上方顯示；若太近則往上重疊堆疊顯示
+        interface PlacedTag {
+          x: number;
+          width: number;
+          y: number;
+        }
+        const placedTags: PlacedTag[] = [];
+
+        ctx.font = 'bold 10.5px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+
+        const positionedItems = lineConfigs.map((item, idx) => {
+          const renderX = renderXList[idx];
+          const textMetrics = ctx.measureText(item.fullText);
+          const textWidth = textMetrics.width;
+          const safeX = Math.max(
+            chartArea.left + textWidth / 2 + 4,
+            Math.min(chartArea.right - textWidth / 2 - 4, renderX)
+          );
+
+          // 第一層 (Layer 0) 位於圖表頂端正上方
+          const baseY = chartArea.top - 8;
+          const rowStep = 16;
+          let currentY = baseY;
+          let hasOverlap = true;
+          let safety = 0;
+
+          // 若太近，則往上重疊堆疊顯示 (currentY 往上遞減)
+          while (hasOverlap && safety < 8) {
+            hasOverlap = placedTags.some((placed) => {
+              const yOverlap = Math.abs(placed.y - currentY) < 12;
+              const xOverlap = Math.abs(placed.x - safeX) < (placed.width + textWidth) / 2 + 6;
+              return yOverlap && xOverlap;
+            });
+
+            if (hasOverlap) {
+              currentY -= rowStep; // 往上移動一層
+            }
+            safety++;
+          }
+
+          placedTags.push({ x: safeX, width: textWidth, y: currentY });
+
+          return {
+            ...item,
+            renderX,
+            safeX,
+            tagY: currentY,
+            textWidth,
+          };
+        });
+
+        // 更新全域 renderedLinesRef 供游標準確 hover 判定
+        renderedLinesRef.current = positionedItems.map((item) => ({
+          id: item.id,
+          type: item.type,
+          renderX: item.renderX,
+          data: item.rawItem,
+        }));
+
+        // 繪製各虛線 (從最底層標籤下方連接至圖表底部)
+        // 找出每個 X 座標最底層 (最接近圖表) 的標籤 Y 位置
+        const lowestYByX = new Map<number, number>();
+        positionedItems.forEach((item) => {
+          const cur = lowestYByX.get(item.renderX);
+          if (cur === undefined || item.tagY > cur) {
+            lowestYByX.set(item.renderX, item.tagY);
+          }
+        });
+
+        const drawnLines = new Set<string>();
+        positionedItems.forEach((item) => {
+          const key = `${Math.round(item.renderX * 2) / 2}-${item.lineColor}`;
+          if (drawnLines.has(key)) return;
+          drawnLines.add(key);
+
+          const lowestTagY = lowestYByX.get(item.renderX) ?? (chartArea.top - 8);
+          const lineTopY = Math.min(chartArea.top, lowestTagY + 7);
+
+          // 平均成本虛線加粗 0.6px (3.0px -> 3.6px)，現價虛線加粗 1px (3.0px)，防線保持 2.0px
+          let lineWidth = 2.0;
+          if (item.type === 'avgCost') {
+            lineWidth = 3.6; // 平均成本虛線加粗 0.6px
+          } else if (item.type === 'currentPrice') {
+            lineWidth = 3.0; // 現價加粗 1px
+          }
+
+          ctx.save();
+          ctx.beginPath();
+          ctx.setLineDash([5, 4]);
+          ctx.strokeStyle = item.lineColor;
+          ctx.lineWidth = lineWidth;
+          ctx.moveTo(item.renderX, lineTopY);
+          ctx.lineTo(item.renderX, chartArea.bottom);
+          ctx.stroke();
+          ctx.restore();
+
+          // 每個虛線底部加入狀態小圓點 (若觸發則顯示綠色，尚未觸發則顯示白底圓點)
+          const dotRadius = 4.5;
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(item.renderX, chartArea.bottom, dotRadius, 0, Math.PI * 2);
+          if (item.isTriggered) {
+            // 已觸發：實心綠點
+            ctx.fillStyle = '#10b981';
+            ctx.fill();
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+          } else {
+            // 尚未觸發：白底圓點帶防線虛線顏色外框
+            ctx.fillStyle = '#ffffff';
+            ctx.fill();
+            ctx.strokeStyle = item.lineColor;
+            ctx.lineWidth = 2.0;
+            ctx.stroke();
+          }
+          ctx.restore();
+        });
+
+        // 繪製純文字標籤 (取消所有外框，純文字既可)
+        positionedItems.forEach((item) => {
+          ctx.save();
+          ctx.font = 'bold 10.5px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+
+          // 微光暈防重疊干擾 (純文字無外框)
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+          ctx.lineWidth = 3.5;
+          ctx.lineJoin = 'round';
+          ctx.strokeText(item.fullText, item.safeX, item.tagY);
+
+          // 純文字本體
+          ctx.fillStyle = item.textColor;
+          ctx.fillText(item.fullText, item.safeX, item.tagY);
+          ctx.restore();
+        });
+
+        // 3. Draw Pyramid Step Direct Annotations: "$價格 -跌幅%" & "已購買 X / 預購入 Y 股"
+        ctx.save();
+        stepItems.forEach((step) => {
+          const px = xScale.getPixelForValue(step.price);
+          const yVal = yAxisMode === 'shares' ? step.size : step.percent;
+          const py = yScale.getPixelForValue(yVal);
+
+          if (px >= chartArea.left - 20 && px <= chartArea.right + 20) {
+            // Subtle vertical drop line to bottom
+            ctx.save();
+            ctx.setLineDash([2, 3]);
+            ctx.strokeStyle = step.isReached ? 'rgba(16, 185, 129, 0.35)' : 'rgba(148, 163, 184, 0.35)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(px, py + 8);
+            ctx.lineTo(px, chartArea.bottom);
+            ctx.stroke();
+            ctx.restore();
+
+            // Text Line 1: "$80.93 -3% (15%)"
+            const line1 = `$${step.price.toFixed(2)}  -${step.dropPct}% (${step.percent}%)`;
+            // Text Line 2: "已購買 X / 預購入 Y 股"
+            const line2 = `已購買: ${step.bought} / 預購入: ${step.size} 股`;
+
+            ctx.save();
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'bottom';
+
+            // Line 2 (closer to the point)
+            ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+            ctx.lineWidth = 3.5;
+            ctx.lineJoin = 'round';
+            ctx.strokeText(line2, px, py - 6);
+            ctx.fillStyle = step.isReached ? '#059669' : '#475569';
+            ctx.fillText(line2, px, py - 6);
+
+            // Line 1 (top line)
+            ctx.font = 'bold 12px monospace, system-ui, sans-serif';
+            ctx.strokeText(line1, px, py - 20);
+            ctx.fillStyle = step.isReached ? '#047857' : '#64748b';
+            ctx.fillText(line1, px, py - 20);
+
+            ctx.restore();
+          }
+        });
+        ctx.restore();
+
+        // 4. Draw Historical Trades Price & Quantity directly on the canvas!
+        if (showTrades && validTrades.length > 0) {
+          ctx.save();
+          validTrades.forEach((trade, idx) => {
+            const tx = xScale.getPixelForValue(trade.price);
+            const yVal = yAxisMode === 'shares' ? trade.quantity : 15;
+            const ty = yScale.getPixelForValue(yVal);
+
+            if (tx >= chartArea.left - 15 && tx <= chartArea.right + 15) {
+              const isBuy = trade.type === 'BUY';
+              const label = `${isBuy ? '買' : '賣'} ${trade.quantity}股 @ $${trade.price.toFixed(2)}`;
+
+              ctx.font = 'bold 10px monospace, system-ui, sans-serif';
+              const textWidth = ctx.measureText(label).width;
+              const tagW = textWidth + 10;
+              const tagH = 18;
+
+              // Alternate offset to prevent collision
+              const offsetY = idx % 2 === 0 ? -12 - tagH : 10;
+              const tagX = Math.max(chartArea.left, Math.min(chartArea.right - tagW, tx - tagW / 2));
+              const tagY = ty + offsetY;
+
+              // Mini pill background
+              ctx.fillStyle = isBuy ? 'rgba(239, 246, 255, 0.95)' : 'rgba(255, 247, 237, 0.95)';
+              ctx.strokeStyle = isBuy ? '#3b82f6' : '#f97316';
+              ctx.lineWidth = 1;
+              ctx.beginPath();
+              if (typeof ctx.roundRect === 'function') {
+                ctx.roundRect(tagX, tagY, tagW, tagH, 4);
+              } else {
+                ctx.rect(tagX, tagY, tagW, tagH);
+              }
+              ctx.fill();
+              ctx.stroke();
+
+              // Text
+              ctx.fillStyle = isBuy ? '#1d4ed8' : '#c2410c';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(label, tagX + tagW / 2, tagY + tagH / 2);
+            }
+          });
+          ctx.restore();
+        }
+      },
+    };
+  }, [currentPriceNum, holdingAvgPriceNum, showAvgCost, stepItems, yAxisMode, showTrades, validTrades, displayedVisualLevels, isAllLevelsSelected]);
+
+  // Chart options with disabled in-canvas tooltip and onHover handler to update fixed top HUD
+  const chartOptions: ChartOptions<'line'> = useMemo(() => {
+    return {
+      responsive: true,
+      maintainAspectRatio: false,
+      layout: {
+        padding: {
+          top: 95, // 調整上方空間比例，預留充裕空間供多層向上堆疊之純文字標籤顯示
+          bottom: 8,
+          left: 16,
+          right: 16,
+        },
+      },
+      interaction: {
+        mode: 'nearest',
+        intersect: true,
+      },
+      onHover: (event, elements, chart) => {
+        if (elements && elements.length > 0) {
+          const el = elements[0];
+          const datasetIndex = el.datasetIndex;
+          const dataIndex = el.index;
+
+          if (datasetIndex === 0) {
+            // Pyramid step
+            const item = sortedStepItems[dataIndex];
+            setHoveredItem({ type: 'step', data: item });
+            return;
+          } else if (datasetIndex === 1 && buyTrades.length > 0) {
+            // Buy trade
+            const item = buyTrades[dataIndex];
+            setHoveredItem({ type: 'trade', data: item });
+            return;
+          } else if (datasetIndex === 2 && sellTrades.length > 0) {
+            // Sell trade
+            const item = sellTrades[dataIndex];
+            setHoveredItem({ type: 'trade', data: item });
+            return;
+          }
+        }
+
+        const chartX = event.x;
+
+        // 優先以實際渲染之虛線位置 (含全選間距比例舒緩) 進行懸停判定
+        if (renderedLinesRef.current && renderedLinesRef.current.length > 0 && chartX !== null && chartX !== undefined) {
+          const hitLine = renderedLinesRef.current.find((l) => Math.abs(l.renderX - chartX) <= 12);
+          if (hitLine) {
+            if (hitLine.type === 'currentPrice') {
+              setHoveredItem({
+                type: 'currentPrice',
+                data: {
+                  price: currentPriceNum,
+                  avgCost: holdingAvgPriceNum,
+                },
+              });
+              return;
+            }
+            if (hitLine.type === 'avgCost') {
+              setHoveredItem({
+                type: 'avgCost',
+                data: {
+                  price: holdingAvgPriceNum,
+                  quantity: holdingQty,
+                  currentPrice: currentPriceNum,
+                },
+              });
+              return;
+            }
+            setHoveredItem({ type: 'visualLevel', data: hitLine.data });
+            return;
+          }
+        }
+
+        const xScale = chart?.scales?.x;
+
+        // Fallback: Check if hovering near holdingAvgPrice line (Average Cost)
+        if (showAvgCost && holdingAvgPriceNum > 0 && xScale && chartX !== null && chartX !== undefined) {
+          const hoveredPrice = xScale.getValueForPixel(chartX);
+          if (typeof hoveredPrice === 'number') {
+            const span = maxX - minX || 10;
+            const threshold = span * 0.025;
+            if (Math.abs(holdingAvgPriceNum - hoveredPrice) <= threshold) {
+              setHoveredItem({
+                type: 'avgCost',
+                data: {
+                  price: holdingAvgPriceNum,
+                  quantity: holdingQty,
+                  currentPrice: currentPriceNum,
+                },
+              });
+              return;
+            }
+          }
+        }
+
+        // Fallback: Check if hovering near currentPrice line (Current Price)
+        if (currentPriceNum > 0 && xScale && chartX !== null && chartX !== undefined) {
+          const hoveredPrice = xScale.getValueForPixel(chartX);
+          if (typeof hoveredPrice === 'number') {
+            const span = maxX - minX || 10;
+            const threshold = span * 0.025;
+            if (Math.abs(currentPriceNum - hoveredPrice) <= threshold) {
+              setHoveredItem({
+                type: 'currentPrice',
+                data: {
+                  price: currentPriceNum,
+                  avgCost: holdingAvgPriceNum,
+                },
+              });
+              return;
+            }
+          }
+        }
+
+        // Fallback: Check if hovering near a visual level line
+        if (displayedVisualLevels && displayedVisualLevels.length > 0 && xScale && chartX !== null && chartX !== undefined) {
+          const hoveredPrice = xScale.getValueForPixel(chartX);
+          if (typeof hoveredPrice === 'number') {
+            const span = maxX - minX || 10;
+            const threshold = span * 0.02; // within 2% of price span
+            const nearestLvl = displayedVisualLevels.find((vl) => Math.abs(vl.price - hoveredPrice) <= threshold);
+            if (nearestLvl) {
+              setHoveredItem({ type: 'visualLevel', data: nearestLvl });
+              return;
+            }
+          }
+        }
+
+        setHoveredItem(null);
+      },
+      onClick: (_event, elements) => {
+        if (elements && elements.length > 0) {
+          const el = elements[0];
+          const datasetIndex = el.datasetIndex;
+          const dataIndex = el.index;
+
+          if (datasetIndex === 0) {
+            const item = sortedStepItems[dataIndex];
+            setSelectedItem({ type: 'step', data: item });
+          } else if (datasetIndex === 1 && buyTrades.length > 0) {
+            const item = buyTrades[dataIndex];
+            setSelectedItem({ type: 'trade', data: item });
+          } else if (datasetIndex === 2 && sellTrades.length > 0) {
+            const item = sellTrades[dataIndex];
+            setSelectedItem({ type: 'trade', data: item });
+          }
+        }
+      },
+      plugins: {
+        legend: {
+          display: false, // We use custom bottom legend
+        },
+        tooltip: {
+          enabled: false, // Disabled to prevent obscuring points on canvas!
+        },
+      },
+      scales: {
+        x: {
+          type: 'linear',
+          min: minX,
+          max: maxX,
+          title: {
+            display: true,
+            text: '股價',
+            color: '#475569',
+            font: {
+              size: 11,
+              weight: 'bold',
+            },
+            padding: { top: 8 },
+          },
+          grid: {
+            color: 'rgba(241, 245, 249, 0.95)',
+            lineWidth: 1,
+          },
+          ticks: {
+            color: '#064e3b',
+            font: { size: 11, weight: 'bold' as const },
+            callback: (value) => `$${Number(value).toFixed(2)}`,
+          },
+        },
+        y: {
+          type: 'linear',
+          beginAtZero: true,
+          max: maxYValue,
+          display: false, // Clean background
+          grid: {
+            display: false,
+          },
+        },
+      },
+    };
+  }, [sortedStepItems, buyTrades, sellTrades, minX, maxX, maxYValue, displayedVisualLevels, showAvgCost, holdingAvgPriceNum, currentPriceNum, holdingQty]);
+
+  return (
+    <div
+      className={`w-full bg-white transition-all ${
+        compact
+          ? "p-2.5 sm:p-3 rounded-xl"
+          : "border border-zinc-200/90 rounded-2xl p-5 sm:p-6 shadow-xs mb-4"
+      }`}
+    >
+      {/* 1. Header (Title, Purple Current Price, Orange Avg Price) */}
+      <div
+        className={`flex flex-col sm:flex-row sm:items-center justify-between border-b border-zinc-100 ${
+          compact ? "gap-1.5 pb-2" : "gap-4 pb-4"
+        }`}
+      >
+        <div>
+          {symbol ? (
+            <div className="flex items-baseline gap-2 flex-wrap">
+              <h3
+                className={`font-black tracking-tight text-zinc-950 font-mono leading-none ${
+                  compact ? "text-xl sm:text-2xl" : "text-2xl sm:text-3xl"
+                }`}
+              >
+                {symbol}
+              </h3>
+              {companyName && (
+                <span className="text-zinc-500 text-xs sm:text-sm font-semibold tracking-wider truncate max-w-[200px] sm:max-w-[320px]">
+                  {companyName}
+                </span>
+              )}
+              <span className="text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-200/80 px-2 py-0.5 rounded-full ml-1">
+                分批進場金字塔
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <h3
+                className={`font-black tracking-tight text-zinc-900 ${
+                  compact ? "text-base sm:text-lg" : "text-xl sm:text-2xl"
+                }`}
+              >
+                分批進場金字塔
+              </h3>
+              <span className="text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-200/80 px-2 py-0.5 rounded-full">
+                動態互動圖表
+              </span>
+            </div>
+          )}
+          {!compact && (
+            <p className="text-xs sm:text-sm text-zinc-500 mt-1">
+              以目前價格 ${currentPrice > 0 ? currentPrice.toFixed(2) : '--'} 為基準，沿價格下跌階梯逐批增加配置
+            </p>
+          )}
+        </div>
+
+        {/* Right side: 目前價格 (Purple) & 平均成本 (Orange) & Collapse */}
+        <div className="flex items-center gap-2 self-end sm:self-center flex-wrap">
+          {/* 目前價格 Card (Purple) */}
+          <div
+            className={`bg-purple-50/70 border border-purple-200/80 text-right flex flex-col justify-center items-end shadow-2xs ${
+              compact
+                ? "px-2 py-0.5 sm:px-2.5 sm:py-1 min-w-[76px] sm:min-w-[84px] rounded-lg"
+                : "px-4 py-2 min-w-[120px] rounded-2xl"
+            }`}
+          >
+            <span className={`font-bold text-purple-700 flex items-center gap-1 ${compact ? "text-[9px]" : "text-[10px]"}`}>
+              <span className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse" />
+              目前價格
+            </span>
+            <span
+              className={`font-black font-mono text-purple-700 leading-tight ${
+                compact ? "text-base sm:text-lg" : "text-2xl sm:text-3xl"
+              }`}
+            >
+              ${currentPriceNum > 0 ? currentPriceNum.toFixed(2) : '--'}
+            </span>
+          </div>
+
+          {/* 平均成本 Card (Orange) */}
+          {holdingAvgPriceNum > 0 && (
+            <div
+              className={`bg-orange-50/70 border border-orange-200/80 text-right flex flex-col justify-center items-end shadow-2xs ${
+                compact
+                  ? "px-2 py-0.5 sm:px-2.5 sm:py-1 min-w-[76px] sm:min-w-[84px] rounded-lg"
+                  : "px-4 py-2 min-w-[120px] rounded-2xl"
+              }`}
+            >
+              <span className={`font-bold text-orange-700 flex items-center gap-1 ${compact ? "text-[9px]" : "text-[10px]"}`}>
+                <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />
+                平均成本
+              </span>
+              <span
+                className={`font-black font-mono text-orange-600 leading-tight ${
+                  compact ? "text-base sm:text-lg" : "text-2xl sm:text-3xl"
+                }`}
+              >
+                ${holdingAvgPriceNum.toFixed(2)}
+              </span>
+            </div>
+          )}
+
+          {/* Collapse / Expand Toggle */}
+          <button
+            type="button"
+            onClick={handleToggleExpand}
+            className="p-1.5 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-lg transition-colors cursor-pointer border border-zinc-200/80 shrink-0"
+            title={isExpanded ? '收合圖表' : '展開圖表'}
+          >
+            {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </button>
+        </div>
+      </div>
+
+      {isExpanded && (
+        <div className={compact ? "space-y-2 pt-1.5" : "space-y-3.5 pt-3"}>
+          {/* Controls Bar: Toggle past trades, toggle Y-axis, summary metrics */}
+          <div
+            className={`flex flex-wrap items-center justify-between pt-0.5 ${
+              compact ? "gap-1.5" : "gap-2.5"
+            }`}
+          >
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Toggle Past Trades Button */}
+              <button
+                type="button"
+                onClick={() => setShowTrades(!showTrades)}
+                className={`inline-flex items-center gap-1.5 rounded-lg font-bold transition-all cursor-pointer border ${
+                  compact ? "px-2 sm:px-2.5 py-1 text-[11px]" : "px-3 py-1.5 rounded-xl text-xs"
+                } ${
+                  showTrades
+                    ? 'bg-blue-50 border-blue-300 text-blue-800 shadow-2xs'
+                    : 'bg-emerald-50/60 border-emerald-200 text-emerald-950 hover:text-emerald-700'
+                }`}
+              >
+                <History className={`${compact ? "w-3 h-3" : "w-3.5 h-3.5"} text-blue-700`} />
+                <span>過去交易紀錄 ({totalTradesCount} 筆)</span>
+                <span className={`${compact ? "w-1.5 h-1.5" : "w-2 h-2"} rounded-full ${showTrades ? 'bg-blue-600' : 'bg-emerald-300'}`} />
+              </button>
+
+              {/* Toggle Average Cost Dashed Line */}
+              {holdingAvgPriceNum > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAvgCost(!showAvgCost)}
+                  className={`inline-flex items-center gap-1.5 rounded-lg font-bold transition-all cursor-pointer border ${
+                    compact ? "px-2 sm:px-2.5 py-1 text-[11px]" : "px-3 py-1.5 rounded-xl text-xs"
+                  } ${
+                    showAvgCost
+                      ? 'bg-purple-50/80 border-[#EEABFF] text-purple-950 shadow-2xs'
+                      : 'bg-emerald-50/60 border-emerald-200 text-emerald-950 hover:text-emerald-700'
+                  }`}
+                >
+                  <span className="w-2 h-0 border-t-[2px] border-dashed border-[#EEABFF] shrink-0" />
+                  <span>平均成本 (${holdingAvgPriceNum.toFixed(2)})</span>
+                  <span className={`${compact ? "w-1.5 h-1.5" : "w-2 h-2"} rounded-full ${showAvgCost ? 'bg-[#EEABFF]' : 'bg-emerald-300'}`} />
+                </button>
+              )}
+
+              {/* Toggle Visual Price Levels (Support/StopLoss/Resistance/TakeProfit) - 下拉複選選單 */}
+              <div className="relative" ref={levelsDropdownRef}>
+                <button
+                  type="button"
+                  onClick={() => setIsLevelsDropdownOpen((prev) => !prev)}
+                  className={`inline-flex items-center gap-1.5 rounded-lg font-bold transition-all cursor-pointer border ${
+                    compact ? "px-2 sm:px-2.5 py-1 text-[11px]" : "px-3 py-1.5 rounded-xl text-xs"
+                  } ${
+                    activeTypesCount > 0
+                      ? 'bg-amber-50 border-amber-300 text-amber-950 shadow-2xs'
+                      : 'bg-emerald-50/60 border-emerald-200 text-emerald-950 hover:text-emerald-700'
+                  }`}
+                  title="點擊設定分別顯示：支撐、止損、壓力、止盈"
+                >
+                  <Layers className={`${compact ? "w-3 h-3" : "w-3.5 h-3.5"} text-amber-700 shrink-0`} />
+                  <span>{levelsButtonLabel}</span>
+                  <span className={`${compact ? "w-1.5 h-1.5" : "w-2 h-2"} rounded-full ${activeTypesCount > 0 ? 'bg-amber-600' : 'bg-emerald-300'}`} />
+                  <ChevronDown
+                    className={`${compact ? "w-3 h-3" : "w-3.5 h-3.5"} text-amber-800 transition-transform duration-200 ${
+                      isLevelsDropdownOpen ? 'rotate-180 text-amber-900' : ''
+                    }`}
+                  />
+                </button>
+
+                {/* 下拉複選內容選單 */}
+                {isLevelsDropdownOpen && (
+                  <div className="absolute left-0 mt-1.5 w-68 bg-white rounded-xl shadow-xl border border-emerald-200 p-2.5 z-40 animate-in fade-in zoom-in-95 duration-150">
+                    <div className="flex items-center justify-between px-1 py-1 border-b border-emerald-100 mb-1.5">
+                      <span className="text-xs font-black text-emerald-950">關鍵防線類別篩選</span>
+                      <div className="flex items-center gap-2 text-[11px]">
+                        <button
+                          type="button"
+                          onClick={selectAllLevelTypes}
+                          className="text-amber-800 hover:text-amber-900 font-black hover:underline cursor-pointer"
+                        >
+                          全選
+                        </button>
+                        <span className="text-emerald-300">|</span>
+                        <button
+                          type="button"
+                          onClick={deselectAllLevelTypes}
+                          className="text-emerald-800 hover:text-emerald-950 font-bold hover:underline cursor-pointer"
+                        >
+                          全不選
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      {LEVEL_TYPE_CONFIGS.map((cfg) => {
+                        const isChecked = selectedLevelTypes[cfg.type];
+                        const count = countByType[cfg.type] || 0;
+                        return (
+                          <label
+                            key={cfg.type}
+                            className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors border ${
+                              isChecked
+                                ? 'bg-amber-50/70 border-amber-200 hover:bg-amber-50'
+                                : 'bg-emerald-50/30 border-transparent hover:bg-emerald-50/80'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => toggleLevelType(cfg.type)}
+                                className="w-3.5 h-3.5 rounded border-emerald-300 text-amber-700 focus:ring-amber-500 cursor-pointer"
+                              />
+                              <div className="flex items-center gap-1.5">
+                                <span
+                                  className="w-3.5 h-0 border-t-2 border-dashed shrink-0"
+                                  style={{ borderColor: cfg.color }}
+                                />
+                                <span className={`text-xs font-black ${cfg.textColor}`}>{cfg.label}</span>
+                              </div>
+                            </div>
+                            <span className="text-[11px] font-bold text-emerald-950 bg-white border border-emerald-200 px-2 py-0.5 rounded-md shadow-2xs">
+                              {count} 檔
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 若為全選防線狀態，顯示間距已優化徽章 */}
+              {isAllLevelsSelected && (
+                <span className="hidden sm:inline-flex items-center text-[10px] font-black text-emerald-900 bg-emerald-100/90 border border-emerald-300 px-2.5 py-1 rounded-xl shadow-2xs">
+                  全選防線 · 間距已比例優化
+                </span>
+              )}
+
+              {/* Y-axis Metric Toggle */}
+              <div className="inline-flex items-center bg-emerald-50/80 p-0.5 rounded-xl border border-emerald-200 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setYAxisMode('shares')}
+                  className={`px-2.5 py-1 rounded-lg font-black text-[11px] transition-all cursor-pointer ${
+                    yAxisMode === 'shares'
+                      ? 'bg-white text-emerald-950 shadow-2xs border border-emerald-200/80'
+                      : 'text-emerald-800 hover:text-emerald-950'
+                  }`}
+                >
+                  高度：股數 (股)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setYAxisMode('percent')}
+                  className={`px-2.5 py-1 rounded-lg font-black text-[11px] transition-all cursor-pointer ${
+                    yAxisMode === 'percent'
+                      ? 'bg-white text-emerald-950 shadow-2xs border border-emerald-200/80'
+                      : 'text-emerald-800 hover:text-emerald-950'
+                  }`}
+                >
+                  高度：配置比例 (%)
+                </button>
+              </div>
+            </div>
+
+            {/* Prominent Direct Progress Metric */}
+            <div
+              className={`text-emerald-950 bg-emerald-50/90 border border-emerald-200 shadow-2xs font-bold ${
+                compact ? "text-[11px] px-2.5 py-1 rounded-lg" : "text-xs px-3 py-1.5 rounded-xl"
+              }`}
+            >
+              <span>整體進度：</span>
+              <span className={`font-black text-emerald-800 font-mono ml-1 ${compact ? "text-xs" : "text-sm"}`}>
+                已購買: {totalBoughtShares} 股
+              </span>
+              <span className="text-emerald-400 mx-1 font-black">/</span>
+              <span className={`font-black text-emerald-950 font-mono ${compact ? "text-xs" : "text-sm"}`}>
+                預購入: {totalPlannedShares} 股
+              </span>
+            </div>
+          </div>
+
+          {/* 2. 固定即時情報視窗 (深綠色高對比背景，字體明亮高對比，完全避免暗灰色) */}
+          <div
+            className={`bg-[#032e20] text-white shadow-md flex items-center justify-between transition-all border border-[#0b5338] ${
+              compact ? "min-h-[34px] sm:min-h-[36px] rounded-lg px-2.5 py-1 text-[11px]" : "min-h-[64px] rounded-xl p-3"
+            }`}
+          >
+            {hoveredItem ? (
+              hoveredItem.type === 'step' ? (
+                <div className="flex flex-wrap items-center justify-between w-full gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="px-2.5 py-0.5 rounded-md font-black text-xs bg-emerald-500 text-white shadow-xs">
+                      {hoveredItem.data.name}
+                    </span>
+                    <span className="text-xs font-bold text-emerald-100">
+                      {hoveredItem.data.subtitle} (-{hoveredItem.data.dropPct}%)
+                    </span>
+                    <span
+                      className={`text-[10px] font-black px-2 py-0.5 rounded ${
+                        hoveredItem.data.isReached
+                          ? 'bg-emerald-500 text-white border border-emerald-300'
+                          : 'bg-[#06422d] text-amber-300 border border-amber-400/70'
+                      }`}
+                    >
+                      {hoveredItem.data.isReached ? '● 已到達／已買入' : '○ 尚未觸發'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-4 text-xs font-mono">
+                    <div>
+                      <span className="text-emerald-200 text-[10px] block font-sans font-bold">預計進場價</span>
+                      <span className="font-black text-emerald-300 text-sm">
+                        ${hoveredItem.data.price.toFixed(2)}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-emerald-200 text-[10px] block font-sans font-bold">已購買 / 預購入</span>
+                      <span className="font-black text-white text-sm">
+                        已購 <span className="text-emerald-300">{hoveredItem.data.bought}</span> / 預購 {hoveredItem.data.size} 股
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-emerald-200 text-[10px] block font-sans font-bold">配置佔比</span>
+                      <span className="font-black text-teal-200 text-sm">{hoveredItem.data.percent}%</span>
+                    </div>
+                    <div>
+                      <span className="text-emerald-200 text-[10px] block font-sans font-bold">本批所需資金</span>
+                      <span className="font-black text-amber-300 text-sm">
+                        ${hoveredItem.data.stepCost.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ) : hoveredItem.type === 'trade' ? (
+                <div className="flex flex-wrap items-center justify-between w-full gap-2">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`px-2.5 py-0.5 rounded-md font-black text-xs text-white shadow-xs ${
+                        hoveredItem.data.type === 'BUY' ? 'bg-blue-600' : 'bg-orange-600'
+                      }`}
+                    >
+                      歷史{hoveredItem.data.type === 'BUY' ? '買入' : '賣出'}交易
+                    </span>
+                    <span className="text-xs font-bold text-white">
+                      {hoveredItem.data.dateFormatted}
+                    </span>
+                    {hoveredItem.data.batch && (
+                      <span className="text-[10px] font-black px-2 py-0.5 rounded bg-blue-500 text-white border border-blue-300">
+                        {hoveredItem.data.batch}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-4 text-xs font-mono">
+                    <div>
+                      <span className="text-emerald-200 text-[10px] block font-sans font-bold">成交價格</span>
+                      <span className="font-black text-blue-300 text-sm">
+                        ${hoveredItem.data.price.toFixed(2)}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-emerald-200 text-[10px] block font-sans font-bold">成交股數</span>
+                      <span className="font-black text-white text-sm">{hoveredItem.data.quantity} 股</span>
+                    </div>
+                    <div>
+                      <span className="text-emerald-200 text-[10px] block font-sans font-bold">成交總金額</span>
+                      <span className="font-black text-amber-300 text-sm">
+                        ${(hoveredItem.data.price * hoveredItem.data.quantity).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-emerald-200 text-[10px] block font-sans font-bold">經手 / 目的</span>
+                      <span className="text-white text-xs font-bold">
+                        {hoveredItem.data.operator || '人'} ・ {hoveredItem.data.purpose || '加碼'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ) : hoveredItem.type === 'avgCost' ? (
+                <div className="flex flex-wrap items-center justify-between w-full gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="px-2.5 py-0.5 rounded-md font-black text-xs bg-orange-600 text-white shadow-xs">
+                      持有平均成本
+                    </span>
+                    <span className="text-base font-black font-mono text-orange-300">
+                      ${hoveredItem.data.price.toFixed(2)}
+                    </span>
+                    {hoveredItem.data.quantity > 0 && (
+                      <span className="text-xs font-bold text-emerald-100">
+                        (持有 {hoveredItem.data.quantity} 股)
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-4 text-xs font-mono">
+                    {hoveredItem.data.currentPrice > 0 && (
+                      <div>
+                        <span className="text-emerald-200 font-sans font-bold">距目前價格:</span>{' '}
+                        <span className={`font-black ${hoveredItem.data.currentPrice >= hoveredItem.data.price ? 'text-emerald-300' : 'text-rose-300'}`}>
+                          {hoveredItem.data.currentPrice >= hoveredItem.data.price ? '+' : ''}
+                          ${(hoveredItem.data.currentPrice - hoveredItem.data.price).toFixed(2)} ({(((hoveredItem.data.currentPrice - hoveredItem.data.price) / hoveredItem.data.price) * 100).toFixed(2)}%)
+                        </span>
+                      </div>
+                    )}
+                    {hoveredItem.data.quantity > 0 && hoveredItem.data.currentPrice > 0 && (
+                      <div>
+                        <span className="text-emerald-200 font-sans font-bold">未實現損益:</span>{' '}
+                        <span className={`font-black ${hoveredItem.data.currentPrice >= hoveredItem.data.price ? 'text-emerald-300' : 'text-rose-300'}`}>
+                          {hoveredItem.data.currentPrice >= hoveredItem.data.price ? '+' : ''}
+                          ${((hoveredItem.data.currentPrice - hoveredItem.data.price) * hoveredItem.data.quantity).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                        </span>
+                      </div>
+                    )}
+                    <span className="text-orange-300 text-xs font-sans font-bold">
+                      橘色虛線標註 (加粗)
+                    </span>
+                  </div>
+                </div>
+              ) : hoveredItem.type === 'currentPrice' ? (
+                <div className="flex flex-wrap items-center justify-between w-full gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="px-2.5 py-0.5 rounded-md font-black text-xs bg-purple-600 text-white shadow-xs">
+                      即時目前價格
+                    </span>
+                    <span className="text-base font-black font-mono text-purple-300">
+                      ${hoveredItem.data.price.toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-4 text-xs font-mono">
+                    {hoveredItem.data.avgCost > 0 && (
+                      <div>
+                        <span className="text-emerald-200 font-sans font-bold">距平均成本:</span>{' '}
+                        <span className={`font-black ${hoveredItem.data.price >= hoveredItem.data.avgCost ? 'text-emerald-300' : 'text-rose-300'}`}>
+                          {hoveredItem.data.price >= hoveredItem.data.avgCost ? '+' : ''}
+                          ${(hoveredItem.data.price - hoveredItem.data.avgCost).toFixed(2)} ({(((hoveredItem.data.price - hoveredItem.data.avgCost) / hoveredItem.data.avgCost) * 100).toFixed(2)}%)
+                        </span>
+                      </div>
+                    )}
+                    <span className="text-purple-300 text-xs font-sans font-bold">
+                      紫色虛線標註 (加粗)
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                /* Visual Level Hover HUD */
+                <div className="flex flex-wrap items-center justify-between w-full gap-2">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="px-2.5 py-0.5 rounded-md font-black text-xs text-white shadow-xs"
+                      style={{ backgroundColor: hoveredItem.data.color }}
+                    >
+                      {hoveredItem.data.label}防線
+                    </span>
+                    <span className="text-base font-black font-mono text-white">
+                      ${hoveredItem.data.price.toFixed(2)}
+                    </span>
+                    {hoveredItem.data.note && (
+                      <span className="text-xs font-bold text-emerald-100">
+                        ({hoveredItem.data.note})
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-4 text-xs font-mono">
+                    {currentPriceNum > 0 && (
+                      <div>
+                        <span className="text-emerald-200 font-sans font-bold">距目前價格:</span>{' '}
+                        <span className={`font-black ${hoveredItem.data.price >= currentPriceNum ? 'text-emerald-300' : 'text-rose-300'}`}>
+                          {hoveredItem.data.price >= currentPriceNum ? '+' : ''}${(hoveredItem.data.price - currentPriceNum).toFixed(2)} ({(((hoveredItem.data.price - currentPriceNum) / currentPriceNum) * 100).toFixed(1)}%)
+                        </span>
+                      </div>
+                    )}
+                    {holdingAvgPriceNum > 0 && (
+                      <div>
+                        <span className="text-emerald-200 font-sans font-bold">距平均成本:</span>{' '}
+                        <span className={`font-black ${hoveredItem.data.price >= holdingAvgPriceNum ? 'text-emerald-300' : 'text-amber-300'}`}>
+                          {hoveredItem.data.price >= holdingAvgPriceNum ? '+' : ''}${(hoveredItem.data.price - holdingAvgPriceNum).toFixed(2)} ({(((hoveredItem.data.price - holdingAvgPriceNum) / holdingAvgPriceNum) * 100).toFixed(1)}%)
+                        </span>
+                      </div>
+                    )}
+                    <span className="text-teal-200 text-xs font-sans font-bold">
+                      視覺防線標註
+                    </span>
+                  </div>
+                </div>
+              )
+            ) : (
+              <div className="flex items-center justify-between w-full text-xs text-emerald-100 flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-amber-300 shrink-0" />
+                  <span className="font-bold text-emerald-50">
+                    💡 滑鼠懸停至階梯、交易紀錄或關鍵防線虛線上即時顯示情資，已固定於上方不遮擋圖表
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 text-xs font-mono">
+                  {currentPriceNum > 0 && (
+                    <>
+                      <span className="text-emerald-200 font-sans font-bold">當前價格:</span>
+                      <span className="text-purple-300 font-black">${currentPriceNum.toFixed(2)}</span>
+                    </>
+                  )}
+                  {holdingAvgPriceNum > 0 && (
+                    <>
+                      <span className="text-emerald-500">|</span>
+                      <span className="text-emerald-200 font-sans font-bold">平均成本:</span>
+                      <span className="text-orange-300 font-black">${holdingAvgPriceNum.toFixed(2)}</span>
+                    </>
+                  )}
+                  {displayedVisualLevels && displayedVisualLevels.length > 0 && (
+                    <>
+                      <span className="text-emerald-500">|</span>
+                      <span className="text-amber-300 font-black">防線: {displayedVisualLevels.length} 檔已啟用</span>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 3. Chart Canvas Area (精簡模式適度調降高度，使個股跳轉置中時可完整顯示整體內容) */}
+          <div
+            className={`relative w-full pt-1 ${
+              compact
+                ? "h-[250px] sm:h-[275px] lg:h-[295px] xl:h-[315px]"
+                : "h-[390px] sm:h-[440px] lg:h-[485px] xl:h-[520px]"
+            }`}
+          >
+            <Chart
+              ref={chartRef}
+              type="line"
+              data={chartData}
+              options={chartOptions}
+              plugins={[customAnnotationPlugin]}
+            />
+          </div>
+
+          {/* 4. 底部說明註解 (高對比無灰色：已到達／已買入、尚未觸發、歷史交易紀錄) */}
+          <div
+            className={`flex flex-wrap items-center justify-center sm:justify-start border-t border-emerald-100 ${
+              compact
+                ? "gap-x-4 gap-y-1 text-[11px] pt-1.5"
+                : "gap-x-6 gap-y-2 text-xs pt-2 font-bold text-emerald-950"
+            }`}
+          >
+            {/* 已到達／已買入 */}
+            <div className="flex items-center gap-1.5 font-bold">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 border border-emerald-600 shrink-0" />
+              <span>已到達／已買入（虛線底部綠點：已觸發）</span>
+            </div>
+
+            {/* 尚未觸發 */}
+            <div className="flex items-center gap-1.5 font-bold">
+              <span className="w-2.5 h-2.5 rounded-full border-2 border-amber-600 bg-white shrink-0" />
+              <span>尚未觸發（虛線底部圓點：未觸發）</span>
+            </div>
+
+            {/* 歷史交易紀錄 */}
+            {showTrades && totalTradesCount > 0 && (
+              <div className="flex items-center gap-1.5 font-bold text-blue-800">
+                <span className="w-2.5 h-2.5 rotate-45 bg-blue-600 shrink-0" />
+                <span>歷史交易紀錄 ({totalTradesCount} 筆，已標註價格與股數)</span>
+              </div>
+            )}
+          </div>
+
+          {/* 5. Selected Item Interactive Card (When element is clicked) */}
+          {selectedItem && (
+            <div className="p-3.5 sm:p-4 rounded-xl border bg-zinc-50 border-zinc-200/80 transition-all space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  {selectedItem.type === 'step' ? (
+                    <>
+                      <span className="px-2 py-0.5 rounded-md font-black text-xs bg-emerald-600 text-white">
+                        {selectedItem.data.name}
+                      </span>
+                      <span className="text-xs font-bold text-zinc-800">
+                        {selectedItem.data.subtitle} (-{selectedItem.data.dropPct}%)
+                      </span>
+                      <span
+                        className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                          selectedItem.data.isReached
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-zinc-200 text-zinc-700'
+                        }`}
+                      >
+                        {selectedItem.data.isReached ? '已到達價位' : '等待下跌觸發'}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span
+                        className={`px-2 py-0.5 rounded-md font-black text-xs text-white ${
+                          selectedItem.data.type === 'BUY' ? 'bg-blue-600' : 'bg-orange-600'
+                        }`}
+                      >
+                        歷史{selectedItem.data.type === 'BUY' ? '買入' : '賣出'}
+                      </span>
+                      <span className="text-xs font-bold text-zinc-800">
+                        {selectedItem.data.dateFormatted}
+                      </span>
+                      {selectedItem.data.batch && (
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-800">
+                          {selectedItem.data.batch}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedItem(null)}
+                  className="text-xs text-zinc-400 hover:text-zinc-700 font-semibold cursor-pointer"
+                >
+                  關閉詳情
+                </button>
+              </div>
+
+              {/* Data fields */}
+              {selectedItem.type === 'step' ? (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-xs">
+                  <div className="bg-white p-2 rounded-lg border border-zinc-200 shadow-2xs">
+                    <span className="text-[10px] text-zinc-400 block font-medium">預計進場價</span>
+                    <span className="text-sm font-black font-mono text-emerald-700">
+                      ${selectedItem.data.price.toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="bg-white p-2 rounded-lg border border-zinc-200 shadow-2xs">
+                    <span className="text-[10px] text-zinc-400 block font-medium">已購買 / 預購入</span>
+                    <span className="text-sm font-black font-mono text-zinc-800">
+                      已購 {selectedItem.data.bought} / 預購 {selectedItem.data.size} 股
+                    </span>
+                  </div>
+                  <div className="bg-white p-2 rounded-lg border border-zinc-200 shadow-2xs">
+                    <span className="text-[10px] text-zinc-400 block font-medium">配置佔比</span>
+                    <span className="text-sm font-black font-mono text-zinc-800">
+                      {selectedItem.data.percent}%
+                    </span>
+                  </div>
+                  <div className="bg-white p-2 rounded-lg border border-zinc-200 shadow-2xs flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] text-zinc-400 block font-medium">本梯次所需資金</span>
+                      <span className="text-sm font-black font-mono text-zinc-800">
+                        ${selectedItem.data.stepCost.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      </span>
+                    </div>
+                    {onBatchClick && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const s1 = selectedItem.data.split1?.size || 0;
+                          const s2 = selectedItem.data.split2?.size || 0;
+                          onBatchClick(selectedItem.data.index, selectedItem.data.name, s1, s2);
+                        }}
+                        className="px-2 py-1 text-[11px] font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-md transition-colors cursor-pointer shrink-0"
+                      >
+                        帶入數量
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-xs">
+                  <div className="bg-white p-2 rounded-lg border border-zinc-200 shadow-2xs">
+                    <span className="text-[10px] text-zinc-400 block font-medium">成交價格</span>
+                    <span className="text-sm font-black font-mono text-blue-700">
+                      ${selectedItem.data.price.toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="bg-white p-2 rounded-lg border border-zinc-200 shadow-2xs">
+                    <span className="text-[10px] text-zinc-400 block font-medium">成交數量</span>
+                    <span className="text-sm font-black font-mono text-zinc-800">
+                      {selectedItem.data.quantity} 股
+                    </span>
+                  </div>
+                  <div className="bg-white p-2 rounded-lg border border-zinc-200 shadow-2xs">
+                    <span className="text-[10px] text-zinc-400 block font-medium">成交總額</span>
+                    <span className="text-sm font-black font-mono text-zinc-800">
+                      ${(selectedItem.data.price * selectedItem.data.quantity).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                    </span>
+                  </div>
+                  <div className="bg-white p-2 rounded-lg border border-zinc-200 shadow-2xs">
+                    <span className="text-[10px] text-zinc-400 block font-medium">經手人員 / 目的</span>
+                    <span className="text-xs font-bold text-zinc-700">
+                      {selectedItem.data.operator || '人'} ・ {selectedItem.data.purpose || '加碼'}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};

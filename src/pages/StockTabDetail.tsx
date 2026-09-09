@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
 import { format } from 'date-fns';
 import { Timestamp, collection, writeBatch, doc, serverTimestamp, addDoc, getDocs, deleteDoc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
-import { Trash2, BarChart3, ChevronDown, ChevronUp, Gamepad2, ShieldCheck, Upload, Download, ChevronLeft, CheckCircle2, RotateCcw, Loader2, HelpCircle, AlertTriangle, Save, Calculator, History, RefreshCw } from 'lucide-react';
+import { Trash2, BarChart3, ChevronDown, ChevronUp, Gamepad2, ShieldCheck, Upload, Download, ChevronLeft, CheckCircle2, RotateCcw, Loader2, HelpCircle, AlertTriangle, Save, Calculator, History, RefreshCw, Layers } from 'lucide-react';
 import { toast } from "sonner";
 import { motion, AnimatePresence } from 'motion/react';
 import { db } from '../lib/firebase';
@@ -26,12 +26,18 @@ import StrategyTab from '../components/StrategyTab';
 import { BatchMultiSelect } from '../components/BatchMultiSelect';
 import { formatTimestamp, getTimestampMillis, getTimestampDate } from '../lib/dateUtils';
 import ChipAnalysisTab from '../components/ChipAnalysisTab';
+import { System2PlanningChart, VisualPriceLevel } from '../components/System2PlanningChart';
+import { usePlannedOrders } from '../hooks/usePlannedOrders';
+import { useStrategy } from '../hooks/useStrategy';
+import { getVisualPriceLevels } from '../lib/visualLevels';
 
 export default function StockTabDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { tabs, updateTabStatus, updateCurrentPrice, updateTradeType, updateTab, deleteTab } = useStockTabs();
   const { trades, addTrade, updateTrade, deleteTrade } = useTrades(id);
+  const { orders: plannedOrders } = usePlannedOrders(id);
+  const { strategy } = useStrategy(id);
 
   const tab = tabs.find(t => t.id === id);
 
@@ -67,6 +73,8 @@ export default function StockTabDetail() {
   const [plannedBuyPercentInput, setPlannedBuyPercentInput] = useState<string>('');
   const [stopLossInput, setStopLossInput] = useState<string>('');
   const [takeProfitInput, setTakeProfitInput] = useState<string>('');
+  const [supportInput, setSupportInput] = useState<string>('');
+  const [resistanceInput, setResistanceInput] = useState<string>('');
   const [isEditingPrice, setIsEditingPrice] = useState(false);
   const [tempPrice, setTempPrice] = useState('');
   const [isFetchingPrice, setIsFetchingPrice] = useState(false);
@@ -201,6 +209,24 @@ export default function StockTabDetail() {
       setTakeProfitInput('');
     }
   }, [tab?.id, tab?.takeProfitPrice]);
+
+  // Update supportInput when tab data loads or changes
+  React.useEffect(() => {
+    if (tab?.supportPrice !== undefined && tab?.supportPrice !== null) {
+      setSupportInput(tab.supportPrice ? tab.supportPrice.toString() : '');
+    } else {
+      setSupportInput('');
+    }
+  }, [tab?.id, tab?.supportPrice]);
+
+  // Update resistanceInput when tab data loads or changes
+  React.useEffect(() => {
+    if (tab?.resistancePrice !== undefined && tab?.resistancePrice !== null) {
+      setResistanceInput(tab.resistancePrice ? tab.resistancePrice.toString() : '');
+    } else {
+      setResistanceInput('');
+    }
+  }, [tab?.id, tab?.resistancePrice]);
 
   // Update averaging rows & settings when tab loads (自動帶入預估佔比之批次股數)
   React.useEffect(() => {
@@ -379,6 +405,30 @@ export default function StockTabDetail() {
         await updateTab(tab.id, { takeProfitPrice: parsed });
       } else if (val === '') {
         await updateTab(tab.id, { takeProfitPrice: 0 });
+      }
+    }
+  };
+
+  const handleSupportChange = async (val: string) => {
+    setSupportInput(val);
+    const parsed = parseFloat(val);
+    if (tab) {
+      if (!isNaN(parsed) && parsed >= 0) {
+        await updateTab(tab.id, { supportPrice: parsed });
+      } else if (val === '') {
+        await updateTab(tab.id, { supportPrice: 0 });
+      }
+    }
+  };
+
+  const handleResistanceChange = async (val: string) => {
+    setResistanceInput(val);
+    const parsed = parseFloat(val);
+    if (tab) {
+      if (!isNaN(parsed) && parsed >= 0) {
+        await updateTab(tab.id, { resistancePrice: parsed });
+      } else if (val === '') {
+        await updateTab(tab.id, { resistancePrice: 0 });
       }
     }
   };
@@ -837,9 +887,14 @@ export default function StockTabDetail() {
     : null;
 
   // Four-batch transaction planning calculations
-  // 若持有數量為 0，則此分批購入的紀錄歸零
-  const currentHoldingQty = Math.max(0, stats?.totalQuantity || 0);
-  const totalBought = currentHoldingQty > 0 ? currentHoldingQty : 0;
+  // 若持有數量為 0，則此分批購入的紀錄歸零 (優先取 stats.totalQuantity，次取 tab.holdingQuantity)
+  const effectiveHoldingAvgPrice = (stats?.averagePrice && stats.averagePrice > 0)
+    ? stats.averagePrice
+    : (typeof tab?.averageCost === 'number' && tab.averageCost > 0 ? tab.averageCost : (parseFloat(String(tab?.averageCost)) || 0));
+
+  const effectiveHoldingQty = (stats?.totalQuantity !== undefined && stats.totalQuantity !== 0)
+    ? stats.totalQuantity
+    : (typeof tab?.holdingQuantity === 'number' && tab.holdingQuantity > 0 ? tab.holdingQuantity : (parseFloat(String(tab?.holdingQuantity)) || 0));
 
   const parsedPercent = parseFloat(plannedBuyPercentInput);
   const plannedPercent = (!isNaN(parsedPercent) && parsedPercent >= 0)
@@ -881,6 +936,17 @@ export default function StockTabDetail() {
   const size4_a = Math.round(plannedQty * 0.10);
   const size4_b = Math.max(0, size4 - size4_a);
 
+  // 檢查 averagingRowsSys2 是否有被勾選為已購入的批次
+  const checkedRowsBoughtSys2 = averagingRowsSys2.reduce((sum, r, idx) => {
+    if (!r?.bought) return sum;
+    const q1 = r?.quantity ? parseFloat(r.quantity) : 0;
+    const q2 = r?.quantity2 ? parseFloat(r.quantity2) : 0;
+    const target = q1 + q2 > 0 ? q1 + q2 : [size1, size2, size3, size4][idx] || 0;
+    return sum + target;
+  }, 0);
+
+  const totalBought = Math.max(0, effectiveHoldingQty, checkedRowsBoughtSys2);
+
   // 計算各批與拆分子批已購與餘額 (累進階梯計算)
   // 第一批拆分
   const bought1_a = Math.min(totalBought, size1_a);
@@ -888,7 +954,8 @@ export default function StockTabDetail() {
   const remAfter1_a = Math.max(0, totalBought - size1_a);
   const bought1_b = Math.min(remAfter1_a, size1_b);
   const remaining1_b = Math.max(0, size1_b - bought1_b);
-  const bought1 = bought1_a + bought1_b;
+  const isRow0Bought = Boolean(averagingRowsSys2?.[0]?.bought);
+  const bought1 = isRow0Bought ? size1 : (bought1_a + bought1_b);
   const remaining1 = Math.max(0, size1 - bought1);
 
   // 第二批拆分
@@ -898,7 +965,8 @@ export default function StockTabDetail() {
   const remAfter2_a = Math.max(0, remAfter1 - size2_a);
   const bought2_b = Math.min(remAfter2_a, size2_b);
   const remaining2_b = Math.max(0, size2_b - bought2_b);
-  const bought2 = bought2_a + bought2_b;
+  const isRow1Bought = Boolean(averagingRowsSys2?.[1]?.bought);
+  const bought2 = isRow1Bought ? size2 : (bought2_a + bought2_b);
   const remaining2 = Math.max(0, size2 - bought2);
 
   // 第三批拆分
@@ -908,7 +976,8 @@ export default function StockTabDetail() {
   const remAfter3_a = Math.max(0, remAfter2 - size3_a);
   const bought3_b = Math.min(remAfter3_a, size3_b);
   const remaining3_b = Math.max(0, size3_b - bought3_b);
-  const bought3 = bought3_a + bought3_b;
+  const isRow2Bought = Boolean(averagingRowsSys2?.[2]?.bought);
+  const bought3 = isRow2Bought ? size3 : (bought3_a + bought3_b);
   const remaining3 = Math.max(0, size3 - bought3);
 
   // 第四批拆分
@@ -918,7 +987,8 @@ export default function StockTabDetail() {
   const remAfter4_a = Math.max(0, remAfter3 - size4_a);
   const bought4_b = Math.min(remAfter4_a, size4_b);
   const remaining4_b = Math.max(0, size4_b - bought4_b);
-  const bought4 = bought4_a + bought4_b;
+  const isRow3Bought = Boolean(averagingRowsSys2?.[3]?.bought);
+  const bought4 = isRow3Bought ? size4 : (bought4_a + bought4_b);
   const remaining4 = Math.max(0, size4 - bought4);
 
   const remainingToBuy = Math.max(0, plannedQty - totalBought);
@@ -1073,6 +1143,11 @@ export default function StockTabDetail() {
       },
     },
   ];
+
+  // 視覺防線計算 (支撐、壓力、止損、止盈)
+  const visualLevels = React.useMemo(() => {
+    return getVisualPriceLevels(tab, strategy, plannedOrders);
+  }, [tab, strategy, plannedOrders]);
 
   const handleBatchClick = (
     batchIndex: number,
@@ -1573,24 +1648,24 @@ export default function StockTabDetail() {
         <span className="text-[12px] font-bold text-zinc-800">{tab.symbol}</span>
       </div>
       <ScrollIn>
-        <div className="glass-panel border border-zinc-200 bg-white/90 p-4 sm:py-3 sm:px-4 rounded-2xl shadow-sm flex flex-col xl:flex-row xl:items-center justify-between gap-4 md:gap-4 overflow-visible relative">
-          <div className="flex flex-col md:flex-row md:items-center gap-4 md:gap-6 w-full xl:w-auto relative z-10">
-            <div className="w-full md:w-auto flex justify-between items-start">
-              <div>
-                <div className="flex items-center gap-2">
-                  <motion.h1 
-                    layoutId="tab-title"
-                    className="text-2xl sm:text-2xl font-bold tracking-tight text-black"
-                  >
-                    {tab.symbol}
-                  </motion.h1>
-                  {tab.status === 'COMPLETED' && (
-                    <Badge variant="outline" className="bg-blue-500/10 text-blue-700 border-blue-500/20 font-bold text-[10px] px-2 py-0 rounded-full">COMPLETED</Badge>
-                  )}
-                </div>
-                <div className="flex flex-col mt-0.5 sm:mt-0">
-                  <p className="text-zinc-500 text-[10px] tracking-wider truncate max-w-[200px] sm:max-w-[120px]">{tab.companyName}</p>
-                </div>
+        <div className="glass-panel border border-zinc-200 bg-white/90 p-3 sm:py-2.5 sm:px-4 rounded-xl shadow-xs flex flex-col xl:flex-row xl:items-center justify-between gap-3 md:gap-4 overflow-visible relative">
+          <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-5 w-full xl:w-auto relative z-10">
+            <div className="w-full md:w-auto flex justify-between items-center">
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <motion.h1 
+                  layoutId="tab-title"
+                  className="text-2xl sm:text-2xl font-black tracking-tight text-black font-mono leading-none"
+                >
+                  {tab.symbol}
+                </motion.h1>
+                {tab.companyName && (
+                  <span className="text-zinc-500 text-xs font-semibold tracking-wider truncate max-w-[180px] sm:max-w-[280px]">
+                    {tab.companyName}
+                  </span>
+                )}
+                {tab.status === 'COMPLETED' && (
+                  <Badge variant="outline" className="bg-blue-500/10 text-blue-700 border-blue-500/20 font-bold text-[10px] px-2 py-0 rounded-full">COMPLETED</Badge>
+                )}
               </div>
 
               {/* Mobile Only: Current Price, Avg Cost & Total Shares */}
@@ -2122,7 +2197,26 @@ export default function StockTabDetail() {
                     </TabsList>
 
                     {/* 子分頁 1: 籌碼試算與規劃 */}
-                    <TabsContent value="calc" className="pt-3 space-y-4 outline-none">
+                    <TabsContent value="calc" className="pt-2 space-y-3 outline-none">
+                      {/* 系統二 3% 階梯攤平與分批進場計畫動態互動圖表 (Chart.js) */}
+                      <System2PlanningChart
+                        compact={true}
+                        symbol={tab?.symbol}
+                        companyName={tab?.companyName}
+                        currentPrice={tab?.currentPrice || 0}
+                        holdingAvgPrice={effectiveHoldingAvgPrice}
+                        holdingQty={effectiveHoldingQty}
+                        batches={batchConfigList}
+                        averagingRowsSys2={averagingRowsSys2}
+                        includeCurrentHolding={includeCurrentHolding}
+                        refPnLPointSys2={refPnLPointSys2}
+                        usableCapital={usableCapital}
+                        plannedQty={plannedQty}
+                        trades={trades}
+                        visualLevels={visualLevels}
+                        onBatchClick={handleBatchClick}
+                      />
+
                       {/* 預計購買數量、停損/止盈價位與分批規劃 */}
                       <div className="pt-2 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
                     {/* Left Column: Input box & Remaining Planned Buy Badge underneath */}
@@ -2154,6 +2248,74 @@ export default function StockTabDetail() {
                           <span className="text-zinc-600 font-medium whitespace-nowrap text-[11px] sm:text-xs">
                             可購買總數量: <span className="font-mono font-black text-emerald-800">{plannedQty}</span> 股
                           </span>
+                        </div>
+                      </div>
+
+                      {/* 關鍵防線設定列 (支撐/止損/壓力/止盈) - 與圖表虛線連動 */}
+                      <div className="flex flex-wrap items-center gap-2 sm:gap-2.5 bg-zinc-50 border border-zinc-200 px-3.5 py-2 rounded-2xl shadow-2xs w-full lg:w-auto">
+                        <span className="text-xs font-bold text-zinc-700 whitespace-nowrap flex items-center gap-1">
+                          <Layers className="w-3.5 h-3.5 text-amber-600" />
+                          關鍵防線價位:
+                        </span>
+
+                        {/* 支撐 (琥珀黃 #d97706) */}
+                        <div className="flex items-center gap-1 bg-amber-50/80 border border-amber-200/90 rounded-xl px-2 py-1">
+                          <span className="w-2 h-0 border-t-2 border-dashed border-amber-600 shrink-0" />
+                          <span className="text-[11px] font-bold text-amber-800 whitespace-nowrap">支撐:</span>
+                          <Input
+                            type="number"
+                            step="any"
+                            placeholder={tab?.currentPrice ? (tab.currentPrice * 0.95).toFixed(2) : "價格"}
+                            className="w-16 h-6 bg-white border border-amber-300 text-amber-950 font-mono font-bold text-center text-xs rounded-lg p-0.5 focus-visible:ring-amber-500/50"
+                            value={supportInput}
+                            onChange={(e) => handleSupportChange(e.target.value)}
+                            title="關鍵支撐價位 (琥珀黃虛線)"
+                          />
+                        </div>
+
+                        {/* 止損 (警示紅 #dc2626) */}
+                        <div className="flex items-center gap-1 bg-red-50/80 border border-red-200/90 rounded-xl px-2 py-1">
+                          <span className="w-2 h-0 border-t-2 border-dashed border-red-600 shrink-0" />
+                          <span className="text-[11px] font-bold text-red-700 whitespace-nowrap">止損:</span>
+                          <Input
+                            type="number"
+                            step="any"
+                            placeholder={tab?.currentPrice ? (tab.currentPrice * 0.92).toFixed(2) : "價格"}
+                            className="w-16 h-6 bg-white border border-red-300 text-red-950 font-mono font-bold text-center text-xs rounded-lg p-0.5 focus-visible:ring-red-500/50"
+                            value={stopLossInput}
+                            onChange={(e) => handleStopLossChange(e.target.value)}
+                            title="關鍵止損價位 (警示紅虛線)"
+                          />
+                        </div>
+
+                        {/* 壓力 (玫瑰粉 #e11d48) */}
+                        <div className="flex items-center gap-1 bg-rose-50/80 border border-rose-200/90 rounded-xl px-2 py-1">
+                          <span className="w-2 h-0 border-t-2 border-dashed border-rose-600 shrink-0" />
+                          <span className="text-[11px] font-bold text-rose-700 whitespace-nowrap">壓力:</span>
+                          <Input
+                            type="number"
+                            step="any"
+                            placeholder={tab?.currentPrice ? (tab.currentPrice * 1.05).toFixed(2) : "價格"}
+                            className="w-16 h-6 bg-white border border-rose-300 text-rose-950 font-mono font-bold text-center text-xs rounded-lg p-0.5 focus-visible:ring-rose-500/50"
+                            value={resistanceInput}
+                            onChange={(e) => handleResistanceChange(e.target.value)}
+                            title="關鍵壓力價位 (玫瑰粉虛線)"
+                          />
+                        </div>
+
+                        {/* 止盈 (翡翠綠 #059669) */}
+                        <div className="flex items-center gap-1 bg-emerald-50/80 border border-emerald-200/90 rounded-xl px-2 py-1">
+                          <span className="w-2 h-0 border-t-2 border-dashed border-emerald-600 shrink-0" />
+                          <span className="text-[11px] font-bold text-emerald-700 whitespace-nowrap">止盈:</span>
+                          <Input
+                            type="number"
+                            step="any"
+                            placeholder={tab?.currentPrice ? (tab.currentPrice * 1.12).toFixed(2) : "價格"}
+                            className="w-16 h-6 bg-white border border-emerald-300 text-emerald-950 font-mono font-bold text-center text-xs rounded-lg p-0.5 focus-visible:ring-emerald-500/50"
+                            value={takeProfitInput}
+                            onChange={(e) => handleTakeProfitChange(e.target.value)}
+                            title="關鍵止盈價位 (翡翠綠虛線)"
+                          />
                         </div>
                       </div>
 
