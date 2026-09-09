@@ -8,13 +8,21 @@ import { getTimestampMillis } from '../lib/dateUtils';
 import { safeLocalStorage } from '../lib/utils';
 
 const getCachedTabs = (userId?: string | null): StockTab[] => {
-  if (!userId) return [];
   try {
-    const raw = safeLocalStorage.getItem(`cached_stock_tabs_v3_${userId}`);
-    if (raw) {
-      const parsed = JSON.parse(raw);
+    if (userId) {
+      const raw = safeLocalStorage.getItem(`cached_stock_tabs_v3_${userId}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed as StockTab[];
+        }
+      }
+    }
+    const shared = safeLocalStorage.getItem('cached_stock_tabs_v3_shared');
+    if (shared) {
+      const parsed = JSON.parse(shared);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed.filter(t => !t.userId || t.userId === userId) as StockTab[];
+        return parsed as StockTab[];
       }
     }
   } catch (e) {
@@ -38,7 +46,7 @@ export function useStockTabs() {
       return;
     }
 
-    // Initialize with this specific user's cached tabs
+    // Initialize with cached tabs
     const userCached = getCachedTabs(user.uid);
     if (userCached.length > 0) {
       setTabs(userCached);
@@ -47,9 +55,9 @@ export function useStockTabs() {
       setLoading(true);
     }
 
+    // Query all stock tabs in the shared workspace
     const q = query(
-      collection(db, 'stockTabs'),
-      where('userId', '==', user.uid)
+      collection(db, 'stockTabs')
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -69,6 +77,7 @@ export function useStockTabs() {
       setLoading(false);
       try {
         safeLocalStorage.setItem(`cached_stock_tabs_v3_${user.uid}`, JSON.stringify(sorted));
+        safeLocalStorage.setItem('cached_stock_tabs_v3_shared', JSON.stringify(sorted));
       } catch (e) {
         // ignore storage quota error
       }

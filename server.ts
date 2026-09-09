@@ -98,9 +98,6 @@ async function startServer() {
   app.get("/api/html-files", async (req, res) => {
     try {
       const { userId, symbol } = req.query;
-      if (!userId) {
-        return res.status(400).json({ error: "缺少 userId" });
-      }
 
       let files;
       if (symbol) {
@@ -112,12 +109,7 @@ async function startServer() {
           createdAt: uploadedHtmlFiles.createdAt,
         })
         .from(uploadedHtmlFiles)
-        .where(
-          and(
-            eq(uploadedHtmlFiles.userId, userId as string),
-            eq(uploadedHtmlFiles.symbol, symbol as string)
-          )
-        )
+        .where(eq(uploadedHtmlFiles.symbol, symbol as string))
         .orderBy(desc(uploadedHtmlFiles.createdAt));
       } else {
         files = await db.select({
@@ -128,7 +120,6 @@ async function startServer() {
           createdAt: uploadedHtmlFiles.createdAt,
         })
         .from(uploadedHtmlFiles)
-        .where(eq(uploadedHtmlFiles.userId, userId as string))
         .orderBy(desc(uploadedHtmlFiles.createdAt));
       }
 
@@ -215,11 +206,11 @@ async function startServer() {
   app.get("/api/user-prompts", (req, res) => {
     try {
       const { userId } = req.query;
-      if (!userId || typeof userId !== "string") {
-        return res.status(400).json({ error: "缺少 userId" });
-      }
       const data = getUserPromptsData();
-      const prompts = data[userId] || [];
+      let prompts = (userId && typeof userId === "string") ? data[userId] : null;
+      if (!prompts || prompts.length === 0) {
+        prompts = data["default"] || Object.values(data)[0] || [];
+      }
       res.json({ success: true, prompts });
     } catch (err: any) {
       console.error("Error fetching user prompts:", err);
@@ -235,6 +226,7 @@ async function startServer() {
       }
       const data = getUserPromptsData();
       data[userId] = prompts;
+      data["default"] = prompts;
       saveUserPromptsData(data);
       res.json({ success: true, prompts });
     } catch (err: any) {

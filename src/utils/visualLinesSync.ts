@@ -213,9 +213,45 @@ export interface CardDividerAnalysis {
   allDividers: { ann: ChartAnnotation; colorType: string; y: number }[];
 }
 
-export function analyzeCardDividers(tab: StockTab): CardDividerAnalysis {
+export function analyzeCardDividers(
+  tab: StockTab,
+  strategy?: any,
+  averageCost?: number,
+  holdingQuantity?: number
+): CardDividerAnalysis {
   const annotations = tab.chartAnnotations || [];
   const dividerList: { ann: ChartAnnotation; colorType: string; y: number }[] = [];
+
+  // 精確還原卡片價格尺度，使錨定價格的分隔線能即時動態換算為卡片當前最新可視 Y 座標
+  const { uniqueSortedPrices } = extractCardPricePoints(
+    tab,
+    strategy,
+    averageCost,
+    holdingQuantity
+  );
+
+  const topY = CARD_TOP_Y;
+  const bottomY = CARD_BOTTOM_Y;
+
+  const getYPct = (p: number) => {
+    if (!uniqueSortedPrices || uniqueSortedPrices.length <= 1) return 50;
+    const n = uniqueSortedPrices.length;
+    if (p <= uniqueSortedPrices[0]) return bottomY;
+    if (p >= uniqueSortedPrices[n - 1]) return topY;
+
+    for (let i = 0; i < n - 1; i++) {
+      const pLow = uniqueSortedPrices[i];
+      const pHigh = uniqueSortedPrices[i + 1];
+      if (p >= pLow && p <= pHigh) {
+        const yLow = bottomY - (i / (n - 1)) * (bottomY - topY);
+        const yHigh = bottomY - ((i + 1) / (n - 1)) * (bottomY - topY);
+        if (pHigh === pLow) return yLow;
+        const ratio = (p - pLow) / (pHigh - pLow);
+        return yLow + ratio * (yHigh - yLow);
+      }
+    }
+    return 50;
+  };
 
   for (const ann of annotations) {
     const isDivider =
@@ -226,9 +262,15 @@ export function analyzeCardDividers(tab: StockTab): CardDividerAnalysis {
 
     if (isDivider) {
       const colorType = classifyLineColor(ann.color);
-      const y = ann.y !== undefined 
-        ? ann.y 
-        : (ann.y1 !== undefined && ann.y2 !== undefined ? (ann.y1 + ann.y2) / 2 : (ann.y1 ?? 0));
+      let y: number;
+      if (ann.price && ann.price > 0 && uniqueSortedPrices.length > 0) {
+        const calcY = getYPct(ann.price);
+        y = typeof calcY === "number" && !isNaN(calcY) ? Math.round(calcY * 100) / 100 : (ann.y ?? ann.y1 ?? 0);
+      } else {
+        y = ann.y !== undefined 
+          ? ann.y 
+          : (ann.y1 !== undefined && ann.y2 !== undefined ? (ann.y1 + ann.y2) / 2 : (ann.y1 ?? 0));
+      }
       dividerList.push({ ann, colorType, y });
     }
   }
@@ -439,7 +481,7 @@ export function calculateCanvasYDetails(
   holdingQuantity?: number
 ): CanvasYCalculationDetails {
   const cpCardY = calculateCardPriceY(tab, strategy, averageCost, holdingQuantity);
-  const analysis = analyzeCardDividers(tab);
+  const analysis = analyzeCardDividers(tab, strategy, averageCost, holdingQuantity);
   const dynPrice = tab.currentPrice && tab.currentPrice > 0 ? tab.currentPrice : (tab as any).price || 0;
 
   // 1. 若卡片完全沒有任何分隔線，直接將卡片尺度 (7% ~ 93%) 線性投射至畫布視覺線 (12% ~ 90%)
@@ -476,106 +518,133 @@ export function calculateCanvasYDetails(
     };
   }
 
-  // 2. 取得卡片上各色系分隔線
-  const blackDividers = analysis.allDividers.filter((d) => d.colorType === "black").map((d) => d.y);
-  const blueDividers = analysis.allDividers.filter((d) => d.colorType === "blue").map((d) => d.y);
-  const redDividers = analysis.allDividers.filter((d) => d.colorType === "red").map((d) => d.y);
-  const greenDividers = analysis.allDividers.filter((d) => d.colorType === "green").map((d) => d.y);
-  const yellowDividers = analysis.allDividers.filter((d) => d.colorType === "yellow").map((d) => d.y);
-  const otherDividers = analysis.allDividers.filter((d) => d.colorType === "other").map((d) => d.y);
-
-  // 3. 建立真實分隔線錨點集合 (標準目標高度: 頂黃 12%, 紅 28%, 黑 44%, 藍 60%, 綠 76%, 底黃 90%)
+  // 2. 建立真實分隔線錨點集合 (標準目標高度: 頂黃 12%, 紅 28%, 黑 44%, 藍 60%, 綠 76%, 底黃 90%)
   const detectedAnchors: { cardY: number; canvasY: number; name: string }[] = [];
 
-  // 頂部黃色線 (頂部獲利)：卡片上方 (y < 40)
-  const topYellows = yellowDividers.filter((y) => y < 40);
-  if (topYellows.length > 0) {
-    detectedAnchors.push({
-      cardY: Math.min(...topYellows),
-      canvasY: CANVAS_TOP_YELLOW_Y,
-      name: "頂黃 (Y軸 12%)",
-    });
-  }
+  const dividersByColor = new Map<string, { y: number; ann: ChartAnnotation }[]>();
+  analysis.allDividers.forEach((d) => {
+    const list = dividersByColor.get(d.colorType) || [];
+    list.push({ y: d.y, ann: d.ann });
+    dividersByColor.set(d.colorType, list);
+  });
 
-  // 紅色線 (停損警戒)：卡片中上方阻力
-  if (redDividers.length > 0) {
+  // 紅色線 (停損警戒 / 阻力門檻 - R軸 28%)
+  const redList = dividersByColor.get("red") || [];
+  redList.sort((a, b) => a.y - b.y);
+  redList.forEach((item, idx) => {
+    const offset = (idx - (redList.length - 1) / 2) * 2;
     detectedAnchors.push({
-      cardY: Math.min(...redDividers),
-      canvasY: CANVAS_RED_Y,
-      name: "紅線 (R軸 28%)",
+      cardY: item.y,
+      canvasY: CANVAS_RED_Y + offset,
+      name: redList.length > 1 ? `紅線-${idx + 1} (R軸 28%)` : "紅線 (R軸 28%)",
     });
-  }
+  });
 
-  // 黑色線 (基準中軸)：卡片中間基準
-  if (blackDividers.length > 0) {
-    const closestBlack = blackDividers.reduce((prev, curr) =>
-      Math.abs(curr - 50) < Math.abs(prev - 50) ? curr : prev
-    );
+  // 黑色線 (基準中軸 - D軸 44%)
+  const blackList = dividersByColor.get("black") || [];
+  blackList.sort((a, b) => a.y - b.y);
+  blackList.forEach((item, idx) => {
+    const offset = (idx - (blackList.length - 1) / 2) * 2;
     detectedAnchors.push({
-      cardY: closestBlack,
-      canvasY: CANVAS_BLACK_Y,
-      name: "黑線 (D軸 44%)",
+      cardY: item.y,
+      canvasY: CANVAS_BLACK_Y + offset,
+      name: blackList.length > 1 ? `黑線-${idx + 1} (D軸 44%)` : "黑線 (D軸 44%)",
     });
-  }
+  });
 
-  // 藍色線 (回檔加碼)：卡片中下方支撐
-  if (blueDividers.length > 0) {
+  // 藍色線 (回檔加碼 / 支撐門檻 - B軸 60%)
+  const blueList = dividersByColor.get("blue") || [];
+  blueList.sort((a, b) => a.y - b.y);
+  blueList.forEach((item, idx) => {
+    const offset = (idx - (blueList.length - 1) / 2) * 2;
     detectedAnchors.push({
-      cardY: Math.min(...blueDividers),
-      canvasY: CANVAS_BLUE_Y,
-      name: "藍線 (B軸 60%)",
+      cardY: item.y,
+      canvasY: CANVAS_BLUE_Y + offset,
+      name: blueList.length > 1 ? `藍線-${idx + 1} (B軸 60%)` : "藍線 (B軸 60%)",
     });
-  }
+  });
 
-  // 綠色線 (底部買進)：卡片下方買進
-  if (greenDividers.length > 0) {
+  // 綠色線 (底部買進 - G軸 76%)
+  const greenList = dividersByColor.get("green") || [];
+  greenList.sort((a, b) => a.y - b.y);
+  greenList.forEach((item, idx) => {
+    const offset = (idx - (greenList.length - 1) / 2) * 2;
     detectedAnchors.push({
-      cardY: Math.max(...greenDividers),
-      canvasY: CANVAS_GREEN_Y,
-      name: "綠線 (G軸 76%)",
+      cardY: item.y,
+      canvasY: CANVAS_GREEN_Y + offset,
+      name: greenList.length > 1 ? `綠線-${idx + 1} (G軸 76%)` : "綠線 (G軸 76%)",
     });
-  }
+  });
 
-  // 底部黃色線 (深幅價值)：卡片最下方 (y > 60)
-  const bottomYellows = yellowDividers.filter((y) => y > 60);
-  if (bottomYellows.length > 0) {
+  // 黃色線 (頂黃 12% / 底黃 90%)
+  const yellowList = dividersByColor.get("yellow") || [];
+  yellowList.sort((a, b) => a.y - b.y);
+  if (yellowList.length === 1) {
+    const yItem = yellowList[0];
+    const isTop = yItem.y < 50;
     detectedAnchors.push({
-      cardY: Math.max(...bottomYellows),
-      canvasY: CANVAS_BOTTOM_YELLOW_Y,
-      name: "底黃 (Y軸 90%)",
+      cardY: yItem.y,
+      canvasY: isTop ? CANVAS_TOP_YELLOW_Y : CANVAS_BOTTOM_YELLOW_Y,
+      name: isTop ? "頂黃 (Y軸 12%)" : "底黃 (Y軸 90%)",
     });
-  }
-
-  // 若只有一般分隔線且未收集到標準色系線
-  if (detectedAnchors.length === 0 && otherDividers.length > 0) {
-    otherDividers.sort((a, b) => a - b);
-    if (otherDividers.length === 1) {
-      detectedAnchors.push({ cardY: otherDividers[0], canvasY: CANVAS_BLACK_Y, name: "自訂中軸 (44%)" });
-    } else {
-      otherDividers.forEach((y, i) => {
-        const cY =
-          CANVAS_RED_Y +
-          (i / (otherDividers.length - 1)) * (CANVAS_GREEN_Y - CANVAS_RED_Y);
-        detectedAnchors.push({ cardY: y, canvasY: cY, name: `自訂線-${i + 1}` });
+  } else if (yellowList.length > 1) {
+    yellowList.forEach((item, idx) => {
+      const isTop = idx === 0 || item.y < 50;
+      const isBottom = idx === yellowList.length - 1 && item.y >= 50;
+      const targetCanvasY = isBottom
+        ? CANVAS_BOTTOM_YELLOW_Y
+        : isTop
+        ? CANVAS_TOP_YELLOW_Y
+        : item.y < 50
+        ? CANVAS_TOP_YELLOW_Y
+        : CANVAS_BOTTOM_YELLOW_Y;
+      detectedAnchors.push({
+        cardY: item.y,
+        canvasY: targetCanvasY,
+        name: isBottom ? "底黃 (Y軸 90%)" : "頂黃 (Y軸 12%)",
       });
+    });
+  }
+
+  // 其他自訂分隔線 (均勻映射至 28% ~ 76%)
+  const otherList = dividersByColor.get("other") || [];
+  if (otherList.length > 0) {
+    otherList.sort((a, b) => a.y - b.y);
+    otherList.forEach((item, idx) => {
+      const cY =
+        CANVAS_RED_Y +
+        ((item.y - CARD_TOP_Y) / (CARD_BOTTOM_Y - CARD_TOP_Y)) *
+          (CANVAS_GREEN_Y - CANVAS_RED_Y);
+      detectedAnchors.push({
+        cardY: item.y,
+        canvasY: Math.round(cY * 10) / 10,
+        name: `自訂線-${idx + 1}`,
+      });
+    });
+  }
+
+  // 3. 排序所有實際存在的錨點 (按 cardY 升序，由上至下)
+  detectedAnchors.sort((a, b) => a.cardY - b.cardY);
+
+  // 4. 確保 detectedAnchors 的 canvasY 保持嚴格單調遞增，防止投影顛倒
+  for (let i = 1; i < detectedAnchors.length; i++) {
+    if (detectedAnchors[i].canvasY <= detectedAnchors[i - 1].canvasY) {
+      detectedAnchors[i].canvasY = detectedAnchors[i - 1].canvasY + 2.0;
     }
   }
 
-  // 4. 排序所有實際存在的錨點 (按 cardY 升序)
-  detectedAnchors.sort((a, b) => a.cardY - b.cardY);
-
-  // 5. 加入卡片頂部與底部邊界錨點，建立覆蓋全範圍的映射
+  // 5. 加入卡片頂部與底部邊界錨點，建立覆蓋全範圍的平滑映射
   const firstAnchor = detectedAnchors[0];
   const lastAnchor = detectedAnchors[detectedAnchors.length - 1];
 
-  const minCardY = Math.min(CARD_TOP_Y, firstAnchor ? firstAnchor.cardY - 10 : CARD_TOP_Y);
-  const maxCardY = Math.max(CARD_BOTTOM_Y, lastAnchor ? lastAnchor.cardY + 10 : CARD_BOTTOM_Y);
+  const minCardY = Math.min(CARD_TOP_Y, firstAnchor ? firstAnchor.cardY - 5 : CARD_TOP_Y);
+  const maxCardY = Math.max(CARD_BOTTOM_Y, lastAnchor ? lastAnchor.cardY + 5 : CARD_BOTTOM_Y);
 
   const minCanvasY = firstAnchor
-    ? Math.max(6, Math.min(CANVAS_TOP_YELLOW_Y, firstAnchor.canvasY - 10))
+    ? Math.max(6, Math.min(CANVAS_TOP_YELLOW_Y, firstAnchor.canvasY - 6))
     : CANVAS_TOP_YELLOW_Y;
   const maxCanvasY = lastAnchor
-    ? Math.min(94, Math.max(CANVAS_BOTTOM_YELLOW_Y, lastAnchor.canvasY + 10))
+    ? Math.min(94, Math.max(CANVAS_BOTTOM_YELLOW_Y, lastAnchor.canvasY + 6))
     : CANVAS_BOTTOM_YELLOW_Y;
 
   const anchors = [
@@ -845,7 +914,11 @@ export async function syncSubTabDividersToCanvas(
       targetTab = tabsForSym[0];
     } else {
       const scored = tabsForSym.map((t) => {
-        const analysis = analyzeCardDividers(t);
+        const strat = strategiesMap?.[t.id] || (t as any).strategy;
+        const stat = statsMap?.[t.id];
+        const avgCost = stat?.totalQuantity !== 0 ? stat?.averagePrice : undefined;
+        const holdingQty = stat?.totalQuantity ?? (t as any).holdingQuantity;
+        const analysis = analyzeCardDividers(t, strat, avgCost, holdingQty);
         const dividerCount = analysis.allDividers.length;
         const hasPrice = t.currentPrice && t.currentPrice > 0 ? 1 : 0;
         const isEligible = analysis.isEligible ? 100 : 0;

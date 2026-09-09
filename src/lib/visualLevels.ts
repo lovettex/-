@@ -1,4 +1,5 @@
 import { VisualPriceLevel } from '../components/System2PlanningChart';
+import { extractCardPricePoints } from '../utils/visualLinesSync';
 
 export function getVisualPriceLevels(
   tab?: any | null,
@@ -71,14 +72,45 @@ export function getVisualPriceLevels(
     // Tab chartAnnotations (Dividers / Lines placed on chart or card)
     if (Array.isArray(tab.chartAnnotations)) {
       tab.chartAnnotations.forEach((ann: any, idx: number) => {
-        const p = typeof ann.price === 'number' ? ann.price : parseFloat(String(ann.price));
+        let p = typeof ann.price === 'number' ? ann.price : parseFloat(String(ann.price));
+        if (isNaN(p) || p <= 0) {
+          const annY = ann.y !== undefined ? ann.y : (ann.y1 !== undefined && ann.y2 !== undefined ? (ann.y1 + ann.y2) / 2 : ann.y1);
+          if (typeof annY === 'number' && !isNaN(annY)) {
+            const { uniqueSortedPrices } = extractCardPricePoints(tab, strategy);
+            if (uniqueSortedPrices.length >= 2) {
+              const topY = 7;
+              const bottomY = 93;
+              const clampedY = Math.max(topY, Math.min(bottomY, annY));
+              const ratio = (bottomY - clampedY) / (bottomY - topY);
+              const n = uniqueSortedPrices.length;
+              const idxFloat = ratio * (n - 1);
+              const lowIdx = Math.floor(idxFloat);
+              const highIdx = Math.min(n - 1, lowIdx + 1);
+              const frac = idxFloat - lowIdx;
+              p = uniqueSortedPrices[lowIdx] + frac * (uniqueSortedPrices[highIdx] - uniqueSortedPrices[lowIdx]);
+            }
+          }
+        }
         if (!isNaN(p) && p > 0) {
           const text = (ann.text || '').trim();
+          const isExplicitDivider =
+            ann.type === 'divider' ||
+            Boolean(ann.isDivider) ||
+            (ann.type === 'line' && Math.abs((ann.y2 ?? ann.y1 ?? 0) - (ann.y1 ?? 0)) < 8 && Math.abs((ann.x2 ?? 100) - (ann.x1 ?? 0)) >= 10) ||
+            text.includes('分隔線') ||
+            text.includes('基準');
+
           let type: VisualPriceLevel['type'] = 'support';
           let label = '支撐';
           let color = '#d97706';
+          let isCardDivider = false;
 
-          if (text.includes('止損')) {
+          if (isExplicitDivider) {
+            type = 'divider';
+            label = text || '卡片分隔線';
+            color = ann.color || '#6366f1';
+            isCardDivider = true;
+          } else if (text.includes('止損')) {
             type = 'stopLoss';
             label = '止損';
             color = '#dc2626';
@@ -106,6 +138,12 @@ export function getVisualPriceLevels(
             type = 'support';
             label = '支撐';
             color = '#d97706';
+          } else {
+            // 自訂顏色或其他線條，預設歸類為卡片分隔線
+            type = 'divider';
+            label = text || '卡片分隔線';
+            color = ann.color || '#6366f1';
+            isCardDivider = true;
           }
 
           addLevel({
@@ -114,7 +152,8 @@ export function getVisualPriceLevels(
             label,
             price: p,
             color,
-            note: text || `分隔線防線 $${p.toFixed(2)}`,
+            isCardDivider,
+            note: text || (isCardDivider ? `卡片分隔線 $${p.toFixed(2)}` : `防線 $${p.toFixed(2)}`),
           });
         }
       });

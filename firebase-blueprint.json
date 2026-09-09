@@ -141,6 +141,10 @@
       "schema": "SocratesData",
       "description": "User-specific market signal data by date."
     },
+    "/visualLinesBoard/{boardId}": {
+      "schema": "VisualLinesBoard",
+      "description": "Saved positions of stock tags on the shared visual lines board."
+    },
     "/users/{userId}/visualLinesBoard/{boardId}": {
       "schema": "VisualLinesBoard",
       "description": "Saved positions of stock tags on the visual lines board for a user."

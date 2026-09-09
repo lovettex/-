@@ -21,6 +21,7 @@ import {
   doc,
   setDoc,
   updateDoc,
+  onSnapshot,
   serverTimestamp,
   Timestamp,
 } from "firebase/firestore";
@@ -115,7 +116,8 @@ import { StockCardVisualizer, prefetchStockPrice } from "../components/StockCard
 import { CinemaDock } from "../components/CinemaDock";
 import { DynamicVisualLinesModal } from "../components/DynamicVisualLinesModal";
 import { MiniVisualLinesModal } from "../components/MiniVisualLinesModal";
-import { syncSubTabDividersToCanvas } from "../utils/visualLinesSync";
+import { syncSubTabDividersToCanvas, calculateCanvasYFromDividers } from "../utils/visualLinesSync";
+import { getVisualLinesDataSync, saveVisualLinesDataOptimistic } from "../utils/visualLinesStorage";
 import { ChartAnnotation } from "../types";
 
 const EMPTY_CHART_ANNOTATIONS: ChartAnnotation[] = [];
@@ -338,21 +340,36 @@ export default function Dashboard() {
     if (!user) return;
     const fetchSettings = async () => {
       try {
-        const docRef = doc(db, "userSettings", user.uid);
-        const snapshot = await getDoc(docRef);
+        let snapshot = await getDoc(doc(db, "userSettings", user.uid));
+        if (!snapshot.exists()) {
+          // Fallback to shared default settings or any existing user settings document in the workspace
+          const defaultSnap = await getDoc(doc(db, "userSettings", "default"));
+          if (defaultSnap.exists()) {
+            snapshot = defaultSnap;
+          } else {
+            const allSettings = await getDocs(collection(db, "userSettings"));
+            const validDoc = allSettings.docs.find(d => typeof d.data()?.totalCapital === "number");
+            if (validDoc) {
+              snapshot = validDoc;
+            }
+          }
+        }
         if (snapshot.exists()) {
           const data = snapshot.data();
           if (typeof data.totalCapital === "number") {
             setTotalCapital(data.totalCapital);
             safeLocalStorage.setItem(`total-capital-${user.uid}`, data.totalCapital.toString());
+            safeLocalStorage.setItem(`total-capital-shared`, data.totalCapital.toString());
           }
           if (typeof data.virtualCapital === "number") {
             setVirtualCapital(data.virtualCapital);
             safeLocalStorage.setItem(`virtual-capital-${user.uid}`, data.virtualCapital.toString());
+            safeLocalStorage.setItem(`virtual-capital-shared`, data.virtualCapital.toString());
           }
           if (typeof data.bankAccountBalance === "number") {
             setBankAccountBalance(data.bankAccountBalance);
             safeLocalStorage.setItem(`bank-account-balance-${user.uid}`, data.bankAccountBalance.toString());
+            safeLocalStorage.setItem(`bank-account-balance-shared`, data.bankAccountBalance.toString());
           }
         }
       } catch (error) {
@@ -367,13 +384,21 @@ export default function Dashboard() {
     setBankAccountBalance(newVal);
     const userKey = user ? user.uid : "guest";
     safeLocalStorage.setItem(`bank-account-balance-${userKey}`, newVal.toString());
+    safeLocalStorage.setItem(`bank-account-balance-shared`, newVal.toString());
     if (user) {
       try {
-        await setDoc(
-          doc(db, "userSettings", user.uid),
-          { bankAccountBalance: newVal, updatedAt: serverTimestamp() },
-          { merge: true }
-        );
+        await Promise.all([
+          setDoc(
+            doc(db, "userSettings", user.uid),
+            { bankAccountBalance: newVal, updatedAt: serverTimestamp() },
+            { merge: true }
+          ),
+          setDoc(
+            doc(db, "userSettings", "default"),
+            { bankAccountBalance: newVal, updatedAt: serverTimestamp() },
+            { merge: true }
+          )
+        ]);
       } catch (error) {
         console.error("Failed to save bankAccountBalance userSettings:", error);
         handleFirestoreError(error, OperationType.WRITE, `userSettings/${user.uid}`, user);
@@ -385,13 +410,21 @@ export default function Dashboard() {
     setTotalCapital(newVal);
     const userKey = user ? user.uid : "guest";
     safeLocalStorage.setItem(`total-capital-${userKey}`, newVal.toString());
+    safeLocalStorage.setItem(`total-capital-shared`, newVal.toString());
     if (user) {
       try {
-        await setDoc(
-          doc(db, "userSettings", user.uid),
-          { totalCapital: newVal, updatedAt: serverTimestamp() },
-          { merge: true }
-        );
+        await Promise.all([
+          setDoc(
+            doc(db, "userSettings", user.uid),
+            { totalCapital: newVal, updatedAt: serverTimestamp() },
+            { merge: true }
+          ),
+          setDoc(
+            doc(db, "userSettings", "default"),
+            { totalCapital: newVal, updatedAt: serverTimestamp() },
+            { merge: true }
+          )
+        ]);
       } catch (error) {
         console.error("Failed to save userSettings:", error);
         handleFirestoreError(error, OperationType.WRITE, `userSettings/${user.uid}`, user);
@@ -403,13 +436,21 @@ export default function Dashboard() {
     setVirtualCapital(newVal);
     const userKey = user ? user.uid : "guest";
     safeLocalStorage.setItem(`virtual-capital-${userKey}`, newVal.toString());
+    safeLocalStorage.setItem(`virtual-capital-shared`, newVal.toString());
     if (user) {
       try {
-        await setDoc(
-          doc(db, "userSettings", user.uid),
-          { virtualCapital: newVal, updatedAt: serverTimestamp() },
-          { merge: true }
-        );
+        await Promise.all([
+          setDoc(
+            doc(db, "userSettings", user.uid),
+            { virtualCapital: newVal, updatedAt: serverTimestamp() },
+            { merge: true }
+          ),
+          setDoc(
+            doc(db, "userSettings", "default"),
+            { virtualCapital: newVal, updatedAt: serverTimestamp() },
+            { merge: true }
+          )
+        ]);
       } catch (error) {
         console.error("Failed to save virtual userSettings:", error);
         handleFirestoreError(error, OperationType.WRITE, `userSettings/${user.uid}`, user);
@@ -445,31 +486,119 @@ export default function Dashboard() {
     return new Set<string>();
   });
 
-  // Sync selected cards when user authenticates or changes
+  // Helper to persist selected cards to localStorage (instant 0ms) and Firestore for cross-device sync
+  const persistSelectedCardIds = useCallback(
+    (nextIds: Set<string>) => {
+      const idsArray = Array.from(nextIds);
+      const userKey = user ? user.uid : "guest";
+      try {
+        safeLocalStorage.setItem(
+          `selected-card-ids-${userKey}`,
+          JSON.stringify(idsArray)
+        );
+      } catch (e) {
+        console.error("Failed to persist selected card IDs locally:", e);
+      }
+
+      if (user) {
+        const docRef = doc(db, "userSettings", user.uid);
+        setDoc(
+          docRef,
+          {
+            selectedCardIds: idsArray,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        ).catch((err) => {
+          console.warn("Failed to sync selectedCardIds to Firestore:", err);
+        });
+      }
+    },
+    [user]
+  );
+
+  // Sync selected cards across devices via Firestore onSnapshot + safeLocalStorage
   useEffect(() => {
-    const userKey = user ? user.uid : "guest";
+    if (!user) {
+      try {
+        const saved = safeLocalStorage.getItem("selected-card-ids-guest");
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            setSelectedCardIds(new Set(parsed));
+          }
+        }
+      } catch (e) {
+        console.error("Failed to load guest selected cards:", e);
+      }
+      return;
+    }
+
+    // 1. Initial fast local cache load (0ms delay)
     try {
-      const saved = safeLocalStorage.getItem(`selected-card-ids-${userKey}`);
+      const saved = safeLocalStorage.getItem(`selected-card-ids-${user.uid}`);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
           setSelectedCardIds(new Set(parsed));
-          return;
-        }
-      } else if (user) {
-        // Migrate guest selection if user has no saved selection yet
-        const guestSaved = safeLocalStorage.getItem("selected-card-ids-guest");
-        if (guestSaved) {
-          const parsed = JSON.parse(guestSaved);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            setSelectedCardIds(new Set(parsed));
-            safeLocalStorage.setItem(`selected-card-ids-${user.uid}`, guestSaved);
-          }
         }
       }
     } catch (e) {
-      console.error("Failed to reload selected card ids on user change:", e);
+      console.error("Failed to load local selected cards:", e);
     }
+
+    // 2. Real-time Firestore synchronization for multi-device sync
+    const docRef = doc(db, "userSettings", user.uid);
+    const unsubscribe = onSnapshot(
+      docRef,
+      (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          if (Array.isArray(data.selectedCardIds)) {
+            setSelectedCardIds(new Set(data.selectedCardIds));
+            safeLocalStorage.setItem(
+              `selected-card-ids-${user.uid}`,
+              JSON.stringify(data.selectedCardIds)
+            );
+          } else {
+            // If userSettings document exists but has no selectedCardIds yet, upload local selection if any
+            const localSaved = safeLocalStorage.getItem(`selected-card-ids-${user.uid}`);
+            if (localSaved) {
+              try {
+                const parsed = JSON.parse(localSaved);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                  setDoc(
+                    docRef,
+                    { selectedCardIds: parsed, updatedAt: serverTimestamp() },
+                    { merge: true }
+                  ).catch(() => {});
+                }
+              } catch (e) {}
+            }
+          }
+        } else {
+          // Document does not exist yet; if local selection exists, upload it
+          const localSaved = safeLocalStorage.getItem(`selected-card-ids-${user.uid}`);
+          if (localSaved) {
+            try {
+              const parsed = JSON.parse(localSaved);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                setDoc(
+                  docRef,
+                  { selectedCardIds: parsed, updatedAt: serverTimestamp() },
+                  { merge: true }
+                ).catch(() => {});
+              }
+            } catch (e) {}
+          }
+        }
+      },
+      (error) => {
+        console.warn("Real-time userSettings selectedCardIds onSnapshot error:", error);
+      }
+    );
+
+    return () => unsubscribe();
   }, [user?.uid]);
 
   const [isCinemaModeActive, setIsCinemaModeActive] = useState<boolean>(false);
@@ -2329,7 +2458,7 @@ export default function Dashboard() {
     const fetchTabData = async () => {
       if (!user) return;
 
-      const activeTabs = tabs.filter((t) => t.status === "ACTIVE" && (!t.userId || t.userId === user.uid));
+      const activeTabs = tabs.filter((t) => t.status === "ACTIVE");
       const currentTabIdsStr = activeTabs.map(t => t.id).sort().join(",");
 
       // If the set of active tabs changed, clear our fetched cache to reload fresh
@@ -2351,7 +2480,7 @@ export default function Dashboard() {
       const otherToFetch = otherTabs.filter(t => !fetchedTabIdsRef.current.has(t.id));
 
       const fetchSingleTab = async (tab: any) => {
-        if (!user || (tab.userId && tab.userId !== user.uid)) {
+        if (!user) {
           return { id: tab.id, orders: [], trades: [], strategy: null };
         }
         let orders: any[] = [];
@@ -3238,7 +3367,6 @@ export default function Dashboard() {
 
       const q = query(
         collection(db, "stockTabs"),
-        where("userId", "==", user.uid),
       );
       const tabsSnapshot = await getDocs(q);
 
@@ -3665,7 +3793,7 @@ export default function Dashboard() {
     const tradesMap = { ...activeTabTrades };
 
     try {
-      const activeTabs = tabs.filter((t) => t.status === "ACTIVE" && (!t.userId || t.userId === user.uid));
+      const activeTabs = tabs.filter((t) => t.status === "ACTIVE");
       const missingTabs = activeTabs.filter((tab) => !tradesMap[tab.id]);
 
       if (missingTabs.length > 0) {
@@ -3817,18 +3945,10 @@ export default function Dashboard() {
       } else {
         next.add(tabId);
       }
-      const userKey = user ? user.uid : "guest";
-      try {
-        safeLocalStorage.setItem(
-          `selected-card-ids-${userKey}`,
-          JSON.stringify(Array.from(next))
-        );
-      } catch (e) {
-        console.error("Failed to persist selected card IDs:", e);
-      }
+      persistSelectedCardIds(next);
       return next;
     });
-  }, [user]);
+  }, [persistSelectedCardIds]);
 
   const handleSelectAll = useCallback(() => {
     playClickSound();
@@ -3847,33 +3967,18 @@ export default function Dashboard() {
         currentVisibleIds.forEach((id) => next.add(id));
         toast.success(`已全選目前子分頁 ${currentVisibleIds.length} 檔個股`);
       }
-      const userKey = user ? user.uid : "guest";
-      try {
-        safeLocalStorage.setItem(
-          `selected-card-ids-${userKey}`,
-          JSON.stringify(Array.from(next))
-        );
-      } catch (e) {
-        console.error("Failed to persist selected card IDs:", e);
-      }
+      persistSelectedCardIds(next);
       return next;
     });
-  }, [filteredSubTabVisibleTabs, effectiveVisibleActiveTabs, user]);
+  }, [filteredSubTabVisibleTabs, effectiveVisibleActiveTabs, persistSelectedCardIds]);
 
   const handleDeselectAll = useCallback(() => {
     playClickSound();
-    setSelectedCardIds(new Set());
-    const userKey = user ? user.uid : "guest";
-    try {
-      safeLocalStorage.setItem(
-        `selected-card-ids-${userKey}`,
-        JSON.stringify([])
-      );
-    } catch (e) {
-      console.error("Failed to clear persisted selected card IDs:", e);
-    }
+    const next = new Set<string>();
+    setSelectedCardIds(next);
+    persistSelectedCardIds(next);
     toast.info("已取消全選所有個股");
-  }, [user]);
+  }, [persistSelectedCardIds]);
 
   const fetchUploadedHtmlFiles = async (symbolFilter?: string) => {
     if (!user) return;
@@ -4148,6 +4253,9 @@ export default function Dashboard() {
   // Keyboard shortcuts handling
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // 若動態視覺圖示標籤看板 (DynamicVisualLinesModal) 已開啟，由其自身處理快捷鍵，避免 Dashboard 干擾
+      if (isVisualLinesBoardOpen) return;
+
       const activeEl = document.activeElement;
       const isInput =
         activeEl?.tagName === "INPUT" || activeEl?.tagName === "TEXTAREA" || activeEl?.getAttribute("contenteditable") === "true";
@@ -4323,7 +4431,7 @@ export default function Dashboard() {
         !e.ctrlKey &&
         !e.metaKey &&
         !e.shiftKey &&
-        (e.key === "Z" || e.key === "z")
+        (e.key === "Z" || e.key === "z" || e.code === "KeyZ" || e.key === "Ω" || e.keyCode === 90 || e.which === 90)
       ) {
         e.preventDefault();
         handleFlipAllCards();
@@ -4485,7 +4593,8 @@ export default function Dashboard() {
     handleViewTabChange,
     scrollToElement,
     isAiAnalysisOpen,
-    handleTabIndicatorClick
+    handleTabIndicatorClick,
+    isVisualLinesBoardOpen
   ]);
 
   useEffect(() => {
@@ -6466,7 +6575,7 @@ export default function Dashboard() {
                   </span>
                   <div className="grid grid-cols-2 gap-2">
                     {[
-                      { key: "Shift + B", desc: "回到交易總覽頁面" },
+                      { key: "Alt + Z / Shift + B", desc: "回到交易總覽頁面" },
                       { key: "Shift + I", desc: "匯入最新價格" },
                       { key: "快速連按 H H / Shift + H", desc: "預覽模式 / 全螢幕" },
                       { key: "Shift + F", desc: "搜尋股票" },
@@ -8169,7 +8278,41 @@ export default function Dashboard() {
                                               }}
                                               tabId={tab.id}
                                               annotations={tab.chartAnnotations || EMPTY_CHART_ANNOTATIONS}
-                                              onUpdateAnnotations={(annots) => updateTab(tab.id, { chartAnnotations: annots })}
+                                              onUpdateAnnotations={(annots) => {
+                                                updateTab(tab.id, { chartAnnotations: annots });
+                                                const sym = (tab.symbol || "").trim().toUpperCase();
+                                                if (sym) {
+                                                  const strat = activeTabStrategies[tab.id] || (tab as any).strategy;
+                                                  const avgCost = effectiveHoldingQuantity !== 0 && effectiveAveragePrice > 0 ? effectiveAveragePrice : undefined;
+                                                  const tabWithNewAnnots = { ...tab, chartAnnotations: annots };
+                                                  const targetY = calculateCanvasYFromDividers(tabWithNewAnnots, strat, avgCost, effectiveHoldingQuantity);
+                                                  if (targetY !== null) {
+                                                    const currentData = getVisualLinesDataSync(user?.uid);
+                                                    const prevPos = currentData.positions[sym];
+                                                    const nextPositions = {
+                                                      ...currentData.positions,
+                                                      [sym]: {
+                                                        ...prevPos,
+                                                        x: prevPos?.x ?? 50,
+                                                        y: targetY,
+                                                        shape: prevPos?.shape || "circle",
+                                                        sizeOffset: prevPos?.sizeOffset ?? currentData.tagSizeOffset,
+                                                        updatedAt: new Date().toISOString(),
+                                                      },
+                                                    };
+                                                    saveVisualLinesDataOptimistic(user?.uid, nextPositions, currentData.tagSizeOffset);
+                                                    window.dispatchEvent(
+                                                      new CustomEvent("visual_lines_positions_updated", {
+                                                        detail: {
+                                                          symbol: sym,
+                                                          position: nextPositions[sym],
+                                                          allPositions: nextPositions,
+                                                        },
+                                                      })
+                                                    );
+                                                  }
+                                                }
+                                              }}
                                               averageCost={effectiveHoldingQuantity !== 0 && effectiveAveragePrice > 0 ? effectiveAveragePrice : undefined}
                                               averageCostQuantity={effectiveHoldingQuantity !== 0 ? effectiveHoldingQuantity : undefined}
                                               averagingRows={tab.averagingRows}
@@ -10097,6 +10240,9 @@ export default function Dashboard() {
         }}
         allTabs={tabs}
         selectedCardIds={selectedCardIds}
+        onSelectAllCards={handleSelectAll}
+        onDeselectAllCards={handleDeselectAll}
+        onToggleCardSelected={handleToggleCardSelected}
         userId={user?.uid}
         initialTradeType={activeViewTab === "real" ? "real" : activeViewTab === "active" ? "active" : "all"}
         maxStrategyRiskPool60={maxStrategyRiskPool60}

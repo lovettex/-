@@ -452,6 +452,32 @@ export default function StockTabDetail() {
       const activeEl = document.activeElement;
       const isInput = activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA' || activeEl?.getAttribute('contenteditable') === 'true';
       
+      // 快捷鍵 Alt + Z (或 Shift + B) -> 回到交易總覽頁面
+      const isAltZ =
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        (e.key === 'z' || e.key === 'Z' || e.code === 'KeyZ' || e.key === 'Ω' || e.keyCode === 90 || e.which === 90);
+
+      const isShiftB =
+        e.shiftKey &&
+        (e.key === 'B' || e.key === 'b' || e.code === 'KeyB') &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey;
+
+      if (isAltZ || isShiftB) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        if (isInput) {
+          (activeEl as HTMLElement)?.blur?.();
+        }
+        navigate('/', { state: { autoFlipTabId: id, returnStockId: id } });
+        return;
+      }
+
       if (isInput) return;
 
       // Double-tap 'h' / 'H' -> 進入/切換預覽模式 / 全螢幕
@@ -484,12 +510,6 @@ export default function StockTabDetail() {
         }
       }
 
-      if (e.shiftKey && e.key.toUpperCase() === 'B' && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        e.preventDefault();
-        navigate('/', { state: { autoFlipTabId: id, returnStockId: id } });
-        return;
-      }
-
       if (e.shiftKey && e.key.toUpperCase() === 'H' && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         if (!document.fullscreenElement) {
@@ -508,8 +528,8 @@ export default function StockTabDetail() {
         return;
       }
     };
-    window.addEventListener('keydown', handleGlobalKeyDown);
-    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+    window.addEventListener('keydown', handleGlobalKeyDown, { capture: true });
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown, { capture: true });
   }, [navigate, id]);
 
   const stats = calculateStats(trades, tab?.currentPrice);
@@ -909,10 +929,23 @@ export default function StockTabDetail() {
     ? tab.currentPrice
     : (parseFloat(currentPriceInput) || 0);
 
-  // 可購買總數量 = 可使用資金 / 當前股價 (無條件捨去取整數股)
-  const calculatedPlannedQty = stockPrice > 0 && usableCapital > 0
-    ? Math.floor(usableCapital / stockPrice)
-    : (plannedPercent === 0 ? 0 : (tab?.plannedBuyQty || 0));
+  // 可購買總數量 = 可使用資金 / 當前股價 (無條件捨去取整數股，或自 tab.plannedBuyQty / averagingRowsSys2 / 持股推算)
+  let calculatedPlannedQty = 0;
+  if (stockPrice > 0 && usableCapital > 0) {
+    calculatedPlannedQty = Math.floor(usableCapital / stockPrice);
+  } else if (tab?.plannedBuyQty && Number(tab.plannedBuyQty) > 0) {
+    calculatedPlannedQty = Number(tab.plannedBuyQty);
+  } else if (averagingRowsSys2 && averagingRowsSys2.length > 0) {
+    const rowsSum = averagingRowsSys2.reduce((acc, r) => {
+      const q1 = r?.quantity ? parseFloat(r.quantity) : 0;
+      const q2 = r?.quantity2 ? parseFloat(r.quantity2) : 0;
+      return acc + q1 + q2;
+    }, 0);
+    if (rowsSum > 0) calculatedPlannedQty = rowsSum;
+  }
+  if (calculatedPlannedQty <= 0 && effectiveHoldingQty > 0) {
+    calculatedPlannedQty = Math.max(effectiveHoldingQty, Math.ceil(effectiveHoldingQty / 0.15));
+  }
 
   const plannedQty = calculatedPlannedQty;
 
@@ -936,6 +969,28 @@ export default function StockTabDetail() {
   const size4_a = Math.round(plannedQty * 0.10);
   const size4_b = Math.max(0, size4 - size4_a);
 
+  // 檢查來自 trades 中明確指定的批次已購數量
+  const tradeBatchSharesSys2 = [0, 0, 0, 0];
+  if (Array.isArray(trades)) {
+    trades.forEach((t) => {
+      if (t.type === 'BUY') {
+        const q = typeof t.quantity === 'number' ? t.quantity : parseFloat(String(t.quantity)) || 0;
+        if (q > 0) {
+          const b = (t.batch || '').replace(/\s+/g, '');
+          if (b.includes('第一批') || b.includes('第1批') || b.includes('#1') || b.includes('7%') || b.includes('8%')) {
+            tradeBatchSharesSys2[0] += q;
+          } else if (b.includes('第二批') || b.includes('第2批') || b.includes('#2') || b.includes('10%') || b.includes('25%')) {
+            tradeBatchSharesSys2[1] += q;
+          } else if (b.includes('第三批') || b.includes('第3批') || b.includes('#3') || b.includes('20%') || b.includes('35%')) {
+            tradeBatchSharesSys2[2] += q;
+          } else if (b.includes('第四批') || b.includes('第4批') || b.includes('#4')) {
+            tradeBatchSharesSys2[3] += q;
+          }
+        }
+      }
+    });
+  }
+
   // 檢查 averagingRowsSys2 是否有被勾選為已購入的批次
   const checkedRowsBoughtSys2 = averagingRowsSys2.reduce((sum, r, idx) => {
     if (!r?.bought) return sum;
@@ -949,47 +1004,55 @@ export default function StockTabDetail() {
 
   // 計算各批與拆分子批已購與餘額 (累進階梯計算)
   // 第一批拆分
-  const bought1_a = Math.min(totalBought, size1_a);
-  const remaining1_a = Math.max(0, size1_a - bought1_a);
+  const cascade1_a = Math.min(totalBought, size1_a);
   const remAfter1_a = Math.max(0, totalBought - size1_a);
-  const bought1_b = Math.min(remAfter1_a, size1_b);
-  const remaining1_b = Math.max(0, size1_b - bought1_b);
+  const cascade1_b = Math.min(remAfter1_a, size1_b);
   const isRow0Bought = Boolean(averagingRowsSys2?.[0]?.bought);
-  const bought1 = isRow0Bought ? size1 : (bought1_a + bought1_b);
+  const bought1 = Math.max(isRow0Bought ? size1 : (cascade1_a + cascade1_b), tradeBatchSharesSys2[0]);
   const remaining1 = Math.max(0, size1 - bought1);
+  const bought1_a = Math.max(cascade1_a, Math.min(bought1, size1_a));
+  const remaining1_a = Math.max(0, size1_a - bought1_a);
+  const bought1_b = Math.max(cascade1_b, Math.min(Math.max(0, bought1 - size1_a), size1_b));
+  const remaining1_b = Math.max(0, size1_b - bought1_b);
 
   // 第二批拆分
   const remAfter1 = Math.max(0, totalBought - size1);
-  const bought2_a = Math.min(remAfter1, size2_a);
-  const remaining2_a = Math.max(0, size2_a - bought2_a);
+  const cascade2_a = Math.min(remAfter1, size2_a);
   const remAfter2_a = Math.max(0, remAfter1 - size2_a);
-  const bought2_b = Math.min(remAfter2_a, size2_b);
-  const remaining2_b = Math.max(0, size2_b - bought2_b);
+  const cascade2_b = Math.min(remAfter2_a, size2_b);
   const isRow1Bought = Boolean(averagingRowsSys2?.[1]?.bought);
-  const bought2 = isRow1Bought ? size2 : (bought2_a + bought2_b);
+  const bought2 = Math.max(isRow1Bought ? size2 : (cascade2_a + cascade2_b), tradeBatchSharesSys2[1]);
   const remaining2 = Math.max(0, size2 - bought2);
+  const bought2_a = Math.max(cascade2_a, Math.min(bought2, size2_a));
+  const remaining2_a = Math.max(0, size2_a - bought2_a);
+  const bought2_b = Math.max(cascade2_b, Math.min(Math.max(0, bought2 - size2_a), size2_b));
+  const remaining2_b = Math.max(0, size2_b - bought2_b);
 
   // 第三批拆分
   const remAfter2 = Math.max(0, totalBought - size1 - size2);
-  const bought3_a = Math.min(remAfter2, size3_a);
-  const remaining3_a = Math.max(0, size3_a - bought3_a);
+  const cascade3_a = Math.min(remAfter2, size3_a);
   const remAfter3_a = Math.max(0, remAfter2 - size3_a);
-  const bought3_b = Math.min(remAfter3_a, size3_b);
-  const remaining3_b = Math.max(0, size3_b - bought3_b);
+  const cascade3_b = Math.min(remAfter3_a, size3_b);
   const isRow2Bought = Boolean(averagingRowsSys2?.[2]?.bought);
-  const bought3 = isRow2Bought ? size3 : (bought3_a + bought3_b);
+  const bought3 = Math.max(isRow2Bought ? size3 : (cascade3_a + cascade3_b), tradeBatchSharesSys2[2]);
   const remaining3 = Math.max(0, size3 - bought3);
+  const bought3_a = Math.max(cascade3_a, Math.min(bought3, size3_a));
+  const remaining3_a = Math.max(0, size3_a - bought3_a);
+  const bought3_b = Math.max(cascade3_b, Math.min(Math.max(0, bought3 - size3_a), size3_b));
+  const remaining3_b = Math.max(0, size3_b - bought3_b);
 
   // 第四批拆分
   const remAfter3 = Math.max(0, totalBought - size1 - size2 - size3);
-  const bought4_a = Math.min(remAfter3, size4_a);
-  const remaining4_a = Math.max(0, size4_a - bought4_a);
+  const cascade4_a = Math.min(remAfter3, size4_a);
   const remAfter4_a = Math.max(0, remAfter3 - size4_a);
-  const bought4_b = Math.min(remAfter4_a, size4_b);
-  const remaining4_b = Math.max(0, size4_b - bought4_b);
+  const cascade4_b = Math.min(remAfter4_a, size4_b);
   const isRow3Bought = Boolean(averagingRowsSys2?.[3]?.bought);
-  const bought4 = isRow3Bought ? size4 : (bought4_a + bought4_b);
+  const bought4 = Math.max(isRow3Bought ? size4 : (cascade4_a + cascade4_b), tradeBatchSharesSys2[3]);
   const remaining4 = Math.max(0, size4 - bought4);
+  const bought4_a = Math.max(cascade4_a, Math.min(bought4, size4_a));
+  const remaining4_a = Math.max(0, size4_a - bought4_a);
+  const bought4_b = Math.max(cascade4_b, Math.min(Math.max(0, bought4 - size4_a), size4_b));
+  const remaining4_b = Math.max(0, size4_b - bought4_b);
 
   const remainingToBuy = Math.max(0, plannedQty - totalBought);
 
@@ -1065,7 +1128,7 @@ export default function StockTabDetail() {
         percent: "7%",
       },
       split2: {
-        name: "第一批交易(8%)",
+        name: "第一批拆分交易(8%)",
         shortLabel: "拆分 8%",
         size: size1_b,
         bought: bought1_b,
@@ -1126,7 +1189,7 @@ export default function StockTabDetail() {
       bought: bought4,
       remaining: remaining4,
       split1: {
-        name: "第四批拆分交易 (10%)",
+        name: "第四批拆分交易(10%)",
         shortLabel: "拆分 10%",
         size: size4_a,
         bought: bought4_a,
@@ -1134,7 +1197,7 @@ export default function StockTabDetail() {
         percent: "10%",
       },
       split2: {
-        name: "第四批拆分交易 (15%)",
+        name: "第四批拆分交易(15%)",
         shortLabel: "拆分 15%",
         size: size4_b,
         bought: bought4_b,
@@ -1639,10 +1702,12 @@ export default function StockTabDetail() {
       <div className="h-[36px] flex items-center gap-2 bg-transparent select-none">
         <button
           onClick={() => navigate('/', { state: { autoFlipTabId: id, returnStockId: id } })}
+          title="回到交易總覽 (Alt + Z)"
           className="flex items-center gap-1 text-[12px] font-bold transition-all hover:opacity-85 text-zinc-600 hover:text-zinc-900 cursor-pointer"
         >
           <ChevronLeft className="w-3.5 h-3.5" />
           <span>交易總覽</span>
+          <span className="text-[10px] text-zinc-400 font-mono font-normal ml-0.5">(Alt+Z)</span>
         </button>
         <span className="text-[12px] text-zinc-300">/</span>
         <span className="text-[12px] font-bold text-zinc-800">{tab.symbol}</span>

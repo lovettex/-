@@ -20,7 +20,9 @@ import {
   History,
   Sparkles,
   Layers,
+  Split,
 } from 'lucide-react';
+import { calculateBatchPlanning } from '../lib/calculations';
 
 // Register Chart.js components
 ChartJS.register(
@@ -34,11 +36,12 @@ ChartJS.register(
 
 export interface VisualPriceLevel {
   id: string;
-  type: 'support' | 'stopLoss' | 'resistance' | 'takeProfit';
-  label: string; // e.g. "支撐" | "止損" | "壓力" | "止盈"
+  type: 'support' | 'stopLoss' | 'resistance' | 'takeProfit' | 'divider';
+  label: string; // e.g. "支撐" | "止損" | "壓力" | "止盈" | "卡片分隔線"
   price: number;
-  color: string; // #facc15, #ef4444, #f87171, #10b981
+  color: string; // #facc15, #ef4444, #f87171, #10b981, #6366f1
   note?: string;
+  isCardDivider?: boolean;
 }
 
 export interface BatchInfo {
@@ -90,6 +93,17 @@ interface System2PlanningChartProps {
   companyName?: string;
   isExpanded?: boolean;
   onToggleExpand?: () => void;
+  showCardDividers?: boolean;
+  onToggleCardDividers?: () => void;
+  selectedLevelTypes?: {
+    support: boolean;
+    stopLoss: boolean;
+    resistance: boolean;
+    takeProfit: boolean;
+  };
+  onToggleLevelType?: (type: 'support' | 'stopLoss' | 'resistance' | 'takeProfit') => void;
+  onSelectAllLevelTypes?: () => void;
+  onDeselectAllLevelTypes?: () => void;
   onBatchClick?: (
     batchIndex: number,
     batchName: string,
@@ -115,6 +129,12 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
   companyName,
   isExpanded: propIsExpanded,
   onToggleExpand,
+  showCardDividers: propShowCardDividers,
+  onToggleCardDividers,
+  selectedLevelTypes: propSelectedLevelTypes,
+  onToggleLevelType,
+  onSelectAllLevelTypes,
+  onDeselectAllLevelTypes,
   onBatchClick,
 }) => {
   const [internalExpanded, setInternalExpanded] = useState<boolean>(true);
@@ -129,10 +149,19 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
 
   const [showTrades, setShowTrades] = useState<boolean>(true);
   const [showAvgCost, setShowAvgCost] = useState<boolean>(true);
+  const [showCardDividersLocal, setShowCardDividersLocal] = useState<boolean>(false);
+  const showCardDividers = propShowCardDividers !== undefined ? propShowCardDividers : showCardDividersLocal;
+  const handleToggleCardDividers = () => {
+    if (onToggleCardDividers) {
+      onToggleCardDividers();
+    } else {
+      setShowCardDividersLocal((prev) => !prev);
+    }
+  };
 
   // 關鍵防線四種類別獨立複選狀態 (支撐、止損、壓力、止盈)
   // 預設只顯示「支撐」，止損、壓力、止盈預設為 false，可由用戶點擊選單隨時複選啟用
-  const [selectedLevelTypes, setSelectedLevelTypes] = useState<{
+  const [selectedLevelTypesLocal, setSelectedLevelTypesLocal] = useState<{
     support: boolean;
     stopLoss: boolean;
     resistance: boolean;
@@ -143,8 +172,68 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
     resistance: false,
     takeProfit: false,
   });
+  const selectedLevelTypes = propSelectedLevelTypes !== undefined ? propSelectedLevelTypes : selectedLevelTypesLocal;
+
   const [isLevelsDropdownOpen, setIsLevelsDropdownOpen] = useState<boolean>(false);
   const levelsDropdownRef = useRef<HTMLDivElement>(null);
+
+  // 快捷鍵 Alt + D (卡片分隔線), Alt + R (支撐), Alt + P (壓力) 獨立監聽 (若非外部完全控制)
+  useEffect(() => {
+    if (propSelectedLevelTypes !== undefined && propShowCardDividers !== undefined) {
+      return;
+    }
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const isInput =
+        activeEl?.tagName === 'INPUT' ||
+        activeEl?.tagName === 'TEXTAREA' ||
+        activeEl?.getAttribute('contenteditable') === 'true';
+      if (isInput) return;
+
+      if (
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        (e.key === 'D' || e.key === 'd' || e.code === 'KeyD')
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        handleToggleCardDividers();
+        return;
+      }
+
+      if (
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        (e.key === 'R' || e.key === 'r' || e.code === 'KeyR')
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleLevelType('support');
+        return;
+      }
+
+      if (
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        (e.key === 'P' || e.key === 'p' || e.code === 'KeyP')
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleLevelType('resistance');
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [propSelectedLevelTypes, propShowCardDividers]);
 
   // 點擊下拉選單外部自動收合
   useEffect(() => {
@@ -168,6 +257,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
     type: 'step' | 'trade' | 'visualLevel' | 'avgCost' | 'currentPrice';
     data: any;
   } | null>(null);
+  const [showAllSplits, setShowAllSplits] = useState<boolean>(false);
 
   // Normalize numeric values safely
   const currentPriceNum = useMemo(() => {
@@ -189,32 +279,58 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
     []
   );
 
-  // 計算有效持有股數 (優先取 holdingQty，次取 trades 計算之淨買入股數，再取 batch 中的已購買總和)
+  // 計算有效持有股數 (優先取 holdingQty，次取 trades 計算之淨買入股數，再取 batch 中的已購買總和，與 averagingRowsSys2 已購合計)
   const effectiveHoldingShares = useMemo(() => {
-    if (typeof holdingQty === 'number' && holdingQty > 0) {
-      return holdingQty;
-    }
+    const numHolding = typeof holdingQty === 'number' ? holdingQty : parseFloat(String(holdingQty)) || 0;
     const netTradeShares = (trades || []).reduce((sum, t) => {
       const q = typeof t.quantity === 'number' ? t.quantity : parseFloat(String(t.quantity)) || 0;
       if (t.type === 'BUY') return sum + q;
       if (t.type === 'SELL') return sum - q;
       return sum;
     }, 0);
-    if (netTradeShares > 0) {
-      return netTradeShares;
-    }
     const propBatchesBought = (batches || []).reduce((acc, b) => acc + (b?.bought || 0), 0);
-    return Math.max(0, propBatchesBought);
-  }, [holdingQty, trades, batches]);
+    const checkedRowsBought = (averagingRowsSys2 || []).reduce((sum, r) => {
+      if (!r?.bought) return sum;
+      const q1 = r?.quantity ? parseFloat(r.quantity) : 0;
+      const q2 = r?.quantity2 ? parseFloat(r.quantity2) : 0;
+      return sum + (q1 + q2 > 0 ? q1 + q2 : 0);
+    }, 0);
+    return Math.max(0, numHolding, netTradeShares, propBatchesBought, checkedRowsBought);
+  }, [holdingQty, trades, batches, averagingRowsSys2]);
 
   // Compute calculated values for each pyramid step
   const stepItems = useMemo(() => {
     const baseRef = currentPrice > 0 ? currentPrice : (holdingAvgPrice > 0 ? holdingAvgPrice : 100);
 
-    // 第一階段：計算各批預定股數 targetQty
-    const rawSteps = stepConfigs.map((cfg) => {
+    // 若尚未提供 plannedQty，但已有持股或 averagingRowsSys2，智慧推算預估目標總股數
+    let effPlannedQty = plannedQty && plannedQty > 0 ? plannedQty : 0;
+    if (effPlannedQty <= 0 && averagingRowsSys2 && averagingRowsSys2.length > 0) {
+      const sumRows = averagingRowsSys2.reduce((acc, r) => {
+        const q1 = r?.quantity ? parseFloat(r.quantity) : 0;
+        const q2 = r?.quantity2 ? parseFloat(r.quantity2) : 0;
+        return acc + q1 + q2;
+      }, 0);
+      if (sumRows > 0) effPlannedQty = sumRows;
+    }
+    if (effPlannedQty <= 0 && effectiveHoldingShares > 0) {
+      effPlannedQty = Math.max(effectiveHoldingShares, Math.ceil(effectiveHoldingShares / 0.15));
+    }
+
+    // 使用集中化 calculations 模組計算四批次規劃與已購數量，確保各元件數值完全一致
+    const planResult = calculateBatchPlanning({
+      plannedQty: effPlannedQty,
+      usableCapital,
+      currentPrice: currentPriceNum,
+      holdingQty: effectiveHoldingShares,
+      trades,
+      averagingRowsSys2,
+      plannedBuyQty: effPlannedQty,
+    });
+
+    return stepConfigs.map((cfg) => {
       const row = averagingRowsSys2?.[cfg.index];
       const batch = batches?.[cfg.index];
+      const planBatch = planResult.batches[cfg.index];
 
       // Step price: user manual input or formula from current price
       const manualPrice = row?.price ? parseFloat(row.price) : 0;
@@ -222,43 +338,31 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
         ? manualPrice
         : Math.round(baseRef * (1 - cfg.dropPct / 100) * 100) / 100;
 
-      // Planned quantity
-      const q1 = row?.quantity ? parseFloat(row.quantity) : (batch?.split1?.size || 0);
-      const q2 = row?.quantity2 ? parseFloat(row.quantity2) : (batch?.split2?.size || 0);
-      let targetQty = q1 + q2 > 0 ? q1 + q2 : (batch?.size || 0);
-      if (targetQty <= 0 && plannedQty > 0) {
-        targetQty = Math.ceil(plannedQty * (cfg.percent / 100));
-      }
+      // 優先採用 batch props，若未設定則以集中計算結果為基準
+      const s1Size = (batch?.split1?.size && batch.split1.size > 0)
+        ? batch.split1.size
+        : planBatch.split1.size;
+      const s2Size = (batch?.split2?.size && batch.split2.size > 0)
+        ? batch.split2.size
+        : planBatch.split2.size;
+      const targetQty = (batch?.size && batch.size > 0)
+        ? batch.size
+        : (s1Size + s2Size > 0 ? s1Size + s2Size : planBatch.size);
 
-      return {
-        cfg,
-        row,
-        batch,
-        stepPrice,
-        targetQty,
-      };
-    });
+      const s1Bought = (batch?.split1?.bought !== undefined && batch.split1.bought > 0)
+        ? Math.max(batch.split1.bought, planBatch.split1.bought)
+        : planBatch.split1.bought;
+      const s2Bought = (batch?.split2?.bought !== undefined && batch.split2.bought > 0)
+        ? Math.max(batch.split2.bought, planBatch.split2.bought)
+        : planBatch.split2.bought;
 
-    // 第二階段：依階梯向下遞進分配已購買股數 (支援 holdingQty 級聯分配、batch.bought 與 row.bought 勾選)
-    let remainingHolding = effectiveHoldingShares;
+      const boughtQty = (batch?.bought !== undefined && batch.bought > 0)
+        ? Math.max(batch.bought, s1Bought + s2Bought, planBatch.bought)
+        : Math.max(s1Bought + s2Bought, planBatch.bought);
 
-    return rawSteps.map(({ cfg, row, batch, stepPrice, targetQty }) => {
-      // 1. 級聯持有股數填補
-      const cascadeBought = Math.min(remainingHolding, targetQty);
-      remainingHolding = Math.max(0, remainingHolding - cascadeBought);
-
-      // 2. 來自 batch prop 的已購股數
-      const batchBought = typeof batch?.bought === 'number' ? batch.bought : 0;
-
-      // 3. 來自 averagingRowsSys2 勾選標記為「已購入」
-      const rowBought = row?.bought ? targetQty : 0;
-
-      // 取各來源的最大值，確保只要任何一個管道有已購紀錄，圖表就能精準顯示
-      const boughtQty = Math.max(cascadeBought, batchBought, rowBought);
-
-      const remainingQty = batch?.remaining !== undefined
-        ? Math.min(batch.remaining, Math.max(0, targetQty - boughtQty))
-        : Math.max(0, targetQty - boughtQty);
+      const remainingQty = Math.max(0, targetQty - boughtQty);
+      const s1Remaining = Math.max(0, s1Size - s1Bought);
+      const s2Remaining = Math.max(0, s2Size - s2Bought);
 
       const isReached =
         (currentPrice > 0 && currentPrice <= stepPrice) ||
@@ -266,7 +370,25 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
         boughtQty > 0 ||
         Boolean(row?.bought);
 
-      const stepCost = stepPrice * targetQty;
+      const stepCost = stepPrice * (targetQty > 0 ? targetQty : boughtQty);
+
+      const split1 = {
+        name: batch?.split1?.name || planBatch.split1.name,
+        shortLabel: batch?.split1?.shortLabel || planBatch.split1.shortLabel,
+        percent: planBatch.split1.percent,
+        size: s1Size,
+        bought: s1Bought,
+        remaining: s1Remaining,
+      };
+
+      const split2 = {
+        name: batch?.split2?.name || planBatch.split2.name,
+        shortLabel: batch?.split2?.shortLabel || planBatch.split2.shortLabel,
+        percent: planBatch.split2.percent,
+        size: s2Size,
+        bought: s2Bought,
+        remaining: s2Remaining,
+      };
 
       return {
         ...cfg,
@@ -276,11 +398,11 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
         remaining: remainingQty,
         isReached,
         stepCost,
-        split1: batch?.split1,
-        split2: batch?.split2,
+        split1,
+        split2,
       };
     });
-  }, [stepConfigs, averagingRowsSys2, batches, currentPrice, holdingAvgPrice, plannedQty, effectiveHoldingShares]);
+  }, [stepConfigs, averagingRowsSys2, batches, currentPrice, holdingAvgPrice, plannedQty, effectiveHoldingShares, trades]);
 
   // Filter & sort past trades (valid prices and positive quantities)
   const validTrades = useMemo(() => {
@@ -369,10 +491,10 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
   // 關鍵防線四種型別設定 (支撐、止損、壓力、止盈)
   const LEVEL_TYPE_CONFIGS = useMemo(
     () => [
-      { type: 'support' as const, label: '支撐', color: '#d97706', textColor: 'text-amber-700' },
-      { type: 'stopLoss' as const, label: '止損', color: '#dc2626', textColor: 'text-red-700' },
-      { type: 'resistance' as const, label: '壓力', color: '#e11d48', textColor: 'text-rose-700' },
-      { type: 'takeProfit' as const, label: '止盈', color: '#059669', textColor: 'text-emerald-700' },
+      { type: 'support' as const, label: '支撐', shortcut: 'Alt+R', color: '#d97706', textColor: 'text-amber-700' },
+      { type: 'stopLoss' as const, label: '止損', shortcut: '', color: '#dc2626', textColor: 'text-red-700' },
+      { type: 'resistance' as const, label: '壓力', shortcut: 'Alt+P', color: '#e11d48', textColor: 'text-rose-700' },
+      { type: 'takeProfit' as const, label: '止盈', shortcut: '', color: '#059669', textColor: 'text-emerald-700' },
     ],
     []
   );
@@ -393,10 +515,20 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
     return counts;
   }, [effectiveVisualLevels]);
 
-  // 實際依據下拉複選狀態過濾後欲呈現的關鍵防線
+  // 數據圖示化卡片的分隔線 (同步顯示)
+  const cardDividers = useMemo<VisualPriceLevel[]>(() => {
+    return effectiveVisualLevels.filter((lvl) => lvl.type === 'divider' || lvl.isCardDivider);
+  }, [effectiveVisualLevels]);
+
+  // 實際依據下拉複選狀態與卡片分隔線開關過濾後欲呈現的關鍵防線
   const displayedVisualLevels = useMemo(() => {
-    return effectiveVisualLevels.filter((lvl) => selectedLevelTypes[lvl.type]);
-  }, [effectiveVisualLevels, selectedLevelTypes]);
+    return effectiveVisualLevels.filter((lvl) => {
+      if (lvl.type === 'divider' || lvl.isCardDivider) {
+        return showCardDividers;
+      }
+      return selectedLevelTypes[lvl.type as keyof typeof selectedLevelTypes];
+    });
+  }, [effectiveVisualLevels, selectedLevelTypes, showCardDividers]);
 
   const activeTypesCount = useMemo(() => {
     return Object.values(selectedLevelTypes).filter(Boolean).length;
@@ -422,28 +554,40 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
   }, [selectedLevelTypes, displayedVisualLevels.length, LEVEL_TYPE_CONFIGS]);
 
   const toggleLevelType = (type: 'support' | 'stopLoss' | 'resistance' | 'takeProfit') => {
-    setSelectedLevelTypes((prev) => ({
-      ...prev,
-      [type]: !prev[type],
-    }));
+    if (onToggleLevelType) {
+      onToggleLevelType(type);
+    } else {
+      setSelectedLevelTypesLocal((prev) => ({
+        ...prev,
+        [type]: !prev[type],
+      }));
+    }
   };
 
   const selectAllLevelTypes = () => {
-    setSelectedLevelTypes({
-      support: true,
-      stopLoss: true,
-      resistance: true,
-      takeProfit: true,
-    });
+    if (onSelectAllLevelTypes) {
+      onSelectAllLevelTypes();
+    } else {
+      setSelectedLevelTypesLocal({
+        support: true,
+        stopLoss: true,
+        resistance: true,
+        takeProfit: true,
+      });
+    }
   };
 
   const deselectAllLevelTypes = () => {
-    setSelectedLevelTypes({
-      support: false,
-      stopLoss: false,
-      resistance: false,
-      takeProfit: false,
-    });
+    if (onDeselectAllLevelTypes) {
+      onDeselectAllLevelTypes();
+    } else {
+      setSelectedLevelTypesLocal({
+        support: false,
+        stopLoss: false,
+        resistance: false,
+        takeProfit: false,
+      });
+    }
   };
 
   // Compute X-axis boundaries (including currentPrice, holdingAvgPrice, step prices, trade prices, and displayed visual levels)
@@ -487,6 +631,8 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
     stepItems.forEach((s) => {
       const val = yAxisMode === 'shares' ? s.size : s.percent;
       if (val > maxVal) maxVal = val;
+      const bVal = yAxisMode === 'shares' ? s.bought : (s.size > 0 ? (s.bought / s.size) * s.percent : 0);
+      if (bVal > maxVal) maxVal = bVal;
     });
     if (showTrades && yAxisMode === 'shares') {
       validTrades.forEach((t) => {
@@ -498,7 +644,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
 
   // Datasets for Chart.js
   const chartData: ChartData<'line'> = useMemo(() => {
-    // 1. Pyramid steps dataset (connected points)
+    // 1. Pyramid steps planned dataset (connected points at target size)
     const stepPoints = sortedStepItems.map((s) => ({
       x: s.price,
       y: yAxisMode === 'shares' ? s.size : s.percent,
@@ -508,23 +654,34 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
     const datasets: any[] = [
       {
         type: 'line' as const,
-        label: '分批進場金字塔',
+        label: `各批次攤平曲線 (預購目標: ${totalPlannedShares} 股)`,
         data: stepPoints,
         showLine: true,
-        borderColor: '#cbd5e1', // slate-300
-        borderWidth: 2,
-        borderDash: [4, 4],
-        tension: 0.1,
-        pointRadius: 7,
-        pointHoverRadius: 11,
-        pointBackgroundColor: sortedStepItems.map((s) => (s.isReached ? '#10b981' : '#ffffff')),
-        pointBorderColor: sortedStepItems.map((s) => (s.isReached ? '#059669' : '#94a3b8')),
+        borderColor: '#94a3b8', // slate-400
+        borderWidth: 2.2,
+        borderDash: [5, 4],
+        tension: 0.12,
+        pointRadius: 8,
+        pointHoverRadius: 12,
+        pointHitRadius: 25,
+        pointBackgroundColor: sortedStepItems.map((s) =>
+          s.bought >= s.size && s.size > 0
+            ? '#059669' // dark green fully bought
+            : s.bought > 0
+            ? '#10b981' // emerald green partially bought
+            : s.isReached
+            ? '#34d399' // mint green price reached
+            : '#ffffff'
+        ),
+        pointBorderColor: sortedStepItems.map((s) =>
+          s.bought > 0 ? '#047857' : s.isReached ? '#059669' : '#64748b'
+        ),
         pointBorderWidth: 2.5,
-        order: 2,
+        order: 1,
       },
     ];
 
-    // 2. Past BUY trades
+    // 3. Past BUY trades
     if (showTrades && buyTrades.length > 0) {
       datasets.push({
         type: 'line' as const,
@@ -541,11 +698,11 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
         pointBackgroundColor: '#3b82f6', // blue-500
         pointBorderColor: '#ffffff',
         pointBorderWidth: 2,
-        order: 1,
+        order: 0,
       });
     }
 
-    // 3. Past SELL trades (if any)
+    // 4. Past SELL trades (if any)
     if (showTrades && sellTrades.length > 0) {
       datasets.push({
         type: 'line' as const,
@@ -562,14 +719,14 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
         pointBackgroundColor: '#f97316', // orange-500
         pointBorderColor: '#ffffff',
         pointBorderWidth: 2,
-        order: 1,
+        order: 0,
       });
     }
 
     return {
       datasets,
     };
-  }, [sortedStepItems, yAxisMode, showTrades, buyTrades, sellTrades, displayedVisualLevels]);
+  }, [sortedStepItems, yAxisMode, showTrades, buyTrades, sellTrades, displayedVisualLevels, totalPlannedShares, totalBoughtShares]);
 
   const chartRef = useRef<any>(null);
   const renderedLinesRef = useRef<{ id: string; type: string; renderX: number; data: any }[]>([]);
@@ -735,6 +892,10 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
                 priority = 4;
                 // 止盈：市價漲至或達到止盈目標價視為觸發
                 isTriggered = currentPriceNum > 0 && currentPriceNum >= price;
+              } else if (lvl.type === 'divider' || lvl.isCardDivider) {
+                textColor = lvl.color || '#4f46e5'; // indigo-600
+                priority = 0;
+                isTriggered = currentPriceNum > 0 && Math.abs(currentPriceNum - price) / price < 0.01;
               }
 
               lineConfigs.push({
@@ -871,17 +1032,25 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
           const lowestTagY = lowestYByX.get(item.renderX) ?? (chartArea.top - 8);
           const lineTopY = Math.min(chartArea.top, lowestTagY + 7);
 
-          // 平均成本虛線加粗 0.6px (3.0px -> 3.6px)，現價虛線加粗 1px (3.0px)，防線保持 2.0px
+          // 平均成本虛線加粗 0.6px (3.0px -> 3.6px)，現價虛線加粗 1px (3.0px)，卡片分隔線改為實體線並加粗 1.5px (2.0px -> 3.5px)，防線保持 2.0px
           let lineWidth = 2.0;
+          let isSolidLine = false;
           if (item.type === 'avgCost') {
             lineWidth = 3.6; // 平均成本虛線加粗 0.6px
           } else if (item.type === 'currentPrice') {
             lineWidth = 3.0; // 現價加粗 1px
+          } else if (item.type === 'divider' || item.rawItem?.isCardDivider) {
+            lineWidth = 3.5; // 卡片分隔線加粗 1.5px
+            isSolidLine = true; // 改為實體線
           }
 
           ctx.save();
           ctx.beginPath();
-          ctx.setLineDash([5, 4]);
+          if (isSolidLine) {
+            ctx.setLineDash([]); // 卡片分隔線：實體線
+          } else {
+            ctx.setLineDash([5, 4]); // 其他輔助線：虛線
+          }
           ctx.strokeStyle = item.lineColor;
           ctx.lineWidth = lineWidth;
           ctx.moveTo(item.renderX, lineTopY);
@@ -942,7 +1111,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
             // Subtle vertical drop line to bottom
             ctx.save();
             ctx.setLineDash([2, 3]);
-            ctx.strokeStyle = step.isReached ? 'rgba(16, 185, 129, 0.35)' : 'rgba(148, 163, 184, 0.35)';
+            ctx.strokeStyle = step.bought > 0 ? 'rgba(16, 185, 129, 0.45)' : (step.isReached ? 'rgba(16, 185, 129, 0.35)' : 'rgba(148, 163, 184, 0.35)');
             ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.moveTo(px, py + 8);
@@ -952,8 +1121,9 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
 
             // Text Line 1: "$80.93 -3% (15%)"
             const line1 = `$${step.price.toFixed(2)}  -${step.dropPct}% (${step.percent}%)`;
-            // Text Line 2: "已購買 X / 預購入 Y 股"
-            const line2 = `已購買: ${step.bought} / 預購入: ${step.size} 股`;
+            // Text Line 2: "已購買 X / 預購 Y 股 (進度%)"
+            const pctText = step.size > 0 ? ` (${Math.round((step.bought / step.size) * 100)}%)` : '';
+            const line2 = `已購買: ${step.bought} / 預購: ${step.size} 股${pctText}`;
 
             ctx.save();
             ctx.textAlign = 'center';
@@ -965,7 +1135,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
             ctx.lineWidth = 3.5;
             ctx.lineJoin = 'round';
             ctx.strokeText(line2, px, py - 6);
-            ctx.fillStyle = step.isReached ? '#059669' : '#475569';
+            ctx.fillStyle = step.bought > 0 ? '#047857' : (step.isReached ? '#059669' : '#475569');
             ctx.fillText(line2, px, py - 6);
 
             // Line 1 (top line)
@@ -1050,21 +1220,29 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
           const datasetIndex = el.datasetIndex;
           const dataIndex = el.index;
 
-          if (datasetIndex === 0) {
+          const targetDataset = chart?.data?.datasets?.[datasetIndex];
+
+          if (targetDataset?.label?.includes('各批次攤平曲線') || datasetIndex === 0) {
             // Pyramid step
             const item = sortedStepItems[dataIndex];
-            setHoveredItem({ type: 'step', data: item });
-            return;
-          } else if (datasetIndex === 1 && buyTrades.length > 0) {
+            if (item) {
+              setHoveredItem({ type: 'step', data: item });
+              return;
+            }
+          } else if (targetDataset?.label?.includes('買入')) {
             // Buy trade
             const item = buyTrades[dataIndex];
-            setHoveredItem({ type: 'trade', data: item });
-            return;
-          } else if (datasetIndex === 2 && sellTrades.length > 0) {
+            if (item) {
+              setHoveredItem({ type: 'trade', data: item });
+              return;
+            }
+          } else if (targetDataset?.label?.includes('賣出')) {
             // Sell trade
             const item = sellTrades[dataIndex];
-            setHoveredItem({ type: 'trade', data: item });
-            return;
+            if (item) {
+              setHoveredItem({ type: 'trade', data: item });
+              return;
+            }
           }
         }
 
@@ -1157,21 +1335,22 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
 
         setHoveredItem(null);
       },
-      onClick: (_event, elements) => {
+      onClick: (_event, elements, chart) => {
         if (elements && elements.length > 0) {
           const el = elements[0];
           const datasetIndex = el.datasetIndex;
           const dataIndex = el.index;
+          const targetDataset = chart?.data?.datasets?.[datasetIndex];
 
-          if (datasetIndex === 0) {
+          if (targetDataset?.label?.includes('各批次攤平曲線') || datasetIndex === 0) {
             const item = sortedStepItems[dataIndex];
-            setSelectedItem({ type: 'step', data: item });
-          } else if (datasetIndex === 1 && buyTrades.length > 0) {
+            if (item) setSelectedItem({ type: 'step', data: item });
+          } else if (targetDataset?.label?.includes('買入')) {
             const item = buyTrades[dataIndex];
-            setSelectedItem({ type: 'trade', data: item });
-          } else if (datasetIndex === 2 && sellTrades.length > 0) {
+            if (item) setSelectedItem({ type: 'trade', data: item });
+          } else if (targetDataset?.label?.includes('賣出')) {
             const item = sellTrades[dataIndex];
-            setSelectedItem({ type: 'trade', data: item });
+            if (item) setSelectedItem({ type: 'trade', data: item });
           }
         }
       },
@@ -1452,6 +1631,11 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
                                   style={{ borderColor: cfg.color }}
                                 />
                                 <span className={`text-xs font-black ${cfg.textColor}`}>{cfg.label}</span>
+                                {cfg.shortcut && (
+                                  <span className="text-[10px] text-zinc-400 font-mono font-normal">
+                                    ({cfg.shortcut})
+                                  </span>
+                                )}
                               </div>
                             </div>
                             <span className="text-[11px] font-bold text-emerald-950 bg-white border border-emerald-200 px-2 py-0.5 rounded-md shadow-2xs">
@@ -1464,6 +1648,25 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
                   </div>
                 )}
               </div>
+
+              {/* Toggle Card Dividers Button (同步卡片分隔線 - 預設不顯示，手動開啟 / 快捷鍵 Alt + D) */}
+              <button
+                type="button"
+                onClick={handleToggleCardDividers}
+                className={`inline-flex items-center gap-1.5 rounded-lg font-bold transition-all cursor-pointer border ${
+                  compact ? "px-2 sm:px-2.5 py-1 text-[11px]" : "px-3 py-1.5 rounded-xl text-xs"
+                } ${
+                  showCardDividers
+                    ? 'bg-indigo-50 border-indigo-300 text-indigo-950 shadow-2xs ring-1 ring-indigo-200'
+                    : 'bg-emerald-50/60 border-emerald-200 text-emerald-950 hover:text-emerald-700'
+                }`}
+                title="同步顯示數據圖示化卡片上的分隔線 (實體線，快捷鍵 Alt + D)"
+              >
+                <Split className={`${compact ? "w-3 h-3" : "w-3.5 h-3.5"} text-indigo-700 shrink-0`} />
+                <span>卡片分隔線{cardDividers.length > 0 ? ` (${cardDividers.length} 條)` : ''}</span>
+                <span className="hidden sm:inline text-[10px] text-zinc-400 font-mono font-normal">(Alt+D)</span>
+                <span className={`${compact ? "w-1.5 h-1.5" : "w-2 h-2"} rounded-full ${showCardDividers ? 'bg-indigo-600' : 'bg-zinc-300'}`} />
+              </button>
 
               {/* 若為全選防線狀態，顯示間距已優化徽章 */}
               {isAllLevelsSelected && (
@@ -1676,7 +1879,6 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
                   </div>
                 </div>
               ) : (
-                /* Visual Level Hover HUD */
                 <div className="flex flex-wrap items-center justify-between w-full gap-2">
                   <div className="flex items-center gap-2">
                     <span
@@ -1768,7 +1970,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
             />
           </div>
 
-          {/* 4. 底部說明註解 (高對比無灰色：已到達／已買入、尚未觸發、歷史交易紀錄) */}
+          {/* 4. 底部說明註解 (只顯示上面的攤平曲線、綠點、圓點、交易紀錄與明細快捷入口) */}
           <div
             className={`flex flex-wrap items-center justify-center sm:justify-start border-t border-emerald-100 ${
               compact
@@ -1776,25 +1978,45 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
                 : "gap-x-6 gap-y-2 text-xs pt-2 font-bold text-emerald-950"
             }`}
           >
-            {/* 已到達／已買入 */}
-            <div className="flex items-center gap-1.5 font-bold">
+            {/* 攤平曲線 */}
+            <div className="flex items-center gap-1.5 font-bold text-slate-700">
+              <span className="w-4 h-0.5 border-b-2 border-dashed border-slate-400 shrink-0" />
+              <span>各批次攤平曲線（預定目標階梯）</span>
+            </div>
+
+            {/* 已購買／已到達 */}
+            <div className="flex items-center gap-1.5 font-bold text-emerald-800">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 border border-emerald-600 shrink-0" />
-              <span>已到達／已買入（虛線底部綠點：已觸發）</span>
+              <span>已購買／已到達價位（綠點）</span>
             </div>
 
             {/* 尚未觸發 */}
-            <div className="flex items-center gap-1.5 font-bold">
-              <span className="w-2.5 h-2.5 rounded-full border-2 border-amber-600 bg-white shrink-0" />
-              <span>尚未觸發（虛線底部圓點：未觸發）</span>
+            <div className="flex items-center gap-1.5 font-bold text-slate-600">
+              <span className="w-2.5 h-2.5 rounded-full border-2 border-slate-400 bg-white shrink-0" />
+              <span>尚未觸發（白底圓點）</span>
             </div>
 
             {/* 歷史交易紀錄 */}
             {showTrades && totalTradesCount > 0 && (
               <div className="flex items-center gap-1.5 font-bold text-blue-800">
                 <span className="w-2.5 h-2.5 rotate-45 bg-blue-600 shrink-0" />
-                <span>歷史交易紀錄 ({totalTradesCount} 筆，已標註價格與股數)</span>
+                <span>歷史交易紀錄 ({totalTradesCount} 筆)</span>
               </div>
             )}
+
+            {/* 提示點擊圓點查看拆分明細按鈕 */}
+            <button
+              type="button"
+              onClick={() => {
+                const target = sortedStepItems[0] || stepItems[0];
+                if (target) setSelectedItem({ type: 'step', data: target });
+              }}
+              className="sm:ml-auto text-[11px] font-bold text-emerald-800 hover:text-emerald-950 flex items-center gap-1 hover:underline cursor-pointer bg-emerald-50/80 hover:bg-emerald-100 px-2 py-0.5 rounded-md border border-emerald-200/80 transition-colors"
+              title="點擊查看分批拆分交易階段明細"
+            >
+              <Layers className="w-3 h-3 text-emerald-600" />
+              <span>點擊圖表圓點查看 4 批拆分交易明細</span>
+            </button>
           </div>
 
           {/* 5. Selected Item Interactive Card (When element is clicked) */}
@@ -1812,12 +2034,22 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
                       </span>
                       <span
                         className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                          selectedItem.data.isReached
+                          selectedItem.data.bought >= selectedItem.data.size && selectedItem.data.size > 0
+                            ? 'bg-emerald-600 text-white'
+                            : selectedItem.data.bought > 0
                             ? 'bg-emerald-100 text-emerald-800'
+                            : selectedItem.data.isReached
+                            ? 'bg-amber-100 text-amber-800'
                             : 'bg-zinc-200 text-zinc-700'
                         }`}
                       >
-                        {selectedItem.data.isReached ? '已到達價位' : '等待下跌觸發'}
+                        {selectedItem.data.bought >= selectedItem.data.size && selectedItem.data.size > 0
+                          ? '已全數買入'
+                          : selectedItem.data.bought > 0
+                          ? '部分已購入'
+                          : selectedItem.data.isReached
+                          ? '已到達價位'
+                          : '等待下跌觸發'}
                       </span>
                     </>
                   ) : (
@@ -1852,44 +2084,301 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
 
               {/* Data fields */}
               {selectedItem.type === 'step' ? (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-xs">
-                  <div className="bg-white p-2 rounded-lg border border-zinc-200 shadow-2xs">
-                    <span className="text-[10px] text-zinc-400 block font-medium">預計進場價</span>
-                    <span className="text-sm font-black font-mono text-emerald-700">
-                      ${selectedItem.data.price.toFixed(2)}
-                    </span>
-                  </div>
-                  <div className="bg-white p-2 rounded-lg border border-zinc-200 shadow-2xs">
-                    <span className="text-[10px] text-zinc-400 block font-medium">已購買 / 預購入</span>
-                    <span className="text-sm font-black font-mono text-zinc-800">
-                      已購 {selectedItem.data.bought} / 預購 {selectedItem.data.size} 股
-                    </span>
-                  </div>
-                  <div className="bg-white p-2 rounded-lg border border-zinc-200 shadow-2xs">
-                    <span className="text-[10px] text-zinc-400 block font-medium">配置佔比</span>
-                    <span className="text-sm font-black font-mono text-zinc-800">
-                      {selectedItem.data.percent}%
-                    </span>
-                  </div>
-                  <div className="bg-white p-2 rounded-lg border border-zinc-200 shadow-2xs flex items-center justify-between">
-                    <div>
-                      <span className="text-[10px] text-zinc-400 block font-medium">本梯次所需資金</span>
-                      <span className="text-sm font-black font-mono text-zinc-800">
-                        ${selectedItem.data.stepCost.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                <div className="space-y-3 pt-1">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                    <div className="bg-white p-2 rounded-lg border border-zinc-200 shadow-2xs">
+                      <span className="text-[10px] text-zinc-400 block font-medium">預計進場價</span>
+                      <span className="text-sm font-black font-mono text-emerald-700">
+                        ${selectedItem.data.price.toFixed(2)}
                       </span>
                     </div>
-                    {onBatchClick && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const s1 = selectedItem.data.split1?.size || 0;
-                          const s2 = selectedItem.data.split2?.size || 0;
-                          onBatchClick(selectedItem.data.index, selectedItem.data.name, s1, s2);
-                        }}
-                        className="px-2 py-1 text-[11px] font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-md transition-colors cursor-pointer shrink-0"
-                      >
-                        帶入數量
-                      </button>
+                    <div className="bg-white p-2 rounded-lg border border-zinc-200 shadow-2xs">
+                      <span className="text-[10px] text-zinc-400 block font-medium">已購買 / 預購入</span>
+                      <span className="text-sm font-black font-mono text-zinc-800">
+                        已購 {selectedItem.data.bought} / 預購 {selectedItem.data.size} 股
+                        {selectedItem.data.size > 0 && (
+                          <span className="text-emerald-700 ml-1 text-xs">
+                            ({Math.round((selectedItem.data.bought / selectedItem.data.size) * 100)}%)
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                    <div className="bg-white p-2 rounded-lg border border-zinc-200 shadow-2xs">
+                      <span className="text-[10px] text-zinc-400 block font-medium">配置佔比</span>
+                      <span className="text-sm font-black font-mono text-zinc-800">
+                        {selectedItem.data.percent}%
+                      </span>
+                    </div>
+                    <div className="bg-white p-2 rounded-lg border border-zinc-200 shadow-2xs flex items-center justify-between">
+                      <div>
+                        <span className="text-[10px] text-zinc-400 block font-medium">本梯次所需資金</span>
+                        <span className="text-sm font-black font-mono text-zinc-800">
+                          ${selectedItem.data.stepCost.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                        </span>
+                      </div>
+                      {onBatchClick && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const s1 = selectedItem.data.split1?.size || 0;
+                            const s2 = selectedItem.data.split2?.size || 0;
+                            onBatchClick(selectedItem.data.index, selectedItem.data.name, s1, s2);
+                          }}
+                          className="px-2 py-1 text-[11px] font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-md transition-colors cursor-pointer shrink-0"
+                        >
+                          帶入數量
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 拆分交易階段明細 (所處階段所需的個別股數 | 已購買 數量 | 預購買數量) */}
+                  <div className="pt-2.5 border-t border-zinc-200/90 space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 shrink-0" />
+                        <span className="text-xs font-black text-zinc-900 tracking-tight">
+                          {selectedItem.data.name} 拆分交易進度明細
+                        </span>
+                        <span className="text-[11px] text-zinc-500 font-medium hidden sm:inline">
+                          (所處階段所需個別股數 ｜ 已購買 數量 ｜ 預購買數量)
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        {/* 批次快速切換 Tabs */}
+                        <div className="flex items-center bg-zinc-200/70 p-0.5 rounded-lg text-[11px]">
+                          {sortedStepItems.map((st) => (
+                            <button
+                              key={st.index}
+                              type="button"
+                              onClick={() => setSelectedItem({ type: 'step', data: st })}
+                              className={`px-2 py-0.5 rounded-md font-bold transition-all cursor-pointer ${
+                                selectedItem.data.index === st.index
+                                  ? 'bg-emerald-600 text-white shadow-xs'
+                                  : 'text-zinc-600 hover:text-zinc-900 hover:bg-white/80'
+                              }`}
+                            >
+                              {st.label}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* 展開/收合全部 4 批對照表按鈕 */}
+                        <button
+                          type="button"
+                          onClick={() => setShowAllSplits((prev) => !prev)}
+                          className="px-2 py-0.5 rounded-md text-[11px] font-bold text-emerald-800 bg-emerald-100/80 hover:bg-emerald-200 border border-emerald-300/80 transition-colors cursor-pointer flex items-center gap-1"
+                        >
+                          <Layers className="w-3 h-3 text-emerald-700" />
+                          <span>{showAllSplits ? '只看當前批次' : '展開全部 4 批對照'}</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 當前批次雙拆分卡片 */}
+                    {!showAllSplits ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                        {/* Split 1 */}
+                        <div className="p-3 bg-white rounded-xl border border-emerald-200/90 shadow-2xs space-y-2">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-900 border border-emerald-200 text-xs font-black">
+                                {selectedItem.data.split1.name}
+                              </span>
+                              <span className="text-[11px] font-bold text-zinc-500">
+                                佔比 {selectedItem.data.split1.percent}
+                              </span>
+                            </div>
+                            <span
+                              className={`text-[10px] font-black px-2 py-0.5 rounded ${
+                                selectedItem.data.split1.bought >= selectedItem.data.split1.size && selectedItem.data.split1.size > 0
+                                  ? 'bg-emerald-600 text-white'
+                                  : selectedItem.data.split1.bought > 0
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-zinc-100 text-zinc-600'
+                              }`}
+                            >
+                              {selectedItem.data.split1.bought >= selectedItem.data.split1.size && selectedItem.data.split1.size > 0
+                                ? '已全數買入'
+                                : selectedItem.data.split1.bought > 0
+                                ? `已購 ${Math.round((selectedItem.data.split1.bought / selectedItem.data.split1.size) * 100)}%`
+                                : '尚未購買'}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-3 gap-2 text-center">
+                            <div className="bg-zinc-50 p-2 rounded-lg border border-zinc-200/70">
+                              <span className="text-[10px] text-zinc-500 block font-medium">所處階段所需個別股數</span>
+                              <span className="text-sm font-black font-mono text-zinc-900 mt-0.5 block">
+                                {selectedItem.data.split1.size} 股
+                              </span>
+                            </div>
+                            <div className="bg-emerald-50/70 p-2 rounded-lg border border-emerald-200/70">
+                              <span className="text-[10px] text-emerald-700 block font-bold">已購買 數量</span>
+                              <span className="text-sm font-black font-mono text-emerald-800 mt-0.5 block">
+                                {selectedItem.data.split1.bought} 股
+                              </span>
+                            </div>
+                            <div className="bg-amber-50/70 p-2 rounded-lg border border-amber-200/70">
+                              <span className="text-[10px] text-amber-700 block font-bold">預購買數量</span>
+                              <span className="text-sm font-black font-mono text-amber-900 mt-0.5 block">
+                                {selectedItem.data.split1.remaining} 股
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Split 2 */}
+                        <div className="p-3 bg-white rounded-xl border border-emerald-200/90 shadow-2xs space-y-2">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-900 border border-emerald-200 text-xs font-black">
+                                {selectedItem.data.split2.name}
+                              </span>
+                              <span className="text-[11px] font-bold text-zinc-500">
+                                佔比 {selectedItem.data.split2.percent}
+                              </span>
+                            </div>
+                            <span
+                              className={`text-[10px] font-black px-2 py-0.5 rounded ${
+                                selectedItem.data.split2.bought >= selectedItem.data.split2.size && selectedItem.data.split2.size > 0
+                                  ? 'bg-emerald-600 text-white'
+                                  : selectedItem.data.split2.bought > 0
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-zinc-100 text-zinc-600'
+                              }`}
+                            >
+                              {selectedItem.data.split2.bought >= selectedItem.data.split2.size && selectedItem.data.split2.size > 0
+                                ? '已全數買入'
+                                : selectedItem.data.split2.bought > 0
+                                ? `已購 ${Math.round((selectedItem.data.split2.bought / selectedItem.data.split2.size) * 100)}%`
+                                : '尚未購買'}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-3 gap-2 text-center">
+                            <div className="bg-zinc-50 p-2 rounded-lg border border-zinc-200/70">
+                              <span className="text-[10px] text-zinc-500 block font-medium">所處階段所需個別股數</span>
+                              <span className="text-sm font-black font-mono text-zinc-900 mt-0.5 block">
+                                {selectedItem.data.split2.size} 股
+                              </span>
+                            </div>
+                            <div className="bg-emerald-50/70 p-2 rounded-lg border border-emerald-200/70">
+                              <span className="text-[10px] text-emerald-700 block font-bold">已購買 數量</span>
+                              <span className="text-sm font-black font-mono text-emerald-800 mt-0.5 block">
+                                {selectedItem.data.split2.bought} 股
+                              </span>
+                            </div>
+                            <div className="bg-amber-50/70 p-2 rounded-lg border border-amber-200/70">
+                              <span className="text-[10px] text-amber-700 block font-bold">預購買數量</span>
+                              <span className="text-sm font-black font-mono text-amber-900 mt-0.5 block">
+                                {selectedItem.data.split2.remaining} 股
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {sortedStepItems.map((step) => (
+                          <div
+                            key={step.index}
+                            className={
+                              selectedItem.data.index === step.index
+                                ? 'p-2.5 bg-white rounded-xl border transition-all border-emerald-500 ring-2 ring-emerald-400/30 shadow-sm'
+                                : 'p-2.5 bg-white rounded-xl border transition-all border-zinc-200/90 shadow-2xs'
+                            }
+                          >
+                            <div className="flex items-center justify-between mb-1.5">
+                              <div className="flex items-center gap-2">
+                                <span className="px-2 py-0.5 rounded font-black text-xs bg-emerald-700 text-white">
+                                  {step.name}
+                                </span>
+                                <span className="text-xs font-bold text-zinc-700">
+                                  目標進場價 ${step.price.toFixed(2)} (-{step.dropPct}%)
+                                </span>
+                                <span className="text-[11px] text-zinc-500 font-mono">
+                                  總預購: {step.size} 股 ｜ 總已購: {step.bought} 股
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedItem({ type: 'step', data: step })}
+                                className="text-[11px] font-bold text-emerald-700 hover:text-emerald-900 cursor-pointer"
+                              >
+                                切換至此批
+                              </button>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                              {/* Sub Split 1 */}
+                              <div className="p-2 bg-zinc-50/80 rounded-lg border border-zinc-200/60">
+                                <div className="flex items-center justify-between mb-1">
+                                  <span className="font-black text-xs text-zinc-800">
+                                    {step.split1.name}
+                                  </span>
+                                  <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-zinc-200 text-zinc-700">
+                                    佔比 {step.split1.percent}
+                                  </span>
+                                </div>
+                                <div className="grid grid-cols-3 gap-1.5 text-center text-xs">
+                                  <div className="bg-white p-1 rounded border border-zinc-200/60">
+                                    <span className="text-[9px] text-zinc-400 block">所需個別股數</span>
+                                    <span className="font-mono font-black text-zinc-800 text-xs">
+                                      {step.split1.size} 股
+                                    </span>
+                                  </div>
+                                  <div className="bg-emerald-50/80 p-1 rounded border border-emerald-100">
+                                    <span className="text-[9px] text-emerald-700 block font-medium">已購買 數量</span>
+                                    <span className="font-mono font-black text-emerald-800 text-xs">
+                                      {step.split1.bought} 股
+                                    </span>
+                                  </div>
+                                  <div className="bg-amber-50/80 p-1 rounded border border-amber-100">
+                                    <span className="text-[9px] text-amber-700 block font-medium">預購買數量</span>
+                                    <span className="font-mono font-black text-amber-900 text-xs">
+                                      {step.split1.remaining} 股
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Sub Split 2 */}
+                              <div className="p-2 bg-zinc-50/80 rounded-lg border border-zinc-200/60">
+                                <div className="flex items-center justify-between mb-1">
+                                  <span className="font-black text-xs text-zinc-800">
+                                    {step.split2.name}
+                                  </span>
+                                  <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-zinc-200 text-zinc-700">
+                                    佔比 {step.split2.percent}
+                                  </span>
+                                </div>
+                                <div className="grid grid-cols-3 gap-1.5 text-center text-xs">
+                                  <div className="bg-white p-1 rounded border border-zinc-200/60">
+                                    <span className="text-[9px] text-zinc-400 block">所需個別股數</span>
+                                    <span className="font-mono font-black text-zinc-800 text-xs">
+                                      {step.split2.size} 股
+                                    </span>
+                                  </div>
+                                  <div className="bg-emerald-50/80 p-1 rounded border border-emerald-100">
+                                    <span className="text-[9px] text-emerald-700 block font-medium">已購買 數量</span>
+                                    <span className="font-mono font-black text-emerald-800 text-xs">
+                                      {step.split2.bought} 股
+                                    </span>
+                                  </div>
+                                  <div className="bg-amber-50/80 p-1 rounded border border-amber-100">
+                                    <span className="text-[9px] text-amber-700 block font-medium">預購買數量</span>
+                                    <span className="font-mono font-black text-amber-900 text-xs">
+                                      {step.split2.remaining} 股
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </div>
                 </div>
