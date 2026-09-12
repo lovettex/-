@@ -1,13 +1,38 @@
 import { Trade } from '../types';
 import { getTimestampMillis } from './dateUtils';
 
-export function calculateStats(trades: Trade[], currentPrice?: number) {
+export function calculateStats(trades: Trade[] = [], currentPrice?: number) {
   let positionQty = 0;
   let costBasis = 0; 
   let realizedPnL = 0;
 
+  if (!Array.isArray(trades) || trades.length === 0) {
+    return {
+      totalQuantity: 0,
+      totalCostBasis: 0,
+      averagePrice: 0,
+      realizedPnL: 0,
+      unrealizedPnL: 0,
+      totalPnL: 0,
+      returnPercentage: 0,
+    };
+  }
+
+  const validTrades = trades.filter((t) => t && typeof t === 'object');
+  if (validTrades.length === 0) {
+    return {
+      totalQuantity: 0,
+      totalCostBasis: 0,
+      averagePrice: 0,
+      realizedPnL: 0,
+      unrealizedPnL: 0,
+      totalPnL: 0,
+      returnPercentage: 0,
+    };
+  }
+
   // Ensure trades are sorted sequentially from oldest to newest for average cost calculation
-  const sorted = [...trades].sort((a, b) => {
+  const sorted = [...validTrades].sort((a, b) => {
     const timeA = getTimestampMillis(a.tradeDate);
     const timeB = getTimestampMillis(b.tradeDate);
     if (timeA === timeB) {
@@ -288,6 +313,7 @@ export function calculateBatchPlanning(params: BatchPlanningParams): {
   totalBought: number;
   totalRemaining: number;
 } {
+  const safeParams = params || ({} as BatchPlanningParams);
   const {
     currentPrice = 0,
     usableCapital = 0,
@@ -295,10 +321,10 @@ export function calculateBatchPlanning(params: BatchPlanningParams): {
     trades = [],
     averagingRowsSys2 = [],
     plannedBuyQty,
-  } = params;
+  } = safeParams;
 
   // 1. 推算預計購買總股數 plannedQty
-  let effPlanned = params.plannedQty && params.plannedQty > 0 ? params.plannedQty : 0;
+  let effPlanned = safeParams.plannedQty && safeParams.plannedQty > 0 ? safeParams.plannedQty : 0;
   if (effPlanned <= 0 && currentPrice > 0 && usableCapital > 0) {
     effPlanned = Math.floor(usableCapital / currentPrice);
   }

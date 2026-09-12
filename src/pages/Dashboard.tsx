@@ -473,10 +473,13 @@ export default function Dashboard() {
   const [selectedCardIds, setSelectedCardIds] = useState<Set<string>>(() => {
     try {
       const userKey = user ? user.uid : "guest";
-      const saved = safeLocalStorage.getItem(`selected-card-ids-${userKey}`);
+      const saved =
+        safeLocalStorage.getItem(`selected-card-ids-${userKey}`) ||
+        safeLocalStorage.getItem("selected-card-ids-shared") ||
+        safeLocalStorage.getItem("selected-card-ids-guest");
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
+        if (Array.isArray(parsed) && parsed.length > 0) {
           return new Set(parsed);
         }
       }
@@ -496,11 +499,29 @@ export default function Dashboard() {
           `selected-card-ids-${userKey}`,
           JSON.stringify(idsArray)
         );
+        safeLocalStorage.setItem(
+          "selected-card-ids-shared",
+          JSON.stringify(idsArray)
+        );
       } catch (e) {
         console.error("Failed to persist selected card IDs locally:", e);
       }
 
+      // 1. Sync to shared workspace document for instant cross-device and shared link reflection
       if (user) {
+        const sharedDocRef = doc(db, "userSettings", "shared_workspace");
+        setDoc(
+          sharedDocRef,
+          {
+            selectedCardIds: idsArray,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        ).catch((err) => {
+          console.warn("Failed to sync selectedCardIds to shared Firestore:", err);
+        });
+
+        // 2. Sync to user personal document
         const docRef = doc(db, "userSettings", user.uid);
         setDoc(
           docRef,
@@ -510,7 +531,7 @@ export default function Dashboard() {
           },
           { merge: true }
         ).catch((err) => {
-          console.warn("Failed to sync selectedCardIds to Firestore:", err);
+          console.warn("Failed to sync selectedCardIds to user Firestore:", err);
         });
       }
     },
@@ -519,27 +540,16 @@ export default function Dashboard() {
 
   // Sync selected cards across devices via Firestore onSnapshot + safeLocalStorage
   useEffect(() => {
-    if (!user) {
-      try {
-        const saved = safeLocalStorage.getItem("selected-card-ids-guest");
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed)) {
-            setSelectedCardIds(new Set(parsed));
-          }
-        }
-      } catch (e) {
-        console.error("Failed to load guest selected cards:", e);
-      }
-      return;
-    }
-
     // 1. Initial fast local cache load (0ms delay)
     try {
-      const saved = safeLocalStorage.getItem(`selected-card-ids-${user.uid}`);
+      const userKey = user ? user.uid : "guest";
+      const saved =
+        safeLocalStorage.getItem(`selected-card-ids-${userKey}`) ||
+        safeLocalStorage.getItem("selected-card-ids-shared") ||
+        safeLocalStorage.getItem("selected-card-ids-guest");
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
+        if (Array.isArray(parsed) && parsed.length > 0) {
           setSelectedCardIds(new Set(parsed));
         }
       }
@@ -547,44 +557,44 @@ export default function Dashboard() {
       console.error("Failed to load local selected cards:", e);
     }
 
+    if (!user) return;
+
     // 2. Real-time Firestore synchronization for multi-device sync
-    const docRef = doc(db, "userSettings", user.uid);
-    const unsubscribe = onSnapshot(
-      docRef,
+    const userDocRef = doc(db, "userSettings", user.uid);
+    const sharedDocRef = doc(db, "userSettings", "shared_workspace");
+
+    let isMounted = true;
+
+    const applyRemoteIds = (ids: any) => {
+      if (!isMounted) return;
+      if (Array.isArray(ids)) {
+        setSelectedCardIds(new Set(ids));
+        try {
+          safeLocalStorage.setItem(`selected-card-ids-${user.uid}`, JSON.stringify(ids));
+          safeLocalStorage.setItem("selected-card-ids-shared", JSON.stringify(ids));
+        } catch {}
+      }
+    };
+
+    const unsubShared = onSnapshot(
+      sharedDocRef,
       (snapshot) => {
         if (snapshot.exists()) {
           const data = snapshot.data();
           if (Array.isArray(data.selectedCardIds)) {
-            setSelectedCardIds(new Set(data.selectedCardIds));
-            safeLocalStorage.setItem(
-              `selected-card-ids-${user.uid}`,
-              JSON.stringify(data.selectedCardIds)
-            );
-          } else {
-            // If userSettings document exists but has no selectedCardIds yet, upload local selection if any
-            const localSaved = safeLocalStorage.getItem(`selected-card-ids-${user.uid}`);
-            if (localSaved) {
-              try {
-                const parsed = JSON.parse(localSaved);
-                if (Array.isArray(parsed) && parsed.length > 0) {
-                  setDoc(
-                    docRef,
-                    { selectedCardIds: parsed, updatedAt: serverTimestamp() },
-                    { merge: true }
-                  ).catch(() => {});
-                }
-              } catch (e) {}
-            }
+            applyRemoteIds(data.selectedCardIds);
           }
         } else {
-          // Document does not exist yet; if local selection exists, upload it
-          const localSaved = safeLocalStorage.getItem(`selected-card-ids-${user.uid}`);
+          // If shared document doesn't exist yet, seed it with current local selection
+          const localSaved =
+            safeLocalStorage.getItem(`selected-card-ids-${user.uid}`) ||
+            safeLocalStorage.getItem("selected-card-ids-shared");
           if (localSaved) {
             try {
               const parsed = JSON.parse(localSaved);
               if (Array.isArray(parsed) && parsed.length > 0) {
                 setDoc(
-                  docRef,
+                  sharedDocRef,
                   { selectedCardIds: parsed, updatedAt: serverTimestamp() },
                   { merge: true }
                 ).catch(() => {});
@@ -594,11 +604,30 @@ export default function Dashboard() {
         }
       },
       (error) => {
-        console.warn("Real-time userSettings selectedCardIds onSnapshot error:", error);
+        console.warn("Real-time shared userSettings onSnapshot error:", error);
       }
     );
 
-    return () => unsubscribe();
+    const unsubUser = onSnapshot(
+      userDocRef,
+      (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          if (Array.isArray(data.selectedCardIds) && data.selectedCardIds.length > 0) {
+            applyRemoteIds(data.selectedCardIds);
+          }
+        }
+      },
+      (error) => {
+        console.warn("Real-time user userSettings onSnapshot error:", error);
+      }
+    );
+
+    return () => {
+      isMounted = false;
+      unsubShared();
+      unsubUser();
+    };
   }, [user?.uid]);
 
   const [isCinemaModeActive, setIsCinemaModeActive] = useState<boolean>(false);
@@ -10265,7 +10294,7 @@ export default function Dashboard() {
           let targetTab = tabs.find((t) => t.id === tabId);
           if (!targetTab || targetTab.status === "COMPLETED") {
             const activeMatch = tabs.find(
-              (t) => t.symbol.trim().toUpperCase() === cleanSym && t.status !== "COMPLETED"
+              (t) => (t?.symbol || "").trim().toUpperCase() === cleanSym && t.status !== "COMPLETED"
             );
             if (activeMatch) {
               targetTab = activeMatch;

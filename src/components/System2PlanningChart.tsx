@@ -1,12 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   Chart as ChartJS,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip,
-  Legend,
+  registerables,
   ChartData,
   ChartOptions,
   Plugin,
@@ -24,15 +19,8 @@ import {
 } from 'lucide-react';
 import { calculateBatchPlanning } from '../lib/calculations';
 
-// Register Chart.js components
-ChartJS.register(
-  LinearScale,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip,
-  Legend
-);
+// Register all Chart.js components and controllers
+ChartJS.register(...registerables);
 
 export interface VisualPriceLevel {
   id: string;
@@ -253,6 +241,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
     type: 'step' | 'trade' | 'visualLevel' | 'avgCost' | 'currentPrice';
     data: any;
   } | null>(null);
+  const lastHoverKeyRef = useRef<string>('');
   const [selectedItem, setSelectedItem] = useState<{
     type: 'step' | 'trade' | 'visualLevel' | 'avgCost' | 'currentPrice';
     data: any;
@@ -330,7 +319,29 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
     return stepConfigs.map((cfg) => {
       const row = averagingRowsSys2?.[cfg.index];
       const batch = batches?.[cfg.index];
-      const planBatch = planResult.batches[cfg.index];
+      const planBatch = planResult?.batches?.[cfg.index];
+      const safePlanBatch = {
+        name: planBatch?.name || cfg.name,
+        size: typeof planBatch?.size === 'number' ? planBatch.size : 0,
+        bought: typeof planBatch?.bought === 'number' ? planBatch.bought : 0,
+        remaining: typeof planBatch?.remaining === 'number' ? planBatch.remaining : 0,
+        split1: {
+          name: planBatch?.split1?.name || `${cfg.name} 拆分 1`,
+          shortLabel: planBatch?.split1?.shortLabel || '拆分 1',
+          size: typeof planBatch?.split1?.size === 'number' ? planBatch.split1.size : 0,
+          bought: typeof planBatch?.split1?.bought === 'number' ? planBatch.split1.bought : 0,
+          remaining: typeof planBatch?.split1?.remaining === 'number' ? planBatch.split1.remaining : 0,
+          percent: planBatch?.split1?.percent || '7%',
+        },
+        split2: {
+          name: planBatch?.split2?.name || `${cfg.name} 拆分 2`,
+          shortLabel: planBatch?.split2?.shortLabel || '拆分 2',
+          size: typeof planBatch?.split2?.size === 'number' ? planBatch.split2.size : 0,
+          bought: typeof planBatch?.split2?.bought === 'number' ? planBatch.split2.bought : 0,
+          remaining: typeof planBatch?.split2?.remaining === 'number' ? planBatch.split2.remaining : 0,
+          percent: planBatch?.split2?.percent || '8%',
+        },
+      };
 
       // Step price: user manual input or formula from current price
       const manualPrice = row?.price ? parseFloat(row.price) : 0;
@@ -341,24 +352,24 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
       // 優先採用 batch props，若未設定則以集中計算結果為基準
       const s1Size = (batch?.split1?.size && batch.split1.size > 0)
         ? batch.split1.size
-        : planBatch.split1.size;
+        : safePlanBatch.split1.size;
       const s2Size = (batch?.split2?.size && batch.split2.size > 0)
         ? batch.split2.size
-        : planBatch.split2.size;
+        : safePlanBatch.split2.size;
       const targetQty = (batch?.size && batch.size > 0)
         ? batch.size
-        : (s1Size + s2Size > 0 ? s1Size + s2Size : planBatch.size);
+        : (s1Size + s2Size > 0 ? s1Size + s2Size : safePlanBatch.size);
 
       const s1Bought = (batch?.split1?.bought !== undefined && batch.split1.bought > 0)
-        ? Math.max(batch.split1.bought, planBatch.split1.bought)
-        : planBatch.split1.bought;
+        ? Math.max(batch.split1.bought, safePlanBatch.split1.bought)
+        : safePlanBatch.split1.bought;
       const s2Bought = (batch?.split2?.bought !== undefined && batch.split2.bought > 0)
-        ? Math.max(batch.split2.bought, planBatch.split2.bought)
-        : planBatch.split2.bought;
+        ? Math.max(batch.split2.bought, safePlanBatch.split2.bought)
+        : safePlanBatch.split2.bought;
 
       const boughtQty = (batch?.bought !== undefined && batch.bought > 0)
-        ? Math.max(batch.bought, s1Bought + s2Bought, planBatch.bought)
-        : Math.max(s1Bought + s2Bought, planBatch.bought);
+        ? Math.max(batch.bought, s1Bought + s2Bought, safePlanBatch.bought)
+        : Math.max(s1Bought + s2Bought, safePlanBatch.bought);
 
       const remainingQty = Math.max(0, targetQty - boughtQty);
       const s1Remaining = Math.max(0, s1Size - s1Bought);
@@ -373,18 +384,18 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
       const stepCost = stepPrice * (targetQty > 0 ? targetQty : boughtQty);
 
       const split1 = {
-        name: batch?.split1?.name || planBatch.split1.name,
-        shortLabel: batch?.split1?.shortLabel || planBatch.split1.shortLabel,
-        percent: planBatch.split1.percent,
+        name: batch?.split1?.name || safePlanBatch.split1.name,
+        shortLabel: batch?.split1?.shortLabel || safePlanBatch.split1.shortLabel,
+        percent: safePlanBatch.split1.percent,
         size: s1Size,
         bought: s1Bought,
         remaining: s1Remaining,
       };
 
       const split2 = {
-        name: batch?.split2?.name || planBatch.split2.name,
-        shortLabel: batch?.split2?.shortLabel || planBatch.split2.shortLabel,
-        percent: planBatch.split2.percent,
+        name: batch?.split2?.name || safePlanBatch.split2.name,
+        shortLabel: batch?.split2?.shortLabel || safePlanBatch.split2.shortLabel,
+        percent: safePlanBatch.split2.percent,
         size: s2Size,
         bought: s2Bought,
         remaining: s2Remaining,
@@ -611,13 +622,17 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
     if (allPrices.length === 0) return { minX: 60, maxX: 100 };
     const min = Math.min(...allPrices);
     const max = Math.max(...allPrices);
-    const span = max - min || 10;
+    const safeMin = isFinite(min) ? min : 60;
+    const safeMax = isFinite(max) ? max : 100;
+    const span = safeMax - safeMin || 10;
     // 全選防線狀態下給予更加平衡的邊界比例，避免圖表被壓縮
     const padding = isAllLevelsSelected ? span * 0.09 + 1.2 : span * 0.12 + 1.5;
+    const calculatedMin = Math.max(0, Math.floor((safeMin - padding) * 10) / 10);
+    const calculatedMax = Math.max(calculatedMin + 2, Math.ceil((safeMax + padding) * 10) / 10);
 
     return {
-      minX: Math.max(0, Math.floor((min - padding) * 10) / 10),
-      maxX: Math.ceil((max + padding) * 10) / 10,
+      minX: calculatedMin,
+      maxX: calculatedMax,
     };
   }, [currentPriceNum, holdingAvgPriceNum, showAvgCost, stepItems, validTrades, showTrades, displayedVisualLevels, isAllLevelsSelected]);
 
@@ -760,8 +775,12 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
   };
 
   useEffect(() => {
-    if (chartRef.current) {
-      chartRef.current.update();
+    if (chartRef.current && typeof chartRef.current.update === 'function') {
+      try {
+        chartRef.current.update();
+      } catch {
+        // Safe fallback if chart is mid-lifecycle
+      }
     }
   }, [
     displayedVisualLevels,
@@ -783,13 +802,14 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
   // 5. Historical trades: Direct price and shares tag labels directly on the canvas!
   const customAnnotationPlugin = useMemo<Plugin<'line'>>(() => {
     return {
-      id: 'pyramidAndCurrentPricePlugin',
+      id: `pyramidAndCurrentPricePlugin_${symbol ? String(symbol).replace(/[^a-zA-Z0-9]/g, '_') : 'default'}`,
       afterDraw: (chart) => {
-        const { ctx, chartArea, scales } = chart;
-        const xScale = scales.x;
-        const yScale = scales.y;
+        try {
+          const { ctx, chartArea, scales } = chart;
+          const xScale = scales.x;
+          const yScale = scales.y;
 
-        if (!xScale || !yScale || !chartArea) return;
+          if (!xScale || !yScale || !chartArea || chartArea.width <= 0 || chartArea.height <= 0) return;
 
         // Extract latest values from ref to completely eliminate stale closure issues
         const {
@@ -1193,15 +1213,25 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
           });
           ctx.restore();
         }
-      },
-    };
-  }, [currentPriceNum, holdingAvgPriceNum, showAvgCost, stepItems, yAxisMode, showTrades, validTrades, displayedVisualLevels, isAllLevelsSelected]);
+      } catch (err) {
+        console.warn('pyramidAndCurrentPricePlugin afterDraw error:', err);
+      }
+    },
+  };
+}, [currentPriceNum, holdingAvgPriceNum, showAvgCost, stepItems, yAxisMode, showTrades, validTrades, displayedVisualLevels, isAllLevelsSelected]);
 
   // Chart options with disabled in-canvas tooltip and onHover handler to update fixed top HUD
   const chartOptions: ChartOptions<'line'> = useMemo(() => {
     return {
       responsive: true,
       maintainAspectRatio: false,
+      animation: false,
+      hover: {
+        mode: 'nearest',
+        intersect: true,
+        animationDuration: 0,
+      },
+      responsiveAnimationDuration: 0,
       layout: {
         padding: {
           top: 95, // 調整上方空間比例，預留充裕空間供多層向上堆疊之純文字標籤顯示
@@ -1215,143 +1245,162 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
         intersect: true,
       },
       onHover: (event, elements, chart) => {
-        if (elements && elements.length > 0) {
-          const el = elements[0];
-          const datasetIndex = el.datasetIndex;
-          const dataIndex = el.index;
+        try {
+          let nextHover: {
+            type: 'step' | 'trade' | 'visualLevel' | 'avgCost' | 'currentPrice';
+            data: any;
+          } | null = null;
+          let hoverKey = '';
 
-          const targetDataset = chart?.data?.datasets?.[datasetIndex];
+          if (elements && elements.length > 0) {
+            const el = elements[0];
+            const datasetIndex = el.datasetIndex;
+            const dataIndex = el.index;
 
-          if (targetDataset?.label?.includes('各批次攤平曲線') || datasetIndex === 0) {
-            // Pyramid step
-            const item = sortedStepItems[dataIndex];
-            if (item) {
-              setHoveredItem({ type: 'step', data: item });
-              return;
-            }
-          } else if (targetDataset?.label?.includes('買入')) {
-            // Buy trade
-            const item = buyTrades[dataIndex];
-            if (item) {
-              setHoveredItem({ type: 'trade', data: item });
-              return;
-            }
-          } else if (targetDataset?.label?.includes('賣出')) {
-            // Sell trade
-            const item = sellTrades[dataIndex];
-            if (item) {
-              setHoveredItem({ type: 'trade', data: item });
-              return;
-            }
-          }
-        }
+            const targetDataset = chart?.data?.datasets?.[datasetIndex];
 
-        const chartX = event.x;
-
-        // 優先以實際渲染之虛線位置 (含全選間距比例舒緩) 進行懸停判定
-        if (renderedLinesRef.current && renderedLinesRef.current.length > 0 && chartX !== null && chartX !== undefined) {
-          const hitLine = renderedLinesRef.current.find((l) => Math.abs(l.renderX - chartX) <= 12);
-          if (hitLine) {
-            if (hitLine.type === 'currentPrice') {
-              setHoveredItem({
-                type: 'currentPrice',
-                data: {
-                  price: currentPriceNum,
-                  avgCost: holdingAvgPriceNum,
-                },
-              });
-              return;
-            }
-            if (hitLine.type === 'avgCost') {
-              setHoveredItem({
-                type: 'avgCost',
-                data: {
-                  price: holdingAvgPriceNum,
-                  quantity: holdingQty,
-                  currentPrice: currentPriceNum,
-                },
-              });
-              return;
-            }
-            setHoveredItem({ type: 'visualLevel', data: hitLine.data });
-            return;
-          }
-        }
-
-        const xScale = chart?.scales?.x;
-
-        // Fallback: Check if hovering near holdingAvgPrice line (Average Cost)
-        if (showAvgCost && holdingAvgPriceNum > 0 && xScale && chartX !== null && chartX !== undefined) {
-          const hoveredPrice = xScale.getValueForPixel(chartX);
-          if (typeof hoveredPrice === 'number') {
-            const span = maxX - minX || 10;
-            const threshold = span * 0.025;
-            if (Math.abs(holdingAvgPriceNum - hoveredPrice) <= threshold) {
-              setHoveredItem({
-                type: 'avgCost',
-                data: {
-                  price: holdingAvgPriceNum,
-                  quantity: holdingQty,
-                  currentPrice: currentPriceNum,
-                },
-              });
-              return;
+            if (targetDataset?.label?.includes('各批次攤平曲線') || datasetIndex === 0) {
+              // Pyramid step
+              const item = sortedStepItems[dataIndex];
+              if (item) {
+                nextHover = { type: 'step', data: item };
+                hoverKey = `step_${item.name}_${item.price}_${item.bought}`;
+              }
+            } else if (targetDataset?.label?.includes('買入')) {
+              // Buy trade
+              const item = buyTrades[dataIndex];
+              if (item) {
+                nextHover = { type: 'trade', data: item };
+                hoverKey = `trade_buy_${item.price}_${item.quantity}_${item.dateFormatted || ''}_${dataIndex}`;
+              }
+            } else if (targetDataset?.label?.includes('賣出')) {
+              // Sell trade
+              const item = sellTrades[dataIndex];
+              if (item) {
+                nextHover = { type: 'trade', data: item };
+                hoverKey = `trade_sell_${item.price}_${item.quantity}_${item.dateFormatted || ''}_${dataIndex}`;
+              }
             }
           }
-        }
 
-        // Fallback: Check if hovering near currentPrice line (Current Price)
-        if (currentPriceNum > 0 && xScale && chartX !== null && chartX !== undefined) {
-          const hoveredPrice = xScale.getValueForPixel(chartX);
-          if (typeof hoveredPrice === 'number') {
-            const span = maxX - minX || 10;
-            const threshold = span * 0.025;
-            if (Math.abs(currentPriceNum - hoveredPrice) <= threshold) {
-              setHoveredItem({
-                type: 'currentPrice',
-                data: {
-                  price: currentPriceNum,
-                  avgCost: holdingAvgPriceNum,
-                },
-              });
-              return;
+          if (!nextHover) {
+            const chartX = event.x;
+
+            // 優先以實際渲染之虛線位置 (含全選間距比例舒緩) 進行懸停判定
+            if (renderedLinesRef.current && renderedLinesRef.current.length > 0 && chartX !== null && chartX !== undefined) {
+              const hitLine = renderedLinesRef.current.find((l) => Math.abs(l.renderX - chartX) <= 12);
+              if (hitLine) {
+                if (hitLine.type === 'currentPrice') {
+                  nextHover = {
+                    type: 'currentPrice',
+                    data: {
+                      price: currentPriceNum,
+                      avgCost: holdingAvgPriceNum,
+                    },
+                  };
+                  hoverKey = `cur_${currentPriceNum}_${holdingAvgPriceNum}`;
+                } else if (hitLine.type === 'avgCost') {
+                  nextHover = {
+                    type: 'avgCost',
+                    data: {
+                      price: holdingAvgPriceNum,
+                      quantity: holdingQty,
+                      currentPrice: currentPriceNum,
+                    },
+                  };
+                  hoverKey = `avg_${holdingAvgPriceNum}_${holdingQty}_${currentPriceNum}`;
+                } else {
+                  nextHover = { type: 'visualLevel', data: hitLine.data };
+                  hoverKey = `lvl_${hitLine.data.label}_${hitLine.data.price}`;
+                }
+              }
+            }
+
+            const xScale = chart?.scales?.x;
+
+            // Fallback: Check if hovering near holdingAvgPrice line (Average Cost)
+            if (!nextHover && showAvgCost && holdingAvgPriceNum > 0 && xScale && chartX !== null && chartX !== undefined) {
+              const hoveredPrice = xScale.getValueForPixel(chartX);
+              if (typeof hoveredPrice === 'number') {
+                const span = maxX - minX || 10;
+                const threshold = span * 0.025;
+                if (Math.abs(holdingAvgPriceNum - hoveredPrice) <= threshold) {
+                  nextHover = {
+                    type: 'avgCost',
+                    data: {
+                      price: holdingAvgPriceNum,
+                      quantity: holdingQty,
+                      currentPrice: currentPriceNum,
+                    },
+                  };
+                  hoverKey = `avg_${holdingAvgPriceNum}_${holdingQty}_${currentPriceNum}`;
+                }
+              }
+            }
+
+            // Fallback: Check if hovering near currentPrice line (Current Price)
+            if (!nextHover && currentPriceNum > 0 && xScale && chartX !== null && chartX !== undefined) {
+              const hoveredPrice = xScale.getValueForPixel(chartX);
+              if (typeof hoveredPrice === 'number') {
+                const span = maxX - minX || 10;
+                const threshold = span * 0.025;
+                if (Math.abs(currentPriceNum - hoveredPrice) <= threshold) {
+                  nextHover = {
+                    type: 'currentPrice',
+                    data: {
+                      price: currentPriceNum,
+                      avgCost: holdingAvgPriceNum,
+                    },
+                  };
+                  hoverKey = `cur_${currentPriceNum}_${holdingAvgPriceNum}`;
+                }
+              }
+            }
+
+            // Fallback: Check if hovering near a visual level line
+            if (!nextHover && displayedVisualLevels && displayedVisualLevels.length > 0 && xScale && chartX !== null && chartX !== undefined) {
+              const hoveredPrice = xScale.getValueForPixel(chartX);
+              if (typeof hoveredPrice === 'number') {
+                const span = maxX - minX || 10;
+                const threshold = span * 0.02; // within 2% of price span
+                const nearestLvl = displayedVisualLevels.find((vl) => Math.abs(vl.price - hoveredPrice) <= threshold);
+                if (nearestLvl) {
+                  nextHover = { type: 'visualLevel', data: nearestLvl };
+                  hoverKey = `lvl_${nearestLvl.label}_${nearestLvl.price}`;
+                }
+              }
             }
           }
-        }
 
-        // Fallback: Check if hovering near a visual level line
-        if (displayedVisualLevels && displayedVisualLevels.length > 0 && xScale && chartX !== null && chartX !== undefined) {
-          const hoveredPrice = xScale.getValueForPixel(chartX);
-          if (typeof hoveredPrice === 'number') {
-            const span = maxX - minX || 10;
-            const threshold = span * 0.02; // within 2% of price span
-            const nearestLvl = displayedVisualLevels.find((vl) => Math.abs(vl.price - hoveredPrice) <= threshold);
-            if (nearestLvl) {
-              setHoveredItem({ type: 'visualLevel', data: nearestLvl });
-              return;
-            }
+          if (lastHoverKeyRef.current !== hoverKey) {
+            lastHoverKeyRef.current = hoverKey;
+            setHoveredItem(nextHover);
           }
+        } catch {
+          // ignore hover error
         }
-
-        setHoveredItem(null);
       },
       onClick: (_event, elements, chart) => {
-        if (elements && elements.length > 0) {
-          const el = elements[0];
-          const datasetIndex = el.datasetIndex;
-          const dataIndex = el.index;
-          const targetDataset = chart?.data?.datasets?.[datasetIndex];
+        try {
+          if (elements && elements.length > 0) {
+            const el = elements[0];
+            const datasetIndex = el.datasetIndex;
+            const dataIndex = el.index;
+            const targetDataset = chart?.data?.datasets?.[datasetIndex];
 
-          if (targetDataset?.label?.includes('各批次攤平曲線') || datasetIndex === 0) {
-            const item = sortedStepItems[dataIndex];
-            if (item) setSelectedItem({ type: 'step', data: item });
-          } else if (targetDataset?.label?.includes('買入')) {
-            const item = buyTrades[dataIndex];
-            if (item) setSelectedItem({ type: 'trade', data: item });
-          } else if (targetDataset?.label?.includes('賣出')) {
-            const item = sellTrades[dataIndex];
-            if (item) setSelectedItem({ type: 'trade', data: item });
+            if (targetDataset?.label?.includes('各批次攤平曲線') || datasetIndex === 0) {
+              const item = sortedStepItems[dataIndex];
+              if (item) setSelectedItem({ type: 'step', data: item });
+            } else if (targetDataset?.label?.includes('買入')) {
+              const item = buyTrades[dataIndex];
+              if (item) setSelectedItem({ type: 'trade', data: item });
+            } else if (targetDataset?.label?.includes('賣出')) {
+              const item = sellTrades[dataIndex];
+              if (item) setSelectedItem({ type: 'trade', data: item });
+            }
           }
+        } catch {
+          // ignore click error
         }
       },
       plugins: {
@@ -1402,7 +1451,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
 
   return (
     <div
-      className={`w-full bg-white transition-all ${
+      className={`w-full bg-white transition-shadow duration-200 ${
         compact
           ? "p-2.5 sm:p-3 rounded-xl"
           : "border border-zinc-200/90 rounded-2xl p-5 sm:p-6 shadow-xs mb-4"
@@ -1719,24 +1768,24 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
             </div>
           </div>
 
-          {/* 2. 固定即時情報視窗 (深綠色高對比背景，字體明亮高對比，完全避免暗灰色) */}
+          {/* 2. 固定即時情報視窗 (深綠色高對比背景，字體明亮高對比，完全避免暗灰色，固定高度杜絕震盪) */}
           <div
-            className={`bg-[#032e20] text-white shadow-md flex items-center justify-between transition-all border border-[#0b5338] ${
-              compact ? "min-h-[34px] sm:min-h-[36px] rounded-lg px-2.5 py-1 text-[11px]" : "min-h-[64px] rounded-xl p-3"
+            className={`bg-[#032e20] text-white shadow-xs border border-[#0b5338] flex items-center justify-between overflow-hidden shrink-0 select-none ${
+              compact ? "h-[38px] sm:h-[40px] rounded-lg px-2.5 py-1 text-[11px]" : "h-[48px] sm:h-[52px] rounded-xl px-3.5 py-2 text-xs"
             }`}
           >
             {hoveredItem ? (
               hoveredItem.type === 'step' ? (
-                <div className="flex flex-wrap items-center justify-between w-full gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="px-2.5 py-0.5 rounded-md font-black text-xs bg-emerald-500 text-white shadow-xs">
+                <div className="flex items-center justify-between w-full gap-2 min-w-0">
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="px-2 py-0.5 rounded-md font-black text-xs bg-emerald-500 text-white shadow-xs">
                       {hoveredItem.data.name}
                     </span>
-                    <span className="text-xs font-bold text-emerald-100">
+                    <span className="text-xs font-bold text-emerald-100 hidden sm:inline">
                       {hoveredItem.data.subtitle} (-{hoveredItem.data.dropPct}%)
                     </span>
                     <span
-                      className={`text-[10px] font-black px-2 py-0.5 rounded ${
+                      className={`text-[10px] font-black px-1.5 py-0.5 rounded ${
                         hoveredItem.data.isReached
                           ? 'bg-emerald-500 text-white border border-emerald-300'
                           : 'bg-[#06422d] text-amber-300 border border-amber-400/70'
@@ -1745,36 +1794,36 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
                       {hoveredItem.data.isReached ? '● 已到達／已買入' : '○ 尚未觸發'}
                     </span>
                   </div>
-                  <div className="flex items-center gap-4 text-xs font-mono">
-                    <div>
-                      <span className="text-emerald-200 text-[10px] block font-sans font-bold">預計進場價</span>
-                      <span className="font-black text-emerald-300 text-sm">
+                  <div className="flex items-center gap-2.5 sm:gap-4 text-xs font-mono shrink-0">
+                    <div className="flex items-center gap-1">
+                      <span className="text-emerald-200 text-[10px] sm:text-xs font-sans font-bold">預計價:</span>
+                      <span className="font-black text-emerald-300 text-xs sm:text-sm">
                         ${hoveredItem.data.price.toFixed(2)}
                       </span>
                     </div>
-                    <div>
-                      <span className="text-emerald-200 text-[10px] block font-sans font-bold">已購買 / 預購入</span>
-                      <span className="font-black text-white text-sm">
+                    <div className="flex items-center gap-1">
+                      <span className="text-emerald-200 text-[10px] sm:text-xs font-sans font-bold hidden sm:inline">股數:</span>
+                      <span className="font-black text-white text-xs sm:text-sm">
                         已購 <span className="text-emerald-300">{hoveredItem.data.bought}</span> / 預購 {hoveredItem.data.size} 股
                       </span>
                     </div>
-                    <div>
-                      <span className="text-emerald-200 text-[10px] block font-sans font-bold">配置佔比</span>
-                      <span className="font-black text-teal-200 text-sm">{hoveredItem.data.percent}%</span>
+                    <div className="flex items-center gap-1 hidden md:flex">
+                      <span className="text-emerald-200 text-[10px] sm:text-xs font-sans font-bold">配置:</span>
+                      <span className="font-black text-teal-200 text-xs sm:text-sm">{hoveredItem.data.percent}%</span>
                     </div>
-                    <div>
-                      <span className="text-emerald-200 text-[10px] block font-sans font-bold">本批所需資金</span>
-                      <span className="font-black text-amber-300 text-sm">
+                    <div className="flex items-center gap-1">
+                      <span className="text-emerald-200 text-[10px] sm:text-xs font-sans font-bold hidden md:inline">資金:</span>
+                      <span className="font-black text-amber-300 text-xs sm:text-sm">
                         ${hoveredItem.data.stepCost.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                       </span>
                     </div>
                   </div>
                 </div>
               ) : hoveredItem.type === 'trade' ? (
-                <div className="flex flex-wrap items-center justify-between w-full gap-2">
-                  <div className="flex items-center gap-2">
+                <div className="flex items-center justify-between w-full gap-2 min-w-0">
+                  <div className="flex items-center gap-1.5 shrink-0">
                     <span
-                      className={`px-2.5 py-0.5 rounded-md font-black text-xs text-white shadow-xs ${
+                      className={`px-2 py-0.5 rounded-md font-black text-xs text-white shadow-xs ${
                         hoveredItem.data.type === 'BUY' ? 'bg-blue-600' : 'bg-orange-600'
                       }`}
                     >
@@ -1784,30 +1833,30 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
                       {hoveredItem.data.dateFormatted}
                     </span>
                     {hoveredItem.data.batch && (
-                      <span className="text-[10px] font-black px-2 py-0.5 rounded bg-blue-500 text-white border border-blue-300">
+                      <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-blue-500 text-white border border-blue-300 hidden sm:inline">
                         {hoveredItem.data.batch}
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center gap-4 text-xs font-mono">
-                    <div>
-                      <span className="text-emerald-200 text-[10px] block font-sans font-bold">成交價格</span>
-                      <span className="font-black text-blue-300 text-sm">
+                  <div className="flex items-center gap-2.5 sm:gap-4 text-xs font-mono shrink-0">
+                    <div className="flex items-center gap-1">
+                      <span className="text-emerald-200 text-[10px] sm:text-xs font-sans font-bold">價格:</span>
+                      <span className="font-black text-blue-300 text-xs sm:text-sm">
                         ${hoveredItem.data.price.toFixed(2)}
                       </span>
                     </div>
-                    <div>
-                      <span className="text-emerald-200 text-[10px] block font-sans font-bold">成交股數</span>
-                      <span className="font-black text-white text-sm">{hoveredItem.data.quantity} 股</span>
+                    <div className="flex items-center gap-1">
+                      <span className="text-emerald-200 text-[10px] sm:text-xs font-sans font-bold">股數:</span>
+                      <span className="font-black text-white text-xs sm:text-sm">{hoveredItem.data.quantity} 股</span>
                     </div>
-                    <div>
-                      <span className="text-emerald-200 text-[10px] block font-sans font-bold">成交總金額</span>
-                      <span className="font-black text-amber-300 text-sm">
+                    <div className="flex items-center gap-1">
+                      <span className="text-emerald-200 text-[10px] sm:text-xs font-sans font-bold hidden sm:inline">總金額:</span>
+                      <span className="font-black text-amber-300 text-xs sm:text-sm">
                         ${(hoveredItem.data.price * hoveredItem.data.quantity).toLocaleString(undefined, { maximumFractionDigits: 0 })}
                       </span>
                     </div>
-                    <div>
-                      <span className="text-emerald-200 text-[10px] block font-sans font-bold">經手 / 目的</span>
+                    <div className="flex items-center gap-1 hidden md:flex">
+                      <span className="text-emerald-200 text-[10px] sm:text-xs font-sans font-bold">經手:</span>
                       <span className="text-white text-xs font-bold">
                         {hoveredItem.data.operator || '人'} ・ {hoveredItem.data.purpose || '加碼'}
                       </span>
@@ -1815,137 +1864,139 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
                   </div>
                 </div>
               ) : hoveredItem.type === 'avgCost' ? (
-                <div className="flex flex-wrap items-center justify-between w-full gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="px-2.5 py-0.5 rounded-md font-black text-xs bg-orange-600 text-white shadow-xs">
+                <div className="flex items-center justify-between w-full gap-2 min-w-0">
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="px-2 py-0.5 rounded-md font-black text-xs bg-orange-600 text-white shadow-xs">
                       持有平均成本
                     </span>
-                    <span className="text-base font-black font-mono text-orange-300">
+                    <span className="text-xs sm:text-sm font-black font-mono text-orange-300">
                       ${hoveredItem.data.price.toFixed(2)}
                     </span>
                     {hoveredItem.data.quantity > 0 && (
-                      <span className="text-xs font-bold text-emerald-100">
+                      <span className="text-xs font-bold text-emerald-100 hidden sm:inline">
                         (持有 {hoveredItem.data.quantity} 股)
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center gap-4 text-xs font-mono">
+                  <div className="flex items-center gap-2.5 sm:gap-4 text-xs font-mono shrink-0">
                     {hoveredItem.data.currentPrice > 0 && (
-                      <div>
-                        <span className="text-emerald-200 font-sans font-bold">距目前價格:</span>{' '}
-                        <span className={`font-black ${hoveredItem.data.currentPrice >= hoveredItem.data.price ? 'text-emerald-300' : 'text-rose-300'}`}>
+                      <div className="flex items-center gap-1">
+                        <span className="text-emerald-200 font-sans font-bold text-[10px] sm:text-xs">距現價:</span>
+                        <span className={`font-black text-xs sm:text-sm ${hoveredItem.data.currentPrice >= hoveredItem.data.price ? 'text-emerald-300' : 'text-rose-300'}`}>
                           {hoveredItem.data.currentPrice >= hoveredItem.data.price ? '+' : ''}
                           ${(hoveredItem.data.currentPrice - hoveredItem.data.price).toFixed(2)} ({(((hoveredItem.data.currentPrice - hoveredItem.data.price) / hoveredItem.data.price) * 100).toFixed(2)}%)
                         </span>
                       </div>
                     )}
                     {hoveredItem.data.quantity > 0 && hoveredItem.data.currentPrice > 0 && (
-                      <div>
-                        <span className="text-emerald-200 font-sans font-bold">未實現損益:</span>{' '}
-                        <span className={`font-black ${hoveredItem.data.currentPrice >= hoveredItem.data.price ? 'text-emerald-300' : 'text-rose-300'}`}>
+                      <div className="flex items-center gap-1 hidden sm:flex">
+                        <span className="text-emerald-200 font-sans font-bold text-[10px] sm:text-xs">未實現:</span>
+                        <span className={`font-black text-xs sm:text-sm ${hoveredItem.data.currentPrice >= hoveredItem.data.price ? 'text-emerald-300' : 'text-rose-300'}`}>
                           {hoveredItem.data.currentPrice >= hoveredItem.data.price ? '+' : ''}
                           ${((hoveredItem.data.currentPrice - hoveredItem.data.price) * hoveredItem.data.quantity).toLocaleString(undefined, { maximumFractionDigits: 0 })}
                         </span>
                       </div>
                     )}
-                    <span className="text-orange-300 text-xs font-sans font-bold">
-                      橘色虛線標註 (加粗)
+                    <span className="text-orange-300 text-[10px] sm:text-xs font-sans font-bold hidden md:inline">
+                      橘色虛線標註
                     </span>
                   </div>
                 </div>
               ) : hoveredItem.type === 'currentPrice' ? (
-                <div className="flex flex-wrap items-center justify-between w-full gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="px-2.5 py-0.5 rounded-md font-black text-xs bg-purple-600 text-white shadow-xs">
+                <div className="flex items-center justify-between w-full gap-2 min-w-0">
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="px-2 py-0.5 rounded-md font-black text-xs bg-purple-600 text-white shadow-xs">
                       即時目前價格
                     </span>
-                    <span className="text-base font-black font-mono text-purple-300">
+                    <span className="text-xs sm:text-sm font-black font-mono text-purple-300">
                       ${hoveredItem.data.price.toFixed(2)}
                     </span>
                   </div>
-                  <div className="flex items-center gap-4 text-xs font-mono">
+                  <div className="flex items-center gap-2.5 sm:gap-4 text-xs font-mono shrink-0">
                     {hoveredItem.data.avgCost > 0 && (
-                      <div>
-                        <span className="text-emerald-200 font-sans font-bold">距平均成本:</span>{' '}
-                        <span className={`font-black ${hoveredItem.data.price >= hoveredItem.data.avgCost ? 'text-emerald-300' : 'text-rose-300'}`}>
+                      <div className="flex items-center gap-1">
+                        <span className="text-emerald-200 font-sans font-bold text-[10px] sm:text-xs">距平均成本:</span>
+                        <span className={`font-black text-xs sm:text-sm ${hoveredItem.data.price >= hoveredItem.data.avgCost ? 'text-emerald-300' : 'text-rose-300'}`}>
                           {hoveredItem.data.price >= hoveredItem.data.avgCost ? '+' : ''}
                           ${(hoveredItem.data.price - hoveredItem.data.avgCost).toFixed(2)} ({(((hoveredItem.data.price - hoveredItem.data.avgCost) / hoveredItem.data.avgCost) * 100).toFixed(2)}%)
                         </span>
                       </div>
                     )}
-                    <span className="text-purple-300 text-xs font-sans font-bold">
-                      紫色虛線標註 (加粗)
+                    <span className="text-purple-300 text-[10px] sm:text-xs font-sans font-bold hidden sm:inline">
+                      紫色虛線標註
                     </span>
                   </div>
                 </div>
               ) : (
-                <div className="flex flex-wrap items-center justify-between w-full gap-2">
-                  <div className="flex items-center gap-2">
+                <div className="flex items-center justify-between w-full gap-2 min-w-0">
+                  <div className="flex items-center gap-1.5 shrink-0">
                     <span
-                      className="px-2.5 py-0.5 rounded-md font-black text-xs text-white shadow-xs"
+                      className="px-2 py-0.5 rounded-md font-black text-xs text-white shadow-xs"
                       style={{ backgroundColor: hoveredItem.data.color }}
                     >
                       {hoveredItem.data.label}防線
                     </span>
-                    <span className="text-base font-black font-mono text-white">
+                    <span className="text-xs sm:text-sm font-black font-mono text-white">
                       ${hoveredItem.data.price.toFixed(2)}
                     </span>
                     {hoveredItem.data.note && (
-                      <span className="text-xs font-bold text-emerald-100">
+                      <span className="text-xs font-bold text-emerald-100 hidden sm:inline">
                         ({hoveredItem.data.note})
                       </span>
                     )}
                   </div>
 
-                  <div className="flex items-center gap-4 text-xs font-mono">
+                  <div className="flex items-center gap-2.5 sm:gap-4 text-xs font-mono shrink-0">
                     {currentPriceNum > 0 && (
-                      <div>
-                        <span className="text-emerald-200 font-sans font-bold">距目前價格:</span>{' '}
-                        <span className={`font-black ${hoveredItem.data.price >= currentPriceNum ? 'text-emerald-300' : 'text-rose-300'}`}>
+                      <div className="flex items-center gap-1">
+                        <span className="text-emerald-200 font-sans font-bold text-[10px] sm:text-xs">距現價:</span>
+                        <span className={`font-black text-xs sm:text-sm ${hoveredItem.data.price >= currentPriceNum ? 'text-emerald-300' : 'text-rose-300'}`}>
                           {hoveredItem.data.price >= currentPriceNum ? '+' : ''}${(hoveredItem.data.price - currentPriceNum).toFixed(2)} ({(((hoveredItem.data.price - currentPriceNum) / currentPriceNum) * 100).toFixed(1)}%)
                         </span>
                       </div>
                     )}
                     {holdingAvgPriceNum > 0 && (
-                      <div>
-                        <span className="text-emerald-200 font-sans font-bold">距平均成本:</span>{' '}
-                        <span className={`font-black ${hoveredItem.data.price >= holdingAvgPriceNum ? 'text-emerald-300' : 'text-amber-300'}`}>
+                      <div className="flex items-center gap-1 hidden sm:flex">
+                        <span className="text-emerald-200 font-sans font-bold text-[10px] sm:text-xs">距均價:</span>
+                        <span className={`font-black text-xs sm:text-sm ${hoveredItem.data.price >= holdingAvgPriceNum ? 'text-emerald-300' : 'text-amber-300'}`}>
                           {hoveredItem.data.price >= holdingAvgPriceNum ? '+' : ''}${(hoveredItem.data.price - holdingAvgPriceNum).toFixed(2)} ({(((hoveredItem.data.price - holdingAvgPriceNum) / holdingAvgPriceNum) * 100).toFixed(1)}%)
                         </span>
                       </div>
                     )}
-                    <span className="text-teal-200 text-xs font-sans font-bold">
+                    <span className="text-teal-200 text-[10px] sm:text-xs font-sans font-bold hidden md:inline">
                       視覺防線標註
                     </span>
                   </div>
                 </div>
               )
             ) : (
-              <div className="flex items-center justify-between w-full text-xs text-emerald-100 flex-wrap gap-2">
-                <div className="flex items-center gap-2">
+              <div className="flex items-center justify-between w-full text-xs text-emerald-100 gap-2 min-w-0">
+                <div className="flex items-center gap-1.5 truncate">
                   <Sparkles className="w-4 h-4 text-amber-300 shrink-0" />
-                  <span className="font-bold text-emerald-50">
+                  <span className="font-bold text-emerald-50 text-[11px] sm:text-xs truncate">
                     💡 滑鼠懸停至階梯、交易紀錄或關鍵防線虛線上即時顯示情資，已固定於上方不遮擋圖表
                   </span>
                 </div>
-                <div className="flex items-center gap-3 text-xs font-mono">
+                <div className="flex items-center gap-2 sm:gap-3 text-xs font-mono shrink-0">
                   {currentPriceNum > 0 && (
-                    <>
-                      <span className="text-emerald-200 font-sans font-bold">當前價格:</span>
-                      <span className="text-purple-300 font-black">${currentPriceNum.toFixed(2)}</span>
-                    </>
+                    <div className="flex items-center gap-1">
+                      <span className="text-emerald-200 font-sans font-bold text-[10px] sm:text-xs">當前:</span>
+                      <span className="text-purple-300 font-black text-xs sm:text-sm">${currentPriceNum.toFixed(2)}</span>
+                    </div>
                   )}
                   {holdingAvgPriceNum > 0 && (
                     <>
                       <span className="text-emerald-500">|</span>
-                      <span className="text-emerald-200 font-sans font-bold">平均成本:</span>
-                      <span className="text-orange-300 font-black">${holdingAvgPriceNum.toFixed(2)}</span>
+                      <div className="flex items-center gap-1">
+                        <span className="text-emerald-200 font-sans font-bold text-[10px] sm:text-xs">均價:</span>
+                        <span className="text-orange-300 font-black text-xs sm:text-sm">${holdingAvgPriceNum.toFixed(2)}</span>
+                      </div>
                     </>
                   )}
                   {displayedVisualLevels && displayedVisualLevels.length > 0 && (
                     <>
-                      <span className="text-emerald-500">|</span>
-                      <span className="text-amber-300 font-black">防線: {displayedVisualLevels.length} 檔已啟用</span>
+                      <span className="text-emerald-500 hidden sm:inline">|</span>
+                      <span className="text-amber-300 font-black text-[10px] sm:text-xs hidden sm:inline">防線: {displayedVisualLevels.length} 檔已啟用</span>
                     </>
                   )}
                 </div>

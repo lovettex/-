@@ -84,6 +84,44 @@ export interface PositionMap {
   };
 }
 
+class PyramidCardErrorBoundary extends React.Component<
+  { symbol: string; children: React.ReactNode },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error(`PyramidCardErrorBoundary caught error for ${this.props.symbol}:`, error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="w-full max-w-[99%] xl:max-w-[98%] 2xl:max-w-[1880px] mx-auto bg-white rounded-xl border border-rose-200/90 shadow-sm p-4 text-center">
+          <div className="font-bold text-rose-700 text-sm mb-1">
+            {this.props.symbol} 金字塔圖表載入時發生狀況
+          </div>
+          <p className="text-xs text-zinc-500 mb-3 font-mono">
+            {this.state.error?.message || '請點擊下方按鈕重試'}
+          </p>
+          <button
+            type="button"
+            onClick={() => this.setState({ hasError: false, error: null })}
+            className="px-3 py-1 bg-rose-50 border border-rose-300 hover:bg-rose-100 rounded-lg text-xs font-bold text-rose-800 transition cursor-pointer"
+          >
+            重試載入
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // 拆分交易百分比選項 (8 大標準拆分交易)
 export interface SplitTradeOption {
   id: string; // 標準 ID, 如 "第一批拆分交易(7%)"
@@ -2113,7 +2151,8 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
 
     const groups = new Map<string, StockTab[]>();
     simTabs.forEach((t) => {
-      const sym = t.symbol.trim().toUpperCase();
+      const sym = (t?.symbol || "").trim().toUpperCase();
+      if (!sym) return;
       if (!groups.has(sym)) groups.set(sym, []);
       groups.get(sym)!.push(t);
     });
@@ -2148,10 +2187,10 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
 
     // 補足其餘非活躍（如 COMPLETED）的虛擬交易卡片作為備援
     allTabs
-      .filter((t) => t.tradeType !== "real" && (t.symbol || "").trim() !== "")
+      .filter((t) => t.tradeType !== "real" && (t?.symbol || "").trim() !== "")
       .forEach((t) => {
-        const sym = t.symbol.trim().toUpperCase();
-        if (!map.has(sym)) {
+        const sym = (t?.symbol || "").trim().toUpperCase();
+        if (sym && !map.has(sym)) {
           map.set(sym, t);
         }
       });
@@ -2163,12 +2202,13 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
   const realStockMap = useMemo(() => {
     const map = new Map<string, StockTab>();
     const realTabs = allTabs.filter(
-      (t) => t.status !== "COMPLETED" && t.tradeType === "real" && (t.symbol || "").trim() !== ""
+      (t) => t.status !== "COMPLETED" && t.tradeType === "real" && (t?.symbol || "").trim() !== ""
     );
 
     const groups = new Map<string, StockTab[]>();
     realTabs.forEach((t) => {
-      const sym = t.symbol.trim().toUpperCase();
+      const sym = (t?.symbol || "").trim().toUpperCase();
+      if (!sym) return;
       if (!groups.has(sym)) groups.set(sym, []);
       groups.get(sym)!.push(t);
     });
@@ -2203,10 +2243,10 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
 
     // 補足其餘非活躍（如 COMPLETED）的真實交易卡片作為備援
     allTabs
-      .filter((t) => t.tradeType === "real" && (t.symbol || "").trim() !== "")
+      .filter((t) => t.tradeType === "real" && (t?.symbol || "").trim() !== "")
       .forEach((t) => {
-        const sym = t.symbol.trim().toUpperCase();
-        if (!map.has(sym)) {
+        const sym = (t?.symbol || "").trim().toUpperCase();
+        if (sym && !map.has(sym)) {
           map.set(sym, t);
         }
       });
@@ -2319,13 +2359,13 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
       filteredTabs
         .filter((tab) => selectedCardIds.has(tab.id))
         .forEach((tab) => {
-          const sym = tab.symbol.trim().toUpperCase();
-          if (!symMap.has(sym)) {
+          const sym = (tab?.symbol || "").trim().toUpperCase();
+          if (sym && !symMap.has(sym)) {
             symMap.set(sym, tab);
           }
         });
     }
-    return Array.from(symMap.values()).sort((a, b) => a.symbol.localeCompare(b.symbol));
+    return Array.from(symMap.values()).sort((a, b) => (a?.symbol || "").localeCompare(b?.symbol || ""));
   }, [filteredTabs, selectedCardIds]);
 
   // 判斷股票標籤是否符合當前交易模式 Tabs (嚴格限定僅在主畫面有勾選 Tickbox 之卡片才可出現在視覺線看板中)
@@ -2630,7 +2670,8 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     const newPos = { ...positions };
 
     availableBlockStocks.forEach((tab, index) => {
-      const sym = tab.symbol.trim().toUpperCase();
+      const sym = (tab?.symbol || "").trim().toUpperCase();
+      if (!sym) return;
       if (!newPos[sym]) {
         addedCount++;
         const totalNow = Object.keys(newPos).length;
@@ -2953,7 +2994,7 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     [userId, tagSizeOffset]
   );
 
-  // 自動檢測並校準具備分隔線設定的股票（特別是 XEL），使其標籤位置與卡片分隔線及現價精確同步
+  // 自動檢測並校準具備分隔線設定的股票（特別是 XEL），使其標籤位置與卡片分隔線及現價精確同步，且絕不更動卡片上的分隔線數據
   const calibratedTabKeysRef = useRef<string>("");
   useEffect(() => {
     if (!isOpen || allTabs.length === 0) return;
@@ -2982,25 +3023,28 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
         )
       );
 
-      // 特別對 XEL 或具備分隔線的股票進行同步檢查
+      // 僅對已在畫布上的股票或 XEL 進行校準，避免將未放置標籤強制塞入畫布
+      const existingPos = positions[sym];
       if (hasDividers || sym === "XEL") {
+        if (!existingPos && sym !== "XEL") return;
+
         const strat = strategiesMap?.[tab.id] || (tab as any).strategy;
         const stat = statsMap?.[tab.id];
         const avgCost = stat?.totalQuantity !== 0 ? stat?.averagePrice : undefined;
         const holdingQty = stat?.totalQuantity ?? (tab as any).holdingQuantity;
         const targetY = calculateCanvasYFromDividers(tab, strat, avgCost, holdingQty);
 
-        if (targetY !== null) {
-          const currentY = positions[sym]?.y;
+        if (targetY !== null && !isNaN(targetY)) {
+          const currentY = existingPos?.y;
           const diff = currentY !== undefined ? Math.abs(currentY - targetY) : 999;
-          // 若為 XEL 且存在位置偏差，或任意股票無座標/存在明顯偏差 (>0.1)
-          if ((sym === "XEL" && diff > 0.05) || currentY === undefined) {
+          // 若偏差大於 0.1% 則校準
+          if (diff > 0.1) {
             nextPositions[sym] = {
-              ...nextPositions[sym],
-              x: nextPositions[sym]?.x ?? 50,
+              ...existingPos,
+              x: existingPos?.x ?? 50,
               y: targetY,
-              shape: nextPositions[sym]?.shape || "circle",
-              sizeOffset: nextPositions[sym]?.sizeOffset ?? tagSizeOffset,
+              shape: existingPos?.shape || "circle",
+              sizeOffset: existingPos?.sizeOffset ?? tagSizeOffset,
               updatedAt: new Date().toISOString(),
             };
             hasUpdates = true;
@@ -3010,9 +3054,10 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     });
 
     if (hasUpdates) {
-      savePositionsDirectly(nextPositions, tagSizeOffset);
+      setPositions(nextPositions);
+      saveVisualLinesDataOptimistic(userId, nextPositions, tagSizeOffset);
     }
-  }, [isOpen, allTabs, strategiesMap, statsMap, tagSizeOffset, savePositionsDirectly, positions]);
+  }, [isOpen, allTabs, strategiesMap, statsMap, tagSizeOffset, userId, positions]);
 
   // 設定/切換勾選股票標籤的攤平進度 (#1, #2, #3, #4) 或拆分交易選項並自動儲存
   const handleSetDcaProgress = async (step?: "#1" | "#2" | "#3" | "#4" | string) => {
@@ -3937,7 +3982,7 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
         targetSymbols = [...activeCanvasSymbols];
         setSelectedTagSymbols(targetSymbols);
       } else if (allTabs && allTabs.length > 0) {
-        const fromTabs = allTabs.map((t) => t.symbol.trim().toUpperCase()).filter(Boolean);
+        const fromTabs = allTabs.map((t) => (t?.symbol || "").trim().toUpperCase()).filter(Boolean);
         if (fromTabs.length > 0) {
           targetSymbols = fromTabs;
           setSelectedTagSymbols(targetSymbols);
@@ -3963,6 +4008,20 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     });
   }, [showPyramidView, selectedTagSymbols, activeCanvasSymbols, allTabs]);
 
+  // 跨設備或未勾選時，保證 Primial 視圖始終能取用最完整的個股代號集合
+  const displayPyramidSymbols = useMemo(() => {
+    if (selectedTagSymbols && selectedTagSymbols.length > 0) {
+      return selectedTagSymbols;
+    }
+    if (activeCanvasSymbols && activeCanvasSymbols.length > 0) {
+      return activeCanvasSymbols;
+    }
+    if (allTabs && allTabs.length > 0) {
+      return allTabs.map((t) => (t?.symbol || "").trim().toUpperCase()).filter(Boolean);
+    }
+    return [];
+  }, [selectedTagSymbols, activeCanvasSymbols, allTabs]);
+
   // 跳轉至指定個股卡片並將畫面上下置中
   const handleJumpToPyramidStock = useCallback((symbol: string) => {
     const cleanSym = symbol.trim().toUpperCase();
@@ -3987,16 +4046,18 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     }));
   }, []);
 
-  // 全部展開/收合
+  // 全部展開/收合 (依 displayPyramidSymbols 為準)
   const toggleAllCardsCollapse = useCallback(() => {
     playClickSound();
-    const allCollapsed = selectedTagSymbols.every((sym) => Boolean(collapsedCards[sym]));
-    const nextState: Record<string, boolean> = {};
-    selectedTagSymbols.forEach((sym) => {
+    const symbols = displayPyramidSymbols;
+    if (symbols.length === 0) return;
+    const allCollapsed = symbols.every((sym) => Boolean(collapsedCards[sym]));
+    const nextState: Record<string, boolean> = { ...collapsedCards };
+    symbols.forEach((sym) => {
       nextState[sym] = !allCollapsed;
     });
     setCollapsedCards(nextState);
-  }, [selectedTagSymbols, collapsedCards]);
+  }, [displayPyramidSymbols, collapsedCards]);
 
   // 快捷切換 Primial 金字塔圖表卡片分隔線 (Alt + D)
   const handleTogglePyramidCardDividers = useCallback(() => {
@@ -4040,151 +4101,174 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
   // 計算個股 Primial 金字塔圖表所有必要資料
   const getStockPyramidData = useCallback(
     (symbol: string) => {
-      const cleanSym = symbol.trim().toUpperCase();
-      const candidateTabs = allTabs.filter(
-        (t) => (t.symbol || "").trim().toUpperCase() === cleanSym
-      );
-      const tab =
-        allStockMap.get(cleanSym) ||
-        candidateTabs.find((t) => t.status !== "COMPLETED") ||
-        candidateTabs[0];
-      const tabId = tab?.id || cleanSym;
-      const strategy = strategiesMap?.[tabId] || strategiesMap?.[cleanSym];
+      try {
+        const cleanSym = (symbol || "").trim().toUpperCase();
+        const candidateTabs = (allTabs || []).filter(
+          (t) => (t?.symbol || "").trim().toUpperCase() === cleanSym
+        );
+        const tab =
+          allStockMap?.get(cleanSym) ||
+          candidateTabs.find((t) => t?.status !== "COMPLETED") ||
+          candidateTabs[0];
+        const tabId = tab?.id || cleanSym;
+        const strategy = strategiesMap?.[tabId] || strategiesMap?.[cleanSym];
 
-      // 取得歷史交易 (若當前 tabId 無資料，跨候選 tab 或 tab.trades 補全)
-      let trades: any[] = tradesMap?.[tabId] || tradesMap?.[cleanSym] || [];
-      if ((!trades || trades.length === 0) && candidateTabs.length > 0) {
-        for (const cTab of candidateTabs) {
-          if (tradesMap?.[cTab.id] && tradesMap[cTab.id].length > 0) {
-            trades = tradesMap[cTab.id];
-            break;
+        // 取得歷史交易 (若當前 tabId 無資料，跨候選 tab 或 tab.trades 補全)
+        let rawTrades: any[] = tradesMap?.[tabId] || tradesMap?.[cleanSym] || [];
+        if ((!rawTrades || rawTrades.length === 0) && candidateTabs.length > 0) {
+          for (const cTab of candidateTabs) {
+            if (cTab?.id && tradesMap?.[cTab.id] && tradesMap[cTab.id].length > 0) {
+              rawTrades = tradesMap[cTab.id];
+              break;
+            }
           }
         }
-      }
-      if ((!trades || trades.length === 0) && Array.isArray((tab as any)?.trades) && (tab as any).trades.length > 0) {
-        trades = (tab as any).trades;
-      }
+        if ((!rawTrades || rawTrades.length === 0) && Array.isArray((tab as any)?.trades) && (tab as any).trades.length > 0) {
+          rawTrades = (tab as any).trades;
+        }
+        const trades = Array.isArray(rawTrades) ? rawTrades.filter((t) => t && typeof t === "object") : [];
 
-      // 取得統計數據
-      let stats = statsMap?.[tabId] || statsMap?.[cleanSym];
-      if (!stats && candidateTabs.length > 0) {
-        for (const cTab of candidateTabs) {
-          if (statsMap?.[cTab.id]) {
-            stats = statsMap[cTab.id];
-            break;
+        // 取得統計數據
+        let stats = statsMap?.[tabId] || statsMap?.[cleanSym];
+        if (!stats && candidateTabs.length > 0) {
+          for (const cTab of candidateTabs) {
+            if (cTab?.id && statsMap?.[cTab.id]) {
+              stats = statsMap[cTab.id];
+              break;
+            }
           }
         }
+
+        // 現價
+        const liveP = livePrices?.[cleanSym];
+        const currentPrice =
+          typeof liveP === "number" && liveP > 0
+            ? liveP
+            : tab?.currentPrice && tab.currentPrice > 0
+            ? tab.currentPrice
+            : stats?.averagePrice && stats.averagePrice > 0
+            ? stats.averagePrice
+            : 0;
+
+        // 若 stats 缺少或持有數為 0，且存在 trades，透過 calculateStats 即時動態計算精準持有數據
+        if ((!stats || stats.totalQuantity === undefined || stats.totalQuantity === 0) && trades.length > 0) {
+          stats = calculateStats(trades, currentPrice);
+        }
+
+        // 平均成本
+        const holdingAvgPrice =
+          stats?.averagePrice && stats.averagePrice > 0
+            ? stats.averagePrice
+            : typeof tab?.averageCost === "number" && tab.averageCost > 0
+            ? tab.averageCost
+            : !isNaN(parseFloat(String(tab?.averageCost))) && parseFloat(String(tab?.averageCost)) > 0
+            ? parseFloat(String(tab?.averageCost))
+            : 0;
+
+        // 持有股數
+        let holdingQty =
+          stats?.totalQuantity !== undefined && stats.totalQuantity !== null && !isNaN(stats.totalQuantity)
+            ? stats.totalQuantity
+            : typeof tab?.holdingQuantity === "number" && !isNaN(tab.holdingQuantity)
+            ? tab.holdingQuantity
+            : !isNaN(parseFloat(String(tab?.holdingQuantity)))
+            ? parseFloat(String(tab?.holdingQuantity))
+            : 0;
+
+        // 資金池與預計購買量計算 (支援 plannedBuyPercent、plannedBuyQty、averagingRowsSys2 與持有股數推算)
+        const currentRiskPool =
+          maxStrategyRiskPool60 && maxStrategyRiskPool60 > 0 ? maxStrategyRiskPool60 : 100000;
+        const plannedPercent =
+          tab?.plannedBuyPercent !== undefined && tab?.plannedBuyPercent !== null && !isNaN(Number(tab.plannedBuyPercent))
+            ? Number(tab.plannedBuyPercent)
+            : 0;
+        const usableCapital = plannedPercent > 0 ? currentRiskPool * (plannedPercent / 100) : 0;
+        
+        let plannedQty = 0;
+        if (currentPrice > 0 && usableCapital > 0) {
+          plannedQty = Math.floor(usableCapital / currentPrice);
+        } else if (tab?.plannedBuyQty && Number(tab.plannedBuyQty) > 0) {
+          plannedQty = Number(tab.plannedBuyQty);
+        }
+
+        // 向下攤平試算設定 (系統2)
+        const { sys2: defaultSys2 } = generateAveragingDownRows(
+          holdingAvgPrice > 0 ? holdingAvgPrice : currentPrice
+        );
+        const averagingRowsSys2 =
+          tab?.averagingRowsSys2 &&
+          Array.isArray(tab.averagingRowsSys2) &&
+          tab.averagingRowsSys2.length > 0
+            ? tab.averagingRowsSys2
+            : defaultSys2;
+
+        // 若尚未設定 plannedQty，嘗試從 averagingRowsSys2 計算填寫之各批總預購股數
+        if (plannedQty <= 0 && averagingRowsSys2 && averagingRowsSys2.length > 0) {
+          const rowsSum = averagingRowsSys2.reduce((acc: number, r: any) => {
+            const q1 = r?.quantity ? parseFloat(r.quantity) : 0;
+            const q2 = r?.quantity2 ? parseFloat(r.quantity2) : 0;
+            return acc + (isNaN(q1) ? 0 : q1) + (isNaN(q2) ? 0 : q2);
+          }, 0);
+          if (rowsSum > 0) plannedQty = rowsSum;
+        }
+
+        // 若仍為 0 且已有持股或交易紀錄，以持股推算或作為規劃基準
+        if (plannedQty <= 0 && holdingQty > 0) {
+          plannedQty = Math.max(holdingQty, Math.ceil(holdingQty / 0.15));
+        }
+
+        // 使用 calculations 模組集中計算四批次規劃與已購數量，保證所有頁面與圖表數值精確同步
+        const batchPlanResult = calculateBatchPlanning({
+          plannedQty,
+          usableCapital,
+          currentPrice,
+          holdingQty,
+          trades,
+          averagingRowsSys2,
+          plannedBuyQty: tab?.plannedBuyQty ? Number(tab.plannedBuyQty) : undefined,
+        });
+
+        const batchConfigList = batchPlanResult?.batches || [];
+        const plannedShares = batchPlanResult?.plannedQty || plannedQty;
+        holdingQty = Math.max(holdingQty, batchPlanResult?.totalBought || 0);
+
+        // 關鍵防線
+        const visualLevels = getVisualPriceLevels(tab, strategy, (tab as any)?.plannedOrders) || [];
+
+        // 公司英文名稱
+        const companyName = tab?.companyName || (tab as any)?.cardTitle || (tab as any)?.name || cleanSym;
+
+        return {
+          symbol: cleanSym,
+          tab,
+          companyName,
+          currentPrice,
+          holdingAvgPrice,
+          holdingQty,
+          usableCapital,
+          plannedQty: plannedShares || plannedQty,
+          batchConfigList,
+          averagingRowsSys2,
+          trades,
+          visualLevels,
+        };
+      } catch (err) {
+        console.error(`getStockPyramidData error for ${symbol}:`, err);
+        return {
+          symbol: (symbol || "").trim().toUpperCase(),
+          tab: null,
+          companyName: (symbol || "").trim().toUpperCase(),
+          currentPrice: 0,
+          holdingAvgPrice: 0,
+          holdingQty: 0,
+          usableCapital: 0,
+          plannedQty: 0,
+          batchConfigList: [],
+          averagingRowsSys2: [],
+          trades: [],
+          visualLevels: [],
+        };
       }
-
-      // 現價
-      const liveP = livePrices[cleanSym];
-      const currentPrice =
-        typeof liveP === "number" && liveP > 0
-          ? liveP
-          : tab?.currentPrice && tab.currentPrice > 0
-          ? tab.currentPrice
-          : stats?.averagePrice && stats.averagePrice > 0
-          ? stats.averagePrice
-          : 0;
-
-      // 若 stats 缺少或持有數為 0，且存在 trades，透過 calculateStats 即時動態計算精準持有數據
-      if ((!stats || stats.totalQuantity === undefined || stats.totalQuantity === 0) && trades && trades.length > 0) {
-        stats = calculateStats(trades, currentPrice);
-      }
-
-      // 平均成本
-      const holdingAvgPrice =
-        stats?.averagePrice && stats.averagePrice > 0
-          ? stats.averagePrice
-          : typeof tab?.averageCost === "number" && tab.averageCost > 0
-          ? tab.averageCost
-          : parseFloat(String(tab?.averageCost)) || 0;
-
-      // 持有股數
-      let holdingQty =
-        stats?.totalQuantity !== undefined && stats.totalQuantity !== 0
-          ? stats.totalQuantity
-          : typeof tab?.holdingQuantity === "number" && tab.holdingQuantity > 0
-          ? tab.holdingQuantity
-          : parseFloat(String(tab?.holdingQuantity)) || 0;
-
-      // 資金池與預計購買量計算 (支援 plannedBuyPercent、plannedBuyQty、averagingRowsSys2 與持有股數推算)
-      const currentRiskPool =
-        maxStrategyRiskPool60 && maxStrategyRiskPool60 > 0 ? maxStrategyRiskPool60 : 100000;
-      const plannedPercent =
-        tab?.plannedBuyPercent !== undefined && tab?.plannedBuyPercent !== null
-          ? Number(tab.plannedBuyPercent)
-          : 0;
-      const usableCapital = plannedPercent > 0 ? currentRiskPool * (plannedPercent / 100) : 0;
-      
-      let plannedQty = 0;
-      if (currentPrice > 0 && usableCapital > 0) {
-        plannedQty = Math.floor(usableCapital / currentPrice);
-      } else if (tab?.plannedBuyQty && Number(tab.plannedBuyQty) > 0) {
-        plannedQty = Number(tab.plannedBuyQty);
-      }
-
-      // 向下攤平試算設定 (系統2)
-      const { sys2: defaultSys2 } = generateAveragingDownRows(
-        holdingAvgPrice > 0 ? holdingAvgPrice : currentPrice
-      );
-      const averagingRowsSys2 =
-        tab?.averagingRowsSys2 &&
-        Array.isArray(tab.averagingRowsSys2) &&
-        tab.averagingRowsSys2.length > 0
-          ? tab.averagingRowsSys2
-          : defaultSys2;
-
-      // 若尚未設定 plannedQty，嘗試從 averagingRowsSys2 計算填寫之各批總預購股數
-      if (plannedQty <= 0 && averagingRowsSys2 && averagingRowsSys2.length > 0) {
-        const rowsSum = averagingRowsSys2.reduce((acc: number, r: any) => {
-          const q1 = r?.quantity ? parseFloat(r.quantity) : 0;
-          const q2 = r?.quantity2 ? parseFloat(r.quantity2) : 0;
-          return acc + q1 + q2;
-        }, 0);
-        if (rowsSum > 0) plannedQty = rowsSum;
-      }
-
-      // 若仍為 0 且已有持股或交易紀錄，以持股推算或作為規劃基準
-      if (plannedQty <= 0 && holdingQty > 0) {
-        plannedQty = Math.max(holdingQty, Math.ceil(holdingQty / 0.15));
-      }
-
-      // 使用 calculations 模組集中計算四批次規劃與已購數量，保證所有頁面與圖表數值精確同步
-      const batchPlanResult = calculateBatchPlanning({
-        plannedQty,
-        usableCapital,
-        currentPrice,
-        holdingQty,
-        trades,
-        averagingRowsSys2,
-        plannedBuyQty: tab?.plannedBuyQty ? Number(tab.plannedBuyQty) : undefined,
-      });
-
-      const batchConfigList = batchPlanResult.batches;
-      const plannedShares = batchPlanResult.plannedQty;
-      holdingQty = Math.max(holdingQty, batchPlanResult.totalBought);
-
-      // 關鍵防線
-      const visualLevels = getVisualPriceLevels(tab, strategy, (tab as any)?.plannedOrders);
-
-      // 公司英文名稱
-      const companyName = tab?.companyName || (tab as any)?.cardTitle || (tab as any)?.name || "";
-
-      return {
-        symbol: cleanSym,
-        tab,
-        companyName,
-        currentPrice,
-        holdingAvgPrice,
-        holdingQty,
-        usableCapital,
-        plannedQty: plannedShares || plannedQty,
-        batchConfigList,
-        averagingRowsSys2,
-        trades,
-        visualLevels,
-      };
     },
     [
       allStockMap,
@@ -4199,7 +4283,7 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
 
   // 當處於 Primial 視圖時，監聽滾動事件使頂部 Tabs 與畫面中最近的個股卡片雙向連動
   useEffect(() => {
-    if (!showPyramidView || selectedTagSymbols.length === 0) return;
+    if (!showPyramidView || displayPyramidSymbols.length === 0) return;
 
     const container = pyramidScrollContainerRef.current;
     if (!container) return;
@@ -4208,10 +4292,10 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
       const containerRect = container.getBoundingClientRect();
       const containerCenterY = containerRect.top + containerRect.height / 2;
 
-      let closestSymbol = selectedTagSymbols[0];
+      let closestSymbol = displayPyramidSymbols[0];
       let minDistance = Infinity;
 
-      selectedTagSymbols.forEach((sym) => {
+      displayPyramidSymbols.forEach((sym) => {
         const el = document.getElementById(`pyramid-card-${sym}`);
         if (el) {
           const rect = el.getBoundingClientRect();
@@ -4231,7 +4315,7 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
 
     container.addEventListener("scroll", handleScroll, { passive: true });
     return () => container.removeEventListener("scroll", handleScroll);
-  }, [showPyramidView, selectedTagSymbols]);
+  }, [showPyramidView, displayPyramidSymbols]);
 
   const lastHKeyPressTimeRef = useRef<number>(0);
 
@@ -4393,19 +4477,19 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
         e.preventDefault();
         e.stopPropagation();
 
-        if (showPyramidView && selectedTagSymbols.length > 0) {
+        if (showPyramidView && displayPyramidSymbols.length > 0) {
           const isLeft = e.key === "ArrowLeft" || e.code === "ArrowLeft";
-          const currentSym = (activePyramidSymbol || selectedTagSymbols[0] || "").trim().toUpperCase();
-          const curIdx = selectedTagSymbols.findIndex(
+          const currentSym = (activePyramidSymbol || displayPyramidSymbols[0] || "").trim().toUpperCase();
+          const curIdx = displayPyramidSymbols.findIndex(
             (s) => s.trim().toUpperCase() === currentSym
           );
           const safeCurIdx = curIdx >= 0 ? curIdx : 0;
           const nextIdx = isLeft
-            ? (safeCurIdx - 1 + selectedTagSymbols.length) % selectedTagSymbols.length
-            : (safeCurIdx + 1) % selectedTagSymbols.length;
-          const nextSym = selectedTagSymbols[nextIdx].trim().toUpperCase();
+            ? (safeCurIdx - 1 + displayPyramidSymbols.length) % displayPyramidSymbols.length
+            : (safeCurIdx + 1) % displayPyramidSymbols.length;
+          const nextSym = displayPyramidSymbols[nextIdx].trim().toUpperCase();
           handleJumpToPyramidStock(nextSym);
-          toast.info(`已切換個股：${nextSym} (${nextIdx + 1}/${selectedTagSymbols.length})`, {
+          toast.info(`已切換個股：${nextSym} (${nextIdx + 1}/${displayPyramidSymbols.length})`, {
             id: "primal-stock-switch",
             duration: 1000,
           });
@@ -4456,7 +4540,7 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     activeTradeModeTab,
     handleTogglePyramidView,
     showPyramidView,
-    selectedTagSymbols,
+    displayPyramidSymbols,
     activePyramidSymbol,
     handleJumpToPyramidStock,
     handleTogglePyramidCardDividers,
@@ -6575,16 +6659,16 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
                   <span className="hidden md:inline text-xs font-bold text-zinc-400">分批進場金字塔動態互動圖表</span>
                 </span>
                 <span className="px-2 py-0.5 bg-amber-400/15 border border-amber-400/30 text-amber-300 text-xs font-black rounded-full">
-                  已選取 {selectedTagSymbols.length} 檔
+                  已選取 {displayPyramidSymbols.length} 檔
                 </span>
               </div>
             </div>
 
             {/* 中間：個股的名字 Tab (可點擊快速跳轉到該股，並將畫面上下置中) */}
             <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar scrollbar-hide py-1 max-w-[45vw] sm:max-w-[55vw] lg:max-w-[60vw]">
-              {selectedTagSymbols.map((symbol) => {
+              {displayPyramidSymbols.map((symbol) => {
                 const cleanSym = symbol.trim().toUpperCase();
-                const isActive = (activePyramidSymbol || selectedTagSymbols[0]) === cleanSym;
+                const isActive = (activePyramidSymbol || displayPyramidSymbols[0]) === cleanSym;
                 const pData = getStockPyramidData(cleanSym);
                 return (
                   <button
@@ -6682,7 +6766,7 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
                 onClick={toggleAllCardsCollapse}
                 className="px-2.5 sm:px-3 py-1.5 bg-zinc-800/80 hover:bg-zinc-700 text-zinc-200 hover:text-white rounded-full text-xs font-bold transition-all border border-zinc-700/60 cursor-pointer active:scale-95 shrink-0"
               >
-                {selectedTagSymbols.every((sym) => Boolean(collapsedCards[sym])) ? "全部展開" : "全部收合"}
+                {displayPyramidSymbols.length > 0 && displayPyramidSymbols.every((sym) => Boolean(collapsedCards[sym])) ? "全部展開" : "全部收合"}
               </button>
 
               <button
@@ -6705,64 +6789,73 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
             }}
             className="flex-1 min-h-0 h-full overflow-y-auto px-2 sm:px-4 lg:px-6 py-2.5 sm:py-3 space-y-4 bg-[#f3f4f6] scrollbar-hide no-scrollbar [&::-webkit-scrollbar]:hidden [scrollbar-width:none] [-ms-overflow-style:none] overscroll-contain focus:outline-none scroll-smooth"
           >
-            {selectedTagSymbols.map((symbol) => {
-              const cleanSym = symbol.trim().toUpperCase();
-              const pData = getStockPyramidData(cleanSym);
-              const isCollapsed = Boolean(collapsedCards[cleanSym]);
+            {displayPyramidSymbols.length === 0 ? (
+              <div className="flex flex-col items-center justify-center min-h-[300px] text-zinc-500 bg-white rounded-xl border border-zinc-200/90 shadow-sm p-8 text-center max-w-xl mx-auto my-8">
+                <Layers className="w-10 h-10 text-amber-400/80 mb-3" />
+                <div className="text-base font-bold text-zinc-700 mb-1">目前尚無選取的個股</div>
+                <div className="text-xs text-zinc-400">請在視覺線看板勾選標籤，或在畫布上加入股票後再行開啟金字塔圖表</div>
+              </div>
+            ) : (
+              displayPyramidSymbols.map((symbol) => {
+                const cleanSym = symbol.trim().toUpperCase();
+                const pData = getStockPyramidData(cleanSym);
+                const isCollapsed = Boolean(collapsedCards[cleanSym]);
 
-              return (
-                <div
-                  key={cleanSym}
-                  id={`pyramid-card-${cleanSym}`}
-                  className="w-full max-w-[99%] xl:max-w-[98%] 2xl:max-w-[1880px] mx-auto bg-white rounded-xl border border-zinc-200/90 shadow-sm p-2.5 sm:p-3.5 transition-all duration-200 hover:shadow-md"
-                >
-                  {/* 卡片主體：分批進場金字塔動態互動圖表 (整合代號/公司名與收合功能，移除重複雙標題，上下微縮置中完整顯示) */}
-                  <System2PlanningChart
-                    compact={true}
-                    symbol={cleanSym}
-                    companyName={pData.companyName || pData.tab?.companyName || cleanSym}
-                    isExpanded={!isCollapsed}
-                    onToggleExpand={() => toggleCardCollapse(cleanSym)}
-                    currentPrice={pData.currentPrice}
-                    holdingAvgPrice={pData.holdingAvgPrice}
-                    holdingQty={pData.holdingQty}
-                    batches={pData.batchConfigList}
-                    averagingRowsSys2={pData.averagingRowsSys2}
-                    includeCurrentHolding={true}
-                    refPnLPointSys2=""
-                    usableCapital={pData.usableCapital}
-                    plannedQty={pData.plannedQty}
-                    trades={pData.trades}
-                    visualLevels={pData.visualLevels}
-                    showCardDividers={pyramidShowCardDividers}
-                    onToggleCardDividers={handleTogglePyramidCardDividers}
-                    selectedLevelTypes={pyramidLevelTypes}
-                    onToggleLevelType={(type) => {
-                      setPyramidLevelTypes((prev) => ({
-                        ...prev,
-                        [type]: !prev[type],
-                      }));
-                    }}
-                    onSelectAllLevelTypes={() => {
-                      setPyramidLevelTypes({
-                        support: true,
-                        stopLoss: true,
-                        resistance: true,
-                        takeProfit: true,
-                      });
-                    }}
-                    onDeselectAllLevelTypes={() => {
-                      setPyramidLevelTypes({
-                        support: false,
-                        stopLoss: false,
-                        resistance: false,
-                        takeProfit: false,
-                      });
-                    }}
-                  />
-                </div>
-              );
-            })}
+                return (
+                  <PyramidCardErrorBoundary key={cleanSym} symbol={cleanSym}>
+                    <div
+                      id={`pyramid-card-${cleanSym}`}
+                      className="w-full max-w-[99%] xl:max-w-[98%] 2xl:max-w-[1880px] mx-auto bg-white rounded-xl border border-zinc-200/90 shadow-sm p-2.5 sm:p-3.5 transition-shadow duration-200 hover:shadow-md"
+                    >
+                      {/* 卡片主體：分批進場金字塔動態互動圖表 (整合代號/公司名與收合功能，移除重複雙標題，上下微縮置中完整顯示) */}
+                      <System2PlanningChart
+                        compact={true}
+                        symbol={cleanSym}
+                        companyName={pData.companyName || pData.tab?.companyName || cleanSym}
+                        isExpanded={!isCollapsed}
+                        onToggleExpand={() => toggleCardCollapse(cleanSym)}
+                        currentPrice={pData.currentPrice}
+                        holdingAvgPrice={pData.holdingAvgPrice}
+                        holdingQty={pData.holdingQty}
+                        batches={pData.batchConfigList}
+                        averagingRowsSys2={pData.averagingRowsSys2}
+                        includeCurrentHolding={true}
+                        refPnLPointSys2=""
+                        usableCapital={pData.usableCapital}
+                        plannedQty={pData.plannedQty}
+                        trades={pData.trades}
+                        visualLevels={pData.visualLevels}
+                        showCardDividers={pyramidShowCardDividers}
+                        onToggleCardDividers={handleTogglePyramidCardDividers}
+                        selectedLevelTypes={pyramidLevelTypes}
+                        onToggleLevelType={(type) => {
+                          setPyramidLevelTypes((prev) => ({
+                            ...prev,
+                            [type]: !prev[type],
+                          }));
+                        }}
+                        onSelectAllLevelTypes={() => {
+                          setPyramidLevelTypes({
+                            support: true,
+                            stopLoss: true,
+                            resistance: true,
+                            takeProfit: true,
+                          });
+                        }}
+                        onDeselectAllLevelTypes={() => {
+                          setPyramidLevelTypes({
+                            support: false,
+                            stopLoss: false,
+                            resistance: false,
+                            takeProfit: false,
+                          });
+                        }}
+                      />
+                    </div>
+                  </PyramidCardErrorBoundary>
+                );
+              })
+            )}
           </div>
         </div>
       )}

@@ -267,9 +267,12 @@ export function analyzeCardDividers(
         const calcY = getYPct(ann.price);
         y = typeof calcY === "number" && !isNaN(calcY) ? Math.round(calcY * 100) / 100 : (ann.y ?? ann.y1 ?? 0);
       } else {
-        y = ann.y !== undefined 
-          ? ann.y 
-          : (ann.y1 !== undefined && ann.y2 !== undefined ? (ann.y1 + ann.y2) / 2 : (ann.y1 ?? 0));
+        y =
+          ann.y !== undefined
+            ? ann.y
+            : ann.y1 !== undefined && ann.y2 !== undefined
+            ? (ann.y1 + ann.y2) / 2
+            : ann.y1 ?? 0;
       }
       dividerList.push({ ann, colorType, y });
     }
@@ -307,6 +310,9 @@ export function extractCardPricePoints(
   dynamicPrice: number;
   uniqueSortedPrices: number[];
 } {
+  if (!tab) {
+    return { dynamicPrice: 0, uniqueSortedPrices: [] };
+  }
   const tabAny = tab as any;
   const dynamicPrice =
     tab.currentPrice && tab.currentPrice > 0
