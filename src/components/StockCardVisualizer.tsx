@@ -1,10 +1,13 @@
-import React, { useMemo, useState, useRef } from "react";
+import React, { useMemo, useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { PlannedOrder, ChartAnnotation } from "../types";
-import { MousePointer, Minus, Square, Type, Trash2, Eraser, Undo2, ArrowUpRight, Move, Download, Share2, Camera, Loader2, SeparatorHorizontal, Check } from "lucide-react";
+import { PlannedOrder, ChartAnnotation, Trade } from "../types";
+import { MousePointer, Minus, Square, Type, Trash2, Eraser, Undo2, ArrowUpRight, Move, Download, Share2, Camera, Loader2, SeparatorHorizontal, Check, Layers, History, Sparkles } from "lucide-react";
 import html2canvas from "html2canvas";
 import { toast } from "sonner";
 import { getAxisLetterForColor } from "../utils/visualLinesSync";
+import { calculateBatchPlanning } from "../lib/calculations";
+import { formatTimestamp } from "../lib/dateUtils";
+import { safeSessionStorage } from "../lib/utils";
 import {
   Chart as ChartJS,
   registerables,
@@ -22,6 +25,7 @@ interface Props {
   onUpdateAnnotations?: (annotations: ChartAnnotation[]) => void;
   averageCost?: number;
   averageCostQuantity?: number;
+  trades?: Trade[];
   averagingRows?: { price: string; quantity: string; quantity2?: string; bought?: boolean; riskFlag?: boolean }[];
   averagingRowsSys2?: { price: string; quantity: string; quantity2?: string; bought?: boolean; riskFlag?: boolean }[];
   plannedBuyQty?: number;
@@ -82,77 +86,158 @@ interface Props {
   }) => void;
 }
 
-function resolveCollisions<T extends { rawY: number; isFixed?: boolean }>(
+function resolveGlobalLayout<T extends { id: string; price?: number; rawY: number; column: number; isFixed?: boolean }>(
   items: T[],
-  minDisp: number,
+  minColumnDisp = 4.3,
 ): (T & { y: number })[] {
   if (items.length === 0) return [];
   if (items.length === 1) {
     return [{ ...items[0], y: items[0].isFixed ? items[0].rawY : Math.max(7, Math.min(93, items[0].rawY)) }];
   }
 
-  const sorted = [...items]
-    .sort((a, b) => a.rawY - b.rawY)
-    .map((item) => ({ ...item, y: item.isFixed ? item.rawY : Math.max(7, Math.min(93, item.rawY)) }));
-
   const minY = 7;
   const maxY = 93;
-  const n = sorted.length;
-  // Adaptive minDisp so large numbers of targets don't push beyond container bounds
-  const effectiveMinDisp = Math.min(minDisp, (maxY - minY) / Math.max(1, n - 1));
 
-  // 80 rounds of gentle iterative spring relaxation and collision resolution
-  for (let iter = 0; iter < 80; iter++) {
-    // 1. Gentle spring attraction to raw position (keeps labels as faithful to actual price line as possible)
+  // 1. 全域嚴格依照價格由大到小排序（價格最高在最上方，價格相同時依欄位排序）
+  const sorted = [...items].sort((a, b) => {
+    const pA = typeof a.price === 'number' && !isNaN(a.price) ? a.price : 0;
+    const pB = typeof b.price === 'number' && !isNaN(b.price) ? b.price : 0;
+    if (pB !== pA) return pB - pA;
+    return a.column - b.column;
+  });
+
+  const n = sorted.length;
+  const result = sorted.map((item) => ({
+    ...item,
+    price: typeof item.price === 'number' && !isNaN(item.price) ? item.price : 0,
+    y: item.isFixed ? item.rawY : Math.max(minY, Math.min(maxY, item.rawY)),
+  }));
+
+  // 同價格的項目初始對齊相同的 rawY
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      if (Math.abs(result[j].price - result[i].price) < 0.001) {
+        result[j].rawY = result[i].rawY;
+        result[j].y = result[i].y;
+      }
+    }
+  }
+
+  // 2. 迭代彈性調整：兼顧同欄位避碰與全域價格由大到小 (上方至下方) 嚴格單調性
+  for (let iter = 0; iter < 90; iter++) {
+    // A. 彈簧回拉至原始比例位置
     for (let i = 0; i < n; i++) {
-      if (!sorted[i].isFixed) {
-        sorted[i].y += (sorted[i].rawY - sorted[i].y) * 0.08;
+      if (!result[i].isFixed) {
+        result[i].y += (result[i].rawY - result[i].y) * 0.12;
       }
     }
 
-    // 2. Pairwise collision separation
-    for (let i = 0; i < n - 1; i++) {
-      const diff = sorted[i + 1].y - sorted[i].y;
-      if (diff < effectiveMinDisp) {
-        const overlap = effectiveMinDisp - diff;
-        const iFixed = !!sorted[i].isFixed;
-        const nextFixed = !!sorted[i + 1].isFixed;
-        if (iFixed && !nextFixed) {
-          sorted[i + 1].y += overlap;
-        } else if (!iFixed && nextFixed) {
-          sorted[i].y -= overlap;
-        } else if (!iFixed && !nextFixed) {
-          sorted[i].y -= overlap / 2;
-          sorted[i + 1].y += overlap / 2;
+    // B. 同欄位避碰推移 (避免同一欄位的標籤重疊)
+    for (let col = 1; col <= 4; col++) {
+      const colIndices: number[] = [];
+      for (let i = 0; i < n; i++) {
+        if (result[i].column === col) colIndices.push(i);
+      }
+      for (let k = 0; k < colIndices.length - 1; k++) {
+        const idx1 = colIndices[k];
+        const idx2 = colIndices[k + 1];
+        const diff = result[idx2].y - result[idx1].y;
+        if (diff < minColumnDisp) {
+          const overlap = minColumnDisp - diff;
+          const i1Fixed = !!result[idx1].isFixed;
+          const i2Fixed = !!result[idx2].isFixed;
+          if (i1Fixed && !i2Fixed) {
+            result[idx2].y += overlap;
+          } else if (!i1Fixed && i2Fixed) {
+            result[idx1].y -= overlap;
+          } else if (!i1Fixed && !i2Fixed) {
+            result[idx1].y -= overlap * 0.5;
+            result[idx2].y += overlap * 0.5;
+          }
         }
       }
     }
 
-    // 3. Individual boundary constraints (clamp strictly to boundaries without falsely pushing unrelated items)
+    // C. 全域單調性約束 (由上而下掃描：高價者不可比低價者更偏下方)
+    for (let i = 0; i < n - 1; i++) {
+      if (result[i + 1].price < result[i].price) {
+        if (result[i + 1].y < result[i].y) {
+          if (!result[i + 1].isFixed) {
+            result[i + 1].y = result[i].y;
+          } else if (!result[i].isFixed) {
+            result[i].y = result[i + 1].y;
+          }
+        }
+      } else if (Math.abs(result[i + 1].price - result[i].price) < 0.001) {
+        if (result[i].column !== result[i + 1].column) {
+          const avgY = (result[i].y + result[i + 1].y) / 2;
+          if (!result[i].isFixed) result[i].y = avgY;
+          if (!result[i + 1].isFixed) result[i + 1].y = avgY;
+        }
+      }
+    }
+
+    // D. 全域單調性約束 (由下而上反向掃描)
+    for (let i = n - 2; i >= 0; i--) {
+      if (result[i + 1].price < result[i].price) {
+        if (result[i].y > result[i + 1].y) {
+          if (!result[i].isFixed) {
+            result[i].y = result[i + 1].y;
+          } else if (!result[i + 1].isFixed) {
+            result[i + 1].y = result[i].y;
+          }
+        }
+      }
+    }
+
+    // E. 邊界約束
     for (let i = 0; i < n; i++) {
-      if (!sorted[i].isFixed) {
-        sorted[i].y = Math.max(minY, Math.min(maxY, sorted[i].y));
+      if (!result[i].isFixed) {
+        result[i].y = Math.max(minY, Math.min(maxY, result[i].y));
       }
     }
   }
 
-  // 4. Final monotonic ordering and minimum spacing pass
+  // 3. 最終嚴格保證同欄位間距
+  for (let col = 1; col <= 4; col++) {
+    const colIndices: number[] = [];
+    for (let i = 0; i < n; i++) {
+      if (result[i].column === col) colIndices.push(i);
+    }
+    for (let k = 0; k < colIndices.length - 1; k++) {
+      const idx1 = colIndices[k];
+      const idx2 = colIndices[k + 1];
+      if (result[idx2].y < result[idx1].y + minColumnDisp * 0.9) {
+        if (!result[idx2].isFixed) {
+          result[idx2].y = Math.min(maxY, result[idx1].y + minColumnDisp * 0.9);
+        }
+      }
+    }
+  }
+
+  // 4. 最終嚴格保證全域價格由大到小順序 (從上到下)
   for (let i = 0; i < n - 1; i++) {
-    if (!sorted[i + 1].isFixed) {
-      if (sorted[i + 1].y < sorted[i].y + effectiveMinDisp * 0.85) {
-        sorted[i + 1].y = Math.min(maxY, sorted[i].y + effectiveMinDisp * 0.85);
+    if (result[i + 1].price < result[i].price) {
+      if (result[i + 1].y < result[i].y) {
+        if (!result[i + 1].isFixed) {
+          result[i + 1].y = Math.min(maxY, result[i].y);
+        }
+      }
+    } else if (Math.abs(result[i + 1].price - result[i].price) < 0.001) {
+      if (result[i].column !== result[i + 1].column) {
+        if (!result[i + 1].isFixed) result[i + 1].y = result[i].y;
       }
     }
   }
 
-  // Final hard clamping to keep within safe physical boundaries
-  sorted.forEach((item) => {
+  // 5. 邊界防溢出
+  result.forEach((item) => {
     if (!item.isFixed) {
       item.y = Math.max(minY, Math.min(maxY, item.y));
     }
   });
 
-  return sorted;
+  return result;
 }
 
 export const priceCache = new Map<string, { price: number; timestamp: number }>();
@@ -337,6 +422,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
   onUpdateAnnotations,
   averageCost,
   averageCostQuantity,
+  trades,
   averagingRows,
   averagingRowsSys2,
   plannedBuyQty,
@@ -383,6 +469,42 @@ export const StockCardVisualizer: React.FC<Props> = ({
   const negValue = Math.max(0, 5 - ratingVal) + Math.max(0, 5 - qualityVal) + Math.max(0, 5 - valueVal) + sellVal;
 
   const [hoveredLabel, setHoveredLabel] = useState<any>(null);
+  const [hoveredDetail, setHoveredDetail] = useState<{
+    type: "pyramid" | "trade" | "price" | "order";
+    data: any;
+  } | null>(null);
+
+  const [liveTrades, setLiveTrades] = useState<Trade[]>(() => {
+    if (trades && trades.length > 0) return trades;
+    if (typeof window !== "undefined" && userId && tabId) {
+      try {
+        const raw = safeSessionStorage.getItem(`cached_tab_trades_v3_${userId}`);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed[tabId])) return parsed[tabId];
+        }
+      } catch (e) {}
+    }
+    return [];
+  });
+
+  useEffect(() => {
+    if (trades && trades.length > 0) {
+      setLiveTrades(trades);
+    }
+  }, [trades]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !tabId) return;
+    const handleTradesUpdated = (e: any) => {
+      if (e?.detail?.tabId === tabId && Array.isArray(e.detail.trades)) {
+        setLiveTrades(e.detail.trades);
+      }
+    };
+    window.addEventListener("tab_trades_updated", handleTradesUpdated);
+    return () => window.removeEventListener("tab_trades_updated", handleTradesUpdated);
+  }, [tabId]);
+
   const longPressTimers = useRef<{ [key: string]: NodeJS.Timeout }>({});
 
   // Local optimistic annotations state for instant (0ms) canvas response
@@ -1776,10 +1898,8 @@ export const StockCardVisualizer: React.FC<Props> = ({
       };
       pushToHistoryAndSave([...localAnnotationsRef.current, newAnn], true);
       const priceMsg = targetPrice ? ` (錨定價格 $${targetPrice.toFixed(2)})` : '';
-      toast.success(`已新增水平分隔線${priceMsg}，位置已固定 (如需移動請切換至「拖曳」模式)`, { duration: 1800 });
-      setMode('cursor');
-      modeRef.current = 'cursor';
-      setHoverPoint(null);
+      toast.success(`已新增水平分隔線${priceMsg}，可繼續點選設定下一條分隔線`, { duration: 1500 });
+      setHoverPoint(coords);
     } else if (currentMode === 'text') {
       setInputCoords(coords);
       setInputText('');
@@ -1954,9 +2074,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
       };
       pushToHistoryAndSave([...localAnnotationsRef.current, newAnn], true);
       const priceMsg = targetPrice ? ` (錨定價格 $${targetPrice.toFixed(2)})` : '';
-      toast.success(`已新增水平分隔線${priceMsg}，位置已固定 (如需移動請切換至「拖曳」模式)`, { duration: 1800 });
-      setMode('cursor');
-      modeRef.current = 'cursor';
+      toast.success(`已新增水平分隔線${priceMsg}，可繼續點選設定下一條分隔線`, { duration: 1500 });
       setHoverPoint(null);
     } else if (currentMode === 'text') {
       setInputCoords(coords);
@@ -2118,78 +2236,116 @@ export const StockCardVisualizer: React.FC<Props> = ({
       .filter((o) => o.category?.includes("進出"))
       .sort((a, b) => a.price - b.price);
 
-    // 提取系統二 股價向下攤平試算 組別 1~4 的預計購入股價 (持有數量 > 0 時)
-    const validAvgSys2Items: any[] = [];
-    const avgSys2Prices: number[] = [];
-    const hasHoldings = (holdingQuantity !== undefined ? holdingQuantity > 0 : (averageCostQuantity !== undefined && averageCostQuantity > 0));
-    const totalBought = holdingQuantity !== undefined ? holdingQuantity : (averageCostQuantity || 0);
-
-    if (hasHoldings && averagingRowsSys2 && averagingRowsSys2.length > 0) {
-      const batchPlannedSizes: number[] = [0, 1, 2, 3].map(i => {
-        const row = averagingRowsSys2[i];
-        const q1 = parseFloat(row?.quantity || '') || 0;
-        const q2 = parseFloat(row?.quantity2 || '') || 0;
-        if (q1 + q2 > 0) return q1 + q2;
-        if (plannedBuyQty && plannedBuyQty > 0) {
-          const pcts = [0.15, 0.25, 0.35, 0.25];
-          return Math.ceil(plannedBuyQty * pcts[i]);
-        }
-        return 0;
-      });
-
-      averagingRowsSys2.slice(0, 4).forEach((row, idx) => {
-        const parsedPrice = parseFloat(row.price);
-        if (!isNaN(parsedPrice) && parsedPrice > 0) {
-          avgSys2Prices.push(parsedPrice);
-          const discountPct = (idx + 1) * 3; // -3%, -6%, -9%, -12%
-          const isBasePosition = discountPct === 6; // 系統二第 2 欄位 6% 為基準倉位
-          const isForceClosePosition = discountPct === 12; // 系統二第 4 欄位 12% 為強制平倉
-          const isSpecialPosition = isBasePosition || isForceClosePosition;
-          const formattedPrice = parsedPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-          
-          const rowPlannedQty = batchPlannedSizes[idx];
-          const priorBatchesSum = batchPlannedSizes.slice(0, idx).reduce((a, b) => a + b, 0);
-          const rowBoughtQty = rowPlannedQty > 0 ? Math.max(0, Math.min(rowPlannedQty, totalBought - priorBatchesSum)) : 0;
-
-          let noteText = "";
-          if (isBasePosition) {
-            noteText = " (基準倉位)";
-          } else if (isForceClosePosition) {
-            noteText = " (強制平倉)";
-          }
-
-          let qtyText = "";
-          if (rowPlannedQty > 0 || rowBoughtQty > 0) {
-            qtyText = ` (預計 ${rowPlannedQty}股 · 已購 ${rowBoughtQty}股)`;
-          }
-
-          validAvgSys2Items.push({
-            id: `avg2-${idx + 1}`,
-            price: parsedPrice,
-            text: `攤平#${idx + 1} $${formattedPrice} (-${discountPct}%)${noteText}${qtyText}`,
-            color: isSpecialPosition ? "#F7554D" : "#3b82f6",
-            isBold: true,
-            isAlert: false,
-            isAveragingSys2: true,
-            isBasePosition,
-            isForceClosePosition,
-            isSpecialPosition,
-            isClosePosition: isBasePosition,
-            groupIndex: idx + 1,
-            discountPct,
-            isFixed: false,
-            plannedQty: rowPlannedQty,
-            boughtQty: rowBoughtQty,
-          });
-        }
-      });
+    // 預計購買總股數與集中規劃計算 (分批進場金字塔)
+    let effPlannedQty = plannedBuyQty && plannedBuyQty > 0 ? plannedBuyQty : 0;
+    if (effPlannedQty <= 0 && averagingRowsSys2 && averagingRowsSys2.length > 0) {
+      const rowsSum = averagingRowsSys2.reduce((acc, r) => {
+        const q1 = r?.quantity ? parseFloat(r.quantity) : 0;
+        const q2 = r?.quantity2 ? parseFloat(r.quantity2) : 0;
+        return acc + (isNaN(q1) ? 0 : q1) + (isNaN(q2) ? 0 : q2);
+      }, 0);
+      if (rowsSum > 0) effPlannedQty = rowsSum;
     }
+    const currentHoldingQty = holdingQuantity !== undefined ? holdingQuantity : (averageCostQuantity || 0);
+    if (effPlannedQty <= 0 && currentHoldingQty > 0) {
+      effPlannedQty = Math.max(currentHoldingQty, Math.ceil(currentHoldingQty / 0.15));
+    }
+
+    const planResult = calculateBatchPlanning({
+      plannedQty: effPlannedQty,
+      usableCapital: 0,
+      currentPrice: dynamicPrice > 0 ? dynamicPrice : currentPrice,
+      holdingQty: currentHoldingQty,
+      trades: liveTrades,
+      averagingRowsSys2,
+      plannedBuyQty: effPlannedQty,
+    });
+
+    const stepConfigs = [
+      { index: 0, name: "第1批", fullName: "第一批 (15%)", percent: "15%", dropPct: 3, subtitle: "初期試探" },
+      { index: 1, name: "第2批", fullName: "第二批 (25%)", percent: "25%", dropPct: 6, subtitle: "基準倉位", isBasePosition: true },
+      { index: 2, name: "第3批", fullName: "第三批 (35%)", percent: "35%", dropPct: 9, subtitle: "主力加碼" },
+      { index: 3, name: "第4批", fullName: "第四批 (25%)", percent: "25%", dropPct: 12, subtitle: "強制平倉", isForceClose: true },
+    ];
+
+    const baseRef = (averageCost && averageCost > 0) ? averageCost : (dynamicPrice > 0 ? dynamicPrice : (currentPrice || 0));
+    const isHoldingActive = typeof holdingQuantity === "number" && holdingQuantity > 0;
+
+    const pyramidStepItems = isHoldingActive ? stepConfigs.map((cfg) => {
+      const row = averagingRowsSys2?.[cfg.index];
+      const planBatch = planResult?.batches?.[cfg.index];
+      const manualPrice = row?.price ? parseFloat(row.price) : 0;
+      const stepPrice = manualPrice > 0
+        ? manualPrice
+        : (baseRef > 0 ? Math.round(baseRef * (1 - cfg.dropPct / 100) * 100) / 100 : 0);
+
+      const targetQty = planBatch?.size || 0;
+      const boughtQty = planBatch?.bought || 0;
+      const remainingQty = Math.max(0, targetQty - boughtQty);
+      const isReached = (dynamicPrice > 0 && stepPrice > 0 && dynamicPrice <= stepPrice);
+      const isFullyBought = targetQty > 0 && boughtQty >= targetQty;
+      const isPartiallyBought = boughtQty > 0 && !isFullyBought;
+
+      let status: 'fully_bought' | 'partially_bought' | 'reached' | 'pending' = 'pending';
+      let statusText = '尚未觸及';
+      let statusColor = '#64748b';
+      let statusBg = 'bg-slate-700 text-slate-200 border-slate-600';
+
+      if (isFullyBought) {
+        status = 'fully_bought';
+        statusText = '已全數購入';
+        statusColor = '#059669';
+        statusBg = 'bg-emerald-600 text-white border-emerald-500 shadow-sm';
+      } else if (isPartiallyBought) {
+        status = 'partially_bought';
+        statusText = '部分購入';
+        statusColor = '#10b981';
+        statusBg = 'bg-emerald-700/80 text-emerald-100 border-emerald-500';
+      } else if (isReached) {
+        status = 'reached';
+        statusText = '價格已達標';
+        statusColor = '#0284c7';
+        statusBg = 'bg-sky-600 text-white border-sky-400 animate-pulse';
+      }
+
+      return {
+        ...cfg,
+        price: stepPrice,
+        size: targetQty,
+        bought: boughtQty,
+        remaining: remainingQty,
+        progressPct: targetQty > 0 ? Math.min(100, Math.round((boughtQty / targetQty) * 100)) : (boughtQty > 0 ? 100 : 0),
+        status,
+        statusText,
+        statusColor,
+        statusBg,
+        split1: planBatch?.split1 || { size: 0, bought: 0, percent: '0%' },
+        split2: planBatch?.split2 || { size: 0, bought: 0, percent: '0%' },
+      };
+    }) : [];
+
+    const buyTrades = isHoldingActive ? (liveTrades || [])
+      .filter((t) => t.type === 'BUY' && typeof t.price === 'number' && t.price > 0 && typeof t.quantity === 'number' && t.quantity > 0)
+      .map((t, idx) => ({
+        id: t.id || `buy-${idx}`,
+        price: t.price,
+        quantity: t.quantity,
+        dateFormatted: formatTimestamp(t.tradeDate, 'yyyy-MM-dd') || '未知日期',
+        batch: t.batch || '',
+        purpose: t.purpose || '',
+        notes: t.notes || '',
+        fees: t.fees || 0,
+      })) : [];
+
+    const pyramidPrices = pyramidStepItems.map((s) => s.price).filter((p) => p > 0);
+    const tradePrices = buyTrades.map((t) => t.price).filter((p) => p > 0);
 
     const allPrices = [
       dynamicPrice,
       ...(averageCost && averageCost > 0 ? [averageCost] : []),
       ...validOrders.map((o) => o.price),
-      ...avgSys2Prices,
+      ...pyramidPrices,
+      ...tradePrices,
     ].filter((p) => typeof p === "number" && !isNaN(p) && p > 0);
 
     if (allPrices.length === 0) return null;
@@ -2250,7 +2406,8 @@ export const StockCardVisualizer: React.FC<Props> = ({
       return false;
     };
 
-    const leftItems = [
+    // 第一欄位：支撐與止損
+    const col1Items = [
       ...supports.map((s, i) => ({
         id: `s-${i}`,
         text: `支撐 $${s.price}`,
@@ -2259,20 +2416,57 @@ export const StockCardVisualizer: React.FC<Props> = ({
         color: "#facc15",
         isAlert: isAlert(s.price),
         data: s,
+        column: 1,
       })),
-    ].sort((a, b) => (b.price ?? 0) - (a.price ?? 0));
+      ...sls.map((sl, i) => ({
+        id: `sl-${i}`,
+        text: `止損 $${sl.price}`,
+        price: sl.price,
+        rawY: getYPct(sl.price),
+        color: "#ef4444",
+        isAlert: isAlert(sl.price),
+        data: sl,
+        column: 1,
+      })),
+    ];
 
-    const slItems = sls.map((sl, i) => ({
-      id: `sl-${i}`,
-      text: `止損 $${sl.price}`,
-      price: sl.price,
-      rawY: getYPct(sl.price),
-      color: "#ef4444",
-      isAlert: isAlert(sl.price),
-      data: sl,
-    })).sort((a, b) => (b.price ?? 0) - (a.price ?? 0));
+    // 第二欄位：止盈與壓力
+    const col2Items = [
+      ...tps.map((tp, i) => ({
+        id: `tp-${i}`,
+        text: `止盈 $${tp.price}`,
+        price: tp.price,
+        rawY: getYPct(tp.price),
+        color: "#10b981",
+        isAlert: isAlert(tp.price),
+        data: tp,
+        column: 2,
+      })),
+      ...resistances.map((r, i) => ({
+        id: `r-${i}`,
+        text: `壓力 $${r.price}`,
+        price: r.price,
+        rawY: getYPct(r.price),
+        color: "#f87171",
+        isAlert: isAlert(r.price),
+        data: r,
+        column: 2,
+      })),
+    ];
 
-    const rightItemsRaw = [
+    // 第三欄位：歷史買入標籤 (持有數量 > 0 且有交易時顯示)
+    const buyTradeItemsRaw = (isHoldingActive ? (buyTrades || []) : [])
+      .filter((t: any) => t.price > 0)
+      .map((t: any, idx: number) => ({
+        ...t,
+        id: t.id || `trade-${idx}`,
+        price: t.price,
+        rawY: getYPct(t.price),
+        column: 3,
+      }));
+
+    // 第四欄位（持有 > 0 時）或 第三欄位（持有 = 0 時）：現價、均本與攤平交易標籤
+    const col4ItemsRaw = [
       ...(dynamicPrice > 0 || isCardLoading
         ? [
             {
@@ -2285,6 +2479,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
               isAlert: false,
               isCurrentPrice: true,
               isFixed: true,
+              column: 4,
             },
           ]
         : []),
@@ -2303,47 +2498,36 @@ export const StockCardVisualizer: React.FC<Props> = ({
               isAlert: false,
               isAverageCost: true,
               isFixed: false,
+              column: 4,
             },
           ]
         : []),
-      ...validAvgSys2Items.map((item) => ({
-        ...item,
-        rawY: getYPct(item.price),
-      })),
+      ...(isHoldingActive ? ((pyramidStepItems || [])
+        .filter((s: any) => s.price > 0)
+        .map((s: any) => ({
+          ...s,
+          id: `pyr-${s.index}`,
+          price: s.price,
+          rawY: getYPct(s.price),
+          isPyramid: true,
+          column: 4,
+        }))) : []),
     ];
 
-    // 右側所有標籤無論種類，一律依照數字 (價格) 從大排到小
-    const rightItems = rightItemsRaw.sort((a, b) => (b.price ?? 0) - (a.price ?? 0));
+    // 全體標籤統一參與全域避碰與金額由大到小排序運算
+    const allLabelsToResolve = [
+      ...col1Items,
+      ...col2Items,
+      ...buyTradeItemsRaw,
+      ...col4ItemsRaw,
+    ];
 
-    // 取消顯示進場價格標籤
-    const entryItems: any[] = [];
+    const resolvedAll = resolveGlobalLayout(allLabelsToResolve, 4.3);
 
-    const tpItems = [
-      ...tps.map((tp, i) => ({
-        id: `tp-${i}`,
-        text: `止盈 $${tp.price}`,
-        price: tp.price,
-        rawY: getYPct(tp.price),
-        color: "#10b981",
-        isAlert: isAlert(tp.price),
-        data: tp,
-      })),
-      ...resistances.map((r, i) => ({
-        id: `r-${i}`,
-        text: `壓力 $${r.price}`,
-        price: r.price,
-        rawY: getYPct(r.price),
-        color: "#f87171",
-        isAlert: isAlert(r.price),
-        data: r,
-      })),
-    ].sort((a, b) => (b.price ?? 0) - (a.price ?? 0));
-
-    const leftLabels = resolveCollisions(leftItems, 4.8);
-    const slLabels = resolveCollisions(slItems, 4.8);
-    const entryLabels = resolveCollisions(entryItems, 4.8);
-    const tpLabels = resolveCollisions(tpItems, 5.0);
-    const rightLabels = resolveCollisions(rightItems, 5.0);
+    const col1Labels = resolvedAll.filter((item) => item.column === 1);
+    const col2Labels = resolvedAll.filter((item) => item.column === 2);
+    const buyTradeLabels = resolvedAll.filter((item) => item.column === 3);
+    const col4Labels = resolvedAll.filter((item) => item.column === 4);
 
     return {
       supports,
@@ -2351,16 +2535,21 @@ export const StockCardVisualizer: React.FC<Props> = ({
       tps,
       sls,
       entries,
+      pyramidStepItems,
+      col1Labels,
+      col2Labels,
+      buyTradeLabels,
+      col4Labels,
+      buyTrades,
+      planResult,
+      effPlannedQty,
+      currentHoldingQty,
+      isHoldingActive,
       getYPct,
       getPriceFromYPct,
       uniqueSortedPrices,
-      leftLabels,
-      rightLabels,
-      entryLabels,
-      slLabels,
-      tpLabels,
     };
-  }, [plannedOrders, dynamicPrice, averageCost, averageCostQuantity, averagingRows, averagingRowsSys2, plannedBuyQty, holdingQuantity]);
+  }, [plannedOrders, dynamicPrice, currentPrice, averageCost, averageCostQuantity, averagingRows, averagingRowsSys2, plannedBuyQty, holdingQuantity, liveTrades]);
 
   if (!data)
     return (
@@ -2375,14 +2564,19 @@ export const StockCardVisualizer: React.FC<Props> = ({
     tps,
     sls,
     entries,
+    pyramidStepItems,
+    col1Labels,
+    col2Labels,
+    buyTradeLabels,
+    col4Labels,
+    buyTrades,
+    planResult,
+    effPlannedQty,
+    currentHoldingQty,
+    isHoldingActive,
     getYPct,
     getPriceFromYPct,
     uniqueSortedPrices,
-    leftLabels,
-    rightLabels,
-    entryLabels,
-    slLabels,
-    tpLabels,
   } = data;
 
   const renderLabel = (l: any, extraClass: string, style: any) => {
@@ -2524,16 +2718,29 @@ export const StockCardVisualizer: React.FC<Props> = ({
       <div
         key={l.id}
         title={isCp ? "現價標籤 - 雙擊開啟動態視覺線定位" : undefined}
-        className={`absolute whitespace-nowrap transition-all duration-300 font-extrabold px-1 py-0.5 rounded-sm ${
-          isSpecialPos ? "text-[10.5px] sm:text-[11.0px] md:text-[11.5px]" : "text-[10.2px] sm:text-[10.7px] md:text-[11.2px]"
-        } tracking-tight ${
-          isCp ? "cursor-pointer hover:ring-2 hover:ring-blue-400" : "cursor-help"
-        } select-none hover:scale-105 hover:z-40 active:scale-95 shadow-sm border border-black/10 leading-none ${extraClass} ${blinkClass} ${alertClass}`}
+        className={`absolute whitespace-nowrap transition-all duration-150 font-extrabold px-1.5 py-0.5 rounded-md text-[13px] tracking-tight cursor-pointer select-none hover:scale-110 hover:z-40 active:scale-95 shadow-md border border-black/15 leading-tight ${
+          isCp ? "hover:ring-2 hover:ring-purple-400" : "hover:ring-2 hover:ring-white/40"
+        } ${extraClass} ${blinkClass} ${alertClass}`}
         style={{
           ...style,
           backgroundColor: finalBgColor,
           color: finalTextColor,
           textShadow: "none",
+        }}
+        onMouseEnter={() => {
+          setHoveredLabel(l);
+          setHoveredDetail({
+            type: isCp || l.isAverageCost || l.id === "ac" ? "price" : "order",
+            data: l,
+          });
+        }}
+        onMouseLeave={() => {
+          setHoveredLabel(null);
+          setHoveredDetail(null);
+          if (longPressTimers.current[l.id]) {
+            clearTimeout(longPressTimers.current[l.id]);
+            delete longPressTimers.current[l.id];
+          }
         }}
         onDoubleClick={(e) => {
           if (isCp) {
@@ -2544,14 +2751,6 @@ export const StockCardVisualizer: React.FC<Props> = ({
               holdingStatus,
               tradeType,
             });
-          }
-        }}
-        onMouseEnter={() => setHoveredLabel(l)}
-        onMouseLeave={() => {
-          setHoveredLabel(null);
-          if (longPressTimers.current[l.id]) {
-            clearTimeout(longPressTimers.current[l.id]);
-            delete longPressTimers.current[l.id];
           }
         }}
         onMouseDown={(e) => {
@@ -2608,7 +2807,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
 
   return (
     <div
-      className="w-full h-full p-2 relative flex flex-col rounded-xl pointer-events-auto"
+      className="w-full h-full px-2 py-1.5 relative flex flex-col rounded-xl pointer-events-auto"
       style={{ isolation: "isolate" }}
       onClick={(e) => e.stopPropagation()}
     >
@@ -2708,37 +2907,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
             </marker>
           </defs>
 
-          {supports.map((s, i) => (
-            <g key={`sup-line-${i}`}>
-              <line
-                x1="0"
-                y1={getYPct(s.price)}
-                x2="100"
-                y2={getYPct(s.price)}
-                vectorEffect="non-scaling-stroke"
-                stroke="#d4d4d8"
-                strokeWidth="1.5"
-                strokeDasharray="6 4"
-                opacity="0.8"
-              />
-            </g>
-          ))}
-
-          {resistances.map((r, i) => (
-            <g key={`res-line-${i}`}>
-              <line
-                x1="0"
-                y1={getYPct(r.price)}
-                x2="100"
-                y2={getYPct(r.price)}
-                vectorEffect="non-scaling-stroke"
-                stroke="#d4d4d8"
-                strokeWidth="1.5"
-                strokeDasharray="6 4"
-                opacity="0.8"
-              />
-            </g>
-          ))}
+          {/* Background horizontal dashed lines removed per user request */}
 
           {dynamicPrice > 0 && (
             <line
@@ -2762,7 +2931,8 @@ export const StockCardVisualizer: React.FC<Props> = ({
               y2={getYPct(averageCost)}
               vectorEffect="non-scaling-stroke"
               stroke="#f97316"
-              strokeWidth="3.5"
+              strokeWidth="2.2"
+              strokeDasharray="6 4"
               opacity="0.95"
             />
           )}
@@ -2770,13 +2940,13 @@ export const StockCardVisualizer: React.FC<Props> = ({
           {/* Optional trade paths omitted to maintain clear visualization without curve clutter */}
 
           {/* Connector lines for collision-adjusted labels */}
-          {slLabels.map((l, i) =>
+          {col1Labels.map((l, i) =>
             Math.abs(l.y - l.rawY) > 0.5 ? (
               <line
-                key={`sl-conn-${i}`}
-                x1="21"
+                key={`col1-conn-${i}`}
+                x1="2"
                 y1={l.rawY}
-                x2="23"
+                x2="2"
                 y2={l.y}
                 stroke={l.color}
                 strokeWidth="1"
@@ -2786,13 +2956,13 @@ export const StockCardVisualizer: React.FC<Props> = ({
               />
             ) : null,
           )}
-          {entryLabels.map((l, i) =>
+          {col2Labels.map((l, i) =>
             Math.abs(l.y - l.rawY) > 0.5 ? (
               <line
-                key={`en-conn-${i}`}
-                x1="50"
+                key={`col2-conn-${i}`}
+                x1={isHoldingActive ? "24" : "28"}
                 y1={l.rawY}
-                x2="50"
+                x2={isHoldingActive ? "24" : "28"}
                 y2={l.y}
                 stroke={l.color}
                 strokeWidth="1"
@@ -2802,53 +2972,58 @@ export const StockCardVisualizer: React.FC<Props> = ({
               />
             ) : null,
           )}
-          {tpLabels.map((l, i) =>
-            Math.abs(l.y - l.rawY) > 0.5 ? (
-              <line
-                key={`tp-conn-${i}`}
-                x1="50"
-                y1={l.rawY}
-                x2="50"
-                y2={l.y}
-                stroke={l.color}
-                strokeWidth="1"
-                strokeDasharray="1 2"
-                opacity="0.6"
-                vectorEffect="non-scaling-stroke"
-              />
-            ) : null,
-          )}
-          {rightLabels.map((l, i) =>
-            Math.abs(l.y - l.rawY) > 0.5 ? (
-              <line
-                key={`rt-conn-${i}`}
-                x1="100"
-                y1={l.rawY}
-                x2="95"
-                y2={l.y}
-                stroke={l.color}
-                strokeWidth="1"
-                strokeDasharray="1 2"
-                opacity="0.6"
-                vectorEffect="non-scaling-stroke"
-              />
-            ) : null,
-          )}
-          {leftLabels.map((l, i) =>
-            Math.abs(l.y - l.rawY) > 0.5 ? (
-              <line
-                key={`left-conn-${i}`}
-                x1="0"
-                y1={l.rawY}
-                x2="5"
-                y2={l.y}
-                stroke={l.color}
-                strokeWidth="1"
-                strokeDasharray="1 2"
-                opacity="0.6"
-                vectorEffect="non-scaling-stroke"
-              />
-            ) : null,
+          {isHoldingActive ? (
+            <>
+              {buyTradeLabels.map((l: any, i: number) =>
+                Math.abs(l.y - l.rawY) > 0.5 ? (
+                  <line
+                    key={`col3-conn-${i}`}
+                    x1="45"
+                    y1={l.rawY}
+                    x2="45"
+                    y2={l.y}
+                    stroke="#3b82f6"
+                    strokeWidth="1"
+                    strokeDasharray="1 2"
+                    opacity="0.6"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                ) : null,
+              )}
+              {col4Labels.map((l, i) =>
+                Math.abs(l.y - l.rawY) > 0.5 ? (
+                  <line
+                    key={`col4-conn-${i}`}
+                    x1="98.5"
+                    y1={l.rawY}
+                    x2="98.5"
+                    y2={l.y}
+                    stroke={l.color || (l.isCurrentPrice ? "#c084fc" : l.isAverageCost ? "#f97316" : "#f59e0b")}
+                    strokeWidth="1"
+                    strokeDasharray="1 2"
+                    opacity="0.6"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                ) : null,
+              )}
+            </>
+          ) : (
+            col4Labels.map((l, i) =>
+              Math.abs(l.y - l.rawY) > 0.5 ? (
+                <line
+                  key={`col3-conn-3col-${i}`}
+                  x1="98.5"
+                  y1={l.rawY}
+                  x2="98.5"
+                  y2={l.y}
+                  stroke={l.color || (l.isCurrentPrice ? "#c084fc" : l.isAverageCost ? "#f97316" : "#f59e0b")}
+                  strokeWidth="1"
+                  strokeDasharray="1 2"
+                  opacity="0.6"
+                  vectorEffect="non-scaling-stroke"
+                />
+              ) : null,
+            )
           )}
 
           {/* Render Vector-Scalable Drawing Annotations */}
@@ -3348,101 +3523,121 @@ export const StockCardVisualizer: React.FC<Props> = ({
           </form>
         )}
 
-        {/* Clean, Non-scaled HTML Overlay for Dots & Text Layer */}
+        {/* Clean, Non-scaled HTML Overlay for Labels */}
         <div
           className="absolute inset-0 pointer-events-none text-[10px] leading-none z-20"
-          style={{ textShadow: "0 1px 2px rgba(0,0,0,0.8)" }}
         >
-          {/* Decorative Dots strictly at RAW positions */}
-          {sls.map((sl, i) => (
-            <div
-              key={`sl-dot-${i}`}
-              className="absolute w-2 h-2 rounded-full bg-[#ef4444]"
-              style={{
-                left: "21%",
-                top: `${getYPct(sl.price)}%`,
-                transform: "translate(-50%, -50%)",
-                opacity: 0.8,
-                boxShadow: "0 0 5px #ef4444",
-              }}
-            />
-          ))}
-          {tps.map((tp, i) => (
-            <div
-              key={`tp-dot-${i}`}
-              className="absolute w-2 h-2 rounded-full bg-[#10b981]"
-              style={{
-                left: "50%",
-                top: `${getYPct(tp.price)}%`,
-                transform: "translate(-50%, -50%)",
-                opacity: 0.8,
-                boxShadow: "0 0 5px #10b981",
-              }}
-            />
-          ))}
-          {resistances.map((r, i) => (
-            <div
-              key={`res-dot-${i}`}
-              className="absolute w-2 h-2 rounded-full bg-[#f87171]"
-              style={{
-                left: "50%",
-                top: `${getYPct(r.price)}%`,
-                transform: "translate(-50%, -50%)",
-                opacity: 0.8,
-                boxShadow: "0 0 5px #f87171",
-              }}
-            />
-          ))}
-
-          {/* Left Labels (S/R) */}
+          {/* Column 1: 支撐與止損標籤 */}
           <div className={mode === 'cursor' ? "pointer-events-auto" : "pointer-events-none"}>
-            {leftLabels.map((l) =>
-              renderLabel(l, "left-1", {
+            {col1Labels.map((l) =>
+              renderLabel(l, "left-[4px]", {
                 top: `${l.y}%`,
                 transform: "translateY(-50%)",
               }),
             )}
           </div>
 
-          {/* Current Price */}
+          {/* Column 2: 止盈與壓力標籤 (保持 3px 間距) */}
           <div className={mode === 'cursor' ? "pointer-events-auto" : "pointer-events-none"}>
-            {rightLabels.map((l) =>
-              renderLabel(l, "right-1", {
+            {col2Labels.map((l) =>
+              renderLabel(l, "left-[133px]", {
                 top: `${l.y}%`,
                 transform: "translateY(-50%)",
               }),
             )}
           </div>
 
-          {/* SL Labels */}
-          <div className={mode === 'cursor' ? "pointer-events-auto" : "pointer-events-none"}>
-            {slLabels.map((l) =>
-              renderLabel(l, "left-[23%]", {
-                top: `${l.y}%`,
-                transform: "translateY(-50%)",
-              }),
-            )}
-          </div>
+          {isHoldingActive ? (
+            <>
+              {/* Column 3: 歷史買入標籤 (保持 3px 間距) */}
+              <div className={mode === 'cursor' ? "pointer-events-auto" : "pointer-events-none"}>
+                {buyTradeLabels && buyTradeLabels.map((trade: any, idx: number) => {
+                  if (!trade.price || trade.price <= 0) return null;
+                  const isHovered = (hoveredDetail?.type === 'trade' && hoveredDetail?.data?.id === trade.id) || hoveredLabel?.id === trade.id;
+                  return (
+                    <div
+                      key={`buy-trade-badge-${trade.id || idx}`}
+                      style={{
+                        left: "263px",
+                        top: `${trade.y}%`,
+                        transform: "translateY(-50%)",
+                      }}
+                      className={`absolute z-30 transition-all duration-150 cursor-pointer select-none whitespace-nowrap hover:scale-110 hover:z-40 active:scale-95 ${
+                        isHovered ? "scale-110 ring-2 ring-blue-400 shadow-lg z-40" : ""
+                      }`}
+                      onMouseEnter={() => {
+                        setHoveredDetail({ type: 'trade', data: trade });
+                        setHoveredLabel(trade);
+                      }}
+                      onMouseLeave={() => {
+                        setHoveredDetail(null);
+                        setHoveredLabel(null);
+                      }}
+                    >
+                      <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-600/95 hover:bg-blue-500 text-white border border-blue-400 text-[13px] font-mono font-bold shadow-xs leading-tight">
+                        <span>🔷</span>
+                        <span>${trade.price.toFixed(1)}</span>
+                        <span className="text-[12px] opacity-95">({trade.quantity}股)</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
 
-          {/* Entry Labels */}
-          <div className={mode === 'cursor' ? "pointer-events-auto" : "pointer-events-none"}>
-            {entryLabels.map((l) =>
-              renderLabel(l, "left-1/2", {
-                top: `${l.y}%`,
-                transform: "translate(-50%, -50%)",
-              }),
-            )}
-          </div>
-
-          {/* TP & Resistance Labels (Centered) */}
-          <div className={mode === 'cursor' ? "pointer-events-auto" : "pointer-events-none"}>
-            {tpLabels.map((l) =>
-              renderLabel(l, "left-1/2", {
-                top: `${l.y}%`,
-                transform: "translate(-50%, -50%)",
-              }),
-            )}
-          </div>
+              {/* Column 4: 現價 / 均本 / 攤平交易標籤 (靠右邊對齊) */}
+              <div className={mode === 'cursor' ? "pointer-events-auto" : "pointer-events-none"}>
+                {col4Labels.map((item: any, idx: number) => {
+                  if (item.isCurrentPrice || item.id === 'cp' || item.isAverageCost || item.id === 'ac') {
+                    return renderLabel(item, "right-[6px]", {
+                      top: `${item.y}%`,
+                      transform: "translateY(-50%)",
+                    });
+                  }
+                  // Pyramid step item
+                  const isHovered = (hoveredDetail?.type === 'pyramid' && hoveredDetail?.data?.index === item.index) || hoveredLabel?.id === item.id;
+                  return (
+                    <div
+                      key={`pyramid-badge-${item.index ?? idx}`}
+                      style={{
+                        right: "6px",
+                        top: `${item.y}%`,
+                        transform: "translateY(-50%)",
+                      }}
+                      className={`absolute z-30 transition-all duration-150 cursor-pointer select-none whitespace-nowrap hover:scale-110 hover:z-40 active:scale-95 ${
+                        isHovered ? "scale-110 ring-2 ring-amber-400 shadow-lg z-40" : ""
+                      }`}
+                      onMouseEnter={() => {
+                        setHoveredDetail({ type: 'pyramid', data: item });
+                        setHoveredLabel(item);
+                      }}
+                      onMouseLeave={() => {
+                        setHoveredDetail(null);
+                        setHoveredLabel(null);
+                      }}
+                    >
+                      <div className={`flex items-center gap-1 px-2 py-0.5 rounded-md border text-[13px] font-bold shadow-xs leading-tight ${item.statusBg}`}>
+                        <span className="font-mono">{item.percent}</span>
+                        <span className="font-mono text-white">${item.price.toFixed(1)}</span>
+                        <span className="text-[12px] opacity-95 font-mono">({item.bought}/{item.size}股)</span>
+                        {item.isBasePosition && <span className="text-[11px] bg-amber-500/90 px-1.5 py-0.2 rounded text-white font-black">基</span>}
+                        {item.isForceClose && <span className="text-[11px] bg-rose-600 px-1.5 py-0.2 rounded text-white font-black">平</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          ) : (
+            /* 3 Column Mode (當持有數量為 0 時)：第 3 欄為現價 / 均本，靠右邊對齊 */
+            <div className={mode === 'cursor' ? "pointer-events-auto" : "pointer-events-none"}>
+              {col4Labels.map((item: any) =>
+                renderLabel(item, "right-[6px]", {
+                  top: `${item.y}%`,
+                  transform: "translateY(-50%)",
+                }),
+              )}
+            </div>
+          )}
 
           {/* Render Vector-Correct Text Annotations in HTML Space */}
           {localAnnotations.map((ann) => {
@@ -3598,49 +3793,9 @@ export const StockCardVisualizer: React.FC<Props> = ({
             );
           })}
         </div>
-
-        {/* Global Tooltip */}
-        {hoveredLabel && (
-          <div className="absolute top-2 left-1/2 -translate-x-1/2 px-3 py-2 bg-black/80 backdrop-blur-md rounded-lg border border-white/20 text-white z-50 shadow-2xl flex flex-col items-center min-w-[120px] pointer-events-none">
-            <span
-              className="font-bold text-xs"
-              style={{ color: hoveredLabel.color }}
-            >
-              {hoveredLabel.text}
-            </span>
-            {hoveredLabel.isAlert && (
-              <span className="text-[10px] text-amber-400 font-bold mt-1">
-                進入提醒區間
-              </span>
-            )}
-            {hoveredLabel.data?.notes && (
-              <span className="text-[10px] text-white/70 mt-1 max-w-[150px] text-center truncate">
-                {hoveredLabel.data.notes}
-              </span>
-            )}
-            {hoveredLabel.data?.conditions && (
-              <span className="text-[10px] text-white/50 mt-1 max-w-[150px] text-center truncate">
-                {hoveredLabel.data.conditions}
-              </span>
-            )}
-            {hoveredLabel.isCurrentPrice && (
-              <span className="text-[10px] text-blue-300 mt-1">最新報價</span>
-            )}
-            {hoveredLabel.isAveragingSys2 && (
-              <span className="text-[10px] text-blue-300 mt-1">
-                系統二向下攤平 (組別 #{hoveredLabel.groupIndex}, -{hoveredLabel.discountPct}%)
-                {hoveredLabel.discountPct === 6 || hoveredLabel.isBasePosition
-                  ? " - (基準倉位(下注終局))"
-                  : hoveredLabel.discountPct === 12 || hoveredLabel.isForceClosePosition
-                    ? " - (強制平倉)"
-                    : ""}
-              </span>
-            )}
-          </div>
-        )}
       </div>
 
-      {/* COMPACT BAR AT THE BOTTOM OF CARD (Drawing toolbar) */}
+      {/* COMPACT BAR AT THE BOTTOM OF CARD (Dynamic Detail HUD + Drawing toolbar) */}
       <div 
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
@@ -3650,6 +3805,99 @@ export const StockCardVisualizer: React.FC<Props> = ({
         onTouchMove={(e) => e.stopPropagation()}
         className="flex flex-col gap-1 mt-0.5 shrink-0 z-50 pointer-events-auto select-none w-full px-1 animate-fadeIn"
       >
+        {/* Dynamic Detail HUD Panel (卡片正下方動態提示細節, 高對比度清晰顯示) */}
+        <div 
+          className="w-full shrink-0 px-2.5 py-1 rounded-md bg-zinc-950 text-white border border-zinc-600 shadow-md flex items-center justify-between min-h-[34px] h-[34px] text-[11px] select-none pointer-events-auto overflow-hidden transition-colors"
+        >
+          {hoveredDetail?.type === 'pyramid' ? (
+            <div className="flex items-center justify-between w-full gap-2 animate-fadeIn">
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${hoveredDetail.data.statusBg}`}>
+                  {hoveredDetail.data.statusText}
+                </span>
+                <span className="font-black text-amber-300">
+                  {hoveredDetail.data.fullName}
+                </span>
+                <span className="text-zinc-200 text-[10.5px] font-medium">
+                  {hoveredDetail.data.subtitle}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 truncate text-zinc-100 font-medium">
+                <span>目標價: <strong className="font-mono text-amber-300 font-bold">${hoveredDetail.data.price?.toFixed(2)}</strong> <span className="text-rose-300 text-[10px] font-bold">(-{hoveredDetail.data.dropPct}%)</span></span>
+                <span className="text-zinc-500 font-bold">|</span>
+                <span>規劃: <strong className="font-mono text-white font-bold">{hoveredDetail.data.size}</strong>股</span>
+                <span className="text-zinc-500 font-bold">|</span>
+                <span>已購: <strong className="font-mono text-emerald-300 font-bold">{hoveredDetail.data.bought}</strong>股 (<span className="text-emerald-300 font-black">{hoveredDetail.data.progressPct}%</span>)</span>
+              </div>
+              <div className="shrink-0 text-[10px] text-zinc-100 bg-zinc-800 px-1.5 py-0.5 rounded border border-zinc-600 font-mono font-bold">
+                拆分: {hoveredDetail.data.split1.percent}({hoveredDetail.data.split1.bought}/{hoveredDetail.data.split1.size}) + {hoveredDetail.data.split2.percent}({hoveredDetail.data.split2.bought}/{hoveredDetail.data.split2.size})
+              </div>
+            </div>
+          ) : hoveredDetail?.type === 'trade' ? (
+            <div className="flex items-center justify-between w-full gap-2 animate-fadeIn">
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-blue-600 text-white">
+                  🔷 歷史買入
+                </span>
+                <span className="font-mono text-zinc-100 font-bold">
+                  {hoveredDetail.data.dateFormatted}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 truncate text-zinc-100 font-medium">
+                <span>買入價: <strong className="font-mono text-cyan-300 font-bold">${hoveredDetail.data.price?.toFixed(2)}</strong></span>
+                <span className="text-zinc-500 font-bold">|</span>
+                <span>數量: <strong className="font-mono text-white font-bold">{hoveredDetail.data.quantity}</strong> 股</span>
+                <span className="text-zinc-500 font-bold">|</span>
+                <span>總額: <strong className="font-mono text-emerald-300 font-bold">${(hoveredDetail.data.price * hoveredDetail.data.quantity).toLocaleString(undefined, { maximumFractionDigits: 0 })}</strong></span>
+              </div>
+              <div className="shrink-0 text-[10px] text-zinc-100 bg-zinc-800 px-1.5 py-0.5 rounded border border-zinc-600 font-medium">
+                {hoveredDetail.data.batch || '一般進場'}{hoveredDetail.data.purpose ? ` · ${hoveredDetail.data.purpose}` : ''}
+              </div>
+            </div>
+          ) : hoveredDetail?.type === 'price' || hoveredDetail?.type === 'order' ? (
+            <div className="flex items-center justify-between w-full gap-2 animate-fadeIn">
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-purple-600 text-white">
+                  指標價格
+                </span>
+                <span className="font-bold text-white">
+                  {hoveredDetail.data.text || hoveredDetail.data.id}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 truncate text-zinc-100 font-medium">
+                <span>價格: <strong className="font-mono text-yellow-300 font-bold">${typeof hoveredDetail.data.price === 'number' ? hoveredDetail.data.price.toFixed(2) : hoveredDetail.data.price}</strong></span>
+                {dynamicPrice > 0 && typeof hoveredDetail.data.price === 'number' && (
+                  <>
+                    <span className="text-zinc-500 font-bold">|</span>
+                    <span>距現價: <strong className="font-mono text-cyan-300 font-bold">{((hoveredDetail.data.price - dynamicPrice) / dynamicPrice * 100).toFixed(2)}%</strong></span>
+                  </>
+                )}
+              </div>
+              <div className="shrink-0 text-[10px] text-zinc-200 font-medium">
+                懸停圖表元素檢視即時資訊
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between w-full gap-2 text-zinc-100">
+              <div className="flex items-center gap-1.5 font-bold">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block animate-pulse shrink-0 shadow-sm shadow-emerald-500" />
+                <span className="text-white font-bold">分批進場金字塔:</span>
+                <span className="font-mono text-emerald-300 font-extrabold">{planResult?.totalBought || currentHoldingQty}</span>
+                <span className="text-zinc-400 font-bold">/</span>
+                <span className="font-mono text-white font-bold">{planResult?.plannedQty || effPlannedQty} 股</span>
+                <span className="text-emerald-300 font-black font-mono">
+                  ({planResult?.plannedQty && planResult.plannedQty > 0 ? Math.round(((planResult.totalBought || currentHoldingQty) / planResult.plannedQty) * 100) : 0}%)
+                </span>
+              </div>
+              <div className="text-[11px] text-zinc-200 flex items-center gap-2 truncate font-medium">
+                <span>歷史買入: <strong className="text-cyan-300 font-extrabold font-mono">{buyTrades?.length || 0}</strong> 筆</span>
+                <span className="text-zinc-500 font-bold">|</span>
+                <span className="text-zinc-300 hidden sm:inline">(懸停金字塔階梯或買入點檢視詳細細節)</span>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Drawing Toolbar */}
         <div className="flex justify-start sm:justify-center w-full mt-0.5 overflow-x-auto max-w-full [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] py-0.5 px-0.5">
           <div className="flex items-center gap-0 sm:gap-0.5 p-[2px] px-1 sm:px-1 bg-white/60 border border-zinc-200/90 backdrop-blur-md rounded-lg sm:rounded-md shadow-none shrink-0">

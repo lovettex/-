@@ -700,6 +700,15 @@ export default function Dashboard() {
   const [confirmDeletePromptId, setConfirmDeletePromptId] = useState<string | null>(null);
   const [confirmDeleteFileId, setConfirmDeleteFileId] = useState<number | null>(null);
 
+  // 檢索式個股下拉選單狀態 (支援持有中與真實交易分類)
+  const [isStockDropdownOpen, setIsStockDropdownOpen] = useState(false);
+  const [stockSearchQuery, setStockSearchQuery] = useState("");
+  const [selectedStockCategoryFilter, setSelectedStockCategoryFilter] = useState<"all" | "simulated" | "real">("all");
+  const stockSearchInputRef = useRef<HTMLInputElement>(null);
+  const stockDropdownRef = useRef<HTMLDivElement>(null);
+  const previousAiStockRef = useRef<{ symbol: string; companyName?: string } | null>(null);
+  const targetStockForJumpRef = useRef<{ tabId?: string; symbol?: string; tradeType?: string } | null>(null);
+
   const handleSavePrompts = async (updated: typeof dynamicPrompts) => {
     setDynamicPrompts(updated);
     safeLocalStorage.setItem("custom_prompt_templates", JSON.stringify(updated));
@@ -747,6 +756,112 @@ export default function Dashboard() {
     syncPromptsCrossDevice();
   }, [user?.uid]);
 
+  // 針對 (股票名稱) 與各類佔位符進行替換的共用輔助函式
+  const replaceStockPlaceholders = useCallback(
+    (text: string, symbol: string, companyName?: string) => {
+      if (!text) return "";
+      const cleanSymbol = symbol.trim().toUpperCase();
+      const cleanCompany = (companyName || "").trim();
+      // 下拉選單所選的股票名稱（例如 "BA (BOEING)"；若無公司名稱則為 "BA"）
+      const stockDisplayName = cleanCompany ? `${cleanSymbol} (${cleanCompany})` : cleanSymbol;
+
+      return text
+        .replace(/\(股票名稱\)/g, stockDisplayName)
+        .replace(/（股票名稱）/g, stockDisplayName)
+        .replace(/\(股票名称\)/g, stockDisplayName)
+        .replace(/（股票名称）/g, stockDisplayName)
+        .replace(/\[股票名稱\]/g, stockDisplayName)
+        .replace(/\[股票名称\]/g, stockDisplayName)
+        .replace(/【股票名稱】/g, stockDisplayName)
+        .replace(/【股票名称】/g, stockDisplayName)
+        .replace(/\{股票名稱\}/g, stockDisplayName)
+        .replace(/\{股票名称\}/g, stockDisplayName)
+        .replace(/\{stock\}/g, stockDisplayName)
+        .replace(/\{stockName\}/g, stockDisplayName)
+        .replace(/\(股票代號\)/g, cleanSymbol)
+        .replace(/（股票代號）/g, cleanSymbol)
+        .replace(/\(股票代码\)/g, cleanSymbol)
+        .replace(/（股票代码）/g, cleanSymbol)
+        .replace(/\{symbol\}/g, cleanSymbol)
+        .replace(/\{companyName\}/g, cleanCompany);
+    },
+    []
+  );
+
+  // 取得目前所有在持有中 (simulated) 與真實交易 (real) 的股票，依照其 tab 分類
+  const allCategorizedActiveStocks = useMemo(() => {
+    if (!tabs || tabs.length === 0) return [];
+
+    const activeTabsList = tabs.filter((t: any) => t.status === "ACTIVE" && t.symbol);
+
+    const items = activeTabsList.map((tab: any) => {
+      const isReal = tab.tradeType === "real";
+      const tradeType: "real" | "simulated" = isReal ? "real" : "simulated";
+      const tradeCategoryName: "真實交易" | "持有中" = isReal ? "真實交易" : "持有中";
+
+      const rawSub = tab.holdingStatus || "觀察中";
+      const subTab = (!isReal && rawSub === "觀察中") ? "虛擬交易" : rawSub;
+      const cleanSymbol = tab.symbol.trim().toUpperCase();
+      const cleanCompany = tab.companyName ? tab.companyName.trim() : "";
+      const displayName = cleanCompany ? `${cleanSymbol} (${cleanCompany})` : cleanSymbol;
+
+      return {
+        id: tab.id,
+        symbol: cleanSymbol,
+        companyName: cleanCompany,
+        tradeType,
+        tradeCategoryName,
+        subTab,
+        currentPrice: tab.currentPrice,
+        displayName,
+      };
+    });
+
+    // 依據 (tradeType + symbol) 去重，保留代表項目
+    const map = new Map<string, typeof items[0]>();
+    for (const item of items) {
+      const key = `${item.tradeType}_${item.symbol}`;
+      if (!map.has(key)) {
+        map.set(key, item);
+      }
+    }
+
+    return Array.from(map.values());
+  }, [tabs]);
+
+  const realCategorizedStocks = useMemo(() => {
+    return allCategorizedActiveStocks.filter((s) => s.tradeType === "real");
+  }, [allCategorizedActiveStocks]);
+
+  const simulatedCategorizedStocks = useMemo(() => {
+    return allCategorizedActiveStocks.filter((s) => s.tradeType === "simulated");
+  }, [allCategorizedActiveStocks]);
+
+  const filteredCategorizedStocks = useMemo(() => {
+    let list = allCategorizedActiveStocks;
+    if (selectedStockCategoryFilter !== "all") {
+      list = list.filter((s) => s.tradeType === selectedStockCategoryFilter);
+    }
+    const q = stockSearchQuery.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter(
+      (s) =>
+        s.symbol.toLowerCase().includes(q) ||
+        s.companyName.toLowerCase().includes(q) ||
+        s.subTab.toLowerCase().includes(q) ||
+        s.tradeCategoryName.toLowerCase().includes(q) ||
+        s.displayName.toLowerCase().includes(q)
+    );
+  }, [allCategorizedActiveStocks, selectedStockCategoryFilter, stockSearchQuery]);
+
+  const filteredRealStocks = useMemo(() => {
+    return filteredCategorizedStocks.filter((s) => s.tradeType === "real");
+  }, [filteredCategorizedStocks]);
+
+  const filteredSimulatedStocks = useMemo(() => {
+    return filteredCategorizedStocks.filter((s) => s.tradeType === "simulated");
+  }, [filteredCategorizedStocks]);
+
   const uniqueActiveStocks = useMemo(() => {
     const seen = new Set<string>();
     const list: { symbol: string; companyName?: string }[] = [];
@@ -766,11 +881,108 @@ export default function Dashboard() {
     return tabs.find((t: any) => t.symbol === aiSelectedSymbol && t.status === "ACTIVE");
   }, [aiSelectedSymbol, tabs]);
 
-  useEffect(() => {
-    if (isAiAnalysisOpen && !aiSelectedSymbol && uniqueActiveStocks.length > 0) {
-      setAiSelectedSymbol(uniqueActiveStocks[0].symbol);
+  // 當使用者在檢索選單中選中某檔股票
+  const handleSelectAiStock = useCallback(
+    (stock: { symbol: string; companyName?: string; id?: string; tradeType?: string }) => {
+      const cleanSym = stock.symbol.trim().toUpperCase();
+      const cleanCompany = (stock.companyName || "").trim();
+      const stockDisplayName = cleanCompany ? `${cleanSym} (${cleanCompany})` : cleanSym;
+
+      setAiSelectedSymbol(cleanSym);
+      // 記錄使用者透過下拉選單選擇的股票，以利關閉對話窗後跳轉至該卡片
+      targetStockForJumpRef.current = {
+        tabId: stock.id,
+        symbol: cleanSym,
+        tradeType: stock.tradeType,
+      };
+
+      setIsStockDropdownOpen(false);
+      playClickSound();
+
+      // 同步更新指令預覽內容中的 (股票名稱) 與變數
+      const templateObj = dynamicPrompts.find((t) => t.id === aiSelectedPromptId);
+      if (templateObj) {
+        // 如果當前預覽內容有使用者自訂修改且含有 (股票名稱)，一併替換當前預覽
+        setAiPromptText((prev) => {
+          if (
+            prev &&
+            /\(股票名稱\)|（股票名稱）|\(股票名称\)|（股票名称）|\[股票名稱\]|\[股票名称\]|【股票名稱】|【股票名称】|\{股票名稱\}|\{股票名称\}|\{symbol\}|\{stock\}|\{stockName\}/.test(
+              prev
+            )
+          ) {
+            return replaceStockPlaceholders(prev, cleanSym, cleanCompany);
+          }
+          // 否則以模版內容重新插值
+          return replaceStockPlaceholders(templateObj.template, cleanSym, cleanCompany);
+        });
+      } else {
+        setAiPromptText((prev) => replaceStockPlaceholders(prev, cleanSym, cleanCompany));
+      }
+
+      previousAiStockRef.current = { symbol: cleanSym, companyName: cleanCompany };
+      toast.success(`已選擇分析個股：${stockDisplayName}，關閉視窗後將跳至其卡片`, { duration: 1800 });
+    },
+    [aiSelectedPromptId, dynamicPrompts, replaceStockPlaceholders]
+  );
+
+  // 關閉 AI 分析對話窗並跳轉至所選股票卡片
+  const handleCloseAiAnalysis = useCallback(() => {
+    playClickSound();
+    setIsAiAnalysisOpen(false);
+    setIsAiPromptDropdownOpen(false);
+    setIsStockDropdownOpen(false);
+
+    // 當AI 搜尋分析指令 透過下拉選單選擇完股票後. 關閉對話窗後也會跳到該股的數據圖示化的卡片位置上
+    const targetToJump = targetStockForJumpRef.current;
+    if (targetToJump && (targetToJump.tabId || targetToJump.symbol)) {
+      setTimeout(() => {
+        window.dispatchEvent(
+          new CustomEvent("jump_to_stock_card", {
+            detail: {
+              tabId: targetToJump.tabId,
+              symbol: targetToJump.symbol,
+              tradeType: targetToJump.tradeType,
+            },
+          })
+        );
+      }, 100);
+      targetStockForJumpRef.current = null;
     }
-  }, [isAiAnalysisOpen, uniqueActiveStocks, aiSelectedSymbol]);
+  }, []);
+
+  // 打開選單時自動聚焦搜尋輸入框
+  useEffect(() => {
+    if (isStockDropdownOpen) {
+      const timer = setTimeout(() => {
+        stockSearchInputRef.current?.focus();
+      }, 50);
+      return () => clearTimeout(timer);
+    } else {
+      setStockSearchQuery("");
+    }
+  }, [isStockDropdownOpen]);
+
+  // ESC 鍵關閉下拉選單
+  useEffect(() => {
+    if (!isStockDropdownOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setIsStockDropdownOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isStockDropdownOpen]);
+
+  useEffect(() => {
+    if (isAiAnalysisOpen && !aiSelectedSymbol) {
+      if (allCategorizedActiveStocks.length > 0) {
+        setAiSelectedSymbol(allCategorizedActiveStocks[0].symbol);
+      } else if (uniqueActiveStocks.length > 0) {
+        setAiSelectedSymbol(uniqueActiveStocks[0].symbol);
+      }
+    }
+  }, [isAiAnalysisOpen, allCategorizedActiveStocks, uniqueActiveStocks, aiSelectedSymbol]);
 
   useEffect(() => {
     if (aiSelectedSymbol) {
@@ -791,27 +1003,43 @@ export default function Dashboard() {
       fetchAiHtmlFiles(aiSelectedSymbol);
       
       const templateObj = dynamicPrompts.find(t => t.id === aiSelectedPromptId);
+      const stockObj =
+        allCategorizedActiveStocks.find((s) => s.symbol === aiSelectedSymbol) ||
+        uniqueActiveStocks.find((s) => s.symbol === aiSelectedSymbol);
+      const companyName = stockObj?.companyName || "";
+
       if (templateObj) {
-        const stockObj = uniqueActiveStocks.find(s => s.symbol === aiSelectedSymbol);
-        const companyName = stockObj?.companyName || "";
-        const interpolated = templateObj.template
-          .replace(/{symbol}/g, aiSelectedSymbol)
-          .replace(/{companyName}/g, companyName);
+        const interpolated = replaceStockPlaceholders(
+          templateObj.template,
+          aiSelectedSymbol,
+          companyName
+        );
         setAiPromptText(interpolated);
+      } else {
+        setAiPromptText((prev) => replaceStockPlaceholders(prev, aiSelectedSymbol, companyName));
       }
+      previousAiStockRef.current = { symbol: aiSelectedSymbol, companyName };
     }
-  }, [aiSelectedSymbol, aiSelectedPromptId, uniqueActiveStocks, user, dynamicPrompts]);
+  }, [aiSelectedSymbol, aiSelectedPromptId, allCategorizedActiveStocks, uniqueActiveStocks, user, dynamicPrompts, replaceStockPlaceholders]);
 
   useEffect(() => {
     if (!isAiAnalysisOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        setIsAiAnalysisOpen(false);
+        if (isStockDropdownOpen) {
+          setIsStockDropdownOpen(false);
+          return;
+        }
+        if (isAiPromptDropdownOpen) {
+          setIsAiPromptDropdownOpen(false);
+          return;
+        }
+        handleCloseAiAnalysis();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isAiAnalysisOpen]);
+  }, [isAiAnalysisOpen, isStockDropdownOpen, isAiPromptDropdownOpen, handleCloseAiAnalysis]);
 
   const handleAiFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -922,7 +1150,15 @@ export default function Dashboard() {
       return;
     }
     try {
-      await navigator.clipboard.writeText(aiPromptText);
+      const stockObj =
+        allCategorizedActiveStocks.find((s) => s.symbol === aiSelectedSymbol) ||
+        uniqueActiveStocks.find((s) => s.symbol === aiSelectedSymbol);
+      const companyName = stockObj?.companyName || "";
+      const textToCopy = replaceStockPlaceholders(aiPromptText, aiSelectedSymbol, companyName);
+      if (textToCopy !== aiPromptText) {
+        setAiPromptText(textToCopy);
+      }
+      await navigator.clipboard.writeText(textToCopy);
       const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
       if (isMobile) {
         toast.success("已複製指令，即將開啓 Deepseek App！");
@@ -1162,46 +1398,79 @@ export default function Dashboard() {
   // Global listener for jump_to_stock_card CustomEvent
   useEffect(() => {
     const handleJumpToCardEvent = (e: Event) => {
-      const customEvent = e as CustomEvent<{ tabId?: string; symbol?: string }>;
-      const { tabId, symbol } = customEvent.detail || {};
-      const targetTab = tabs.find((t) => (tabId ? t.id === tabId : t.symbol === symbol));
+      const customEvent = e as CustomEvent<{ tabId?: string; symbol?: string; tradeType?: string }>;
+      const { tabId, symbol, tradeType } = customEvent.detail || {};
+      const cleanSym = symbol ? symbol.trim().toUpperCase() : "";
+
+      let targetTab = tabs.find((t) => {
+        if (tabId && t.id === tabId) return true;
+        return false;
+      });
+
+      if (!targetTab && cleanSym) {
+        targetTab = tabs.find((t) => {
+          const symMatch = (t?.symbol || "").trim().toUpperCase() === cleanSym;
+          if (!symMatch) return false;
+          if (t.status === "COMPLETED") return false;
+          if (tradeType) return t.tradeType === tradeType;
+          return true;
+        });
+        if (!targetTab) {
+          targetTab = tabs.find(
+            (t) => (t?.symbol || "").trim().toUpperCase() === cleanSym
+          );
+        }
+      }
+
       if (!targetTab) return;
+
+      if (targetTab.isHidden) {
+        updateTabHidden(targetTab.id, false);
+      }
 
       if (targetTab.status === "COMPLETED") {
         setActiveViewTab("completed");
       } else if (targetTab.tradeType === "real") {
         setActiveViewTab("real");
+        setMetricsTradeTab("real");
         setActiveHoldingSubTab(getDisplayHoldingStatus(targetTab.holdingStatus));
       } else {
         setActiveViewTab("active");
+        setMetricsTradeTab("simulated");
         setActiveHoldingSubTab(getDisplayHoldingStatus(targetTab.holdingStatus));
       }
       setActiveCardTabId(targetTab.id);
       setActiveCardDefinitionFilter("all");
 
+      const effectiveTabId = targetTab.id;
       let attempts = 0;
       const attemptScroll = () => {
-        const el = document.getElementById(`stock-card-${targetTab.id}`) || document.getElementById(`notes-row-${targetTab.id}`);
+        const el = document.getElementById(`stock-card-${effectiveTabId}`) || document.getElementById(`notes-row-${effectiveTabId}`);
         if (el) {
           scrollToElement(el, -120);
           el.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
-          el.classList.add("ring-4", "ring-amber-400", "ring-offset-2", "scale-[1.03]", "transition-all", "duration-300");
+          el.classList.add("ring-4", "ring-emerald-500", "ring-offset-2", "scale-[1.02]", "transition-all", "duration-500");
           setTimeout(() => {
-            el.classList.remove("ring-4", "ring-amber-400", "ring-offset-2", "scale-[1.03]");
+            el.classList.remove("ring-4", "ring-emerald-500", "ring-offset-2", "scale-[1.02]");
           }, 2500);
-        } else if (attempts < 25) {
+        } else if (attempts < 30) {
           attempts++;
           setTimeout(attemptScroll, 80);
         }
       };
       setTimeout(attemptScroll, 120);
+
+      toast.info(`已跳轉至「${targetTab.symbol}${targetTab.companyName ? ` (${targetTab.companyName})` : ""}」數據圖示化卡片`, {
+        id: `jump-card-${targetTab.id}`,
+        duration: 2200,
+      });
     };
 
     window.addEventListener("jump_to_stock_card", handleJumpToCardEvent);
     return () => {
       window.removeEventListener("jump_to_stock_card", handleJumpToCardEvent);
     };
-  }, [tabs, scrollToElement]);
+  }, [tabs, scrollToElement, updateTabHidden]);
 
   const [activeManageTab, setActiveManageTab] = useState<
     "觀察中" | "候選名單" | "買進操作" | "賣出操作" | "平倉操作" | "乖離名單" | "持股監控"
@@ -4436,7 +4705,11 @@ export default function Dashboard() {
         (e.key === "D" || e.key === "d")
       ) {
         e.preventDefault();
-        setIsAiAnalysisOpen((prev) => !prev);
+        if (isAiAnalysisOpen) {
+          handleCloseAiAnalysis();
+        } else {
+          setIsAiAnalysisOpen(true);
+        }
         playClickSound();
         return;
       }
@@ -7573,12 +7846,13 @@ export default function Dashboard() {
                                   }
 
                                   const isCardExpanded = isCinemaModeActive ? true : (tab.groupId ? (expandedCards[tab.groupId] !== false) : (expandedCards[tab.id] !== false));
+                                  const isHoldingActive = effectiveHoldingQuantity > 0;
 
                                   return (
                                     <div
                                       key={tab.id}
                                       id={`stock-card-${tab.id}`}
-                                      className={`card-wrapper w-[calc(100vw-32px)] sm:w-[500px] md:w-[520px] shrink-0 flex flex-col transition-all duration-300 ${isCardExpanded ? "min-h-[580px] h-[580px] select-none" : "min-h-[135px] h-[135px]"}`}
+                                      className={`card-wrapper w-[calc(100vw-24px)] ${isHoldingActive ? "sm:w-[617px] md:w-[617px] lg:w-[617px] xl:w-[617px] 2xl:w-[617px]" : "sm:w-[480px] md:w-[480px] lg:w-[480px] xl:w-[480px] 2xl:w-[480px]"} shrink-0 flex flex-col transition-all duration-300 ${isCardExpanded ? "h-[620px] min-h-[540px] sm:min-h-[620px] max-h-[calc(100dvh-56px)] sm:max-h-none select-none" : "min-h-[135px] h-[135px]"}`}
                                       style={{ touchAction: isCardExpanded ? "none" : "auto" }}
                                       onMouseDown={(e) => {
                                         if (e.button !== 0) return; // only left click
@@ -7701,7 +7975,7 @@ export default function Dashboard() {
                                       }}
                                     >
                                       <div
-                                        className={`card-inner-parallax w-full h-full flex flex-col transition-all duration-300 ${isCardExpanded ? "min-h-[580px] h-[580px]" : "min-h-[135px] h-[135px]"}`}
+                                        className={`card-inner-parallax w-full h-full flex flex-col transition-all duration-300 ${isCardExpanded ? "h-[620px] min-h-[540px] sm:min-h-[620px] max-h-[calc(100dvh-56px)] sm:max-h-none" : "min-h-[135px] h-[135px]"}`}
                                         style={{ perspective: "1200px" }}
                                       >
                                         <motion.div
@@ -7719,12 +7993,12 @@ export default function Dashboard() {
                                             delay: idx * 0.05,
                                           }}
                                           key={tab.id}
-                                          className={`relative w-full h-full flex-1 flex flex-col cursor-pointer slide-drawer-container transition-all duration-300 ${isCardExpanded ? "min-h-[580px] h-[580px]" : "min-h-[135px] h-[135px]"} ${
+                                          className={`relative w-full h-full flex-1 flex flex-col cursor-pointer slide-drawer-container transition-all duration-300 ${isCardExpanded ? "h-[620px] min-h-[540px] sm:min-h-[620px] max-h-[calc(100dvh-56px)] sm:max-h-none" : "min-h-[135px] h-[135px]"} ${
                                             ((flippedCards[tab.id] !== false) && isCardExpanded) ? "show-back" : ""
                                           } ${activeTabStrategies[tab.id]?.observeChecked ? "card-breathe-observe" : activeTabStrategies[tab.id]?.closeChecked ? "card-breathe-close" : activeTabStrategies[tab.id]?.slChecked ? "card-breathe-sl" : activeTabStrategies[tab.id]?.addChecked ? "card-breathe-add" : activeTabStrategies[tab.id]?.tpChecked ? "card-breathe-tp" : ""}`}
                                         >
                                           {/* Corner label badges - stacked vertically (render on container level to avoid clip truncation) */}
-                                          <div className="absolute -top-2.5 -left-2.5 z-40 flex flex-col gap-1 items-start">
+                                          <div className="absolute -top-2.5 -left-2.5 z-40 flex flex-col gap-1.5 items-start">
                                             {(() => {
                                               const strat = activeTabStrategies[tab.id] || {};
                                               const badges: React.ReactNode[] = [];
@@ -10359,8 +10633,7 @@ export default function Dashboard() {
             className="fixed inset-0 z-[99999] bg-black/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 text-white overflow-y-auto"
             onClick={(e) => {
               if (e.target === e.currentTarget) {
-                setIsAiAnalysisOpen(false);
-                setIsAiPromptDropdownOpen(false);
+                handleCloseAiAnalysis();
               }
             }}
           >
@@ -10383,26 +10656,234 @@ export default function Dashboard() {
                       <span className="text-sm sm:text-base font-bold text-white tracking-wide truncate">
                         AI 搜尋分析指令
                       </span>
-                      {aiSelectedSymbol && (
-                        <div className="relative shrink-0">
-                          <select
-                            value={aiSelectedSymbol}
-                            onChange={(e) => {
-                              setAiSelectedSymbol(e.target.value);
-                              playClickSound();
-                            }}
-                            className="bg-[#e5484d]/20 hover:bg-[#e5484d]/30 text-[#ff7176] border border-[#e5484d]/40 rounded-full px-2.5 py-0.5 text-xs font-black cursor-pointer appearance-none pr-5 focus:outline-none"
-                            title="切換分析個股"
-                          >
-                            {uniqueActiveStocks.map((s) => (
-                              <option key={s.symbol} value={s.symbol} className="bg-[#18181b] text-white">
-                                {s.symbol} {s.companyName ? `(${s.companyName})` : ""}
-                              </option>
-                            ))}
-                          </select>
-                          <ChevronDown className="w-3 h-3 text-[#ff7176] absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                        </div>
-                      )}
+                      {/* 檢索式下拉選股票選單 (目前所有在持有中與真實交易的股票，依照其 tab 分類) */}
+                      <div className="relative shrink-0" ref={stockDropdownRef}>
+                        <button
+                          type="button"
+                          id="ai-stock-search-trigger"
+                          onClick={() => {
+                            setIsStockDropdownOpen(!isStockDropdownOpen);
+                            setIsAiPromptDropdownOpen(false);
+                            playClickSound();
+                          }}
+                          className={`bg-[#e5484d]/20 hover:bg-[#e5484d]/30 text-[#ff7176] hover:text-white border transition-all rounded-full px-2.5 sm:px-3 py-0.5 text-xs font-black cursor-pointer flex items-center gap-1.5 shadow-sm max-w-[150px] sm:max-w-[240px] ${
+                            isStockDropdownOpen
+                              ? "border-[#e5484d] ring-2 ring-[#e5484d]/40 bg-[#e5484d]/35 text-white"
+                              : "border-[#e5484d]/40"
+                          }`}
+                          title="檢索並切換分析個股 (支援持有中與真實交易分類)"
+                        >
+                          <span className="truncate">
+                            {(() => {
+                              const currentStockObj =
+                                allCategorizedActiveStocks.find((s) => s.symbol === aiSelectedSymbol) ||
+                                uniqueActiveStocks.find((s) => s.symbol === aiSelectedSymbol);
+                              return currentStockObj?.companyName
+                                ? `${currentStockObj.symbol} (${currentStockObj.companyName})`
+                                : currentStockObj?.symbol || aiSelectedSymbol || "選擇個股...";
+                            })()}
+                          </span>
+                          <ChevronDown
+                            className={`w-3 h-3 text-[#ff7176] shrink-0 transition-transform duration-200 ${
+                              isStockDropdownOpen ? "rotate-180 text-white" : ""
+                            }`}
+                          />
+                        </button>
+
+                        {/* 檢索式下拉選單彈出層 */}
+                        {isStockDropdownOpen && (
+                          <>
+                            {/* 背景點擊關閉遮罩 */}
+                            <div
+                              className="fixed inset-0 z-50"
+                              onClick={() => setIsStockDropdownOpen(false)}
+                            />
+
+                            <div
+                              data-lenis-prevent
+                              onWheel={(e) => e.stopPropagation()}
+                              className="absolute left-0 sm:left-0 top-full mt-2 z-50 w-[310px] sm:w-[370px] max-w-[calc(100vw-36px)] bg-[#18181b] border border-white/20 rounded-2xl shadow-2xl flex flex-col overflow-hidden backdrop-blur-2xl animate-fadeIn"
+                            >
+                              {/* 檢索搜尋輸入框 */}
+                              <div className="p-2.5 border-b border-white/10 bg-[#1c1c20]">
+                                <div className="relative flex items-center">
+                                  <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-2.5 pointer-events-none" />
+                                  <input
+                                    ref={stockSearchInputRef}
+                                    type="text"
+                                    value={stockSearchQuery}
+                                    onChange={(e) => setStockSearchQuery(e.target.value)}
+                                    placeholder="檢索代號、公司名稱或分類..."
+                                    className="w-full bg-[#121214] border border-white/15 focus:border-[#e5484d] focus:ring-1 focus:ring-[#e5484d]/50 rounded-xl pl-8 pr-7 py-1.5 text-xs text-white placeholder-zinc-500 focus:outline-none transition-all"
+                                  />
+                                  {stockSearchQuery && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setStockSearchQuery("")}
+                                      className="absolute right-2 text-zinc-400 hover:text-white text-xs p-1 cursor-pointer"
+                                      title="清除搜尋"
+                                    >
+                                      ✕
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Tab 分類切換按鈕 (持有中 / 真實交易) */}
+                              <div className="flex items-center gap-1 px-3 py-1.5 border-b border-white/5 bg-[#141416]/70 text-[11px] overflow-x-auto scrollbar-hide">
+                                <span className="text-zinc-500 shrink-0 font-bold mr-1">分類:</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedStockCategoryFilter("all")}
+                                  className={`px-2 py-0.5 rounded-md font-bold transition-all cursor-pointer whitespace-nowrap ${
+                                    selectedStockCategoryFilter === "all"
+                                      ? "bg-white/20 text-white shadow-xs font-black"
+                                      : "text-zinc-400 hover:text-zinc-200 hover:bg-white/5"
+                                  }`}
+                                >
+                                  全部 ({allCategorizedActiveStocks.length})
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedStockCategoryFilter("real")}
+                                  className={`px-2 py-0.5 rounded-md font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1 ${
+                                    selectedStockCategoryFilter === "real"
+                                      ? "bg-teal-500/25 text-teal-300 border border-teal-500/40 font-black"
+                                      : "text-zinc-400 hover:text-teal-300 hover:bg-white/5"
+                                  }`}
+                                >
+                                  <ShieldCheck className="w-3 h-3 text-teal-400" />
+                                  真實交易 ({realCategorizedStocks.length})
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedStockCategoryFilter("simulated")}
+                                  className={`px-2 py-0.5 rounded-md font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1 ${
+                                    selectedStockCategoryFilter === "simulated"
+                                      ? "bg-emerald-500/25 text-emerald-300 border border-emerald-500/40 font-black"
+                                      : "text-zinc-400 hover:text-emerald-300 hover:bg-white/5"
+                                  }`}
+                                >
+                                  <Activity className="w-3 h-3 text-emerald-400" />
+                                  持有中 ({simulatedCategorizedStocks.length})
+                                </button>
+                              </div>
+
+                              {/* 依照 Tab 分類展示股票清單 */}
+                              <div className="max-h-64 sm:max-h-72 overflow-y-auto overscroll-contain divide-y divide-white/5">
+                                {filteredCategorizedStocks.length === 0 ? (
+                                  <div className="py-8 text-center text-xs text-zinc-500 flex flex-col items-center justify-center gap-1.5">
+                                    <Search className="w-5 h-5 text-zinc-600 stroke-1" />
+                                    <span>查無符合「{stockSearchQuery}」的股票</span>
+                                  </div>
+                                ) : (
+                                  <>
+                                    {/* 真實交易 Group */}
+                                    {filteredRealStocks.length > 0 && (
+                                      <div>
+                                        <div className="px-3 py-1 bg-teal-950/40 border-b border-teal-500/10 text-teal-300 text-[10px] font-black tracking-wider flex items-center justify-between sticky top-0 z-10 backdrop-blur-md">
+                                          <div className="flex items-center gap-1.5">
+                                            <ShieldCheck className="w-3 h-3 text-teal-400" />
+                                            <span>真實交易 ({filteredRealStocks.length})</span>
+                                          </div>
+                                          <span className="text-teal-400/60 font-mono text-[9px]">REAL</span>
+                                        </div>
+                                        {filteredRealStocks.map((stock) => {
+                                          const isSelected = stock.symbol === aiSelectedSymbol;
+                                          return (
+                                            <button
+                                              key={`real-${stock.symbol}-${stock.id}`}
+                                              type="button"
+                                              onClick={() => handleSelectAiStock(stock)}
+                                              className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between gap-2 transition-colors cursor-pointer border-b border-white/[0.03] ${
+                                                isSelected
+                                                  ? "bg-[#e5484d]/15 text-[#ff7176] font-bold border-l-3 border-[#e5484d]"
+                                                  : "text-zinc-200 hover:bg-white/10 hover:text-white"
+                                              }`}
+                                            >
+                                              <div className="flex items-center gap-2 min-w-0">
+                                                <span className="font-mono font-black text-xs sm:text-sm text-white tracking-wide shrink-0">
+                                                  {stock.symbol}
+                                                </span>
+                                                {stock.companyName && (
+                                                  <span className="text-[11px] text-zinc-400 truncate max-w-[110px] sm:max-w-[150px]">
+                                                    {stock.companyName}
+                                                  </span>
+                                                )}
+                                              </div>
+                                              <div className="flex items-center gap-1.5 shrink-0">
+                                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-teal-500/15 text-teal-300 border border-teal-500/30">
+                                                  {stock.subTab}
+                                                </span>
+                                                {isSelected && (
+                                                  <Check className="w-3.5 h-3.5 text-[#ff7176]" />
+                                                )}
+                                              </div>
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+
+                                    {/* 持有中 Group */}
+                                    {filteredSimulatedStocks.length > 0 && (
+                                      <div>
+                                        <div className="px-3 py-1 bg-emerald-950/40 border-b border-emerald-500/10 text-emerald-300 text-[10px] font-black tracking-wider flex items-center justify-between sticky top-0 z-10 backdrop-blur-md">
+                                          <div className="flex items-center gap-1.5">
+                                            <Activity className="w-3 h-3 text-emerald-400" />
+                                            <span>持有中 ({filteredSimulatedStocks.length})</span>
+                                          </div>
+                                          <span className="text-emerald-400/60 font-mono text-[9px]">SIMULATED</span>
+                                        </div>
+                                        {filteredSimulatedStocks.map((stock) => {
+                                          const isSelected = stock.symbol === aiSelectedSymbol;
+                                          return (
+                                            <button
+                                              key={`sim-${stock.symbol}-${stock.id}`}
+                                              type="button"
+                                              onClick={() => handleSelectAiStock(stock)}
+                                              className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between gap-2 transition-colors cursor-pointer border-b border-white/[0.03] ${
+                                                isSelected
+                                                  ? "bg-[#e5484d]/15 text-[#ff7176] font-bold border-l-3 border-[#e5484d]"
+                                                  : "text-zinc-200 hover:bg-white/10 hover:text-white"
+                                              }`}
+                                            >
+                                              <div className="flex items-center gap-2 min-w-0">
+                                                <span className="font-mono font-black text-xs sm:text-sm text-white tracking-wide shrink-0">
+                                                  {stock.symbol}
+                                                </span>
+                                                {stock.companyName && (
+                                                  <span className="text-[11px] text-zinc-400 truncate max-w-[110px] sm:max-w-[150px]">
+                                                    {stock.companyName}
+                                                  </span>
+                                                )}
+                                              </div>
+                                              <div className="flex items-center gap-1.5 shrink-0">
+                                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                                                  {stock.subTab}
+                                                </span>
+                                                {isSelected && (
+                                                  <Check className="w-3.5 h-3.5 text-[#ff7176]" />
+                                                )}
+                                              </div>
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+
+                              {/* 底部說明 */}
+                              <div className="px-3 py-1.5 bg-[#121214] border-t border-white/5 text-[10px] text-zinc-500 flex items-center justify-between">
+                                <span>共 {allCategorizedActiveStocks.length} 檔標的</span>
+                                <span className="text-zinc-400">點擊選定個股，關閉視窗後將跳轉至該卡片</span>
+                              </div>
+                            </div>
+                          </>
+                        )}
+                      </div>
                     </div>
                     <span className="text-[10px] text-zinc-400">
                       一鍵生成 DeepSeek 專業分析 Prompt
@@ -10412,11 +10893,7 @@ export default function Dashboard() {
 
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => {
-                      playClickSound();
-                      setIsAiAnalysisOpen(false);
-                      setIsAiPromptDropdownOpen(false);
-                    }}
+                    onClick={handleCloseAiAnalysis}
                     className="w-8 h-8 rounded-full border border-white/10 hover:border-white/20 bg-white/5 hover:bg-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition-all cursor-pointer text-xs"
                     title="關閉 (ESC)"
                   >
@@ -10481,13 +10958,25 @@ export default function Dashboard() {
                           />
                         </div>
                         <div className="flex flex-col gap-1">
-                          <label className="text-[11px] text-zinc-400 font-bold">
-                            模版內容 (支援 &#123;symbol&#125;, &#123;companyName&#125;)
-                          </label>
+                          <div className="flex items-center justify-between">
+                            <label className="text-[11px] text-zinc-400 font-bold">
+                              模版內容 (支援 (股票名稱)、&#123;symbol&#125;、&#123;companyName&#125;)
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingPromptTemplate((prev) => prev + "(股票名稱)");
+                              }}
+                              className="text-[10px] text-amber-400 hover:text-amber-300 bg-amber-400/10 px-1.5 py-0.5 rounded cursor-pointer transition-all"
+                            >
+                              + 插入 (股票名稱)
+                            </button>
+                          </div>
                           <textarea
                             value={editingPromptTemplate}
                             onChange={(e) => setEditingPromptTemplate(e.target.value)}
                             rows={4}
+                            placeholder="輸入模版內容，包含 (股票名稱) 會自動代入所選股票..."
                             className="w-full bg-[#18181b] border border-white/10 text-white rounded-lg p-2.5 text-xs focus:outline-none focus:border-amber-500 resize-none font-mono leading-relaxed"
                           />
                         </div>
@@ -10549,13 +11038,26 @@ export default function Dashboard() {
                             className="w-full bg-[#18181b] border border-white/10 text-white rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[#e5484d]"
                           />
                         </div>
-                        <textarea
-                          placeholder="請輸入指令內容，可包含變數 &#123;symbol&#125; 與 &#123;companyName&#125;..."
-                          value={newPromptTemplate}
-                          onChange={(e) => setNewPromptTemplate(e.target.value)}
-                          rows={3}
-                          className="w-full bg-[#18181b] border border-white/10 text-white rounded-lg p-2.5 text-xs focus:outline-none focus:border-[#e5484d] resize-none font-mono leading-relaxed"
-                        />
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center justify-end">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setNewPromptTemplate((prev) => prev + "(股票名稱)");
+                              }}
+                              className="text-[10px] text-[#ff7176] hover:text-white bg-[#e5484d]/10 hover:bg-[#e5484d]/20 px-1.5 py-0.5 rounded cursor-pointer transition-all"
+                            >
+                              + 插入 (股票名稱)
+                            </button>
+                          </div>
+                          <textarea
+                            placeholder="請輸入指令內容，可包含 (股票名稱)、&#123;symbol&#125; 或 &#123;companyName&#125;..."
+                            value={newPromptTemplate}
+                            onChange={(e) => setNewPromptTemplate(e.target.value)}
+                            rows={3}
+                            className="w-full bg-[#18181b] border border-white/10 text-white rounded-lg p-2.5 text-xs focus:outline-none focus:border-[#e5484d] resize-none font-mono leading-relaxed"
+                          />
+                        </div>
                         <button
                           type="button"
                           onClick={() => {
@@ -10784,7 +11286,15 @@ export default function Dashboard() {
                           <button
                             type="button"
                             onClick={() => {
-                              navigator.clipboard.writeText(aiPromptText);
+                              const stockObj =
+                                allCategorizedActiveStocks.find((s) => s.symbol === aiSelectedSymbol) ||
+                                uniqueActiveStocks.find((s) => s.symbol === aiSelectedSymbol);
+                              const companyName = stockObj?.companyName || "";
+                              const textToCopy = replaceStockPlaceholders(aiPromptText, aiSelectedSymbol, companyName);
+                              if (textToCopy !== aiPromptText) {
+                                setAiPromptText(textToCopy);
+                              }
+                              navigator.clipboard.writeText(textToCopy);
                               toast.success("已複製指令內容至剪貼簿");
                               playClickSound();
                             }}
