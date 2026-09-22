@@ -44,6 +44,7 @@ export interface StockTab {
   includeCurrentHolding?: boolean;
   averagingRowsSys2?: { price: string; quantity: string; quantity2?: string; bought?: boolean; riskFlag?: boolean }[];
   refPnLPointSys2?: number | string;
+  selectedSplitTrade?: string;
 }
 
 export interface ChartAnnotation {
@@ -138,6 +139,7 @@ export interface StrategyConfig {
   closeChecked?: boolean;
   observeChecked?: boolean;
   notesHighlighted?: boolean;
+  selectedSplitTrade?: string;
   tags?: string[];
   resistanceZones?: KeyPriceThreshold[];
   supportZones?: KeyPriceThreshold[];

@@ -4226,6 +4226,9 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
           trades,
           averagingRowsSys2,
           plannedBuyQty: tab?.plannedBuyQty ? Number(tab.plannedBuyQty) : undefined,
+          plannedBuyPercent: tab?.plannedBuyPercent !== undefined && tab?.plannedBuyPercent !== null ? Number(tab.plannedBuyPercent) : undefined,
+          tradeType: tab?.tradeType,
+          maxStrategyRiskPool60,
         });
 
         const batchConfigList = batchPlanResult?.batches || [];
@@ -5692,34 +5695,21 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
           const strat = tab ? (strategiesMap?.[tab.id] || (tab as any)?.strategy) : undefined;
           const rowsSys2 = tab?.averagingRowsSys2 || strat?.averagingRowsSys2;
           const rowsSys1 = tab?.averagingRows || strat?.averagingRows;
-          const batchPlannedSizes: number[] = [0, 1, 2, 3].map((i) => {
-            const row = rowsSys2?.[i];
-            const q1 = parseFloat(row?.quantity || "") || 0;
-            const q2 = parseFloat(row?.quantity2 || "") || 0;
-            if (q1 + q2 > 0) return q1 + q2;
-            if (tab?.plannedBuyQty && tab.plannedBuyQty > 0) {
-              const pcts = [0.15, 0.25, 0.35, 0.25];
-              return Math.ceil(tab.plannedBuyQty * pcts[i]);
-            }
-            return 0;
-          });
-          const totalSys2Planned = batchPlannedSizes.reduce((a, b) => a + b, 0);
-          const totalSys1Planned = (rowsSys1 || []).reduce((sum: number, r: any) => {
-            const q1 = parseFloat(r?.quantity || "") || 0;
-            const q2 = parseFloat(r?.quantity2 || "") || 0;
-            return sum + q1 + q2;
-          }, 0);
-          const effectivePlannedBuyQty =
-            tab?.plannedBuyQty && tab.plannedBuyQty > 0
-              ? tab.plannedBuyQty
-              : totalSys2Planned > 0
-              ? totalSys2Planned
-              : totalSys1Planned > 0
-              ? totalSys1Planned
-              : 0;
-
-          // 3. 目前攤平欄位號碼 (#1, #2, #3, #4) 或拆分交易選項
           const cardTrades = tab ? (tradesMap?.[tab.id] || (tab as any)?.trades || []) : [];
+
+          const modalPlan = calculateBatchPlanning({
+            currentPrice: curPriceNum,
+            holdingQty: effectiveHoldingQty,
+            trades: cardTrades,
+            averagingRowsSys2: rowsSys2,
+            plannedBuyQty: tab?.plannedBuyQty ? Number(tab.plannedBuyQty) : undefined,
+            plannedBuyPercent: tab?.plannedBuyPercent !== undefined && tab?.plannedBuyPercent !== null ? Number(tab.plannedBuyPercent) : undefined,
+            tradeType: tab?.tradeType,
+            maxStrategyRiskPool60,
+          });
+
+          const batchPlannedSizes: number[] = modalPlan.batches.map((b) => b.size);
+          const effectivePlannedBuyQty = modalPlan.plannedQty;
           const effectiveDcaProgress = getEffectiveDcaProgress(
             pos.dcaProgress,
             tab,

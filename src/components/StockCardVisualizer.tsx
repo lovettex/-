@@ -30,6 +30,9 @@ interface Props {
   averagingRowsSys2?: { price: string; quantity: string; quantity2?: string; bought?: boolean; riskFlag?: boolean }[];
   plannedBuyQty?: number;
   plannedBuyPercent?: number;
+  totalCapital?: number;
+  virtualCapital?: number;
+  maxStrategyRiskPool60?: number;
   holdingQuantity?: number;
   stockName?: string;
   rating?: number;
@@ -42,6 +45,7 @@ interface Props {
   onRatingBarDoubleClick?: (e: React.MouseEvent | React.TouchEvent) => void;
   strategy?: {
     notesHighlighted?: boolean;
+    selectedSplitTrade?: string;
     tpChecked?: boolean;
     slChecked?: boolean;
     addChecked?: boolean;
@@ -73,6 +77,7 @@ interface Props {
   onUpdateObserveChecked?: (checked: boolean) => void;
   onUpdateNotesHighlighted?: (checked: boolean) => void;
   onOpenActionSettings?: () => void;
+  selectedSplitTrade?: string;
   userId?: string;
   holdingStatus?: string;
   tradeType?: string;
@@ -427,6 +432,9 @@ export const StockCardVisualizer: React.FC<Props> = ({
   averagingRowsSys2,
   plannedBuyQty,
   plannedBuyPercent,
+  totalCapital,
+  virtualCapital,
+  maxStrategyRiskPool60,
   holdingQuantity,
   stockName,
   rating,
@@ -447,6 +455,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
   onUpdateObserveChecked,
   onUpdateNotesHighlighted,
   onOpenActionSettings,
+  selectedSplitTrade,
   userId,
   holdingStatus,
   tradeType,
@@ -454,6 +463,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
   onToggleSelected,
   onOpenMiniVisualLinesModal,
 }) => {
+  const activeSplitTrade = selectedSplitTrade || strategy?.selectedSplitTrade;
   const { price: dynamicPrice, isLoading: isCardLoading } = useStockPrice(stockName, currentPrice);
 
   const lastCpTapTime = useRef<number>(0);
@@ -2236,30 +2246,23 @@ export const StockCardVisualizer: React.FC<Props> = ({
       .filter((o) => o.category?.includes("進出"))
       .sort((a, b) => a.price - b.price);
 
-    // 預計購買總股數與集中規劃計算 (分批進場金字塔)
-    let effPlannedQty = plannedBuyQty && plannedBuyQty > 0 ? plannedBuyQty : 0;
-    if (effPlannedQty <= 0 && averagingRowsSys2 && averagingRowsSys2.length > 0) {
-      const rowsSum = averagingRowsSys2.reduce((acc, r) => {
-        const q1 = r?.quantity ? parseFloat(r.quantity) : 0;
-        const q2 = r?.quantity2 ? parseFloat(r.quantity2) : 0;
-        return acc + (isNaN(q1) ? 0 : q1) + (isNaN(q2) ? 0 : q2);
-      }, 0);
-      if (rowsSum > 0) effPlannedQty = rowsSum;
-    }
+    // 預計購買總股數與集中規劃計算 (分批進場金字塔，完全參照個股頁面核心計算)
     const currentHoldingQty = holdingQuantity !== undefined ? holdingQuantity : (averageCostQuantity || 0);
-    if (effPlannedQty <= 0 && currentHoldingQty > 0) {
-      effPlannedQty = Math.max(currentHoldingQty, Math.ceil(currentHoldingQty / 0.15));
-    }
+    const activePrice = dynamicPrice > 0 ? dynamicPrice : (currentPrice || 0);
 
     const planResult = calculateBatchPlanning({
-      plannedQty: effPlannedQty,
-      usableCapital: 0,
-      currentPrice: dynamicPrice > 0 ? dynamicPrice : currentPrice,
+      currentPrice: activePrice,
       holdingQty: currentHoldingQty,
       trades: liveTrades,
       averagingRowsSys2,
-      plannedBuyQty: effPlannedQty,
+      plannedBuyQty,
+      plannedBuyPercent,
+      totalCapital,
+      virtualCapital,
+      tradeType,
+      maxStrategyRiskPool60,
     });
+    const effPlannedQty = planResult.plannedQty;
 
     const stepConfigs = [
       { index: 0, name: "第1批", fullName: "第一批 (15%)", percent: "15%", dropPct: 3, subtitle: "初期試探" },
@@ -2549,7 +2552,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
       getPriceFromYPct,
       uniqueSortedPrices,
     };
-  }, [plannedOrders, dynamicPrice, currentPrice, averageCost, averageCostQuantity, averagingRows, averagingRowsSys2, plannedBuyQty, holdingQuantity, liveTrades]);
+  }, [plannedOrders, dynamicPrice, currentPrice, averageCost, averageCostQuantity, averagingRows, averagingRowsSys2, plannedBuyQty, plannedBuyPercent, holdingQuantity, liveTrades, totalCapital, virtualCapital, tradeType, maxStrategyRiskPool60]);
 
   if (!data)
     return (
@@ -2844,13 +2847,13 @@ export const StockCardVisualizer: React.FC<Props> = ({
             )}
             {stockName && (
               <div 
-                className="font-extrabold text-base sm:text-2xl tracking-tighter leading-none text-zinc-900 shrink-0 cursor-pointer hover:opacity-80 transition-opacity flex items-baseline gap-1.5"
+                className="font-extrabold text-base sm:text-2xl tracking-tighter leading-none text-zinc-900 shrink-0 cursor-pointer hover:opacity-80 transition-opacity flex items-baseline gap-1.5 select-none"
                 onTouchStart={(e) => e.stopPropagation()}
-                onClick={(e) => {
+                onDoubleClick={(e) => {
                   e.stopPropagation();
                   onOpenActionSettings?.();
                 }}
-                title="開啟操作設定對話窗"
+                title="雙擊開啟操作設定對話窗"
               >
                 <span>{stockName}</span>
                 {(!plannedBuyPercent || plannedBuyPercent <= 0) && (

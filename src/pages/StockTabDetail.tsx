@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useStockTabs } from '../hooks/useStockTabs';
 import { playClickSound, playSuccessSound, playPriceImportSound } from '../lib/audio';
 import { useTrades } from '../hooks/useTrades';
-import { calculateStats, generateAveragingDownRows, shouldUpdateAveragingRows } from '../lib/calculations';
+import { calculateStats, generateAveragingDownRows, shouldUpdateAveragingRows, calculateBatchPlanning } from '../lib/calculations';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -929,132 +929,68 @@ export default function StockTabDetail() {
     ? tab.currentPrice
     : (parseFloat(currentPriceInput) || 0);
 
-  // 可購買總數量 = 可使用資金 / 當前股價 (無條件捨去取整數股，或自 tab.plannedBuyQty / averagingRowsSys2 / 持股推算)
-  let calculatedPlannedQty = 0;
-  if (stockPrice > 0 && usableCapital > 0) {
-    calculatedPlannedQty = Math.floor(usableCapital / stockPrice);
-  } else if (tab?.plannedBuyQty && Number(tab.plannedBuyQty) > 0) {
-    calculatedPlannedQty = Number(tab.plannedBuyQty);
-  } else if (averagingRowsSys2 && averagingRowsSys2.length > 0) {
-    const rowsSum = averagingRowsSys2.reduce((acc, r) => {
-      const q1 = r?.quantity ? parseFloat(r.quantity) : 0;
-      const q2 = r?.quantity2 ? parseFloat(r.quantity2) : 0;
-      return acc + q1 + q2;
-    }, 0);
-    if (rowsSum > 0) calculatedPlannedQty = rowsSum;
-  }
-  if (calculatedPlannedQty <= 0 && effectiveHoldingQty > 0) {
-    calculatedPlannedQty = Math.max(effectiveHoldingQty, Math.ceil(effectiveHoldingQty / 0.15));
-  }
+  // 可購買總數量與各批次規劃數值 (使用集中化 calculateBatchPlanning 確保與卡片視覺化完全一致)
+  const batchPlanResult = calculateBatchPlanning({
+    plannedBuyPercent: plannedPercent,
+    currentPrice: stockPrice,
+    holdingQty: effectiveHoldingQty,
+    trades,
+    averagingRowsSys2,
+    plannedBuyQty: tab?.plannedBuyQty ? Number(tab.plannedBuyQty) : undefined,
+    totalCapital,
+    virtualCapital,
+    tradeType: tab?.tradeType,
+    maxStrategyRiskPool60,
+  });
 
-  const plannedQty = calculatedPlannedQty;
+  const plannedQty = batchPlanResult.plannedQty;
+  const b0 = batchPlanResult.batches[0];
+  const b1 = batchPlanResult.batches[1];
+  const b2 = batchPlanResult.batches[2];
+  const b3 = batchPlanResult.batches[3];
 
-  // 1. 第一批 (15%) -> 第一批拆分交易(7%) + 第一批交易(8%)
-  const size1 = Math.ceil(plannedQty * 0.15);
-  const size1_a = Math.round(plannedQty * 0.07);
-  const size1_b = Math.max(0, size1 - size1_a);
+  const size1 = b0.size;
+  const size1_a = b0.split1.size;
+  const size1_b = b0.split2.size;
+  const bought1 = b0.bought;
+  const remaining1 = b0.remaining;
+  const bought1_a = b0.split1.bought;
+  const remaining1_a = b0.split1.remaining;
+  const bought1_b = b0.split2.bought;
+  const remaining1_b = b0.split2.remaining;
 
-  // 2. 第二批 (25%) -> 第二批拆分交易(10%) + 第二批拆分交易(15%)
-  const size2 = Math.ceil(plannedQty * 0.25);
-  const size2_a = Math.round(plannedQty * 0.10);
-  const size2_b = Math.max(0, size2 - size2_a);
+  const size2 = b1.size;
+  const size2_a = b1.split1.size;
+  const size2_b = b1.split2.size;
+  const bought2 = b1.bought;
+  const remaining2 = b1.remaining;
+  const bought2_a = b1.split1.bought;
+  const remaining2_a = b1.split1.remaining;
+  const bought2_b = b1.split2.bought;
+  const remaining2_b = b1.split2.remaining;
 
-  // 3. 第三批 (35%) -> 第三批拆分交易(15%) + 第三批拆分交易(20%)
-  const size3 = Math.ceil(plannedQty * 0.35);
-  const size3_a = Math.round(plannedQty * 0.15);
-  const size3_b = Math.max(0, size3 - size3_a);
+  const size3 = b2.size;
+  const size3_a = b2.split1.size;
+  const size3_b = b2.split2.size;
+  const bought3 = b2.bought;
+  const remaining3 = b2.remaining;
+  const bought3_a = b2.split1.bought;
+  const remaining3_a = b2.split1.remaining;
+  const bought3_b = b2.split2.bought;
+  const remaining3_b = b2.split2.remaining;
 
-  // 4. 第四批 (25%) -> 第四批拆分交易 (10%) + 第四批拆分交易 (15%)
-  const size4 = Math.ceil(plannedQty * 0.25);
-  const size4_a = Math.round(plannedQty * 0.10);
-  const size4_b = Math.max(0, size4 - size4_a);
+  const size4 = b3.size;
+  const size4_a = b3.split1.size;
+  const size4_b = b3.split2.size;
+  const bought4 = b3.bought;
+  const remaining4 = b3.remaining;
+  const bought4_a = b3.split1.bought;
+  const remaining4_a = b3.split1.remaining;
+  const bought4_b = b3.split2.bought;
+  const remaining4_b = b3.split2.remaining;
 
-  // 檢查來自 trades 中明確指定的批次已購數量
-  const tradeBatchSharesSys2 = [0, 0, 0, 0];
-  if (Array.isArray(trades)) {
-    trades.forEach((t) => {
-      if (t.type === 'BUY') {
-        const q = typeof t.quantity === 'number' ? t.quantity : parseFloat(String(t.quantity)) || 0;
-        if (q > 0) {
-          const b = (t.batch || '').replace(/\s+/g, '');
-          if (b.includes('第一批') || b.includes('第1批') || b.includes('#1') || b.includes('7%') || b.includes('8%')) {
-            tradeBatchSharesSys2[0] += q;
-          } else if (b.includes('第二批') || b.includes('第2批') || b.includes('#2') || b.includes('10%') || b.includes('25%')) {
-            tradeBatchSharesSys2[1] += q;
-          } else if (b.includes('第三批') || b.includes('第3批') || b.includes('#3') || b.includes('20%') || b.includes('35%')) {
-            tradeBatchSharesSys2[2] += q;
-          } else if (b.includes('第四批') || b.includes('第4批') || b.includes('#4')) {
-            tradeBatchSharesSys2[3] += q;
-          }
-        }
-      }
-    });
-  }
-
-  // 檢查 averagingRowsSys2 是否有被勾選為已購入的批次
-  const checkedRowsBoughtSys2 = averagingRowsSys2.reduce((sum, r, idx) => {
-    if (!r?.bought) return sum;
-    const q1 = r?.quantity ? parseFloat(r.quantity) : 0;
-    const q2 = r?.quantity2 ? parseFloat(r.quantity2) : 0;
-    const target = q1 + q2 > 0 ? q1 + q2 : [size1, size2, size3, size4][idx] || 0;
-    return sum + target;
-  }, 0);
-
-  const totalBought = Math.max(0, effectiveHoldingQty, checkedRowsBoughtSys2);
-
-  // 計算各批與拆分子批已購與餘額 (累進階梯計算)
-  // 第一批拆分
-  const cascade1_a = Math.min(totalBought, size1_a);
-  const remAfter1_a = Math.max(0, totalBought - size1_a);
-  const cascade1_b = Math.min(remAfter1_a, size1_b);
-  const isRow0Bought = Boolean(averagingRowsSys2?.[0]?.bought);
-  const bought1 = Math.max(isRow0Bought ? size1 : (cascade1_a + cascade1_b), tradeBatchSharesSys2[0]);
-  const remaining1 = Math.max(0, size1 - bought1);
-  const bought1_a = Math.max(cascade1_a, Math.min(bought1, size1_a));
-  const remaining1_a = Math.max(0, size1_a - bought1_a);
-  const bought1_b = Math.max(cascade1_b, Math.min(Math.max(0, bought1 - size1_a), size1_b));
-  const remaining1_b = Math.max(0, size1_b - bought1_b);
-
-  // 第二批拆分
-  const remAfter1 = Math.max(0, totalBought - size1);
-  const cascade2_a = Math.min(remAfter1, size2_a);
-  const remAfter2_a = Math.max(0, remAfter1 - size2_a);
-  const cascade2_b = Math.min(remAfter2_a, size2_b);
-  const isRow1Bought = Boolean(averagingRowsSys2?.[1]?.bought);
-  const bought2 = Math.max(isRow1Bought ? size2 : (cascade2_a + cascade2_b), tradeBatchSharesSys2[1]);
-  const remaining2 = Math.max(0, size2 - bought2);
-  const bought2_a = Math.max(cascade2_a, Math.min(bought2, size2_a));
-  const remaining2_a = Math.max(0, size2_a - bought2_a);
-  const bought2_b = Math.max(cascade2_b, Math.min(Math.max(0, bought2 - size2_a), size2_b));
-  const remaining2_b = Math.max(0, size2_b - bought2_b);
-
-  // 第三批拆分
-  const remAfter2 = Math.max(0, totalBought - size1 - size2);
-  const cascade3_a = Math.min(remAfter2, size3_a);
-  const remAfter3_a = Math.max(0, remAfter2 - size3_a);
-  const cascade3_b = Math.min(remAfter3_a, size3_b);
-  const isRow2Bought = Boolean(averagingRowsSys2?.[2]?.bought);
-  const bought3 = Math.max(isRow2Bought ? size3 : (cascade3_a + cascade3_b), tradeBatchSharesSys2[2]);
-  const remaining3 = Math.max(0, size3 - bought3);
-  const bought3_a = Math.max(cascade3_a, Math.min(bought3, size3_a));
-  const remaining3_a = Math.max(0, size3_a - bought3_a);
-  const bought3_b = Math.max(cascade3_b, Math.min(Math.max(0, bought3 - size3_a), size3_b));
-  const remaining3_b = Math.max(0, size3_b - bought3_b);
-
-  // 第四批拆分
-  const remAfter3 = Math.max(0, totalBought - size1 - size2 - size3);
-  const cascade4_a = Math.min(remAfter3, size4_a);
-  const remAfter4_a = Math.max(0, remAfter3 - size4_a);
-  const cascade4_b = Math.min(remAfter4_a, size4_b);
-  const isRow3Bought = Boolean(averagingRowsSys2?.[3]?.bought);
-  const bought4 = Math.max(isRow3Bought ? size4 : (cascade4_a + cascade4_b), tradeBatchSharesSys2[3]);
-  const remaining4 = Math.max(0, size4 - bought4);
-  const bought4_a = Math.max(cascade4_a, Math.min(bought4, size4_a));
-  const remaining4_a = Math.max(0, size4_a - bought4_a);
-  const bought4_b = Math.max(cascade4_b, Math.min(Math.max(0, bought4 - size4_a), size4_b));
-  const remaining4_b = Math.max(0, size4_b - bought4_b);
-
-  const remainingToBuy = Math.max(0, plannedQty - totalBought);
+  const totalBought = batchPlanResult.totalBought;
+  const remainingToBuy = batchPlanResult.totalRemaining;
 
   let currentBatchText = "";
   let currentBatchOrderText = "";

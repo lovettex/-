@@ -114,7 +114,7 @@ import { safeLocalStorage, safeSessionStorage } from "../lib/utils";
 import { format } from "date-fns";
 import { StockCardVisualizer, prefetchStockPrice } from "../components/StockCardVisualizer";
 import { CinemaDock } from "../components/CinemaDock";
-import { DynamicVisualLinesModal } from "../components/DynamicVisualLinesModal";
+import { DynamicVisualLinesModal, SPLIT_TRADE_OPTIONS } from "../components/DynamicVisualLinesModal";
 import { MiniVisualLinesModal } from "../components/MiniVisualLinesModal";
 import { syncSubTabDividersToCanvas, calculateCanvasYFromDividers } from "../utils/visualLinesSync";
 import { getVisualLinesDataSync, saveVisualLinesDataOptimistic } from "../utils/visualLinesStorage";
@@ -238,6 +238,245 @@ const holdingTabConfig = {
     activeCountClass: "bg-indigo-100/80 text-indigo-800 border-indigo-200/50",
   },
 } as const;
+
+export type BatchGroup = "第一批" | "第二批" | "第三批" | "第四批";
+export type SplitTradeKey =
+  | "1-7%"
+  | "1-8%"
+  | "2-10%"
+  | "2-15%"
+  | "3-15%"
+  | "3-20%"
+  | "4-10%"
+  | "4-15%";
+
+export const BATCH_GROUPS: BatchGroup[] = ["第一批", "第二批", "第三批", "第四批"];
+
+export const BATCH_TO_SPLIT_KEYS: Record<BatchGroup, SplitTradeKey[]> = {
+  "第一批": ["1-7%", "1-8%"],
+  "第二批": ["2-10%", "2-15%"],
+  "第三批": ["3-15%", "3-20%"],
+  "第四批": ["4-10%", "4-15%"],
+};
+
+export const SPLIT_FULL_NAME_TO_KEY: Record<string, SplitTradeKey> = {
+  "第一批拆分交易(7%)": "1-7%",
+  "第一批拆分交易(8%)": "1-8%",
+  "第二批拆分交易(10%)": "2-10%",
+  "第二批拆分交易(15%)": "2-15%",
+  "第三批拆分交易(15%)": "3-15%",
+  "第三批拆分交易(20%)": "3-20%",
+  "第四批拆分交易(10%)": "4-10%",
+  "第四批拆分交易(15%)": "4-15%",
+};
+
+export const BATCH_THEME_CONFIG: Record<
+  BatchGroup,
+  {
+    colorClass: string;
+    bgClass: string;
+    borderClass: string;
+    shadowClass: string;
+    activeCountClass: string;
+  }
+> = {
+  "第一批": {
+    colorClass: "text-sky-700 font-bold",
+    bgClass: "bg-sky-50",
+    borderClass: "border-sky-300",
+    shadowClass: "shadow-[0_2px_8px_rgba(56,189,248,0.12)]",
+    activeCountClass: "bg-sky-100 text-sky-800 border-sky-300",
+  },
+  "第二批": {
+    colorClass: "text-emerald-700 font-bold",
+    bgClass: "bg-emerald-50",
+    borderClass: "border-emerald-300",
+    shadowClass: "shadow-[0_2px_8px_rgba(16,185,129,0.12)]",
+    activeCountClass: "bg-emerald-100 text-emerald-800 border-emerald-300",
+  },
+  "第三批": {
+    colorClass: "text-amber-700 font-bold",
+    bgClass: "bg-amber-50",
+    borderClass: "border-amber-300",
+    shadowClass: "shadow-[0_2px_8px_rgba(245,158,11,0.12)]",
+    activeCountClass: "bg-amber-100 text-amber-800 border-amber-300",
+  },
+  "第四批": {
+    colorClass: "text-rose-700 font-bold",
+    bgClass: "bg-rose-50",
+    borderClass: "border-rose-300",
+    shadowClass: "shadow-[0_2px_8px_rgba(244,63,94,0.12)]",
+    activeCountClass: "bg-rose-100 text-rose-800 border-rose-300",
+  },
+};
+
+export const SPLIT_STAGES_CONFIG: Record<
+  SplitTradeKey,
+  {
+    key: SplitTradeKey;
+    label: string;
+    fullName: string;
+    batchGroup: BatchGroup;
+    percentText: string;
+    colorClass: string;
+    bgClass: string;
+    borderClass: string;
+    activeCountClass: string;
+  }
+> = {
+  "1-7%": {
+    key: "1-7%",
+    label: "1-7%",
+    fullName: "第一批拆分交易(7%)",
+    batchGroup: "第一批",
+    percentText: "7%",
+    colorClass: "text-sky-700 font-bold",
+    bgClass: "bg-sky-50",
+    borderClass: "border-sky-300",
+    activeCountClass: "bg-sky-100 text-sky-800 border-sky-300",
+  },
+  "1-8%": {
+    key: "1-8%",
+    label: "1-8%",
+    fullName: "第一批拆分交易(8%)",
+    batchGroup: "第一批",
+    percentText: "8%",
+    colorClass: "text-cyan-700 font-bold",
+    bgClass: "bg-cyan-50",
+    borderClass: "border-cyan-300",
+    activeCountClass: "bg-cyan-100 text-cyan-800 border-cyan-300",
+  },
+  "2-10%": {
+    key: "2-10%",
+    label: "2-10%",
+    fullName: "第二批拆分交易(10%)",
+    batchGroup: "第二批",
+    percentText: "10%",
+    colorClass: "text-teal-700 font-bold",
+    bgClass: "bg-teal-50",
+    borderClass: "border-teal-300",
+    activeCountClass: "bg-teal-100 text-teal-800 border-teal-300",
+  },
+  "2-15%": {
+    key: "2-15%",
+    label: "2-15%",
+    fullName: "第二批拆分交易(15%)",
+    batchGroup: "第二批",
+    percentText: "15%",
+    colorClass: "text-emerald-700 font-bold",
+    bgClass: "bg-emerald-50",
+    borderClass: "border-emerald-300",
+    activeCountClass: "bg-emerald-100 text-emerald-800 border-emerald-300",
+  },
+  "3-15%": {
+    key: "3-15%",
+    label: "3-15%",
+    fullName: "第三批拆分交易(15%)",
+    batchGroup: "第三批",
+    percentText: "15%",
+    colorClass: "text-amber-700 font-bold",
+    bgClass: "bg-amber-50",
+    borderClass: "border-amber-300",
+    activeCountClass: "bg-amber-100 text-amber-800 border-amber-300",
+  },
+  "3-20%": {
+    key: "3-20%",
+    label: "3-20%",
+    fullName: "第三批拆分交易(20%)",
+    batchGroup: "第三批",
+    percentText: "20%",
+    colorClass: "text-orange-700 font-bold",
+    bgClass: "bg-orange-50",
+    borderClass: "border-orange-300",
+    activeCountClass: "bg-orange-100 text-orange-800 border-orange-300",
+  },
+  "4-10%": {
+    key: "4-10%",
+    label: "4-10%",
+    fullName: "第四批拆分交易(10%)",
+    batchGroup: "第四批",
+    percentText: "10%",
+    colorClass: "text-rose-700 font-bold",
+    bgClass: "bg-rose-50",
+    borderClass: "border-rose-300",
+    activeCountClass: "bg-rose-100 text-rose-800 border-rose-300",
+  },
+  "4-15%": {
+    key: "4-15%",
+    label: "4-15%",
+    fullName: "第四批拆分交易(15%)",
+    batchGroup: "第四批",
+    percentText: "15%",
+    colorClass: "text-purple-700 font-bold",
+    bgClass: "bg-purple-50",
+    borderClass: "border-purple-300",
+    activeCountClass: "bg-purple-100 text-purple-800 border-purple-300",
+  },
+};
+
+export const getTabSplitTradeKey = (
+  tab: any,
+  strategy?: any,
+  trades?: any[]
+): SplitTradeKey => {
+  const selected = strategy?.selectedSplitTrade || tab?.selectedSplitTrade;
+  if (selected && typeof selected === "string") {
+    const raw = selected.trim();
+    if (SPLIT_FULL_NAME_TO_KEY[raw]) {
+      return SPLIT_FULL_NAME_TO_KEY[raw];
+    }
+    if (raw.includes("第四批") || raw.includes("第4批") || raw.startsWith("4-")) {
+      return (raw.includes("15%") || raw.includes("25%")) ? "4-15%" : "4-10%";
+    }
+    if (raw.includes("第三批") || raw.includes("第3批") || raw.startsWith("3-")) {
+      return (raw.includes("20%") || raw.includes("35%")) ? "3-20%" : "3-15%";
+    }
+    if (raw.includes("第二批") || raw.includes("第2批") || raw.startsWith("2-")) {
+      return (raw.includes("15%") || raw.includes("25%")) ? "2-15%" : "2-10%";
+    }
+    if (raw.includes("第一批") || raw.includes("第1批") || raw.startsWith("1-")) {
+      return (raw.includes("8%") || raw.includes("15%")) ? "1-8%" : "1-7%";
+    }
+  }
+
+  const batchHint = strategy?.dcaProgress || strategy?.currentBatch || tab?.batch || "";
+  if (typeof batchHint === "string" && batchHint) {
+    if (batchHint.includes("第四批") || batchHint.includes("第4批") || batchHint.startsWith("4-")) {
+      return batchHint.includes("15%") ? "4-15%" : "4-10%";
+    }
+    if (batchHint.includes("第三批") || batchHint.includes("第3批") || batchHint.startsWith("3-")) {
+      return batchHint.includes("20%") ? "3-20%" : "3-15%";
+    }
+    if (batchHint.includes("第二批") || batchHint.includes("第2批") || batchHint.startsWith("2-")) {
+      return batchHint.includes("15%") ? "2-15%" : "2-10%";
+    }
+    if (batchHint.includes("第一批") || batchHint.includes("第1批") || batchHint.startsWith("1-")) {
+      return batchHint.includes("8%") ? "1-8%" : "1-7%";
+    }
+  }
+
+  if (trades && Array.isArray(trades) && trades.length > 0) {
+    for (const t of trades) {
+      if (t?.batch && typeof t.batch === "string") {
+        const b = t.batch;
+        if (b.includes("第四批") || b.includes("第4批") || b.startsWith("4-")) {
+          return b.includes("15%") ? "4-15%" : "4-10%";
+        }
+        if (b.includes("第三批") || b.includes("第3批") || b.startsWith("3-")) {
+          return b.includes("20%") ? "3-20%" : "3-15%";
+        }
+        if (b.includes("第二批") || b.includes("第2批") || b.startsWith("2-")) {
+          return b.includes("15%") ? "2-15%" : "2-10%";
+        }
+        if (b.includes("第一批") || b.includes("第1批") || b.startsWith("1-")) {
+          return b.includes("8%") ? "1-8%" : "1-7%";
+        }
+      }
+    }
+  }
+
+  return "1-7%";
+};
 
 const calculatePositiveValue = (
   rating: number = 5,
@@ -1321,14 +1560,29 @@ export default function Dashboard() {
     "觀察中" | "候選名單" | "買進操作" | "賣出操作" | "平倉操作" | "乖離名單"
   >((safeSessionStorage.getItem('preferredHoldingSubTab') as any) || "候選名單");
 
+  const [activeBatchTab, setActiveBatchTab] = useState<BatchGroup>(
+    (safeSessionStorage.getItem('preferredBatchTab') as BatchGroup) || "第一批"
+  );
+  const [activeSplitSubTab, setActiveSplitSubTab] = useState<SplitTradeKey>(
+    (safeSessionStorage.getItem('preferredSplitSubTab') as SplitTradeKey) || "1-7%"
+  );
+
   const [activeCardDefinitionFilter, setActiveCardDefinitionFilter] = useState<
     "all" | "highlight" | "operation" | "deviation" | "group"
   >("all");
 
   useEffect(() => {
     safeSessionStorage.setItem('preferredHoldingSubTab', activeHoldingSubTab);
-    setActiveCardDefinitionFilter("all");
   }, [activeHoldingSubTab]);
+
+  useEffect(() => {
+    safeSessionStorage.setItem('preferredBatchTab', activeBatchTab);
+  }, [activeBatchTab]);
+
+  useEffect(() => {
+    safeSessionStorage.setItem('preferredSplitSubTab', activeSplitSubTab);
+    setActiveCardDefinitionFilter("all");
+  }, [activeSplitSubTab]);
 
   useEffect(() => {
     const state = location.state as { autoFlipTabId?: string; returnStockId?: string } | null;
@@ -1362,9 +1616,13 @@ export default function Dashboard() {
         setActiveViewTab("active");
       }
 
-      // 2. Switch holding subtab
+      // 2. Switch batch & split trade tab
       const targetSubTab = getDisplayHoldingStatus(targetTab.holdingStatus);
       setActiveHoldingSubTab(targetSubTab);
+      const targetSplitKey = getTabSplitTradeKey(targetTab, activeTabStrategies[targetTab.id], activeTabTrades[targetTab.id]);
+      const targetBatch = SPLIT_STAGES_CONFIG[targetSplitKey]?.batchGroup || "第一批";
+      setActiveBatchTab(targetBatch);
+      setActiveSplitSubTab(targetSplitKey);
 
       // 3. Reset card definition filter so card is not filtered out
       setActiveCardDefinitionFilter("all");
@@ -1947,6 +2205,40 @@ export default function Dashboard() {
     } catch (error) {
       console.error(error);
       toast.error("更新選取狀態失敗");
+    }
+  };
+
+  const handleUpdateSelectedSplitTrade = async (tabId: string, splitTradeId: string) => {
+    try {
+      const currentVal = activeTabStrategies[tabId]?.selectedSplitTrade ?? tabs.find(t => t.id === tabId)?.selectedSplitTrade ?? "";
+      const nextVal = currentVal === splitTradeId ? "" : splitTradeId;
+
+      updateTab(tabId, { selectedSplitTrade: nextVal });
+
+      const currentStrategy = activeTabStrategies[tabId] || {};
+      const updatedStrategy = { 
+        ...currentStrategy, 
+        selectedSplitTrade: nextVal, 
+        updatedAt: serverTimestamp() 
+      };
+      
+      setActiveTabStrategies((prev) => ({
+        ...prev,
+        [tabId]: updatedStrategy
+      }));
+      
+      const docRef = doc(db, `stockTabs/${tabId}/strategy`, 'main');
+      await setDoc(docRef, { selectedSplitTrade: nextVal, updatedAt: serverTimestamp() }, { merge: true });
+
+      if (selectedActionTab && selectedActionTab.id === tabId) {
+        setSelectedActionTab((prev: any) => prev ? {
+          ...prev,
+          selectedSplitTrade: nextVal,
+        } : null);
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error("更新拆分交易階段失敗");
     }
   };
 
@@ -4055,6 +4347,41 @@ export default function Dashboard() {
     return hiddenActiveTabs;
   }, [hiddenActiveTabs, activeViewTab]);
 
+  const batchCounts = useMemo(() => {
+    const counts: Record<BatchGroup, number> = {
+      "第一批": 0,
+      "第二批": 0,
+      "第三批": 0,
+      "第四批": 0,
+    };
+    effectiveVisibleActiveTabs.forEach((t) => {
+      const splitKey = getTabSplitTradeKey(t, activeTabStrategies[t.id], activeTabTrades[t.id]);
+      const batch = SPLIT_STAGES_CONFIG[splitKey]?.batchGroup || "第一批";
+      counts[batch] = (counts[batch] || 0) + 1;
+    });
+    return counts;
+  }, [effectiveVisibleActiveTabs, activeTabStrategies, activeTabTrades]);
+
+  const splitCounts = useMemo(() => {
+    const counts: Record<SplitTradeKey, number> = {
+      "1-7%": 0,
+      "1-8%": 0,
+      "2-10%": 0,
+      "2-15%": 0,
+      "3-15%": 0,
+      "3-20%": 0,
+      "4-10%": 0,
+      "4-15%": 0,
+    };
+    effectiveVisibleActiveTabs.forEach((t) => {
+      const splitKey = getTabSplitTradeKey(t, activeTabStrategies[t.id], activeTabTrades[t.id]);
+      if (counts[splitKey] !== undefined) {
+        counts[splitKey]++;
+      }
+    });
+    return counts;
+  }, [effectiveVisibleActiveTabs, activeTabStrategies, activeTabTrades]);
+
   const visibleSubTabs = useMemo(() => {
     const list = [
       "觀察中",
@@ -4085,6 +4412,14 @@ export default function Dashboard() {
       }
     }
   }, [visibleSubTabs, activeHoldingSubTab, effectiveVisibleActiveTabs, location.state]);
+
+  // Ensure activeSplitSubTab belongs to activeBatchTab
+  useEffect(() => {
+    const validSplits = BATCH_TO_SPLIT_KEYS[activeBatchTab];
+    if (validSplits && !validSplits.includes(activeSplitSubTab)) {
+      setActiveSplitSubTab(validSplits[0]);
+    }
+  }, [activeBatchTab, activeSplitSubTab]);
 
   const handleExportMd = useCallback(async () => {
     toast.info("正在準備持股交易數據...");
@@ -4164,12 +4499,13 @@ export default function Dashboard() {
     }
   }, [tabs, activeTabTrades, playSuccessSound]);
 
-  // further categorize visible tabs based on holdingStatus for rendering
+  // further categorize visible tabs based on split trade stage for rendering
   const currentSubTabVisibleTabs = useMemo(() => {
-    return effectiveVisibleActiveTabs.filter(
-      (t) => getDisplayHoldingStatus(t.holdingStatus) === activeHoldingSubTab,
-    );
-  }, [effectiveVisibleActiveTabs, activeHoldingSubTab]);
+    return effectiveVisibleActiveTabs.filter((t) => {
+      const splitKey = getTabSplitTradeKey(t, activeTabStrategies[t.id], activeTabTrades[t.id]);
+      return splitKey === activeSplitSubTab;
+    });
+  }, [effectiveVisibleActiveTabs, activeSplitSubTab, activeTabStrategies, activeTabTrades]);
 
   // Automatically reset card definition filter if it has no items in the active sub tab
   useEffect(() => {
@@ -6427,7 +6763,7 @@ export default function Dashboard() {
             setActionActiveTab("general");
           }
         }}>
-          <DialogContent className="border border-zinc-200 shadow-2xl bg-white text-zinc-800 w-[92vw] max-w-[380px] p-5 sm:p-6 rounded-2xl">
+          <DialogContent className="border border-zinc-200 shadow-2xl bg-white text-zinc-800 w-[92vw] max-w-[380px] p-5 sm:p-6 rounded-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader className="mb-3">
               <DialogTitle className="font-black text-xl text-zinc-900 flex items-center justify-center gap-2">
                 <span className="bg-zinc-105 text-zinc-800 px-2 py-0.5 rounded text-sm font-black border border-zinc-200">{selectedActionTab?.symbol}</span> 操作
@@ -6520,6 +6856,53 @@ export default function Dashboard() {
                     觀察
                   </span>
                 </label>
+              </div>
+            )}
+
+            {/* Split Trade Tickboxes: 4 Batches (8 Options) */}
+            {selectedActionTab && (
+              <div className="bg-zinc-50 border border-zinc-200/90 p-2.5 rounded-2xl mb-4 shadow-xs">
+                <div className="flex items-center justify-between mb-2 px-1">
+                  <span className="text-[11px] font-black text-zinc-700 tracking-wide">
+                    拆分交易階段
+                  </span>
+                  {Boolean(activeTabStrategies[selectedActionTab.id]?.selectedSplitTrade || selectedActionTab?.selectedSplitTrade) && (
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateSelectedSplitTrade(selectedActionTab.id, "")}
+                      className="text-[10px] text-zinc-400 hover:text-red-500 font-bold underline cursor-pointer"
+                    >
+                      清除勾選
+                    </button>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {SPLIT_TRADE_OPTIONS.map((opt) => {
+                    const currentSelected = activeTabStrategies[selectedActionTab.id]?.selectedSplitTrade || selectedActionTab?.selectedSplitTrade;
+                    const isChecked = currentSelected === opt.id || currentSelected === opt.label;
+                    return (
+                      <label
+                        key={opt.id}
+                        onClick={(e) => e.stopPropagation()}
+                        className={`flex items-center gap-1.5 p-1.5 rounded-xl border transition-all cursor-pointer select-none ${
+                          isChecked
+                            ? "bg-amber-100/90 border-amber-400 text-amber-950 font-black shadow-xs ring-1 ring-amber-400"
+                            : "bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-100/80 font-medium"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => handleUpdateSelectedSplitTrade(selectedActionTab.id, opt.id)}
+                          className="h-3.5 w-3.5 rounded border border-zinc-300 bg-white checked:bg-amber-500 checked:border-amber-500 text-amber-600 focus:ring-0 cursor-pointer accent-amber-500 transition-all shrink-0"
+                        />
+                        <span className="text-[10.5px] leading-tight truncate">
+                          {opt.label}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
               </div>
             )}
 
@@ -6983,46 +7366,87 @@ export default function Dashboard() {
                   <div className={`py-2 border-b w-full ${activeViewTab === "real" ? "border-teal-500/10" : "border-emerald-500/10"}`}>
                     {/* Desktop/Tablet version */}
                     <div className="hidden md:flex max-w-6xl mx-auto px-4 items-center justify-between w-full">
-                      <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-3">
                         <div className={`w-1.5 h-6 rounded-full transition-all duration-300 ${activeViewTab === "real" ? "bg-gradient-to-b from-teal-400 to-teal-600 shadow-[0_0_10px_rgba(20,184,166,0.5)]" : "bg-gradient-to-b from-emerald-400 to-emerald-600 rounded-full shadow-[0_0_10px_rgba(16,185,129,0.5)]"}`}></div>
+                        
+                        {/* 1. Main Batch Tabs (第一批 | 第二批 | 第三批 | 第四批) */}
                         <div className="flex bg-zinc-100 p-1 border border-zinc-200/80 rounded-xl gap-1 shadow-inner">
-                          {visibleSubTabs.map((tab) => {
-                            const conf = holdingTabConfig[tab];
-                            const TabIcon = conf.icon;
-                            const tabCount = effectiveVisibleActiveTabs.filter(
-                              (t) => getDisplayHoldingStatus(t.holdingStatus) === tab,
-                            ).length;
-                            const isActive = activeHoldingSubTab === tab;
+                          {BATCH_GROUPS.map((batch) => {
+                            const isBatchActive = activeBatchTab === batch;
+                            const conf = BATCH_THEME_CONFIG[batch];
+                            const batchCount = batchCounts[batch] || 0;
 
                             return (
                               <button
-                                key={tab}
+                                key={batch}
                                 onClick={() => {
                                   playClickSound();
-                                  setActiveHoldingSubTab(tab as any);
+                                  setActiveBatchTab(batch);
+                                  const firstSplitKey = BATCH_TO_SPLIT_KEYS[batch][0];
+                                  setActiveSplitSubTab(firstSplitKey);
                                   setTimeout(() => {
                                     scrollToElement("#active-cards-section", -20);
                                   }, 50);
                                 }}
-                                className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-2 border cursor-pointer ${
-                                  isActive
+                                className={`px-3.5 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 border cursor-pointer ${
+                                  isBatchActive
                                     ? `${conf.colorClass} ${conf.bgClass} ${conf.borderClass} ${conf.shadowClass}`
-                                    : "text-zinc-500 hover:text-zinc-800 hover:bg-zinc-200/50 border-transparent shadow-none"
+                                    : "text-zinc-600 hover:text-zinc-900 hover:bg-zinc-200/50 border-transparent shadow-none"
                                 }`}
                               >
-                                <TabIcon className="w-3.5 h-3.5" />
-                                {tab === "觀察中" && activeViewTab === "active" ? "虛擬交易" : tab}
-                                <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full border ${
-                                  isActive 
-                                    ? conf.activeCountClass 
+                                <span>{batch}</span>
+                                <span className={`text-[10px] font-black px-1.5 py-0.2 rounded-full border ${
+                                  isBatchActive
+                                    ? conf.activeCountClass
                                     : "bg-zinc-200/50 border-zinc-300/40 text-zinc-650"
                                 }`}>
-                                  <AnimatedNumber value={tabCount} />{" "}檔
+                                  <AnimatedNumber value={batchCount} /> 檔
                                 </span>
                               </button>
                             );
                           })}
                         </div>
+
+                        {/* Divider */}
+                        <div className="text-zinc-300 font-bold select-none text-xs">/</div>
+
+                        {/* 2. Split Trade Tabs for Current Batch */}
+                        <div className="flex bg-zinc-100 p-1 border border-zinc-200/80 rounded-xl gap-1 shadow-inner">
+                          {BATCH_TO_SPLIT_KEYS[activeBatchTab].map((splitKey) => {
+                            const isSplitActive = activeSplitSubTab === splitKey;
+                            const stageConf = SPLIT_STAGES_CONFIG[splitKey];
+                            const splitCount = splitCounts[splitKey] || 0;
+
+                            return (
+                              <button
+                                key={splitKey}
+                                onClick={() => {
+                                  playClickSound();
+                                  setActiveSplitSubTab(splitKey);
+                                  setTimeout(() => {
+                                    scrollToElement("#active-cards-section", -20);
+                                  }, 50);
+                                }}
+                                title={stageConf.fullName}
+                                className={`px-3 py-1.5 text-xs font-black tracking-wide rounded-lg transition-all flex items-center gap-1.5 border cursor-pointer ${
+                                  isSplitActive
+                                    ? `${stageConf.colorClass} ${stageConf.bgClass} ${stageConf.borderClass} shadow-sm scale-[1.02]`
+                                    : "text-zinc-500 hover:text-zinc-800 hover:bg-zinc-200/50 border-transparent shadow-none"
+                                }`}
+                              >
+                                <span>{splitKey}</span>
+                                <span className={`text-[10px] font-black px-1.5 py-0.2 rounded-full border ${
+                                  isSplitActive
+                                    ? stageConf.activeCountClass
+                                    : "bg-zinc-200/50 border-zinc-300/40 text-zinc-650"
+                                }`}>
+                                  <AnimatedNumber value={splitCount} /> 檔
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+
                         {effectiveHiddenActiveTabs.length > 0 && (
                           <span className="text-xs font-bold border border-zinc-200 bg-zinc-50 text-zinc-500 px-3 py-1 rounded-full flex items-center gap-1.5">
                             <EyeOff className="w-3.5 h-3.5 text-zinc-400" />
@@ -7111,7 +7535,7 @@ export default function Dashboard() {
                     </div>
 
                     {/* Redesigned Premium Mobile version */}
-                    <div className="flex md:hidden flex-col w-full gap-3.5 px-4 py-1.5">
+                    <div className="flex md:hidden flex-col w-full gap-3 px-4 py-1.5">
                       <div className="flex items-center justify-between pb-1.5 border-b border-zinc-150 w-full">
                         <div className="flex items-center gap-2">
                           {effectiveHiddenActiveTabs.length > 0 && (
@@ -7198,26 +7622,22 @@ export default function Dashboard() {
                         </div>
                       </div>
 
-                      <div className="relative w-full overflow-hidden">
-                        {/* Smooth scroll masks */}
-                        <div className="absolute left-0 top-0 bottom-0 w-4 bg-gradient-to-r from-zinc-50 to-transparent pointer-events-none z-10" />
-                        <div className="absolute right-0 top-0 bottom-0 w-4 bg-gradient-to-l from-zinc-50 to-transparent pointer-events-none z-10" />
-
-                        <div className="flex items-center gap-2.5 overflow-x-auto scrollbar-hide py-1 pl-4 pr-4 -mx-4 snap-x snap-mandatory">
-                          {visibleSubTabs.map((tab) => {
-                            const conf = holdingTabConfig[tab];
-                            const TabIcon = conf.icon;
-                            const tabCount = effectiveVisibleActiveTabs.filter(
-                              (t) => getDisplayHoldingStatus(t.holdingStatus) === tab,
-                            ).length;
-                            const isActive = activeHoldingSubTab === tab;
+                      <div className="flex flex-col gap-2 w-full">
+                        {/* Row 1: Batch Tabs */}
+                        <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-1 pl-4 pr-4 -mx-4 snap-x snap-mandatory">
+                          {BATCH_GROUPS.map((batch) => {
+                            const isBatchActive = activeBatchTab === batch;
+                            const conf = BATCH_THEME_CONFIG[batch];
+                            const batchCount = batchCounts[batch] || 0;
 
                             return (
                               <button
-                                key={tab}
+                                key={`m-batch-${batch}`}
                                 onClick={(e) => {
                                   playClickSound();
-                                  setActiveHoldingSubTab(tab as any);
+                                  setActiveBatchTab(batch);
+                                  const firstSplitKey = BATCH_TO_SPLIT_KEYS[batch][0];
+                                  setActiveSplitSubTab(firstSplitKey);
                                   e.currentTarget.scrollIntoView({
                                     behavior: "smooth",
                                     block: "nearest",
@@ -7227,31 +7647,61 @@ export default function Dashboard() {
                                     scrollToElement("#active-cards-section", -20);
                                   }, 50);
                                 }}
-                                className={`flex-shrink-0 snap-center flex items-center gap-1.5 px-3.5 py-2 rounded-xl border font-bold text-xs transition-all duration-300 relative cursor-pointer ${
-                                  isActive
+                                className={`flex-shrink-0 snap-center flex items-center gap-1.5 px-3 py-1.5 rounded-xl border font-bold text-xs transition-all duration-300 relative cursor-pointer ${
+                                  isBatchActive
                                     ? `${conf.colorClass} ${conf.bgClass} ${conf.borderClass} ${conf.shadowClass} scale-[1.03] z-10`
-                                    : "bg-zinc-50 border-zinc-200/60 text-zinc-500 hover:bg-zinc-100/75 hover:text-zinc-800"
+                                    : "bg-zinc-50 border-zinc-200/60 text-zinc-600 hover:bg-zinc-100/75 hover:text-zinc-900"
                                 }`}
                               >
-                                <TabIcon className={`w-3.5 h-3.5 ${isActive ? conf.colorClass : "text-zinc-400"}`} />
-                                <span>{tab === "觀察中" && activeViewTab === "active" ? "虛擬交易" : tab}</span>
+                                <span>{batch}</span>
                                 <span
                                   className={`text-[9px] font-black px-1.5 py-0.5 rounded-lg border ${
-                                    isActive
+                                    isBatchActive
                                       ? conf.activeCountClass
                                       : "bg-zinc-200/50 border-zinc-250/50 text-zinc-600 font-bold"
                                   }`}
                                 >
-                                  {tabCount}
+                                  {batchCount}
                                 </span>
+                              </button>
+                            );
+                          })}
+                        </div>
 
-                                {isActive && (
-                                  <motion.div
-                                    layoutId="activeTabUnderlineMobile"
-                                    className="absolute bottom-1 left-3.5 right-3.5 h-0.5 rounded-full bg-current opacity-60"
-                                    transition={{ type: "spring", stiffness: 380, damping: 30 }}
-                                  />
-                                )}
+                        {/* Row 2: Split Trade Sub Tabs */}
+                        <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-0.5 pl-4 pr-4 -mx-4">
+                          <span className="text-[10px] font-extrabold text-zinc-400 shrink-0">拆分階段:</span>
+                          {BATCH_TO_SPLIT_KEYS[activeBatchTab].map((splitKey) => {
+                            const isSplitActive = activeSplitSubTab === splitKey;
+                            const stageConf = SPLIT_STAGES_CONFIG[splitKey];
+                            const splitCount = splitCounts[splitKey] || 0;
+
+                            return (
+                              <button
+                                key={`m-split-${splitKey}`}
+                                onClick={() => {
+                                  playClickSound();
+                                  setActiveSplitSubTab(splitKey);
+                                  setTimeout(() => {
+                                    scrollToElement("#active-cards-section", -20);
+                                  }, 50);
+                                }}
+                                className={`flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-black text-xs transition-all cursor-pointer ${
+                                  isSplitActive
+                                    ? `${stageConf.colorClass} ${stageConf.bgClass} ${stageConf.borderClass} shadow-sm`
+                                    : "bg-zinc-50 border-zinc-200/60 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
+                                }`}
+                              >
+                                <span>{splitKey}</span>
+                                <span
+                                  className={`text-[9px] font-black px-1 py-0.2 rounded border ${
+                                    isSplitActive
+                                      ? stageConf.activeCountClass
+                                      : "bg-zinc-200/50 border-zinc-250/50 text-zinc-600"
+                                  }`}
+                                >
+                                  {splitCount}
+                                </span>
                               </button>
                             );
                           })}
@@ -7651,7 +8101,7 @@ export default function Dashboard() {
                                 <Activity className="h-10 w-10 opacity-40" />
                               </div>
                               <p className="text-base font-bold text-white/50 tracking-wide">
-                                尚無可見的{activeHoldingSubTab === "觀察中" && activeViewTab === "active" ? "虛擬交易" : activeHoldingSubTab}股票
+                                尚無可見的【{activeBatchTab} - {activeSplitSubTab}】個股卡片
                               </p>
                             </motion.div>
                           ) : (
@@ -8123,7 +8573,7 @@ export default function Dashboard() {
                                               return (
                                                 <div
                                                   onTouchStart={(e) => e.stopPropagation()}
-                                                  onClick={(e) => {
+                                                  onDoubleClick={(e) => {
                                                     e.stopPropagation();
                                                     setSelectedActionTab(tab);
                                                     setActionActiveTab("general");
@@ -8131,6 +8581,7 @@ export default function Dashboard() {
                                                   }}
                                                   style={{ backgroundColor: bannerBgColor }}
                                                   className={`w-full h-[18px] flex items-center justify-between px-3 transition-colors duration-500 shrink-0 border-b ${isBannerActive ? "border-transparent" : "border-zinc-200/50"} select-none cursor-pointer`}
+                                                  title="雙擊開啟操作對話窗"
                                                 >
                                                   {/* Status with dot */}
                                                   <div className="flex items-center gap-1.5 font-sans">
@@ -8172,9 +8623,9 @@ export default function Dashboard() {
 
                                             {/* Symbol, Price, Scores Row */}
                                             <div
-                                              className="flex items-center justify-between relative z-10 w-full overflow-hidden rounded-lg p-1.5 hover:bg-zinc-150/40 transition-colors duration-200 shrink-0 cursor-pointer"
+                                              className="flex items-center justify-between relative z-10 w-full overflow-hidden rounded-lg p-1.5 hover:bg-zinc-150/40 transition-colors duration-200 shrink-0 cursor-pointer select-none"
                                               onTouchStart={(e) => e.stopPropagation()}
-                                              onClick={(e) => {
+                                              onDoubleClick={(e) => {
                                                 e.stopPropagation();
                                                 setSelectedActionTab(tab);
                                                 setActionActiveTab("general");
@@ -8184,7 +8635,7 @@ export default function Dashboard() {
                                                 activeTabStrategies[tab.id]
                                                   ?.operationNote
                                                   ? `[執行操作備註]\n${activeTabStrategies[tab.id].operationNote}`
-                                                  : undefined
+                                                  : "雙擊開啟操作對話窗"
                                               }
                                             >
                                               <div className="flex flex-col w-full min-w-0">
@@ -8216,14 +8667,15 @@ export default function Dashboard() {
                                                     </label>
                                                     <div className="flex items-baseline gap-2 min-w-0">
                                                       <span 
-                                                        className="font-black text-2xl tracking-tighter leading-none text-black shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
+                                                        className="font-black text-2xl tracking-tighter leading-none text-black shrink-0 cursor-pointer hover:opacity-80 transition-opacity select-none"
                                                         onTouchStart={(e) => e.stopPropagation()}
-                                                        onClick={(e) => {
+                                                        onDoubleClick={(e) => {
                                                           e.stopPropagation();
                                                           setSelectedActionTab(tab);
                                                           setActionActiveTab("general");
                                                           setIsActionDialogOpen(true);
                                                         }}
+                                                        title="雙擊開啟操作對話窗"
                                                       >
                                                         {tab.symbol}
                                                       </span>
@@ -8491,6 +8943,22 @@ export default function Dashboard() {
                                               </>
                                             )}
                                           </div>
+
+                                          {/* 底部拆分交易階段高對比提示 (貼齊卡片底部邊緣) */}
+                                          {(() => {
+                                            const splitTrade = activeTabStrategies[tab.id]?.selectedSplitTrade || tab.selectedSplitTrade;
+                                            if (!splitTrade) return null;
+                                            return (
+                                              <div 
+                                                className="w-full py-1.5 px-3 bg-[#FFE500] text-black border-t border-amber-400 font-black text-xs sm:text-sm tracking-wide flex items-center justify-center gap-1.5 shadow-md select-none shrink-0 z-30"
+                                                style={{ backgroundColor: "#FFE500", color: "#000000" }}
+                                              >
+                                                <span className="font-black tracking-wide drop-shadow-xs">
+                                                  請進行{splitTrade}
+                                                </span>
+                                              </div>
+                                            );
+                                          })()}
                                         </div>
 
                                       {/* Card Back */}
@@ -8528,12 +8996,13 @@ export default function Dashboard() {
                                                 style={{ backgroundColor: bgCol }}
                                                 className={`w-full h-[18px] flex items-center justify-between px-3 transition-colors duration-500 shrink-0 border-b ${isSpecialHighlight ? "border-transparent" : "border-white/5"} select-none cursor-pointer hover:opacity-90 transition-opacity`}
                                                 onTouchStart={(e) => e.stopPropagation()}
-                                                onClick={(e) => {
+                                                onDoubleClick={(e) => {
                                                   e.stopPropagation();
                                                   setSelectedActionTab(tab);
                                                   setActionActiveTab("status");
                                                   setIsActionDialogOpen(true);
                                                 }}
+                                                title="雙擊開啟操作對話窗"
                                               >
                                                 <div className="flex items-center gap-1.5 font-sans">
                                                   <span className="w-1.5 h-1.5 rounded-full inline-block transition-colors duration-500" style={{ backgroundColor: textIndicatorColor }} />
@@ -8564,6 +9033,7 @@ export default function Dashboard() {
                                             <StockCardVisualizer
                                               plannedOrders={plannedOrders}
                                               currentPrice={tab.currentPrice}
+                                              selectedSplitTrade={activeTabStrategies[tab.id]?.selectedSplitTrade || tab.selectedSplitTrade}
                                               onOpenActionSettings={() => {
                                                 setSelectedActionTab(tab);
                                                 setActionActiveTab("status");
@@ -8618,6 +9088,9 @@ export default function Dashboard() {
                                               }}
                                               averageCost={effectiveHoldingQuantity !== 0 && effectiveAveragePrice > 0 ? effectiveAveragePrice : undefined}
                                               averageCostQuantity={effectiveHoldingQuantity !== 0 ? effectiveHoldingQuantity : undefined}
+                                              trades={activeTabTrades[tab.id] || []}
+                                              totalCapital={totalCapital}
+                                              virtualCapital={virtualCapital}
                                               averagingRows={tab.averagingRows}
                                               averagingRowsSys2={tab.averagingRowsSys2}
                                               plannedBuyQty={tab.plannedBuyQty}
@@ -8653,6 +9126,22 @@ export default function Dashboard() {
                                               onOpenMiniVisualLinesModal={(info) => setMiniVisualLinesStock(info)}
                                             />
                                           </div>
+
+                                          {/* 底部拆分交易階段高對比提示 (貼齊卡片底部邊緣) */}
+                                          {(() => {
+                                            const splitTrade = activeTabStrategies[tab.id]?.selectedSplitTrade || tab.selectedSplitTrade;
+                                            if (!splitTrade) return null;
+                                            return (
+                                              <div 
+                                                className="w-full py-1.5 px-3 bg-[#FFE500] text-black border-t border-amber-400 font-black text-xs sm:text-sm tracking-wide flex items-center justify-center gap-1.5 shadow-md select-none shrink-0 z-30"
+                                                style={{ backgroundColor: "#FFE500", color: "#000000" }}
+                                              >
+                                                <span className="font-black tracking-wide drop-shadow-xs">
+                                                  請進行{splitTrade}
+                                                </span>
+                                              </div>
+                                            );
+                                          })()}
                                         </div>
                                       )}
 

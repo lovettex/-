@@ -243,7 +243,12 @@ export interface BatchPlanningParams {
   trades?: any[];
   averagingRowsSys2?: AveragingRow[];
   plannedBuyPercent?: number;
+  plannedPercent?: number;
   plannedBuyQty?: number;
+  totalCapital?: number;
+  virtualCapital?: number;
+  tradeType?: string;
+  maxStrategyRiskPool60?: number;
 }
 
 /**
@@ -305,7 +310,7 @@ export function matchTradeBatch(rawBatch: string | undefined | null): {
 
 /**
  * 統一計算 4 批進場金字塔與 8 項拆分交易的所有數值 (所處階段所需個別股數 | 已購買 數量 | 預購買數量)
- * 徹底解決各分頁 (StockTabDetail、DynamicVisualLinesModal、System2PlanningChart) 間股數分配不一致之問題
+ * 嚴格參照個股頁面 (StockTabDetail) 的計算準則作為全域唯一真理，保證圖示卡片與個股頁面數值 100% 同步
  */
 export function calculateBatchPlanning(params: BatchPlanningParams): {
   plannedQty: number;
@@ -321,17 +326,35 @@ export function calculateBatchPlanning(params: BatchPlanningParams): {
     trades = [],
     averagingRowsSys2 = [],
     plannedBuyQty,
+    plannedBuyPercent,
+    plannedPercent,
+    totalCapital,
+    virtualCapital,
+    tradeType,
+    maxStrategyRiskPool60,
   } = safeParams;
 
-  // 1. 推算預計購買總股數 plannedQty
-  let effPlanned = safeParams.plannedQty && safeParams.plannedQty > 0 ? safeParams.plannedQty : 0;
-  if (effPlanned <= 0 && currentPrice > 0 && usableCapital > 0) {
-    effPlanned = Math.floor(usableCapital / currentPrice);
-  }
-  if (effPlanned <= 0 && plannedBuyQty && Number(plannedBuyQty) > 0) {
+  // 1. 資金池與可用資金推算 (完全對齊個股頁面 StockTabDetail 核心邏輯)
+  const effectiveCapital = (tradeType === 'simulated' ? virtualCapital : totalCapital) || totalCapital || 1000000;
+  const riskPool = (typeof maxStrategyRiskPool60 === 'number' && maxStrategyRiskPool60 > 0)
+    ? maxStrategyRiskPool60
+    : (effectiveCapital * 2) * 0.6;
+
+  const pct = (plannedBuyPercent !== undefined && plannedBuyPercent !== null && !isNaN(Number(plannedBuyPercent)))
+    ? Number(plannedBuyPercent)
+    : (plannedPercent !== undefined && plannedPercent !== null && !isNaN(Number(plannedPercent)) ? Number(plannedPercent) : 0);
+
+  const effectiveUsableCapital = pct > 0 ? riskPool * (pct / 100) : (usableCapital || 0);
+
+  // 2. 推算預計購買總股數 plannedQty (以個股頁面規則為主: 優先由 usableCapital / currentPrice 換算)
+  let effPlanned = 0;
+  if (currentPrice > 0 && effectiveUsableCapital > 0) {
+    effPlanned = Math.floor(effectiveUsableCapital / currentPrice);
+  } else if (safeParams.plannedQty && safeParams.plannedQty > 0) {
+    effPlanned = safeParams.plannedQty;
+  } else if (plannedBuyQty && Number(plannedBuyQty) > 0) {
     effPlanned = Number(plannedBuyQty);
-  }
-  if (effPlanned <= 0 && averagingRowsSys2 && averagingRowsSys2.length > 0) {
+  } else if (averagingRowsSys2 && averagingRowsSys2.length > 0) {
     const rowsSum = averagingRowsSys2.reduce((acc, r) => {
       const q1 = r?.quantity ? parseFloat(r.quantity) : 0;
       const q2 = r?.quantity2 ? parseFloat(r.quantity2) : 0;
@@ -343,166 +366,227 @@ export function calculateBatchPlanning(params: BatchPlanningParams): {
     effPlanned = Math.max(holdingQty, Math.ceil(holdingQty / 0.15));
   }
 
-  // 2. 預設 4 批與 8 個拆分階梯規格
-  const splitConfigs = [
-    { name: '第一批 (15%)', totalPct: 15, s1Name: '第一批拆分交易(7%)', s1Short: '拆分 7%', s1Pct: 7, s2Name: '第一批拆分交易(8%)', s2Short: '拆分 8%', s2Pct: 8 },
-    { name: '第二批 (25%)', totalPct: 25, s1Name: '第二批拆分交易(10%)', s1Short: '拆分 10%', s1Pct: 10, s2Name: '第二批拆分交易(15%)', s2Short: '拆分 15%', s2Pct: 15 },
-    { name: '第三批 (35%)', totalPct: 35, s1Name: '第三批拆分交易(15%)', s1Short: '拆分 15%', s1Pct: 15, s2Name: '第三批拆分交易(20%)', s2Short: '拆分 20%', s2Pct: 20 },
-    { name: '第四批 (25%)', totalPct: 25, s1Name: '第四批拆分交易(10%)', s1Short: '拆分 10%', s1Pct: 10, s2Name: '第四批拆分交易(15%)', s2Short: '拆分 15%', s2Pct: 15 },
-  ];
+  // 3. 各批預定股數與拆分階梯 (嚴格參照個股頁面 15%、25%、35%、25% 之 Math.ceil 及拆分百分比)
+  // 第一批 (15%) -> 拆分 7% + 拆分 8%
+  const size1 = Math.ceil(effPlanned * 0.15);
+  const size1_a = Math.round(effPlanned * 0.07);
+  const size1_b = Math.max(0, size1 - size1_a);
 
-  // 3. 計算各批預定股數 (優先採納 averagingRowsSys2 自訂股數，否則按百分比計算)
-  const sizes = splitConfigs.map((cfg, idx) => {
-    const row = averagingRowsSys2?.[idx];
-    const rowQ1 = row?.quantity ? parseFloat(row.quantity) : 0;
-    const rowQ2 = row?.quantity2 ? parseFloat(row.quantity2) : 0;
-    let s1 = !isNaN(rowQ1) && rowQ1 > 0 ? rowQ1 : 0;
-    let s2 = !isNaN(rowQ2) && rowQ2 > 0 ? rowQ2 : 0;
+  // 第二批 (25%) -> 拆分 10% + 拆分 15%
+  const size2 = Math.ceil(effPlanned * 0.25);
+  const size2_a = Math.round(effPlanned * 0.10);
+  const size2_b = Math.max(0, size2 - size2_a);
 
-    if (s1 === 0 && s2 === 0 && effPlanned > 0) {
-      const totalBatch = Math.ceil(effPlanned * (cfg.totalPct / 100));
-      s1 = Math.round(effPlanned * (cfg.s1Pct / 100));
-      s2 = Math.max(0, totalBatch - s1);
-    }
-    return {
-      size: s1 + s2,
-      s1Size: s1,
-      s2Size: s2,
-    };
-  });
+  // 第三批 (35%) -> 拆分 15% + 拆分 20%
+  const size3 = Math.ceil(effPlanned * 0.35);
+  const size3_a = Math.round(effPlanned * 0.15);
+  const size3_b = Math.max(0, size3 - size3_a);
 
-  // 4. 解析 trades 交易記錄中精確指定的拆分及批次股數
+  // 第四批 (25%) -> 拆分 10% + 拆分 15%
+  const size4 = Math.ceil(effPlanned * 0.25);
+  const size4_a = Math.round(effPlanned * 0.10);
+  const size4_b = Math.max(0, size4 - size4_a);
+
+  // 4. 解析 trades 交易記錄中指定批次與拆分交易的已購數量
+  const tradeBatchSharesSys2 = [0, 0, 0, 0];
   const tradeSplitShares: number[][] = [
     [0, 0],
     [0, 0],
     [0, 0],
     [0, 0],
   ];
-  const tradeBatchShares: number[] = [0, 0, 0, 0];
-  let netTradeQty = 0;
 
   if (Array.isArray(trades)) {
     trades.forEach((t) => {
-      const q = typeof t.quantity === 'number' ? t.quantity : parseFloat(String(t.quantity)) || 0;
       if (t.type === 'BUY') {
-        netTradeQty += q;
-        const { batchIndex, splitIndex } = matchTradeBatch(t.batch);
-        if (batchIndex >= 0 && batchIndex <= 3) {
-          if (splitIndex === 0 || splitIndex === 1) {
-            tradeSplitShares[batchIndex][splitIndex] += q;
-          } else {
-            tradeBatchShares[batchIndex] += q;
+        const q = typeof t.quantity === 'number' ? t.quantity : parseFloat(String(t.quantity)) || 0;
+        if (q > 0) {
+          const b = (t.batch || '').replace(/\s+/g, '');
+          if (b.includes('第一批') || b.includes('第1批') || b.includes('#1') || b.includes('7%') || b.includes('8%')) {
+            tradeBatchSharesSys2[0] += q;
+            if (b.includes('7%')) tradeSplitShares[0][0] += q;
+            else if (b.includes('8%')) tradeSplitShares[0][1] += q;
+          } else if (b.includes('第二批') || b.includes('第2批') || b.includes('#2') || b.includes('10%') || b.includes('25%')) {
+            tradeBatchSharesSys2[1] += q;
+            if (b.includes('10%')) tradeSplitShares[1][0] += q;
+            else if (b.includes('15%')) tradeSplitShares[1][1] += q;
+          } else if (b.includes('第三批') || b.includes('第3批') || b.includes('#3') || b.includes('20%') || b.includes('35%')) {
+            tradeBatchSharesSys2[2] += q;
+            if (b.includes('15%')) tradeSplitShares[2][0] += q;
+            else if (b.includes('20%')) tradeSplitShares[2][1] += q;
+          } else if (b.includes('第四批') || b.includes('第4批') || b.includes('#4')) {
+            tradeBatchSharesSys2[3] += q;
+            if (b.includes('10%')) tradeSplitShares[3][0] += q;
+            else if (b.includes('15%')) tradeSplitShares[3][1] += q;
           }
         }
-      } else if (t.type === 'SELL') {
-        netTradeQty = Math.max(0, netTradeQty - q);
       }
     });
   }
 
-  // 5. 初始化各拆分已購買數量 (先填入明確指定拆分的交易股數)
-  const splitBought: number[][] = [
-    [tradeSplitShares[0][0], tradeSplitShares[0][1]],
-    [tradeSplitShares[1][0], tradeSplitShares[1][1]],
-    [tradeSplitShares[2][0], tradeSplitShares[2][1]],
-    [tradeSplitShares[3][0], tradeSplitShares[3][1]],
-  ];
+  // 5. 檢查 averagingRowsSys2 是否有被勾選為已購入的批次
+  const checkedRowsBoughtSys2 = (averagingRowsSys2 || []).reduce((sum, r, idx) => {
+    if (!r?.bought) return sum;
+    const q1 = r?.quantity ? parseFloat(r.quantity) : 0;
+    const q2 = r?.quantity2 ? parseFloat(r.quantity2) : 0;
+    const target = q1 + q2 > 0 ? q1 + q2 : [size1, size2, size3, size4][idx] || 0;
+    return sum + target;
+  }, 0);
 
-  // 將未指定細分拆分的整批交易股數依序分配入 split1 與 split2
-  for (let i = 0; i < 4; i++) {
-    let unassignedBatchShares = tradeBatchShares[i];
-    if (unassignedBatchShares > 0) {
-      const s1Need = Math.max(0, sizes[i].s1Size - splitBought[i][0]);
-      const add1 = Math.min(unassignedBatchShares, s1Need);
-      splitBought[i][0] += add1;
-      unassignedBatchShares -= add1;
+  const totalBought = Math.max(0, holdingQty, checkedRowsBoughtSys2);
 
-      if (unassignedBatchShares > 0) {
-        splitBought[i][1] += unassignedBatchShares;
-      }
-    }
-  }
+  // 6. 計算各批與拆分子批已購與餘額 (累進階梯級聯計算，與個股頁面完全相同)
+  // 第一批
+  const cascade1_a = Math.min(totalBought, size1_a);
+  const remAfter1_a = Math.max(0, totalBought - size1_a);
+  const cascade1_b = Math.min(remAfter1_a, size1_b);
+  const isRow0Bought = Boolean(averagingRowsSys2?.[0]?.bought);
+  const bought1 = Math.max(isRow0Bought ? size1 : (cascade1_a + cascade1_b), tradeBatchSharesSys2[0]);
+  const remaining1 = Math.max(0, size1 - bought1);
+  const bought1_a = Math.max(cascade1_a, tradeSplitShares[0][0], Math.min(bought1, size1_a));
+  const remaining1_a = Math.max(0, size1_a - bought1_a);
+  const bought1_b = Math.max(cascade1_b, tradeSplitShares[0][1], Math.min(Math.max(0, bought1 - size1_a), size1_b));
+  const remaining1_b = Math.max(0, size1_b - bought1_b);
 
-  // 檢查 averagingRowsSys2 勾選標記為「已購入」的行
-  for (let i = 0; i < 4; i++) {
-    if (averagingRowsSys2?.[i]?.bought) {
-      splitBought[i][0] = Math.max(splitBought[i][0], sizes[i].s1Size);
-      splitBought[i][1] = Math.max(splitBought[i][1], sizes[i].s2Size);
-    }
-  }
+  // 第二批
+  const remAfter1 = Math.max(0, totalBought - size1);
+  const cascade2_a = Math.min(remAfter1, size2_a);
+  const remAfter2_a = Math.max(0, remAfter1 - size2_a);
+  const cascade2_b = Math.min(remAfter2_a, size2_b);
+  const isRow1Bought = Boolean(averagingRowsSys2?.[1]?.bought);
+  const bought2 = Math.max(isRow1Bought ? size2 : (cascade2_a + cascade2_b), tradeBatchSharesSys2[1]);
+  const remaining2 = Math.max(0, size2 - bought2);
+  const bought2_a = Math.max(cascade2_a, tradeSplitShares[1][0], Math.min(bought2, size2_a));
+  const remaining2_a = Math.max(0, size2_a - bought2_a);
+  const bought2_b = Math.max(cascade2_b, tradeSplitShares[1][1], Math.min(Math.max(0, bought2 - size2_a), size2_b));
+  const remaining2_b = Math.max(0, size2_b - bought2_b);
 
-  // 6. 處理整體持股數 (holdingQty 或 netTradeQty) 尚未被明確標註之餘額，進行階梯級聯分配
-  const totalAccountedFor = splitBought.reduce((acc, sp) => acc + sp[0] + sp[1], 0);
-  const effectiveHoldingPool = Math.max(0, holdingQty, netTradeQty);
-  let unallocatedHolding = Math.max(0, effectiveHoldingPool - totalAccountedFor);
+  // 第三批
+  const remAfter2 = Math.max(0, totalBought - size1 - size2);
+  const cascade3_a = Math.min(remAfter2, size3_a);
+  const remAfter3_a = Math.max(0, remAfter2 - size3_a);
+  const cascade3_b = Math.min(remAfter3_a, size3_b);
+  const isRow2Bought = Boolean(averagingRowsSys2?.[2]?.bought);
+  const bought3 = Math.max(isRow2Bought ? size3 : (cascade3_a + cascade3_b), tradeBatchSharesSys2[2]);
+  const remaining3 = Math.max(0, size3 - bought3);
+  const bought3_a = Math.max(cascade3_a, tradeSplitShares[2][0], Math.min(bought3, size3_a));
+  const remaining3_a = Math.max(0, size3_a - bought3_a);
+  const bought3_b = Math.max(cascade3_b, tradeSplitShares[2][1], Math.min(Math.max(0, bought3 - size3_a), size3_b));
+  const remaining3_b = Math.max(0, size3_b - bought3_b);
 
-  if (unallocatedHolding > 0) {
-    for (let i = 0; i < 4; i++) {
-      if (unallocatedHolding <= 0) break;
-      const s1Need = Math.max(0, sizes[i].s1Size - splitBought[i][0]);
-      if (s1Need > 0) {
-        const add = Math.min(unallocatedHolding, s1Need);
-        splitBought[i][0] += add;
-        unallocatedHolding -= add;
-      }
-
-      if (unallocatedHolding <= 0) break;
-      const s2Need = Math.max(0, sizes[i].s2Size - splitBought[i][1]);
-      if (s2Need > 0) {
-        const add = Math.min(unallocatedHolding, s2Need);
-        splitBought[i][1] += add;
-        unallocatedHolding -= add;
-      }
-    }
-
-    // 若全部填滿仍有持股，累積計入最後一組 (第四批拆分2)
-    if (unallocatedHolding > 0) {
-      splitBought[3][1] += unallocatedHolding;
-    }
-  }
+  // 第四批
+  const remAfter3 = Math.max(0, totalBought - size1 - size2 - size3);
+  const cascade4_a = Math.min(remAfter3, size4_a);
+  const remAfter4_a = Math.max(0, remAfter3 - size4_a);
+  const cascade4_b = Math.min(remAfter4_a, size4_b);
+  const isRow3Bought = Boolean(averagingRowsSys2?.[3]?.bought);
+  const bought4 = Math.max(isRow3Bought ? size4 : (cascade4_a + cascade4_b), tradeBatchSharesSys2[3]);
+  const remaining4 = Math.max(0, size4 - bought4);
+  const bought4_a = Math.max(cascade4_a, tradeSplitShares[3][0], Math.min(bought4, size4_a));
+  const remaining4_a = Math.max(0, size4_a - bought4_a);
+  const bought4_b = Math.max(cascade4_b, tradeSplitShares[3][1], Math.min(Math.max(0, bought4 - size4_a), size4_b));
+  const remaining4_b = Math.max(0, size4_b - bought4_b);
 
   // 7. 組合輸出最終的批次與拆分交易物件陣列
-  const batches: BatchPlanItem[] = splitConfigs.map((cfg, idx) => {
-    const s1Size = sizes[idx].s1Size;
-    const s2Size = sizes[idx].s2Size;
-    const s1Bought = splitBought[idx][0];
-    const s2Bought = splitBought[idx][1];
-    const batchSize = sizes[idx].size;
-    const batchBought = s1Bought + s2Bought;
-
-    return {
-      index: idx,
-      name: cfg.name,
-      size: batchSize,
-      bought: batchBought,
-      remaining: Math.max(0, batchSize - batchBought),
+  const batches: BatchPlanItem[] = [
+    {
+      index: 0,
+      name: '第一批 (15%)',
+      size: size1,
+      bought: bought1,
+      remaining: remaining1,
       split1: {
-        name: cfg.s1Name,
-        shortLabel: cfg.s1Short,
-        size: s1Size,
-        bought: s1Bought,
-        remaining: Math.max(0, s1Size - s1Bought),
-        percent: `${cfg.s1Pct}%`,
+        name: '第一批拆分交易(7%)',
+        shortLabel: '拆分 7%',
+        size: size1_a,
+        bought: bought1_a,
+        remaining: remaining1_a,
+        percent: '7%',
       },
       split2: {
-        name: cfg.s2Name,
-        shortLabel: cfg.s2Short,
-        size: s2Size,
-        bought: s2Bought,
-        remaining: Math.max(0, s2Size - s2Bought),
-        percent: `${cfg.s2Pct}%`,
+        name: '第一批拆分交易(8%)',
+        shortLabel: '拆分 8%',
+        size: size1_b,
+        bought: bought1_b,
+        remaining: remaining1_b,
+        percent: '8%',
       },
-    };
-  });
-
-  const totalBought = batches.reduce((sum, b) => sum + b.bought, 0);
-  const totalPlannedSize = batches.reduce((sum, b) => sum + b.size, 0);
-  const totalRemaining = Math.max(0, totalPlannedSize - totalBought);
+    },
+    {
+      index: 1,
+      name: '第二批 (25%)',
+      size: size2,
+      bought: bought2,
+      remaining: remaining2,
+      split1: {
+        name: '第二批拆分交易(10%)',
+        shortLabel: '拆分 10%',
+        size: size2_a,
+        bought: bought2_a,
+        remaining: remaining2_a,
+        percent: '10%',
+      },
+      split2: {
+        name: '第二批拆分交易(15%)',
+        shortLabel: '拆分 15%',
+        size: size2_b,
+        bought: bought2_b,
+        remaining: remaining2_b,
+        percent: '15%',
+      },
+    },
+    {
+      index: 2,
+      name: '第三批 (35%)',
+      size: size3,
+      bought: bought3,
+      remaining: remaining3,
+      split1: {
+        name: '第三批拆分交易(15%)',
+        shortLabel: '拆分 15%',
+        size: size3_a,
+        bought: bought3_a,
+        remaining: remaining3_a,
+        percent: '15%',
+      },
+      split2: {
+        name: '第三批拆分交易(20%)',
+        shortLabel: '拆分 20%',
+        size: size3_b,
+        bought: bought3_b,
+        remaining: remaining3_b,
+        percent: '20%',
+      },
+    },
+    {
+      index: 3,
+      name: '第四批 (25%)',
+      size: size4,
+      bought: bought4,
+      remaining: remaining4,
+      split1: {
+        name: '第四批拆分交易(10%)',
+        shortLabel: '拆分 10%',
+        size: size4_a,
+        bought: bought4_a,
+        remaining: remaining4_a,
+        percent: '10%',
+      },
+      split2: {
+        name: '第四批拆分交易(15%)',
+        shortLabel: '拆分 15%',
+        size: size4_b,
+        bought: bought4_b,
+        remaining: remaining4_b,
+        percent: '15%',
+      },
+    },
+  ];
 
   return {
     plannedQty: effPlanned,
     batches,
     totalBought,
-    totalRemaining,
+    totalRemaining: Math.max(0, effPlanned - totalBought),
   };
 }
