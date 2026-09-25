@@ -3,6 +3,9 @@ import { useAuth } from './lib/AuthContext';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { LogOut, ActivitySquare, ExternalLink, HelpCircle } from 'lucide-react';
 import { Premium3DGrid } from './components/Premium3DGrid';
+import { WhiteNoisePlayer } from './components/WhiteNoisePlayer';
+import { PS5DynamicBackground } from './components/PS5DynamicBackground';
+import { whiteNoiseEngine, WhiteNoiseState } from './lib/whiteNoiseEngine';
 
 export default function Layout() {
   const { user, login, logout, loading: authLoading } = useAuth();
@@ -11,6 +14,14 @@ export default function Layout() {
   const stockId = match ? match[1] : null;
 
   const [loadingTimeout, setLoadingTimeout] = useState(false);
+  const [ambientState, setAmbientState] = useState<WhiteNoiseState>(whiteNoiseEngine.getState());
+
+  useEffect(() => {
+    const unsubscribe = whiteNoiseEngine.subscribe((s) => {
+      setAmbientState(s);
+    });
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     if (authLoading) {
@@ -142,16 +153,24 @@ export default function Layout() {
   }
 
   return (
-    <div className="flex min-h-screen text-zinc-800 relative w-full">
-      {/* Nike Premium 3D Grid Background with depth-of-field effect */}
+    <div className="flex min-h-screen text-zinc-800 relative w-full overflow-x-hidden">
+      {/* Default Clean Grid Background */}
       <Premium3DGrid />
       
-      {/* Top right auth corner */}
-      {/* User name hidden as requested */}
+      {/* PS5 Console Dashboard Dynamic Animated Background (Active when White Noise is playing) */}
+      <PS5DynamicBackground
+        isActive={ambientState.isPlaying && ambientState.bgEnabled}
+        themeId={ambientState.bgThemeId}
+      />
+      
+      {/* Top Left White Noise Music Switch (Default OFF, Random Shuffle 24 tracks & 10 PS5 themes) */}
+      <div className="fixed top-2.5 left-2.5 sm:top-3.5 sm:left-4 z-[990]">
+        <WhiteNoisePlayer />
+      </div>
 
       {/* Main Content */}
-      <main className="flex-1 relative z-0 focus:outline-none w-full">
-        <div className="w-full mx-auto px-2 sm:px-4 md:px-6 pt-16 sm:pt-16 md:pt-4 pb-10 md:pb-16 max-w-[1920px]">
+      <main className="flex-1 relative z-10 focus:outline-none w-full">
+        <div className="w-full mx-auto px-2 sm:px-4 md:px-6 pt-14 sm:pt-16 md:pt-14 pb-10 md:pb-16 max-w-[1920px]">
           <Outlet />
         </div>
       </main>

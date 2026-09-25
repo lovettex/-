@@ -309,4 +309,114 @@
     transform: translateY(0) !important;
 }
 
+/* =========================================================
+   PS5 THEME HIGH CONTRAST & FLUORESCENT NEON GLOW STYLES
+   ========================================================= */
+
+body.ps5-theme-active {
+  --foreground: #f8fafc;
+}
+
+/* 1. Main Header Title & Page Titles Fluorescent Glow */
+body.ps5-theme-active h1,
+body.ps5-theme-active .ps5-fluorescent-title {
+  color: #ffffff !important;
+  text-shadow: 
+    0 0 8px rgba(255, 255, 255, 0.95),
+    0 0 18px var(--ps5-accent, #00d4ff),
+    0 0 35px var(--ps5-glow, rgba(0, 212, 255, 0.8)) !important;
+  letter-spacing: 0.02em;
+}
+
+/* 2. Stock Symbol Titles on Cards & Detail Page (AAPL, TSLA, NVDA, V, SE...) */
+body.ps5-theme-active .stock-symbol-title,
+body.ps5-theme-active .stock-symbol-title span,
+body.ps5-theme-active .stock-symbol-text {
+  color: #ffffff !important;
+  font-weight: 900 !important;
+  -webkit-text-stroke: 0.15px rgba(0, 0, 0, 0.95) !important;
+  paint-order: stroke fill !important;
+  text-shadow: 
+    0 0 0.15px #000000,
+    0 0 1px rgba(0, 0, 0, 0.9),
+    0 0 3px #ffffff,
+    0 0 8px var(--ps5-accent, #00d4ff),
+    0 0 16px var(--ps5-glow, rgba(0, 212, 255, 0.55)) !important;
+  letter-spacing: -0.02em !important;
+}
+
+body.ps5-theme-active .not-ready-badge {
+  color: #ffffff !important;
+  opacity: 0.85 !important;
+  text-shadow: 0 0 8px var(--ps5-glow, rgba(0, 212, 255, 0.6)) !important;
+}
+
+/* 3. Section Titles & Dialog Headers */
+body.ps5-theme-active h2,
+body.ps5-theme-active h3,
+body.ps5-theme-active [data-slot="dialog-title"] {
+  text-shadow: 
+    0 0 6px rgba(255, 255, 255, 0.8),
+    0 0 14px var(--ps5-accent, #00d4ff),
+    0 0 28px var(--ps5-glow, rgba(0, 212, 255, 0.45)) !important;
+}
+
+/* 4. Portfolio Overview Badges & Subtitles */
+body.ps5-theme-active .portfolio-overview-badge {
+  color: #ffffff !important;
+  background-color: rgba(255, 255, 255, 0.18) !important;
+  border: 1px solid var(--ps5-accent, #00d4ff) !important;
+  box-shadow: 0 0 14px var(--ps5-glow, rgba(0, 212, 255, 0.5)), inset 0 0 8px rgba(255, 255, 255, 0.25) !important;
+  text-shadow: 0 0 10px var(--ps5-accent, #00d4ff) !important;
+}
+
+/* 5. Metrics & HUD Numbers High Contrast */
+body.ps5-theme-active .metric-label {
+  color: #ffffff !important;
+  opacity: 0.95;
+  text-shadow: 0 0 8px var(--ps5-accent, #00d4ff);
+}
+
+body.ps5-theme-active .metric-value {
+  color: #ffffff !important;
+  text-shadow: 0 0 8px rgba(255, 255, 255, 0.9), 0 0 18px var(--ps5-accent, #00d4ff) !important;
+}
+
+/* 6. Card Containers: Semi-Transparent Frosted Glass Texture (半透明磨砂玻璃質感) */
+body.ps5-theme-active .glass-card,
+body.ps5-theme-active .card-front,
+body.ps5-theme-active .card-back {
+  background-color: rgba(255, 255, 255, 0.52) !important;
+  backdrop-filter: blur(28px) saturate(190%) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(190%) !important;
+  border: 2px solid rgba(255, 255, 255, 0.6) !important;
+  box-shadow: 
+    0 16px 40px rgba(0, 0, 0, 0.45),
+    0 0 25px var(--ps5-glow, rgba(0, 212, 255, 0.25)),
+    inset 0 1px 2px rgba(255, 255, 255, 0.8) !important;
+  transition: all 400ms ease-out;
+}
+
+body.ps5-theme-active .glass-card:hover,
+body.ps5-theme-active .card-front:hover,
+body.ps5-theme-active .card-back:hover {
+  background-color: rgba(255, 255, 255, 0.62) !important;
+  border-color: rgba(255, 255, 255, 0.85) !important;
+  box-shadow: 
+    0 20px 50px rgba(0, 0, 0, 0.55),
+    0 0 35px var(--ps5-glow, rgba(0, 212, 255, 0.4)),
+    inset 0 1px 2px rgba(255, 255, 255, 0.95) !important;
+}
+
+body.ps5-theme-active .glass-panel {
+  background-color: rgba(255, 255, 255, 0.55) !important;
+  backdrop-filter: blur(28px) saturate(190%) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(190%) !important;
+  border: 1.5px solid rgba(255, 255, 255, 0.6) !important;
+  box-shadow: 
+    0 16px 40px rgba(0, 0, 0, 0.4),
+    0 0 25px var(--ps5-glow, rgba(0, 212, 255, 0.2)) !important;
+}
+
+
 

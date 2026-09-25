@@ -402,22 +402,22 @@ export function calculateBatchPlanning(params: BatchPlanningParams): {
         const q = typeof t.quantity === 'number' ? t.quantity : parseFloat(String(t.quantity)) || 0;
         if (q > 0) {
           const b = (t.batch || '').replace(/\s+/g, '');
-          if (b.includes('第一批') || b.includes('第1批') || b.includes('#1') || b.includes('7%') || b.includes('8%')) {
-            tradeBatchSharesSys2[0] += q;
-            if (b.includes('7%')) tradeSplitShares[0][0] += q;
-            else if (b.includes('8%')) tradeSplitShares[0][1] += q;
-          } else if (b.includes('第二批') || b.includes('第2批') || b.includes('#2') || b.includes('10%') || b.includes('25%')) {
-            tradeBatchSharesSys2[1] += q;
-            if (b.includes('10%')) tradeSplitShares[1][0] += q;
-            else if (b.includes('15%')) tradeSplitShares[1][1] += q;
-          } else if (b.includes('第三批') || b.includes('第3批') || b.includes('#3') || b.includes('20%') || b.includes('35%')) {
-            tradeBatchSharesSys2[2] += q;
-            if (b.includes('15%')) tradeSplitShares[2][0] += q;
-            else if (b.includes('20%')) tradeSplitShares[2][1] += q;
-          } else if (b.includes('第四批') || b.includes('第4批') || b.includes('#4')) {
+          if (b.includes('第四批') || b.includes('第4批') || b.includes('#4') || b.startsWith('4-')) {
             tradeBatchSharesSys2[3] += q;
             if (b.includes('10%')) tradeSplitShares[3][0] += q;
-            else if (b.includes('15%')) tradeSplitShares[3][1] += q;
+            else if (b.includes('15%') || b.includes('25%')) tradeSplitShares[3][1] += q;
+          } else if (b.includes('第三批') || b.includes('第3批') || b.includes('#3') || b.startsWith('3-') || b.includes('35%')) {
+            tradeBatchSharesSys2[2] += q;
+            if (b.includes('15%')) tradeSplitShares[2][0] += q;
+            else if (b.includes('20%') || b.includes('35%')) tradeSplitShares[2][1] += q;
+          } else if (b.includes('第二批') || b.includes('第2批') || b.includes('#2') || b.startsWith('2-')) {
+            tradeBatchSharesSys2[1] += q;
+            if (b.includes('10%')) tradeSplitShares[1][0] += q;
+            else if (b.includes('15%') || b.includes('25%')) tradeSplitShares[1][1] += q;
+          } else if (b.includes('第一批') || b.includes('第1批') || b.includes('#1') || b.startsWith('1-') || b.includes('7%') || b.includes('8%')) {
+            tradeBatchSharesSys2[0] += q;
+            if (b.includes('7%')) tradeSplitShares[0][0] += q;
+            else if (b.includes('8%') || b.includes('15%')) tradeSplitShares[0][1] += q;
           }
         }
       }

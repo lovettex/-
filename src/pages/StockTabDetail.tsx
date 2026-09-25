@@ -1655,7 +1655,7 @@ export default function StockTabDetail() {
               <div className="flex items-baseline gap-2 flex-wrap">
                 <motion.h1 
                   layoutId="tab-title"
-                  className="text-2xl sm:text-2xl font-black tracking-tight text-black font-mono leading-none"
+                  className="stock-symbol-title ps5-fluorescent-title text-2xl sm:text-2xl font-black tracking-tight text-black font-mono leading-none transition-all"
                 >
                   {tab.symbol}
                 </motion.h1>

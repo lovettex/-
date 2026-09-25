@@ -2847,7 +2847,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
             )}
             {stockName && (
               <div 
-                className="font-extrabold text-base sm:text-2xl tracking-tighter leading-none text-zinc-900 shrink-0 cursor-pointer hover:opacity-80 transition-opacity flex items-baseline gap-1.5 select-none"
+                className="stock-symbol-title font-extrabold text-base sm:text-2xl tracking-tighter leading-none text-zinc-900 shrink-0 cursor-pointer hover:opacity-80 transition-all flex items-baseline gap-1.5 select-none"
                 onTouchStart={(e) => e.stopPropagation()}
                 onDoubleClick={(e) => {
                   e.stopPropagation();
@@ -2855,9 +2855,9 @@ export const StockCardVisualizer: React.FC<Props> = ({
                 }}
                 title="雙擊開啟操作設定對話窗"
               >
-                <span>{stockName}</span>
+                <span className="stock-symbol-text font-black">{stockName}</span>
                 {(!plannedBuyPercent || plannedBuyPercent <= 0) && (
-                  <span className="text-[11px] sm:text-xs font-semibold text-zinc-400 select-none tracking-normal font-sans">
+                  <span className="not-ready-badge text-[11px] sm:text-xs font-semibold text-zinc-400 select-none tracking-normal font-sans">
                     (Not ready)
                   </span>
                 )}
