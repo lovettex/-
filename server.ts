@@ -11,8 +11,8 @@ import { eq, desc, and } from "drizzle-orm";
 async function generateContentWithRetry(ai: GoogleGenAI, params: any, maxRetries = 4, initialDelay = 1000) {
   let attempt = 0;
   const originalModel = params.model;
-  // Recommended fallback models for text and multimodal tasks when gemini-3.5-flash is overloaded
-  const fallbackList = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
+  // Recommended fallback models for text and multimodal tasks when gemini-3.8-flash is overloaded
+  const fallbackList = ["gemini-3.8-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
   
   while (true) {
     try {
@@ -299,7 +299,7 @@ async function startServer() {
 `;
 
       const response = await generateContentWithRetry(ai, {
-        model: "gemini-3.5-flash",
+        model: "gemini-3.8-flash",
         contents: [
           {
             inlineData: {
@@ -590,7 +590,7 @@ async function startServer() {
       `;
 
       const response = await generateContentWithRetry(ai, {
-        model: "gemini-3.5-flash",
+        model: "gemini-3.8-flash",
         contents: prompt,
         config: {
           tools: [{ googleSearch: {} }]
@@ -627,7 +627,7 @@ async function startServer() {
       });
 
       const response = await generateContentWithRetry(ai, {
-        model: "gemini-3.5-flash",
+        model: "gemini-3.8-flash",
         contents: [
           {
             role: "user",
@@ -886,7 +886,7 @@ async function startServer() {
       });
 
       const response = await generateContentWithRetry(ai, {
-        model: "gemini-3.5-flash",
+        model: "gemini-3.8-flash",
         contents: prompt,
         config: {
           tools: [{ googleSearch: {} }]

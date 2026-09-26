@@ -238,6 +238,7 @@ export interface WhiteNoiseState {
   randomMode: boolean;
   bgEnabled: boolean;
   bgThemeId: string;
+  bgSpeed: number; // 0.2 to 2.0, default 0.5 (slower & calmer)
 }
 
 type StateListener = (state: WhiteNoiseState) => void;
@@ -256,6 +257,7 @@ class WhiteNoiseEngine {
     randomMode: true,
     bgEnabled: true,
     bgThemeId: 'galaxy-kepler',
+    bgSpeed: 0.5,
   };
 
   private listeners: Set<StateListener> = new Set();
@@ -285,8 +287,24 @@ class WhiteNoiseEngine {
         if (savedBgEnabled !== null) {
           this.state.bgEnabled = savedBgEnabled === 'true';
         }
+        const savedBgSpeed = localStorage.getItem('ambient_bg_speed');
+        if (savedBgSpeed !== null) {
+          const spd = parseFloat(savedBgSpeed);
+          if (!isNaN(spd) && spd >= 0.1 && spd <= 3.0) {
+            this.state.bgSpeed = spd;
+          }
+        }
       } catch {}
     }
+  }
+
+  public setBgSpeed(speed: number) {
+    const clamped = Math.max(0.15, Math.min(2.0, speed));
+    this.state.bgSpeed = clamped;
+    try {
+      localStorage.setItem('ambient_bg_speed', clamped.toString());
+    } catch {}
+    this.notify();
   }
 
   public setBgTheme(themeId: string) {

@@ -418,5 +418,100 @@ body.ps5-theme-active .glass-panel {
     0 0 25px var(--ps5-glow, rgba(0, 212, 255, 0.2)) !important;
 }
 
+/* 7. Main Navigation Tabs & Subtabs: Fluorescent Neon Glow with Crisp Black Outline Stroke (持有中 | 真實交易 | 已完成 | 操作備註 等等) */
+body.ps5-theme-active #main-view-tabs button,
+body.ps5-theme-active #main-view-tabs button span,
+body.ps5-theme-active #main-view-tabs button svg,
+body.ps5-theme-active [role="tab"],
+body.ps5-theme-active [data-slot="tabs-trigger"],
+body.ps5-theme-active .ps5-tab-neon,
+body.ps5-theme-active .subtab-glow-btn {
+  color: #ffffff !important;
+  font-weight: 900 !important;
+  -webkit-text-stroke: 0.35px #000000 !important;
+  text-stroke: 0.35px #000000 !important;
+  paint-order: stroke fill !important;
+  text-shadow: 
+    0 0 0.5px #000000,
+    0 0 1.5px #000000,
+    0 0 3px #ffffff,
+    0 0 8px var(--ps5-accent, #00d4ff),
+    0 0 16px var(--ps5-glow, rgba(0, 212, 255, 0.7)),
+    0 0 28px var(--ps5-glow, rgba(0, 212, 255, 0.45)) !important;
+  letter-spacing: 0.015em !important;
+  transition: all 0.25s ease-out;
+}
+
+body.ps5-theme-active #main-view-tabs {
+  background-color: rgba(0, 0, 0, 0.35) !important;
+  backdrop-filter: blur(20px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+  padding: 6px 10px !important;
+  border-radius: 9999px !important;
+  border: 1px solid rgba(255, 255, 255, 0.18) !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 15px var(--ps5-glow, rgba(0, 212, 255, 0.15)) !important;
+  width: fit-content !important;
+  max-width: 100% !important;
+}
+
+body.ps5-theme-active #main-view-tabs button:hover {
+  background-color: rgba(255, 255, 255, 0.12) !important;
+  border-radius: 9999px !important;
+}
+
+body.ps5-theme-active #main-view-tabs button > div[class*="bg-"] {
+  background-color: rgba(255, 255, 255, 0.22) !important;
+  border: 1px solid var(--ps5-accent, #00d4ff) !important;
+  box-shadow: 0 0 16px var(--ps5-glow, rgba(0, 212, 255, 0.55)), inset 0 0 8px rgba(255, 255, 255, 0.2) !important;
+  border-radius: 9999px !important;
+}
+
+/* Subtabs bar (觀察中 | 候選名單 | 買進操作 | 賣出操作 | 平倉操作 | 乖離名單 | 持股監控) in PS5 Mode */
+body.ps5-theme-active .snap-mandatory button,
+body.ps5-theme-active .snap-x button,
+body.ps5-theme-active button.snap-center {
+  color: #ffffff !important;
+  font-weight: 800 !important;
+  -webkit-text-stroke: 0.3px #000000 !important;
+  paint-order: stroke fill !important;
+  text-shadow: 
+    0 0 0.5px #000000,
+    0 0 1.2px #000000,
+    0 0 3px #ffffff,
+    0 0 8px var(--ps5-accent, #00d4ff),
+    0 0 16px var(--ps5-glow, rgba(0, 212, 255, 0.6)) !important;
+  backdrop-filter: blur(14px) !important;
+  -webkit-backdrop-filter: blur(14px) !important;
+}
+
+/* Detail page TabsList & Triggers */
+body.ps5-theme-active [data-slot="tabs-list"] {
+  background-color: rgba(0, 0, 0, 0.5) !important;
+  border: 1px solid rgba(255, 255, 255, 0.25) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4) !important;
+}
+
+body.ps5-theme-active [data-slot="tabs-trigger"][data-state="active"],
+body.ps5-theme-active [data-slot="tabs-trigger"][aria-selected="true"],
+body.ps5-theme-active [role="tab"][aria-selected="true"] {
+  background-color: rgba(255, 255, 255, 0.22) !important;
+  border: 1px solid var(--ps5-accent, #00d4ff) !important;
+  box-shadow: 0 0 16px var(--ps5-glow, rgba(0, 212, 255, 0.5)), inset 0 0 8px rgba(255, 255, 255, 0.2) !important;
+  color: #ffffff !important;
+}
+
+/* Completed tabs & filter buttons in PS5 mode */
+body.ps5-theme-active #completed-cards-section button {
+  -webkit-text-stroke: 0.25px #000000 !important;
+  paint-order: stroke fill !important;
+  text-shadow: 
+    0 0 0.5px #000000,
+    0 0 2px #ffffff,
+    0 0 6px var(--ps5-accent, #00d4ff) !important;
+}
+
+
 
 

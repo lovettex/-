@@ -1,27 +1,43 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Atom, Orbit, Sparkles, Compass, Radio, Info, Eye, EyeOff } from 'lucide-react';
+import * as THREE from 'three';
+import { Atom, Info, EyeOff } from 'lucide-react';
 
 export interface PS5Theme {
   id: string;
   name: string;
   nameEn: string;
+  category: 'galaxy' | 'classic';
   iconColor: string;
   bgGradient: [string, string, string];
   accentColor: string;
   particleColor: string;
   particleGlow: string;
-  galaxyType: 'kepler' | 'kerr-blackhole' | 'stellar-fusion' | 'cosmic-web' | 'pulsar-gw';
-  sciConcept: string;
-  sciFormula: string;
-  sciDescription: string;
+  galaxyType?: 'kepler' | 'kerr-blackhole' | 'stellar-fusion' | 'cosmic-web' | 'pulsar-gw';
+  ribbonColors?: Array<{
+    color1: string;
+    color2: string;
+    glow: string;
+    speed: number;
+    amp: number;
+    freq: number;
+    phase: number;
+    yBase: number;
+  }>;
+  sciConcept?: string;
+  sciFormula?: string;
+  sciDescription?: string;
 }
 
 export const PS5_THEMES: PS5Theme[] = [
+  // =========================================================================
+  // GALAXY GLSL SCIENTIFIC SHADER SERIES (5 ASTROPHYSICS PHENOMENA)
+  // =========================================================================
   {
     id: 'galaxy-kepler',
     name: '克卜勒行星天體力學',
     nameEn: 'Kepler Orbit & Habitable Zone',
+    category: 'galaxy',
     iconColor: '#38bdf8',
     bgGradient: ['#020617', '#08152e', '#01040d'],
     accentColor: '#38bdf8',
@@ -30,12 +46,13 @@ export const PS5_THEMES: PS5Theme[] = [
     galaxyType: 'kepler',
     sciConcept: '克卜勒行星三大定律 & 金髮姑娘宜居帶',
     sciFormula: 'T² = (4π² / GM) · a³  |  dA/dt = const',
-    sciDescription: '展示天體力學軌道偏心率、近日點加速、拉格朗日點與適居帶行星凌日測光現象。',
+    sciDescription: 'GLSL 著色器動態計算橢圓軌道偏心率、近日點加速運動與適居帶行星凌日現象。',
   },
   {
     id: 'galaxy-kerr-blackhole',
     name: '克爾旋轉黑洞與時空彎曲',
     nameEn: 'Kerr Black Hole & Gravitational Time Dilation',
+    category: 'galaxy',
     iconColor: '#f43f5e',
     bgGradient: ['#0f0208', '#240614', '#080104'],
     accentColor: '#f43f5e',
@@ -44,12 +61,13 @@ export const PS5_THEMES: PS5Theme[] = [
     galaxyType: 'kerr-blackhole',
     sciConcept: '廣義相對論事件視界 & 引力時間膨脹',
     sciFormula: 'r₊ = (GM/c²)(1 + √(1 - a²))  |  Δt = Δt₀ / √(1 - rₛ/r)',
-    sciDescription: '展示時空拖曳能層 (Ergosphere)、最內穩定軌道 (ISCO)、愛因斯坦環與光子層測地線。',
+    sciDescription: 'GLSL 光線步進與度規扭曲計算能層 (Ergosphere)、光子球層與相對論多普勒吸積盤。',
   },
   {
     id: 'galaxy-stellar-fusion',
     name: '恆星核融合週期與赫羅圖',
     nameEn: 'Stellar Nucleosynthesis & Fusion Core',
+    category: 'galaxy',
     iconColor: '#f59e0b',
     bgGradient: ['#170700', '#2e1202', '#0a0300'],
     accentColor: '#f59e0b',
@@ -58,12 +76,13 @@ export const PS5_THEMES: PS5Theme[] = [
     galaxyType: 'stellar-fusion',
     sciConcept: '恆星核聚變洋蔥層模型 & 磁重聯閃焰',
     sciFormula: '4 ¹H ➔ ⁴He + 2e⁺ + 2νₑ + 26.7 MeV  |  M_ch ≈ 1.44 M☉',
-    sciDescription: '展示主序星至鐵核極限的核合成流動、日冕物質拋射 (CME) 與阿爾芬波磁力線。',
+    sciDescription: 'GLSL 碎形布朗運動 (FBM) 模擬主序星洋蔥層核合成流動、日冕物質拋射與磁力線環。',
   },
   {
     id: 'galaxy-cosmic-web',
     name: '韋伯深空巡天與宇宙紅移',
     nameEn: 'James Webb Cosmic Web & Expansion',
+    category: 'galaxy',
     iconColor: '#c084fc',
     bgGradient: ['#0b0318', '#1a0836', '#06010d'],
     accentColor: '#c084fc',
@@ -72,12 +91,13 @@ export const PS5_THEMES: PS5Theme[] = [
     galaxyType: 'cosmic-web',
     sciConcept: '哈伯宇宙膨脹定律 & 暗物質巨網',
     sciFormula: 'v = H₀ · d  |  1 + z = λ_obs / λ_emit',
-    sciDescription: '展示暗物質絲狀結構、引力透鏡愛因斯坦十字、紅移光譜分解與 134 億年回溯觀測。',
+    sciDescription: 'GLSL Voronoi 網格渲染暗物質絲狀結構、愛因斯坦十字引力透鏡與 134 億年紅移光譜。',
   },
   {
     id: 'galaxy-pulsar-gw',
     name: '脈衝星強磁層與引力波',
     nameEn: 'Relativistic Pulsar & Gravitational Waves',
+    category: 'galaxy',
     iconColor: '#00f2fe',
     bgGradient: ['#01111c', '#02253d', '#00090f'],
     accentColor: '#00f2fe',
@@ -86,9 +106,456 @@ export const PS5_THEMES: PS5Theme[] = [
     galaxyType: 'pulsar-gw',
     sciConcept: '磁陀星偶極磁力線 & 雙中子星併合時空擾動',
     sciFormula: 'ḣ_μν = (2G/c⁴r) · d²Q_μν/dt²  |  B ≈ 10¹⁴ Gauss',
-    sciDescription: '展示光塔燈塔效應同步輻射光錐、LIGO 引力波時空度規波紋與自轉減速能量耗散。',
+    sciDescription: 'GLSL 渲染旋轉同步輻射光錐、LIGO 引力波四極時空漣漪度規擾動與自轉能損。',
+  },
+
+  // =========================================================================
+  // CLASSIC PS5 FLUID WAVE RIBBON THEMES (10 PRESETS)
+  // =========================================================================
+  {
+    id: 'ps5-cosmic',
+    name: 'PS5 經典星空',
+    nameEn: 'Cosmic Midnight',
+    category: 'classic',
+    iconColor: '#00d4ff',
+    bgGradient: ['#050b18', '#08142b', '#030814'],
+    accentColor: '#00d4ff',
+    particleColor: '#ffffff',
+    particleGlow: 'rgba(0, 212, 255, 0.7)',
+    ribbonColors: [
+      { color1: 'rgba(0, 180, 255, 0.45)', color2: 'rgba(50, 90, 255, 0.1)', glow: 'rgba(0, 212, 255, 0.5)', speed: 0.0008, amp: 90, freq: 0.0012, phase: 0, yBase: 0.62 },
+      { color1: 'rgba(120, 190, 255, 0.35)', color2: 'rgba(0, 140, 255, 0.08)', glow: 'rgba(100, 200, 255, 0.4)', speed: 0.0012, amp: 120, freq: 0.0018, phase: 1.8, yBase: 0.55 },
+      { color1: 'rgba(255, 255, 255, 0.25)', color2: 'rgba(0, 220, 255, 0.05)', glow: 'rgba(255, 255, 255, 0.3)', speed: 0.0006, amp: 70, freq: 0.0015, phase: 3.5, yBase: 0.7 },
+      { color1: 'rgba(30, 80, 220, 0.3)', color2: 'rgba(0, 0, 50, 0.0)', glow: 'rgba(0, 120, 255, 0.3)', speed: 0.0015, amp: 140, freq: 0.001, phase: 4.2, yBase: 0.48 },
+    ],
+  },
+  {
+    id: 'emerald-aurora',
+    name: '極光流雲',
+    nameEn: 'Emerald Aurora',
+    category: 'classic',
+    iconColor: '#10b981',
+    bgGradient: ['#02140e', '#05291d', '#010a07'],
+    accentColor: '#10b981',
+    particleColor: '#a7f3d0',
+    particleGlow: 'rgba(16, 185, 129, 0.8)',
+    ribbonColors: [
+      { color1: 'rgba(16, 185, 129, 0.5)', color2: 'rgba(6, 95, 70, 0.1)', glow: 'rgba(16, 185, 129, 0.6)', speed: 0.0009, amp: 100, freq: 0.0014, phase: 0.5, yBase: 0.58 },
+      { color1: 'rgba(52, 211, 153, 0.4)', color2: 'rgba(20, 184, 166, 0.08)', glow: 'rgba(52, 211, 153, 0.5)', speed: 0.0013, amp: 130, freq: 0.0019, phase: 2.2, yBase: 0.5 },
+      { color1: 'rgba(209, 250, 229, 0.28)', color2: 'rgba(5, 150, 105, 0.05)', glow: 'rgba(209, 250, 229, 0.4)', speed: 0.0007, amp: 80, freq: 0.0016, phase: 4.0, yBase: 0.66 },
+      { color1: 'rgba(4, 120, 87, 0.35)', color2: 'rgba(2, 44, 34, 0.0)', glow: 'rgba(16, 185, 129, 0.3)', speed: 0.0016, amp: 150, freq: 0.0011, phase: 1.2, yBase: 0.42 },
+    ],
+  },
+  {
+    id: 'cyber-neon',
+    name: '賽博霓虹',
+    nameEn: 'Cyberpunk Neon',
+    category: 'classic',
+    iconColor: '#c084fc',
+    bgGradient: ['#0d041c', '#1e0b3c', '#080212'],
+    accentColor: '#c084fc',
+    particleColor: '#f5d0fe',
+    particleGlow: 'rgba(192, 132, 252, 0.85)',
+    ribbonColors: [
+      { color1: 'rgba(168, 85, 247, 0.5)', color2: 'rgba(236, 72, 153, 0.12)', glow: 'rgba(192, 132, 252, 0.6)', speed: 0.001, amp: 110, freq: 0.0015, phase: 0.2, yBase: 0.6 },
+      { color1: 'rgba(236, 72, 153, 0.42)', color2: 'rgba(147, 51, 234, 0.1)', glow: 'rgba(244, 114, 182, 0.5)', speed: 0.0014, amp: 135, freq: 0.002, phase: 2.5, yBase: 0.52 },
+      { color1: 'rgba(192, 132, 252, 0.3)', color2: 'rgba(79, 70, 229, 0.05)', glow: 'rgba(216, 180, 254, 0.4)', speed: 0.0008, amp: 85, freq: 0.0017, phase: 3.8, yBase: 0.68 },
+      { color1: 'rgba(217, 70, 239, 0.32)', color2: 'rgba(30, 10, 60, 0.0)', glow: 'rgba(217, 70, 239, 0.4)', speed: 0.0017, amp: 145, freq: 0.0012, phase: 1.6, yBase: 0.45 },
+    ],
+  },
+  {
+    id: 'sunset-horizon',
+    name: '落日餘暉',
+    nameEn: 'Sunset Horizon',
+    category: 'classic',
+    iconColor: '#f59e0b',
+    bgGradient: ['#1c0817', '#381329', '#0d030c'],
+    accentColor: '#f59e0b',
+    particleColor: '#fed7aa',
+    particleGlow: 'rgba(245, 158, 11, 0.8)',
+    ribbonColors: [
+      { color1: 'rgba(245, 158, 11, 0.5)', color2: 'rgba(239, 68, 68, 0.12)', glow: 'rgba(251, 191, 36, 0.6)', speed: 0.0008, amp: 95, freq: 0.0013, phase: 0.8, yBase: 0.64 },
+      { color1: 'rgba(244, 63, 94, 0.4)', color2: 'rgba(217, 70, 239, 0.08)', glow: 'rgba(251, 113, 133, 0.5)', speed: 0.0012, amp: 125, freq: 0.0018, phase: 2.8, yBase: 0.54 },
+      { color1: 'rgba(254, 215, 170, 0.3)', color2: 'rgba(234, 88, 12, 0.05)', glow: 'rgba(254, 240, 138, 0.4)', speed: 0.0006, amp: 75, freq: 0.0015, phase: 4.5, yBase: 0.72 },
+      { color1: 'rgba(194, 65, 12, 0.35)', color2: 'rgba(88, 28, 135, 0.0)', glow: 'rgba(249, 115, 22, 0.3)', speed: 0.0015, amp: 140, freq: 0.0011, phase: 1.5, yBase: 0.46 },
+    ],
+  },
+  {
+    id: 'deep-nebula',
+    name: '深空星雲',
+    nameEn: 'Deep Nebula',
+    category: 'classic',
+    iconColor: '#818cf8',
+    bgGradient: ['#04051a', '#0b0f38', '#02030d'],
+    accentColor: '#818cf8',
+    particleColor: '#c7d2fe',
+    particleGlow: 'rgba(129, 140, 248, 0.8)',
+    ribbonColors: [
+      { color1: 'rgba(99, 102, 241, 0.48)', color2: 'rgba(59, 130, 246, 0.1)', glow: 'rgba(129, 140, 248, 0.6)', speed: 0.0009, amp: 105, freq: 0.0014, phase: 0.4, yBase: 0.6 },
+      { color1: 'rgba(168, 85, 247, 0.38)', color2: 'rgba(99, 102, 241, 0.08)', glow: 'rgba(192, 132, 252, 0.5)', speed: 0.0013, amp: 130, freq: 0.0019, phase: 2.1, yBase: 0.52 },
+      { color1: 'rgba(224, 231, 255, 0.26)', color2: 'rgba(37, 99, 235, 0.05)', glow: 'rgba(224, 231, 255, 0.4)', speed: 0.0007, amp: 80, freq: 0.0016, phase: 3.9, yBase: 0.68 },
+      { color1: 'rgba(67, 56, 202, 0.32)', color2: 'rgba(15, 23, 42, 0.0)', glow: 'rgba(99, 102, 241, 0.3)', speed: 0.0016, amp: 150, freq: 0.0011, phase: 1.1, yBase: 0.44 },
+    ],
+  },
+  {
+    id: 'titanium-frost',
+    name: '鈦金霜白',
+    nameEn: 'Titanium Frost',
+    category: 'classic',
+    iconColor: '#e2e8f0',
+    bgGradient: ['#0f172a', '#1e293b', '#090d16'],
+    accentColor: '#38bdf8',
+    particleColor: '#f8fafc',
+    particleGlow: 'rgba(56, 189, 248, 0.75)',
+    ribbonColors: [
+      { color1: 'rgba(148, 163, 184, 0.45)', color2: 'rgba(56, 189, 248, 0.1)', glow: 'rgba(203, 213, 225, 0.5)', speed: 0.0008, amp: 90, freq: 0.0012, phase: 0.6, yBase: 0.62 },
+      { color1: 'rgba(56, 189, 248, 0.35)', color2: 'rgba(100, 116, 139, 0.08)', glow: 'rgba(125, 211, 252, 0.4)', speed: 0.0012, amp: 120, freq: 0.0017, phase: 2.4, yBase: 0.53 },
+      { color1: 'rgba(248, 250, 252, 0.28)', color2: 'rgba(71, 85, 105, 0.05)', glow: 'rgba(255, 255, 255, 0.4)', speed: 0.0006, amp: 70, freq: 0.0015, phase: 4.1, yBase: 0.7 },
+      { color1: 'rgba(51, 65, 85, 0.35)', color2: 'rgba(15, 23, 42, 0.0)', glow: 'rgba(148, 163, 184, 0.3)', speed: 0.0015, amp: 140, freq: 0.001, phase: 1.4, yBase: 0.46 },
+    ],
+  },
+  {
+    id: 'ember-core',
+    name: '熾熱核心',
+    nameEn: 'Ember Core',
+    category: 'classic',
+    iconColor: '#ea580c',
+    bgGradient: ['#1a0703', '#331006', '#0d0301'],
+    accentColor: '#ea580c',
+    particleColor: '#ffedd5',
+    particleGlow: 'rgba(234, 88, 12, 0.85)',
+    ribbonColors: [
+      { color1: 'rgba(234, 88, 12, 0.52)', color2: 'rgba(220, 38, 38, 0.12)', glow: 'rgba(249, 115, 22, 0.6)', speed: 0.001, amp: 110, freq: 0.0015, phase: 0.3, yBase: 0.6 },
+      { color1: 'rgba(249, 115, 22, 0.42)', color2: 'rgba(234, 179, 8, 0.1)', glow: 'rgba(251, 146, 60, 0.5)', speed: 0.0014, amp: 135, freq: 0.002, phase: 2.6, yBase: 0.51 },
+      { color1: 'rgba(254, 240, 138, 0.3)', color2: 'rgba(185, 28, 28, 0.05)', glow: 'rgba(253, 224, 71, 0.4)', speed: 0.0008, amp: 85, freq: 0.0017, phase: 4.3, yBase: 0.69 },
+      { color1: 'rgba(153, 27, 27, 0.35)', color2: 'rgba(69, 10, 10, 0.0)', glow: 'rgba(220, 38, 38, 0.3)', speed: 0.0017, amp: 145, freq: 0.0012, phase: 1.7, yBase: 0.43 },
+    ],
+  },
+  {
+    id: 'oceanic-abyss',
+    name: '深海秘境',
+    nameEn: 'Oceanic Abyss',
+    category: 'classic',
+    iconColor: '#06b6d4',
+    bgGradient: ['#02131e', '#04273d', '#01090f'],
+    accentColor: '#06b6d4',
+    particleColor: '#cffafe',
+    particleGlow: 'rgba(6, 182, 212, 0.8)',
+    ribbonColors: [
+      { color1: 'rgba(6, 182, 212, 0.48)', color2: 'rgba(2, 132, 199, 0.1)', glow: 'rgba(34, 211, 238, 0.6)', speed: 0.0008, amp: 95, freq: 0.0013, phase: 0.7, yBase: 0.63 },
+      { color1: 'rgba(14, 165, 233, 0.38)', color2: 'rgba(59, 130, 246, 0.08)', glow: 'rgba(56, 189, 248, 0.5)', speed: 0.0012, amp: 125, freq: 0.0018, phase: 2.7, yBase: 0.54 },
+      { color1: 'rgba(207, 250, 254, 0.28)', color2: 'rgba(3, 105, 161, 0.05)', glow: 'rgba(207, 250, 254, 0.4)', speed: 0.0006, amp: 75, freq: 0.0015, phase: 4.4, yBase: 0.71 },
+      { color1: 'rgba(3, 105, 161, 0.35)', color2: 'rgba(8, 47, 73, 0.0)', glow: 'rgba(6, 182, 212, 0.3)', speed: 0.0015, amp: 140, freq: 0.0011, phase: 1.3, yBase: 0.45 },
+    ],
+  },
+  {
+    id: 'sakura-twilight',
+    name: '落櫻暮光',
+    nameEn: 'Sakura Twilight',
+    category: 'classic',
+    iconColor: '#f472b6',
+    bgGradient: ['#190818', '#330f30', '#0e030e'],
+    accentColor: '#f472b6',
+    particleColor: '#fce7f3',
+    particleGlow: 'rgba(244, 114, 182, 0.85)',
+    ribbonColors: [
+      { color1: 'rgba(244, 114, 182, 0.5)', color2: 'rgba(219, 39, 119, 0.12)', glow: 'rgba(244, 114, 182, 0.6)', speed: 0.0009, amp: 100, freq: 0.0014, phase: 0.4, yBase: 0.61 },
+      { color1: 'rgba(251, 113, 133, 0.4)', color2: 'rgba(192, 132, 252, 0.08)', glow: 'rgba(251, 113, 133, 0.5)', speed: 0.0013, amp: 130, freq: 0.0019, phase: 2.3, yBase: 0.52 },
+      { color1: 'rgba(253, 230, 138, 0.28)', color2: 'rgba(157, 23, 77, 0.05)', glow: 'rgba(253, 230, 138, 0.4)', speed: 0.0007, amp: 80, freq: 0.0016, phase: 4.0, yBase: 0.68 },
+      { color1: 'rgba(157, 23, 77, 0.32)', color2: 'rgba(76, 5, 25, 0.0)', glow: 'rgba(244, 114, 182, 0.3)', speed: 0.0016, amp: 145, freq: 0.0011, phase: 1.5, yBase: 0.44 },
+    ],
+  },
+  {
+    id: 'prestige-gold',
+    name: '流金奢華',
+    nameEn: 'Prestige Gold',
+    category: 'classic',
+    iconColor: '#fbbf24',
+    bgGradient: ['#171206', '#2d2309', '#0a0802'],
+    accentColor: '#fbbf24',
+    particleColor: '#fef08a',
+    particleGlow: 'rgba(251, 191, 36, 0.85)',
+    ribbonColors: [
+      { color1: 'rgba(251, 191, 36, 0.5)', color2: 'rgba(217, 119, 6, 0.12)', glow: 'rgba(251, 191, 36, 0.6)', speed: 0.0008, amp: 95, freq: 0.0013, phase: 0.5, yBase: 0.62 },
+      { color1: 'rgba(245, 158, 11, 0.4)', color2: 'rgba(180, 83, 9, 0.08)', glow: 'rgba(245, 158, 11, 0.5)', speed: 0.0012, amp: 125, freq: 0.0018, phase: 2.5, yBase: 0.53 },
+      { color1: 'rgba(254, 240, 138, 0.3)', color2: 'rgba(146, 64, 14, 0.05)', glow: 'rgba(254, 240, 138, 0.4)', speed: 0.0006, amp: 75, freq: 0.0015, phase: 4.2, yBase: 0.7 },
+      { color1: 'rgba(180, 83, 9, 0.35)', color2: 'rgba(69, 26, 3, 0.0)', glow: 'rgba(251, 191, 36, 0.3)', speed: 0.0015, amp: 140, freq: 0.0011, phase: 1.4, yBase: 0.45 },
+    ],
   },
 ];
+
+// =========================================================================
+// GLSL VERTEX SHADER
+// =========================================================================
+const commonVertexShader = `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = vec4(position, 1.0);
+  }
+`;
+
+// =========================================================================
+// GLSL FRAGMENT SHADERS (5 ASTROPHYSICS SHADERS)
+// =========================================================================
+
+// 1. Kepler Orbit GLSL Shader
+const keplerFragmentShader = `
+  uniform float u_time;
+  uniform vec2 u_resolution;
+  uniform vec2 u_mouse;
+  uniform vec3 u_accent;
+  varying vec2 vUv;
+
+  void main() {
+    vec2 p = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / min(u_resolution.x, u_resolution.y);
+    vec2 m = (u_mouse - 0.5 * u_resolution.xy) / min(u_resolution.x, u_resolution.y);
+    
+    // Gravitational lensing warp toward mouse pointer
+    float mouseDist = length(p - m);
+    p += (p - m) * (0.012 / (mouseDist + 0.15));
+
+    float t = u_time * 0.12; // Calm, steady pace
+
+    vec3 col = vec3(0.015, 0.025, 0.05);
+
+    // Deep field stardust
+    float stars = fract(sin(dot(p + vec2(1.2, 4.3), vec2(12.9898, 78.233))) * 43758.5453);
+    if (stars > 0.992) {
+      col += vec3(0.6, 0.8, 1.0) * (0.4 + 0.6 * sin(u_time * 2.0 + stars * 100.0));
+    }
+
+    vec2 center = vec2(0.12, -0.02);
+    vec2 cp = p - center;
+    float r = length(cp);
+
+    // Goldilocks Habitable Zone (0.35 ~ 0.52 radius)
+    float hz = smoothstep(0.32, 0.38, r) - smoothstep(0.48, 0.55, r);
+    col += vec3(0.05, 0.45, 0.3) * hz * 0.45;
+
+    // Central Star Core Flare
+    float sun = 0.035 / (r + 0.01);
+    col += vec3(1.0, 0.85, 0.5) * sun * 0.5;
+
+    // Kepler Elliptical Orbit Rings
+    float orbits[5];
+    orbits[0] = 0.16; orbits[1] = 0.26; orbits[2] = 0.42; orbits[3] = 0.62; orbits[4] = 0.85;
+
+    vec3 planetColors[5];
+    planetColors[0] = vec3(0.9, 0.3, 0.3);
+    planetColors[1] = vec3(0.95, 0.7, 0.2);
+    planetColors[2] = vec3(0.2, 0.85, 0.55); // Habitable
+    planetColors[3] = vec3(0.3, 0.6, 0.95);
+    planetColors[4] = vec3(0.75, 0.4, 0.95);
+
+    float speeds[5];
+    speeds[0] = 2.4; speeds[1] = 1.6; speeds[2] = 1.0; speeds[3] = 0.68; speeds[4] = 0.45;
+
+    for (int i = 0; i < 5; i++) {
+      float orbR = orbits[i];
+      float ring = abs(r - orbR);
+      col += vec3(0.2, 0.4, 0.7) * (0.0018 / (ring + 0.002)) * 0.4;
+
+      // Keplerian speed anomaly (faster near center)
+      float angle = t * speeds[i] + float(i) * 1.5;
+      vec2 planetPos = vec2(cos(angle), sin(angle)) * orbR;
+      float pDist = length(cp - planetPos);
+      float planetGlow = 0.015 / (pDist + 0.008);
+      col += planetColors[i] * planetGlow * 0.8;
+    }
+
+    gl_FragColor = vec4(col, 1.0);
+  }
+`;
+
+// 2. Kerr Black Hole GLSL Shader
+const kerrFragmentShader = `
+  uniform float u_time;
+  uniform vec2 u_resolution;
+  uniform vec2 u_mouse;
+  varying vec2 vUv;
+
+  void main() {
+    vec2 p = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / min(u_resolution.x, u_resolution.y);
+    vec2 center = vec2(0.12, 0.0);
+    vec2 cp = p - center;
+
+    float r = length(cp);
+    float t = u_time * 0.25;
+
+    // Relativistic gravitational deflection ray warping
+    float rs = 0.12; // Schwarzschild radius
+    float warp = rs / (r * r + 0.035);
+    vec2 warpedP = cp * (1.0 + warp * 0.8);
+    float wr = length(warpedP);
+    float angle = atan(warpedP.y, warpedP.x) + t * (0.3 / (wr + 0.1));
+
+    vec3 col = vec3(0.04, 0.01, 0.025);
+
+    // Accretion Disk with Relativistic Doppler Beaming (Brighter left, dimmer right)
+    if (wr > 0.14 && wr < 0.65) {
+      float doppler = 0.5 + 0.5 * cos(angle + 1.2);
+      float diskGlow = smoothstep(0.14, 0.22, wr) * (1.0 - smoothstep(0.45, 0.65, wr));
+      vec3 diskCol = mix(vec3(0.95, 0.35, 0.1), vec3(0.98, 0.85, 0.6), doppler);
+      col += diskCol * diskGlow * (0.6 + doppler * 0.7);
+    }
+
+    // Photon Sphere Ring (at r = 1.5 rs)
+    float photonRing = abs(r - rs * 1.38);
+    col += vec3(1.0, 0.95, 0.9) * (0.0025 / (photonRing + 0.003)) * 0.65;
+
+    // Event Horizon Shadow (Black Hole Core)
+    if (r < rs) {
+      col *= smoothstep(0.0, rs, r * 0.7);
+    }
+
+    // Spacetime Grid Metrics
+    float grid = abs(sin(warpedP.x * 24.0)) * abs(sin(warpedP.y * 24.0));
+    col += vec3(0.6, 0.1, 0.25) * pow(grid, 18.0) * 0.15;
+
+    gl_FragColor = vec4(col, 1.0);
+  }
+`;
+
+// 3. Stellar Fusion GLSL Shader
+const stellarFragmentShader = `
+  uniform float u_time;
+  uniform vec2 u_resolution;
+  varying vec2 vUv;
+
+  // Simple pseudo-noise
+  float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+  float noise(vec2 p) {
+    vec2 i = floor(p); vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
+               mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
+  }
+  float fbm(vec2 p) {
+    float v = 0.0; float a = 0.5;
+    for (int i = 0; i < 4; i++) {
+      v += a * noise(p); p *= 2.0; a *= 0.5;
+    }
+    return v;
+  }
+
+  void main() {
+    vec2 p = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / min(u_resolution.x, u_resolution.y);
+    vec2 center = vec2(0.12, 0.0);
+    vec2 cp = p - center;
+    float r = length(cp);
+    float t = u_time * 0.15;
+
+    vec3 col = vec3(0.06, 0.015, 0.0);
+
+    // Dynamic Convective Plasma Turbulence (FBM)
+    float angle = atan(cp.y, cp.x);
+    float n = fbm(vec2(r * 8.0 - t * 0.5, angle * 4.0 + t * 0.2));
+
+    // Nested Onion Skin Core Layers
+    float core = 0.08 / (r + 0.02);
+    col += vec3(1.0, 0.6, 0.15) * core * (0.6 + 0.4 * n);
+
+    // Coronal Plasma Loops
+    float arc = abs(sin(angle * 5.0 + t)) * (0.02 / (abs(r - 0.28) + 0.015));
+    col += vec3(1.0, 0.8, 0.2) * arc * 0.4;
+
+    // Outer Solar Wind Halo
+    col += vec3(0.85, 0.3, 0.05) * (0.04 / (r + 0.15));
+
+    gl_FragColor = vec4(col, 1.0);
+  }
+`;
+
+// 4. Cosmic Web GLSL Shader
+const cosmicWebFragmentShader = `
+  uniform float u_time;
+  uniform vec2 u_resolution;
+  varying vec2 vUv;
+
+  vec2 hash2(vec2 p) {
+    return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453);
+  }
+
+  void main() {
+    vec2 p = gl_FragCoord.xy / u_resolution.xy;
+    p.x *= u_resolution.x / u_resolution.y;
+    float t = u_time * 0.04;
+
+    vec2 st = p * 4.2;
+    vec2 i_st = floor(st);
+    vec2 f_st = fract(st);
+
+    float m_dist = 1.0;
+    vec2 m_point;
+
+    for (int y = -1; y <= 1; y++) {
+      for (int x = -1; x <= 1; x++) {
+        vec2 neighbor = vec2(float(x), float(y));
+        vec2 point = hash2(i_st + neighbor);
+        point = 0.5 + 0.5 * sin(t + 6.2831 * point);
+        vec2 diff = neighbor + point - f_st;
+        float dist = length(diff);
+        if (dist < m_dist) {
+          m_dist = dist;
+          m_point = point;
+        }
+      }
+    }
+
+    vec3 col = vec3(0.02, 0.01, 0.04);
+
+    // Dark Matter Filaments Network
+    float filament = smoothstep(0.0, 0.25, m_dist) - smoothstep(0.25, 0.5, m_dist);
+    col += vec3(0.45, 0.15, 0.7) * filament * 0.5;
+
+    // Galaxy Cluster Nodes
+    float nodeGlow = 0.025 / (m_dist + 0.025);
+    col += vec3(0.85, 0.6, 1.0) * nodeGlow * 0.4;
+
+    // JWST 6-point Cross Spikes
+    float crossDist = abs(fract(st.x) - 0.5) * abs(fract(st.y) - 0.5);
+    col += vec3(0.9, 0.8, 0.4) * (0.0006 / (crossDist + 0.005)) * 0.25;
+
+    gl_FragColor = vec4(col, 1.0);
+  }
+`;
+
+// 5. Pulsar & Gravitational Waves GLSL Shader
+const pulsarFragmentShader = `
+  uniform float u_time;
+  uniform vec2 u_resolution;
+  varying vec2 vUv;
+
+  void main() {
+    vec2 p = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / min(u_resolution.x, u_resolution.y);
+    vec2 center = vec2(0.12, 0.0);
+    vec2 cp = p - center;
+    float r = length(cp);
+    float t = u_time * 0.4; // Calm pulsar spin
+
+    vec3 col = vec3(0.01, 0.025, 0.04);
+
+    // 1. Relativistic Lighthouse Synchrotron Beams
+    float beamAngle = atan(cp.y, cp.x) - t * 1.5;
+    float beam = pow(abs(cos(beamAngle)), 32.0);
+    col += vec3(0.0, 0.95, 1.0) * beam * (0.08 / (r + 0.05)) * 0.8;
+
+    // 2. Dipolar Magnetic Field Lines
+    float magnetic = abs(sin(atan(cp.y, cp.x) * 2.0)) * (0.015 / (abs(r - 0.25) + 0.02));
+    col += vec3(0.2, 0.5, 0.9) * magnetic * 0.35;
+
+    // 3. Spacetime Gravitational Wave Metric Ripples
+    float gwRipples = sin(r * 45.0 - t * 4.0);
+    col += vec3(0.1, 0.75, 0.9) * pow(abs(gwRipples), 6.0) * (0.03 / (r + 0.2)) * 0.4;
+
+    // 4. Central Neutron Star Core
+    float neutron = 0.03 / (r + 0.008);
+    col += vec3(0.9, 1.0, 1.0) * neutron * 0.6;
+
+    gl_FragColor = vec4(col, 1.0);
+  }
+`;
 
 interface Particle {
   x: number;
@@ -100,37 +567,32 @@ interface Particle {
   pulseSpeed: number;
 }
 
-interface Probe {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  trail: Array<{ x: number; y: number; alpha: number }>;
-  life: number;
-}
-
 interface PS5DynamicBackgroundProps {
   isActive: boolean;
   themeId?: string;
+  speedMultiplier?: number;
 }
 
-export function PS5DynamicBackground({ isActive, themeId = 'galaxy-kepler' }: PS5DynamicBackgroundProps) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const animFrameIdRef = useRef<number | null>(null);
+export function PS5DynamicBackground({
+  isActive,
+  themeId = 'galaxy-kepler',
+  speedMultiplier = 0.5,
+}: PS5DynamicBackgroundProps) {
+  const glslContainerRef = useRef<HTMLDivElement | null>(null);
+  const classicCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const classicAnimRef = useRef<number | null>(null);
   const particlesRef = useRef<Particle[]>([]);
-  const probesRef = useRef<Probe[]>([]);
-  const mousePosRef = useRef<{ x: number; y: number; isActive: boolean }>({
-    x: -1000,
-    y: -1000,
-    isActive: false,
-  });
+  const speedRef = useRef(speedMultiplier);
+
+  useEffect(() => {
+    speedRef.current = speedMultiplier;
+  }, [speedMultiplier]);
 
   const [showSciHUD, setShowSciHUD] = useState<boolean>(true);
-  const [activeTelemetry, setActiveTelemetry] = useState<string>('系統待命中');
 
   const theme = PS5_THEMES.find((t) => t.id === themeId) || PS5_THEMES[0];
 
-  // Sync PS5 High Contrast & Neon Glow variables with document
+  // Document CSS theme variable synchronization
   useEffect(() => {
     if (isActive) {
       document.body.classList.add('ps5-theme-active');
@@ -146,825 +608,250 @@ export function PS5DynamicBackground({ isActive, themeId = 'galaxy-kepler' }: PS
     };
   }, [isActive, theme]);
 
-  // Window-level pointer tracking for full-screen dynamic astrophysics interaction
+  // =========================================================================
+  // EFFECT 1: GALAXY GLSL SHADER ENGINE (Three.js WebGL Fullscreen Quad)
+  // =========================================================================
   useEffect(() => {
-    if (!isActive) return;
+    if (!isActive || theme.category !== 'galaxy' || !glslContainerRef.current) return;
+
+    const container = glslContainerRef.current;
+    container.innerHTML = '';
+
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, powerPreference: 'high-performance' });
+    renderer.setSize(width, height);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    container.appendChild(renderer.domElement);
+
+    // Select specific GLSL shader
+    let fragShader = keplerFragmentShader;
+    switch (theme.galaxyType) {
+      case 'kerr-blackhole':
+        fragShader = kerrFragmentShader;
+        break;
+      case 'stellar-fusion':
+        fragShader = stellarFragmentShader;
+        break;
+      case 'cosmic-web':
+        fragShader = cosmicWebFragmentShader;
+        break;
+      case 'pulsar-gw':
+        fragShader = pulsarFragmentShader;
+        break;
+      case 'kepler':
+      default:
+        fragShader = keplerFragmentShader;
+        break;
+    }
+
+    const uniforms = {
+      u_time: { value: 0 },
+      u_resolution: { value: new THREE.Vector2(width, height) },
+      u_mouse: { value: new THREE.Vector2(width * 0.5, height * 0.5) },
+      u_accent: { value: new THREE.Color(theme.accentColor) },
+    };
+
+    const geometry = new THREE.PlaneGeometry(2, 2);
+    const material = new THREE.ShaderMaterial({
+      vertexShader: commonVertexShader,
+      fragmentShader: fragShader,
+      uniforms,
+      depthWrite: false,
+      depthTest: false,
+    });
+
+    const mesh = new THREE.Mesh(geometry, material);
+    scene.add(mesh);
+
+    let animId: number;
+    let lastNow = performance.now();
+    let accumulatedTime = 0;
 
     const handlePointerMove = (e: MouseEvent) => {
-      mousePosRef.current = {
-        x: e.clientX,
-        y: e.clientY,
-        isActive: true,
-      };
+      uniforms.u_mouse.value.set(e.clientX, window.innerHeight - e.clientY);
     };
-
-    const handlePointerLeave = () => {
-      mousePosRef.current.isActive = false;
-    };
-
-    const handleClick = (e: MouseEvent) => {
-      // Spawn an astrophysical orbital probe towards mouse target
-      const cx = window.innerWidth * 0.5;
-      const cy = window.innerHeight * 0.5;
-      const angle = Math.atan2(e.clientY - cy, e.clientX - cx);
-      const speed = 4.2;
-
-      probesRef.current.push({
-        x: cx,
-        y: cy,
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed,
-        trail: [],
-        life: 1.0,
-      });
-
-      if (probesRef.current.length > 8) {
-        probesRef.current.shift();
-      }
-    };
-
     window.addEventListener('mousemove', handlePointerMove);
-    window.addEventListener('mouseleave', handlePointerLeave);
-    window.addEventListener('click', handleClick);
+
+    const handleResize = () => {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      renderer.setSize(w, h);
+      uniforms.u_resolution.value.set(w, h);
+    };
+    window.addEventListener('resize', handleResize);
+
+    const render = (now: number) => {
+      const delta = Math.min(0.1, (now - lastNow) * 0.001);
+      lastNow = now;
+      accumulatedTime += delta * (speedRef.current || 0.5);
+      uniforms.u_time.value = accumulatedTime;
+      renderer.render(scene, camera);
+      animId = requestAnimationFrame(render);
+    };
+
+    animId = requestAnimationFrame(render);
 
     return () => {
       window.removeEventListener('mousemove', handlePointerMove);
-      window.removeEventListener('mouseleave', handlePointerLeave);
-      window.removeEventListener('click', handleClick);
+      window.removeEventListener('resize', handleResize);
+      cancelAnimationFrame(animId);
+      geometry.dispose();
+      material.dispose();
+      renderer.dispose();
     };
-  }, [isActive]);
+  }, [isActive, theme]);
 
-  // Main Canvas Rendering Engine (60 FPS Scientific Astrophysics Simulation)
+  // =========================================================================
+  // EFFECT 2: CLASSIC PS5 FLUID WAVE RIBBONS (Original 2D Canvas Engine)
+  // =========================================================================
   useEffect(() => {
-    if (!isActive) {
-      if (animFrameIdRef.current) {
-        cancelAnimationFrame(animFrameIdRef.current);
-        animFrameIdRef.current = null;
-      }
-      return;
-    }
+    if (!isActive || theme.category !== 'classic' || !classicCanvasRef.current) return;
 
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    const canvas = classicCanvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     let width = (canvas.width = window.innerWidth);
     let height = (canvas.height = window.innerHeight);
 
-    // Initialize Cosmic Deep-Field Stars
-    const initParticles = () => {
-      const count = Math.min(120, Math.floor((width * height) / 16000));
-      const list: Particle[] = [];
-      for (let i = 0; i < count; i++) {
-        list.push({
-          x: Math.random() * width,
-          y: Math.random() * height,
-          vx: (Math.random() - 0.5) * 0.15,
-          vy: (Math.random() - 0.5) * 0.15,
-          radius: 0.8 + Math.random() * 2.2,
-          alpha: 0.15 + Math.random() * 0.65,
-          pulseSpeed: 0.005 + Math.random() * 0.012,
-        });
-      }
-      particlesRef.current = list;
-    };
+    // Floating Stardust Particles
+    const count = Math.min(65, Math.floor((width * height) / 24000));
+    const particles: Particle[] = [];
+    for (let i = 0; i < count; i++) {
+      particles.push({
+        x: Math.random() * width,
+        y: Math.random() * height,
+        vx: (Math.random() - 0.5) * 0.35,
+        vy: -0.15 - Math.random() * 0.3,
+        radius: 1.2 + Math.random() * 2.8,
+        alpha: 0.2 + Math.random() * 0.6,
+        pulseSpeed: 0.008 + Math.random() * 0.015,
+      });
+    }
+    particlesRef.current = particles;
+
+    let lastClassicNow = performance.now();
+    let accumulatedClassicTime = 0;
 
     const handleResize = () => {
-      if (!canvas) return;
       width = canvas.width = window.innerWidth;
       height = canvas.height = window.innerHeight;
-      initParticles();
     };
     window.addEventListener('resize', handleResize);
-    initParticles();
 
-    let startTime = performance.now();
-
-    // =========================================================================
-    // SCI-FI HUD HELPER: Celestial Coordinate Rings & Vectors
-    // =========================================================================
-    const drawCelestialCoordinates = (c: CanvasRenderingContext2D, cx: number, cy: number, maxR: number) => {
-      c.save();
-      c.strokeStyle = 'rgba(255, 255, 255, 0.05)';
-      c.lineWidth = 1;
-      c.setLineDash([3, 8]);
-
-      // Concentric Distance Grids (AU / Parsecs)
-      for (let r = 80; r <= maxR; r += 70) {
-        c.beginPath();
-        c.arc(cx, cy, r, 0, Math.PI * 2);
-        c.stroke();
-      }
-
-      // Crosshair Axes
-      c.beginPath();
-      c.moveTo(cx - maxR, cy);
-      c.lineTo(cx + maxR, cy);
-      c.moveTo(cx, cy - maxR);
-      c.lineTo(cx, cy + maxR);
-      c.stroke();
-      c.restore();
-    };
-
-    // =========================================================================
-    // 1. GALAXY SYSTEM 1: KEPLER CELESTIAL ORBITS & HABITABLE ZONE
-    // =========================================================================
-    const drawKeplerSystem = (c: CanvasRenderingContext2D, elapsed: number, mx: number, my: number) => {
-      const cx = width * 0.55;
-      const cy = height * 0.48;
-      const t = elapsed * 0.0008;
-
-      drawCelestialCoordinates(c, cx, cy, Math.min(width, height) * 0.45);
-
-      // 1. Goldilocks Habitable Zone (綠色宜居帶 0.95 ~ 1.4 AU)
-      const rInner = 150;
-      const rOuter = 220;
-      const hzGrad = c.createRadialGradient(cx, cy, rInner, cx, cy, rOuter);
-      hzGrad.addColorStop(0, 'rgba(16, 185, 129, 0)');
-      hzGrad.addColorStop(0.5, 'rgba(16, 185, 129, 0.12)');
-      hzGrad.addColorStop(1, 'rgba(16, 185, 129, 0)');
-      c.fillStyle = hzGrad;
-      c.beginPath();
-      c.arc(cx, cy, rOuter, 0, Math.PI * 2);
-      c.arc(cx, cy, rInner, 0, Math.PI * 2, true);
-      c.fill();
-
-      // Habitable Zone Label
-      c.fillStyle = 'rgba(16, 185, 129, 0.65)';
-      c.font = '10px monospace';
-      c.fillText('✦ 宜居帶 GOLDILOCKS ZONE (0.95 - 1.37 AU)', cx + rInner + 8, cy - 8);
-
-      // 2. Central Parent Star (Sol / Kepler-186)
-      const starGrad = c.createRadialGradient(cx, cy, 2, cx, cy, 45);
-      starGrad.addColorStop(0, '#ffffff');
-      starGrad.addColorStop(0.2, '#fef08a');
-      starGrad.addColorStop(0.6, '#38bdf8');
-      starGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-      c.fillStyle = starGrad;
-      c.beginPath();
-      c.arc(cx, cy, 45, 0, Math.PI * 2);
-      c.fill();
-
-      // 3. Planetary Orbit Paths (Kepler's Ellipses with eccentricity e)
-      const planets = [
-        { name: 'Kepler-b (熔岩微星)', a: 75, b: 70, e: 0.18, speed: 2.2, size: 3.5, color: '#f87171', desc: '0.38 AU | 47.8 km/s' },
-        { name: 'Kepler-c (金屬陸塊)', a: 115, b: 110, e: 0.10, speed: 1.5, size: 4.8, color: '#fbbf24', desc: '0.72 AU | 35.0 km/s' },
-        { name: 'Kepler-e (宜居海洋星)', a: 185, b: 180, e: 0.04, speed: 1.0, size: 5.5, color: '#34d399', desc: '1.02 AU | 29.8 km/s (液態水存在)' },
-        { name: 'Kepler-f (超級類地行星)', a: 260, b: 245, e: 0.15, speed: 0.7, size: 7.0, color: '#60a5fa', desc: '1.55 AU | 24.1 km/s' },
-        { name: 'Kepler-g (氣態巨行星)', a: 350, b: 335, e: 0.08, speed: 0.45, size: 9.5, color: '#c084fc', desc: '2.80 AU | 18.0 km/s (帶光環)' },
-      ];
-
-      planets.forEach((p, idx) => {
-        // Orbit Ellipse
-        c.save();
-        c.strokeStyle = 'rgba(255, 255, 255, 0.15)';
-        c.lineWidth = 1;
-        c.setLineDash([4, 4]);
-        c.beginPath();
-        c.ellipse(cx, cy, p.a, p.b, 0.2, 0, Math.PI * 2);
-        c.stroke();
-        c.restore();
-
-        // Keplerian Speed Modulation (Faster at Perihelion: Kepler's 2nd Law)
-        const meanAngle = t * p.speed + idx * 1.3;
-        const angle = meanAngle + 2 * p.e * Math.sin(meanAngle); // True anomaly approx
-
-        const px = cx + Math.cos(angle) * p.a;
-        const py = cy + Math.sin(angle) * p.b;
-
-        // Gravitational Velocity Vector Line
-        const vx = -Math.sin(angle) * (20 / Math.sqrt(p.a)) * 12;
-        const vy = Math.cos(angle) * (20 / Math.sqrt(p.a)) * 12;
-
-        c.save();
-        c.strokeStyle = 'rgba(56, 189, 248, 0.4)';
-        c.lineWidth = 1.2;
-        c.beginPath();
-        c.moveTo(px, py);
-        c.lineTo(px + vx, py + vy);
-        c.stroke();
-        c.restore();
-
-        // Planet Body with Glow
-        c.save();
-        c.fillStyle = p.color;
-        c.shadowColor = p.color;
-        c.shadowBlur = 10;
-        c.beginPath();
-        c.arc(px, py, p.size, 0, Math.PI * 2);
-        c.fill();
-        c.restore();
-
-        // Planet Label & Telemetry HUD
-        c.fillStyle = '#ffffff';
-        c.font = '10px monospace';
-        c.fillText(`${p.name}`, px + p.size + 6, py - 4);
-        c.fillStyle = 'rgba(255, 255, 255, 0.5)';
-        c.font = '8px monospace';
-        c.fillText(`${p.desc}`, px + p.size + 6, py + 8);
-
-        // Hover Detection
-        const dist = Math.hypot(mx - px, my - py);
-        if (dist < 35) {
-          c.save();
-          c.strokeStyle = '#38bdf8';
-          c.lineWidth = 1.5;
-          c.beginPath();
-          c.arc(px, py, p.size + 8, 0, Math.PI * 2);
-          c.stroke();
-          c.restore();
-          setActiveTelemetry(`[天體鎖定] ${p.name} | 軌道半長軸 a = ${p.a} px | 偏心率 e = ${p.e} | 克卜勒週期律 T = ${p.speed.toFixed(2)}x`);
-        }
-      });
-
-      // 4. Interactive Gravitational Well at Cursor
-      if (mousePosRef.current.isActive) {
-        c.save();
-        c.strokeStyle = 'rgba(56, 189, 248, 0.35)';
-        c.setLineDash([2, 4]);
-        c.beginPath();
-        c.arc(mx, my, 40, 0, Math.PI * 2);
-        c.stroke();
-
-        // Gravitational Force Vector to Parent Star
-        c.strokeStyle = 'rgba(254, 240, 138, 0.6)';
-        c.setLineDash([4, 4]);
-        c.beginPath();
-        c.moveTo(mx, my);
-        c.lineTo(cx, cy);
-        c.stroke();
-        c.restore();
-      }
-    };
-
-    // =========================================================================
-    // 2. GALAXY SYSTEM 2: KERR BLACK HOLE & RELATIVISTIC TIME DILATION
-    // =========================================================================
-    const drawKerrBlackHole = (c: CanvasRenderingContext2D, elapsed: number, mx: number, my: number) => {
-      const cx = width * 0.52;
-      const cy = height * 0.5;
-
-      // 1. Spacetime Curvature Metric Grid Distortion
-      c.save();
-      c.strokeStyle = 'rgba(244, 63, 94, 0.1)';
-      c.lineWidth = 1;
-      const gridSize = 38;
-      for (let x = 0; x < width; x += gridSize) {
-        c.beginPath();
-        for (let y = 0; y < height; y += 12) {
-          const d = Math.hypot(x - cx, y - cy);
-          const warp = Math.max(0, 1800 / (d + 60));
-          const wx = x - (x - cx) * (warp / (d + 20));
-          const wy = y - (y - cy) * (warp / (d + 20));
-          if (y === 0) c.moveTo(wx, wy);
-          else c.lineTo(wx, wy);
-        }
-        c.stroke();
-      }
-      c.restore();
-
-      // 2. Relativistic Doppler-Boosted Accretion Disk (Interstellar-style)
-      c.save();
-      c.translate(cx, cy);
-      c.scale(1.0, 0.35);
-      c.rotate(elapsed * 0.0003);
-
-      const diskGrad = c.createRadialGradient(0, 0, 50, 0, 0, 240);
-      diskGrad.addColorStop(0, '#ffffff');
-      diskGrad.addColorStop(0.2, 'rgba(251, 146, 60, 0.95)');
-      diskGrad.addColorStop(0.5, 'rgba(244, 63, 94, 0.65)');
-      diskGrad.addColorStop(0.85, 'rgba(159, 18, 57, 0.25)');
-      diskGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-      c.fillStyle = diskGrad;
-      c.beginPath();
-      c.arc(0, 0, 240, 0, Math.PI * 2);
-      c.fill();
-      c.restore();
-
-      // 3. Ergosphere & Frame Dragging Boundary (動能圈 - 彭羅斯過程)
-      c.save();
-      c.translate(cx, cy);
-      c.strokeStyle = 'rgba(251, 146, 60, 0.5)';
-      c.lineWidth = 1.5;
-      c.setLineDash([6, 4]);
-      c.beginPath();
-      c.ellipse(0, 0, 78, 62, 0, 0, Math.PI * 2);
-      c.stroke();
-      c.restore();
-
-      // Ergosphere Annotation
-      c.fillStyle = '#fb923c';
-      c.font = '10px monospace';
-      c.fillText('✦ 能層 ERGOSPHERE (時空拖曳 Frame Dragging)', cx + 85, cy - 25);
-      c.fillStyle = 'rgba(255, 255, 255, 0.4)';
-      c.font = '9px monospace';
-      c.fillText('彭羅斯過程能量提取區: 0 < r < r_ergo', cx + 85, cy - 10);
-
-      // 4. Photon Sphere Geodesic Ring
-      c.save();
-      c.strokeStyle = 'rgba(255, 255, 255, 0.9)';
-      c.lineWidth = 2;
-      c.shadowColor = '#f43f5e';
-      c.shadowBlur = 12;
-      c.beginPath();
-      c.arc(cx, cy, 48, 0, Math.PI * 2);
-      c.stroke();
-      c.restore();
-
-      // 5. Event Horizon (事件視界黑洞本體)
-      c.save();
-      c.fillStyle = '#000000';
-      c.beginPath();
-      c.arc(cx, cy, 42, 0, Math.PI * 2);
-      c.fill();
-      c.restore();
-
-      // 6. Interactive Free-Fall Observer Time Dilation Telemetry
-      const userDist = Math.hypot(mx - cx, my - cy);
-      const rs = 42; // Schwarzschild radius in px
-      if (mousePosRef.current.isActive && userDist > rs) {
-        const timeFactor = Math.sqrt(Math.max(0.001, 1 - rs / userDist));
-        const redshiftZ = (1 / timeFactor) - 1;
-
-        // Gravitational Lensing Light Cone Ray
-        c.save();
-        c.strokeStyle = 'rgba(244, 63, 94, 0.7)';
-        c.lineWidth = 1.5;
-        c.setLineDash([3, 3]);
-        c.beginPath();
-        c.moveTo(mx, my);
-        c.lineTo(cx, cy);
-        c.stroke();
-
-        // Observer Reticle
-        c.strokeStyle = '#ffffff';
-        c.strokeRect(mx - 10, my - 10, 20, 20);
-        c.fillStyle = '#ffffff';
-        c.font = '10px monospace';
-        c.fillText(`觀測者座標 [r = ${userDist.toFixed(0)} px]`, mx + 16, my - 14);
-        c.fillStyle = '#fda4af';
-        c.fillText(`時鐘膨脹流速: ${timeFactor.toFixed(3)}x (外界1秒 = 這裡${(1/timeFactor).toFixed(1)}秒)`, mx + 16, my);
-        c.fillStyle = '#fb7185';
-        c.fillText(`引力紅移量 z = ${redshiftZ.toFixed(3)} | 潮汐力 dF/dr = ${(2000/(userDist*userDist)).toFixed(2)} N/kg`, mx + 16, my + 14);
-        c.restore();
-
-        setActiveTelemetry(`[廣義相對論] 距離事件視界 ${(userDist - rs).toFixed(0)} px | 時間膨脹係數 γ = ${(1/timeFactor).toFixed(2)} | 光子測地線偏折`);
-      }
-    };
-
-    // =========================================================================
-    // 3. GALAXY SYSTEM 3: STELLAR NUCLEOSYNTHESIS & FUSION ONION MODEL
-    // =========================================================================
-    const drawStellarFusion = (c: CanvasRenderingContext2D, elapsed: number, mx: number, my: number) => {
-      const cx = width * 0.52;
-      const cy = height * 0.48;
-      const t = elapsed * 0.001;
-
-      // 1. Coronal Mass Ejections & Alfvén Magnetic Field Loops (日冕物質拋射與磁力線環)
-      c.save();
-      c.strokeStyle = 'rgba(245, 158, 11, 0.45)';
-      c.lineWidth = 1.5;
-      for (let loop = 0; loop < 7; loop++) {
-        const loopAngle = (loop * Math.PI * 2) / 7 + Math.sin(t * 0.3 + loop) * 0.2;
-        const loopR = 170 + Math.sin(t * 1.5 + loop * 2) * 25;
-        const lx1 = cx + Math.cos(loopAngle - 0.2) * 115;
-        const ly1 = cy + Math.sin(loopAngle - 0.2) * 115;
-        const lx2 = cx + Math.cos(loopAngle + 0.2) * 115;
-        const ly2 = cy + Math.sin(loopAngle + 0.2) * 115;
-        const cpx = cx + Math.cos(loopAngle) * loopR;
-        const cpy = cy + Math.sin(loopAngle) * loopR;
-
-        c.beginPath();
-        c.moveTo(lx1, ly1);
-        c.quadraticCurveTo(cpx, cpy, lx2, ly2);
-        c.stroke();
-      }
-      c.restore();
-
-      // 2. Stellar Fusion Onion Layers (洋蔥結構核融合層)
-      const layers = [
-        { name: '氫燃燒包層 (H ➔ He)', r: 120, color: 'rgba(239, 68, 68, 0.35)', temp: '1,500 萬 K' },
-        { name: '氦燃燒層 (He ➔ C/O)', r: 92, color: 'rgba(249, 115, 22, 0.45)', temp: '1 億 K' },
-        { name: '碳/氧融合層 (C ➔ Ne/Mg)', r: 68, color: 'rgba(245, 158, 11, 0.55)', temp: '6 億 K' },
-        { name: '矽融合層 (Si ➔ Fe/Ni)', r: 46, color: 'rgba(234, 179, 8, 0.7)', temp: '30 億 K' },
-        { name: '鐵核心 (Fe 坍縮極限)', r: 24, color: '#ffffff', temp: '鐵核無能量釋放 ➔ 超新星' },
-      ];
-
-      layers.forEach((layer) => {
-        c.save();
-        c.fillStyle = layer.color;
-        c.beginPath();
-        c.arc(cx, cy, layer.r, 0, Math.PI * 2);
-        c.fill();
-        c.strokeStyle = 'rgba(255, 255, 255, 0.4)';
-        c.lineWidth = 1;
-        c.stroke();
-        c.restore();
-      });
-
-      // Layer Annotations
-      layers.forEach((layer, idx) => {
-        const textY = cy - 130 + idx * 24;
-        c.fillStyle = '#fef08a';
-        c.font = '10px monospace';
-        c.fillText(`✦ Layer ${idx + 1}: ${layer.name}`, cx + 135, textY);
-        c.fillStyle = 'rgba(255, 255, 255, 0.5)';
-        c.font = '9px monospace';
-        c.fillText(`核心溫度: ${layer.temp}`, cx + 135, textY + 11);
-      });
-
-      // 3. Solar Wind Charged Particles
-      const particles = particlesRef.current;
-      c.save();
-      c.fillStyle = '#fde047';
-      particles.slice(0, 35).forEach((p) => {
-        const pAngle = Math.atan2(p.y - cy, p.x - cx);
-        p.x += Math.cos(pAngle) * 0.8;
-        p.y += Math.sin(pAngle) * 0.8;
-
-        if (Math.hypot(p.x - cx, p.y - cy) > 380) {
-          p.x = cx + Math.cos(pAngle) * 115;
-          p.y = cy + Math.sin(pAngle) * 115;
-        }
-
-        c.beginPath();
-        c.arc(p.x, p.y, 1.4, 0, Math.PI * 2);
-        c.fill();
-      });
-      c.restore();
-
-      // Interactive Flare Trigger on Hover
-      const distToStar = Math.hypot(mx - cx, my - cy);
-      if (mousePosRef.current.isActive && distToStar < 180) {
-        c.save();
-        c.strokeStyle = '#fef08a';
-        c.lineWidth = 2;
-        c.beginPath();
-        c.moveTo(cx, cy);
-        c.lineTo(mx, my);
-        c.stroke();
-
-        c.fillStyle = '#ffffff';
-        c.font = '10px monospace';
-        c.fillText(`[磁重聯電離閃焰] 太陽風流速 650 km/s | 錢德拉塞卡質量極限 1.44 M☉`, mx + 12, my - 6);
-        c.restore();
-
-        setActiveTelemetry(`[恆星物理] 赫羅圖光譜類型 G2V | 核心壓力 2.5×10¹⁶ Pa | 質子-質子鏈核融合釋能 26.7 MeV`);
-      }
-    };
-
-    // =========================================================================
-    // 4. GALAXY SYSTEM 4: COSMIC WEB & WEBB DEEP FIELD REDSHIFT
-    // =========================================================================
-    const drawCosmicWeb = (c: CanvasRenderingContext2D, elapsed: number, mx: number, my: number) => {
-      // 1. Dark Matter Filament Network (暗物質絲狀宇宙巨網)
-      const nodes = [
-        { x: width * 0.2, y: height * 0.25, z: 2.1, type: '螺旋星系 NGC 1365' },
-        { x: width * 0.35, y: height * 0.65, z: 4.8, type: '早期星系團 SMACS 0723' },
-        { x: width * 0.55, y: height * 0.3, z: 8.5, type: '高紅移原星系 GLASS-z12' },
-        { x: width * 0.75, y: height * 0.55, z: 11.1, type: '宇宙黎明星系 GN-z11' },
-        { x: width * 0.85, y: height * 0.2, z: 13.4, type: '韋伯極深場 JADES-GS-z14-0' },
-        { x: width * 0.45, y: height * 0.85, z: 1.2, type: '透鏡星系團 Abell 2744' },
-      ];
-
-      // Draw Filaments Connecting Nodes
-      c.save();
-      c.strokeStyle = 'rgba(192, 132, 252, 0.25)';
-      c.lineWidth = 1.2;
-      for (let i = 0; i < nodes.length; i++) {
-        for (let j = i + 1; j < nodes.length; j++) {
-          c.beginPath();
-          c.moveTo(nodes[i].x, nodes[i].y);
-          // Filament organic curve
-          const midX = (nodes[i].x + nodes[j].x) / 2 + Math.sin(elapsed * 0.0005 + i + j) * 20;
-          const midY = (nodes[i].y + nodes[j].y) / 2 + Math.cos(elapsed * 0.0005 + i + j) * 20;
-          c.quadraticCurveTo(midX, midY, nodes[j].x, nodes[j].y);
-          c.stroke();
-        }
-      }
-      c.restore();
-
-      // 2. JWST Hexagonal Golden Mirror Diffraction Spikes
-      nodes.forEach((node) => {
-        // Redshift Color Mapping (Higher z = More Redshifted / Infrared)
-        const hue = Math.max(0, 280 - node.z * 22); // Purple -> Red -> Deep IR
-        const starColor = `hsl(${hue}, 90%, 65%)`;
-
-        c.save();
-        c.translate(node.x, node.y);
-
-        // Hexagonal 6-point JWST Diffraction Spike
-        c.strokeStyle = starColor;
-        c.lineWidth = 1;
-        c.globalAlpha = 0.7;
-        for (let sp = 0; sp < 6; sp++) {
-          const sAngle = (sp * Math.PI) / 3;
-          c.beginPath();
-          c.moveTo(0, 0);
-          c.lineTo(Math.cos(sAngle) * 32, Math.sin(sAngle) * 32);
-          c.stroke();
-        }
-
-        // Galaxy Core
-        c.fillStyle = '#ffffff';
-        c.beginPath();
-        c.arc(0, 0, 3.5, 0, Math.PI * 2);
-        c.fill();
-
-        // Node Redshift Tag
-        c.fillStyle = starColor;
-        c.font = '10px monospace';
-        c.fillText(`${node.type}`, 16, -6);
-        c.fillStyle = 'rgba(255, 255, 255, 0.5)';
-        c.font = '9px monospace';
-        c.fillText(`紅移 z = ${node.z.toFixed(1)} | 退行速度 v = ${(node.z * 70000).toFixed(0)} km/s`, 16, 8);
-        c.restore();
-      });
-
-      // 3. Einstein Cross Gravitational Lensing Quadruple Image at Center
-      const ecX = width * 0.55;
-      const ecY = height * 0.3;
-      c.save();
-      c.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-      c.setLineDash([2, 2]);
-      c.beginPath();
-      c.arc(ecX, ecY, 18, 0, Math.PI * 2);
-      c.stroke();
-      c.fillStyle = '#fef08a';
-      c.font = '8px monospace';
-      c.fillText('愛因斯坦十字 EINSTEIN CROSS', ecX - 55, ecY - 24);
-      c.restore();
-
-      // Interactive NIRSpec Spectrometer HUD on Pointer Move
-      if (mousePosRef.current.isActive) {
-        c.save();
-        c.strokeStyle = '#c084fc';
-        c.strokeRect(mx - 15, my - 15, 30, 30);
-
-        // Spectral Line Grating Display
-        c.fillStyle = 'rgba(15, 23, 42, 0.85)';
-        c.fillRect(mx + 20, my - 30, 220, 60);
-        c.strokeStyle = '#c084fc';
-        c.strokeRect(mx + 20, my - 30, 220, 60);
-
-        c.fillStyle = '#ffffff';
-        c.font = '10px monospace';
-        c.fillText(`JWST NIRSpec 光譜儀掃描中`, mx + 26, my - 16);
-
-        // Emission Lines (H-alpha, OIII, Ly-alpha)
-        const lines = [
-          { name: 'Ly-α (121.6nm)', color: '#ec4899', x: 70 },
-          { name: '[OIII] (500.7nm)', color: '#38bdf8', x: 125 },
-          { name: 'H-α (656.3nm)', color: '#ef4444', x: 175 },
-        ];
-        lines.forEach(l => {
-          c.strokeStyle = l.color;
-          c.lineWidth = 2;
-          c.beginPath();
-          c.moveTo(mx + 20 + l.x, my);
-          c.lineTo(mx + 20 + l.x, my + 20);
-          c.stroke();
-          c.fillStyle = l.color;
-          c.font = '8px monospace';
-          c.fillText(l.name, mx + 20 + l.x - 12, my + 22);
-        });
-
-        c.restore();
-
-        setActiveTelemetry(`[宇宙學觀測] 哈伯常數 H₀ = 67.4 km/s/Mpc | 宇宙回溯時間 Lookback Time = 13.4 Gyr | 宇宙微波背景 2.725 K`);
-      }
-    };
-
-    // =========================================================================
-    // 5. GALAXY SYSTEM 5: PULSAR MAGNETOSPHERE & GRAVITATIONAL WAVE CHIRP
-    // =========================================================================
-    const drawPulsarGravitationalWaves = (c: CanvasRenderingContext2D, elapsed: number, mx: number, my: number) => {
-      const cx = width * 0.5;
-      const cy = height * 0.48;
-      const t = elapsed * 0.003;
-
-      // 1. Spacetime Gravitational Wave Metric Ripples (LIGO 引力波時空漣漪)
-      c.save();
-      c.strokeStyle = 'rgba(0, 242, 254, 0.25)';
-      c.lineWidth = 1.2;
-      for (let ring = 0; ring < 7; ring++) {
-        const r = ((elapsed * 0.08 + ring * 55) % 380);
-        const alpha = Math.max(0, 1 - r / 380) * 0.4;
-        c.strokeStyle = `rgba(0, 242, 254, ${alpha})`;
-        c.beginPath();
-        // Quadrupole Gravitational Wave Distortion (四極波紋形變)
-        for (let a = 0; a <= Math.PI * 2; a += 0.1) {
-          const quadR = r * (1 + Math.cos(a * 2 + t * 0.5) * 0.12);
-          const qx = cx + Math.cos(a) * quadR;
-          const qy = cy + Math.sin(a) * quadR;
-          if (a === 0) c.moveTo(qx, qy);
-          else c.lineTo(qx, qy);
-        }
-        c.closePath();
-        c.stroke();
-      }
-      c.restore();
-
-      // 2. Dipolar Magnetic Field Lines (偶極磁場磁力線)
-      c.save();
-      c.translate(cx, cy);
-      c.rotate(0.35); // Magnetic axis tilt angle
-
-      c.strokeStyle = 'rgba(56, 189, 248, 0.4)';
-      c.lineWidth = 1.2;
-      for (let m = 1; m <= 4; m++) {
-        const mR = m * 35;
-        // North magnetic loop
-        c.beginPath();
-        c.ellipse(0, mR * 0.7, mR * 0.6, mR * 1.2, 0, 0, Math.PI);
-        c.stroke();
-        // South magnetic loop
-        c.beginPath();
-        c.ellipse(0, -mR * 0.7, mR * 0.6, mR * 1.2, 0, Math.PI, Math.PI * 2);
-        c.stroke();
-      }
-
-      // 3. Relativistic Beaming Light Cones (光塔輻射光錐)
-      const beamAngle = t * 1.8;
-      c.save();
-      c.rotate(beamAngle);
-
-      for (let beam = 0; beam < 2; beam++) {
-        c.rotate(Math.PI);
-        const bGrad = c.createLinearGradient(0, 0, 0, 360);
-        bGrad.addColorStop(0, '#ffffff');
-        bGrad.addColorStop(0.2, 'rgba(0, 242, 254, 0.9)');
-        bGrad.addColorStop(0.6, 'rgba(59, 130, 246, 0.25)');
-        bGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-        c.fillStyle = bGrad;
-        c.beginPath();
-        c.moveTo(-8, 0);
-        c.lineTo(-40, 360);
-        c.lineTo(40, 360);
-        c.lineTo(8, 0);
-        c.closePath();
-        c.fill();
-      }
-      c.restore();
-
-      // 4. Central Neutron Star Core
-      const nGrad = c.createRadialGradient(0, 0, 1, 0, 0, 22);
-      nGrad.addColorStop(0, '#ffffff');
-      nGrad.addColorStop(0.4, '#00f2fe');
-      nGrad.addColorStop(0.8, '#3b82f6');
-      nGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-      c.fillStyle = nGrad;
-      c.beginPath();
-      c.arc(0, 0, 22, 0, Math.PI * 2);
-      c.fill();
-      c.restore();
-
-      // Annotations
-      c.fillStyle = '#00f2fe';
-      c.font = '10px monospace';
-      c.fillText('✦ 毫秒脈衝星 PSR B1919+21 (自轉週期 P = 1.337 s)', cx + 45, cy - 80);
-      c.fillStyle = 'rgba(255, 255, 255, 0.5)';
-      c.font = '9px monospace';
-      c.fillText('磁層強磁場: B ≈ 1.2 × 10¹² Gauss | 密度: 10¹⁴ g/cm³', cx + 45, cy - 65);
-
-      // Interactive Pulse Waveform Monitor
-      if (mousePosRef.current.isActive) {
-        c.save();
-        c.fillStyle = 'rgba(2, 6, 23, 0.9)';
-        c.fillRect(mx + 15, my - 25, 180, 50);
-        c.strokeStyle = '#00f2fe';
-        c.strokeRect(mx + 15, my - 25, 180, 50);
-
-        c.fillStyle = '#ffffff';
-        c.font = '9px monospace';
-        c.fillText('LIGO 引力波 Chirp 頻譜示波器', mx + 20, my - 12);
-
-        // Chirp waveform
-        c.strokeStyle = '#00f2fe';
-        c.lineWidth = 1.5;
-        c.beginPath();
-        for (let i = 0; i < 150; i++) {
-          const wy = my + 10 + Math.sin(i * 0.2 + t * 3) * (5 + (i / 150) * 8);
-          if (i === 0) c.moveTo(mx + 20 + i, wy);
-          else c.lineTo(mx + 20 + i, wy);
-        }
-        c.stroke();
-        c.restore();
-
-        setActiveTelemetry(`[重力波天文台] 雙緻密星併合 GW170817 | 四極輻射能損 dE/dt = 10⁴⁵ W | 時空幾何度規擾動 h_μν`);
-      }
-    };
-
-    // =========================================================================
-    // MAIN SIMULATION RENDER LOOP
-    // =========================================================================
-    const render = (now: number) => {
-      const elapsed = now - startTime;
-      const mx = mousePosRef.current.x;
-      const my = mousePosRef.current.y;
-
-      // 1. Deep Space Cosmic Background
-      const bgGrad = ctx.createRadialGradient(
+    const renderClassic = (now: number) => {
+      const delta = Math.min(100, now - lastClassicNow);
+      lastClassicNow = now;
+      accumulatedClassicTime += delta * (speedRef.current || 0.5);
+      const elapsed = accumulatedClassicTime;
+
+      // 1. Deep Atmospheric Radial Gradient
+      const grad = ctx.createRadialGradient(
+        width * 0.5,
+        height * 0.45,
+        width * 0.1,
         width * 0.5,
         height * 0.5,
-        50,
-        width * 0.5,
-        height * 0.5,
-        Math.max(width, height) * 0.8
+        Math.max(width, height) * 0.85
       );
-      bgGrad.addColorStop(0, theme.bgGradient[1]);
-      bgGrad.addColorStop(0.6, theme.bgGradient[0]);
-      bgGrad.addColorStop(1, theme.bgGradient[2]);
-      ctx.fillStyle = bgGrad;
+      grad.addColorStop(0, theme.bgGradient[1]);
+      grad.addColorStop(0.55, theme.bgGradient[0]);
+      grad.addColorStop(1, theme.bgGradient[2]);
+      ctx.fillStyle = grad;
       ctx.fillRect(0, 0, width, height);
 
-      // 2. Deep Field Starfield Particles
+      // 2. PS5 Dynamic Fluid Wave Ribbons
+      if (theme.ribbonColors) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+
+        theme.ribbonColors.forEach((ribbon) => {
+          const t = elapsed * ribbon.speed + ribbon.phase;
+          const baseY = height * ribbon.yBase;
+
+          ctx.beginPath();
+          ctx.moveTo(0, height);
+
+          const steps = 18;
+          const stepWidth = width / steps;
+
+          for (let i = 0; i <= steps; i++) {
+            const x = i * stepWidth;
+            const harmonic1 = Math.sin(x * ribbon.freq + t) * ribbon.amp;
+            const harmonic2 = Math.cos(x * ribbon.freq * 0.6 - t * 0.8) * (ribbon.amp * 0.45);
+            const harmonic3 = Math.sin(t * 0.5 + x * 0.0006) * (ribbon.amp * 0.3);
+            const y = baseY + harmonic1 + harmonic2 + harmonic3;
+
+            if (i === 0) {
+              ctx.lineTo(x, y);
+            } else {
+              const prevX = (i - 1) * stepWidth;
+              const cX = (prevX + x) / 2;
+              ctx.quadraticCurveTo(prevX, y, cX, y);
+            }
+          }
+
+          ctx.lineTo(width, height);
+          ctx.closePath();
+
+          const ribbonGrad = ctx.createLinearGradient(0, baseY - ribbon.amp * 1.5, 0, height);
+          ribbonGrad.addColorStop(0, ribbon.color1);
+          ribbonGrad.addColorStop(0.4, ribbon.glow);
+          ribbonGrad.addColorStop(1, ribbon.color2);
+
+          ctx.fillStyle = ribbonGrad;
+          ctx.fill();
+        });
+
+        ctx.restore();
+      }
+
+      // 3. Floating Stardust Spark Particles
       ctx.save();
-      const particles = particlesRef.current;
-      particles.forEach((p) => {
+      ctx.globalCompositeOperation = 'screen';
+
+      particlesRef.current.forEach((p) => {
         p.x += p.vx;
         p.y += p.vy;
-        if (p.x < 0) p.x = width;
-        if (p.x > width) p.x = 0;
-        if (p.y < 0) p.y = height;
-        if (p.y > height) p.y = 0;
 
-        ctx.fillStyle = theme.particleColor;
-        ctx.globalAlpha = p.alpha;
+        if (p.x < -20) p.x = width + 20;
+        if (p.x > width + 20) p.x = -20;
+        if (p.y < -20) p.y = height + 20;
+        if (p.y > height + 20) p.y = -20;
+
+        p.alpha += p.pulseSpeed;
+        const currentAlpha = 0.25 + Math.sin(p.alpha) * 0.35;
+
+        const radGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.radius * 3.2);
+        radGrad.addColorStop(0, theme.particleColor);
+        radGrad.addColorStop(0.35, theme.particleGlow);
+        radGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+        ctx.fillStyle = radGrad;
+        ctx.globalAlpha = Math.max(0.05, Math.min(1, currentAlpha));
         ctx.beginPath();
-        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, p.radius * 3.2, 0, Math.PI * 2);
         ctx.fill();
       });
+
       ctx.restore();
 
-      // 3. Active Probes Trajectory
-      ctx.save();
-      const probes = probesRef.current;
-      for (let pIdx = probes.length - 1; pIdx >= 0; pIdx--) {
-        const pr = probes[pIdx];
-        pr.x += pr.vx;
-        pr.y += pr.vy;
-        pr.life -= 0.008;
-
-        pr.trail.push({ x: pr.x, y: pr.y, alpha: 0.8 });
-        if (pr.trail.length > 20) pr.trail.shift();
-
-        if (pr.life <= 0 || pr.x < -50 || pr.x > width + 50 || pr.y < -50 || pr.y > height + 50) {
-          probes.splice(pIdx, 1);
-          continue;
-        }
-
-        // Draw Probe Trail
-        ctx.strokeStyle = theme.accentColor;
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        pr.trail.forEach((pt, idx) => {
-          if (idx === 0) ctx.moveTo(pt.x, pt.y);
-          else ctx.lineTo(pt.x, pt.y);
-        });
-        ctx.stroke();
-
-        // Probe Body
-        ctx.fillStyle = '#ffffff';
-        ctx.beginPath();
-        ctx.arc(pr.x, pr.y, 2.5, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.restore();
-
-      // 4. Render Active Scientifically Educational Galaxy Animation
-      switch (theme.galaxyType) {
-        case 'kepler':
-          drawKeplerSystem(ctx, elapsed, mx, my);
-          break;
-        case 'kerr-blackhole':
-          drawKerrBlackHole(ctx, elapsed, mx, my);
-          break;
-        case 'stellar-fusion':
-          drawStellarFusion(ctx, elapsed, mx, my);
-          break;
-        case 'cosmic-web':
-          drawCosmicWeb(ctx, elapsed, mx, my);
-          break;
-        case 'pulsar-gw':
-          drawPulsarGravitationalWaves(ctx, elapsed, mx, my);
-          break;
-      }
-
-      animFrameIdRef.current = requestAnimationFrame(render);
+      classicAnimRef.current = requestAnimationFrame(renderClassic);
     };
 
-    animFrameIdRef.current = requestAnimationFrame(render);
+    classicAnimRef.current = requestAnimationFrame(renderClassic);
 
     return () => {
       window.removeEventListener('resize', handleResize);
-      if (animFrameIdRef.current) {
-        cancelAnimationFrame(animFrameIdRef.current);
-        animFrameIdRef.current = null;
+      if (classicAnimRef.current) {
+        cancelAnimationFrame(classicAnimRef.current);
       }
     };
-  }, [isActive, themeId, theme]);
+  }, [isActive, theme]);
 
   if (!isActive) return null;
 
@@ -978,76 +865,80 @@ export function PS5DynamicBackground({ isActive, themeId = 'galaxy-kepler' }: PS
           transition={{ duration: 0.8, ease: 'easeInOut' }}
           className="fixed inset-0 z-0 pointer-events-none overflow-hidden select-none"
         >
-          <canvas ref={canvasRef} className="w-full h-full block" />
-          {/* Subtle cinematic vignette */}
+          {/* Galaxy Mode: GLSL Shaders Container */}
+          {theme.category === 'galaxy' && (
+            <div ref={glslContainerRef} className="absolute inset-0 w-full h-full block" />
+          )}
+
+          {/* Classic Mode: 2D Canvas Wave Ribbons */}
+          {theme.category === 'classic' && (
+            <canvas ref={classicCanvasRef} className="absolute inset-0 w-full h-full block" />
+          )}
+
+          {/* Subtle cinematic overlay vignette */}
           <div className="absolute inset-0 bg-radial from-transparent via-transparent to-black/45 pointer-events-none" />
         </motion.div>
       </AnimatePresence>
 
-      {/* Interactive Astrophysics Scientific Educational HUD (Top-Right Overlay) */}
+      {/* Interactive Astrophysics Scientific Educational HUD (Shown in Galaxy GLSL mode) */}
       <AnimatePresence>
-        {showSciHUD && (
+        {theme.category === 'galaxy' && showSciHUD && (
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
             className="fixed top-3.5 right-4 z-[990] hidden md:flex flex-col items-end gap-1.5 pointer-events-auto select-none"
           >
-            <div className="bg-slate-950/85 backdrop-blur-xl border border-slate-700/60 p-3 rounded-2xl shadow-[0_12px_40px_rgba(0,0,0,0.5)] max-w-sm text-left text-xs font-mono text-slate-200">
-              <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800">
+            <div className="bg-black/92 backdrop-blur-2xl border-2 border-slate-600/90 p-3.5 rounded-2xl shadow-[0_16px_50px_rgba(0,0,0,0.85)] max-w-sm text-left text-xs font-mono text-white ring-1 ring-white/20">
+              <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-700">
                 <div className="flex items-center gap-2">
                   <div
-                    className="w-2.5 h-2.5 rounded-full animate-ping"
+                    className="w-2.5 h-2.5 rounded-full ring-2 ring-white/50"
                     style={{ backgroundColor: theme.iconColor }}
                   />
-                  <span className="font-bold text-white tracking-wide uppercase flex items-center gap-1.5">
-                    <Atom className="w-3.5 h-3.5 text-indigo-400" />
+                  <span className="font-black text-white text-[13px] tracking-wide uppercase flex items-center gap-1.5 drop-shadow-sm">
+                    <Atom className="w-4 h-4 text-cyan-400 stroke-[2.5]" />
                     {theme.sciConcept}
                   </span>
                 </div>
                 <button
                   type="button"
                   onClick={() => setShowSciHUD(false)}
-                  className="text-slate-400 hover:text-white p-0.5 rounded cursor-pointer"
+                  className="text-slate-300 hover:text-white p-1 rounded-lg bg-slate-800/80 hover:bg-slate-700 border border-slate-600 cursor-pointer transition-colors"
                   title="隱藏科學面板"
                 >
                   <EyeOff className="w-3.5 h-3.5" />
                 </button>
               </div>
 
-              {/* Physical Formula Badge */}
-              <div className="p-1.5 rounded-lg bg-slate-900/90 border border-slate-800 text-[11px] text-emerald-400 font-bold mb-2">
-                {theme.sciFormula}
+              {/* Physical Formula Badge (High Contrast) */}
+              <div className="p-2 rounded-xl bg-slate-900/95 border border-emerald-400/50 text-emerald-300 font-black text-xs mb-2 tracking-wide shadow-inner flex items-center gap-1.5">
+                <span className="text-emerald-400 font-mono">📐</span>
+                <span className="font-mono text-[11.5px]">{theme.sciFormula}</span>
               </div>
 
-              {/* Educational Description */}
-              <p className="text-[11px] text-slate-300 leading-relaxed font-sans font-medium mb-2">
+              {/* Educational Description (High Contrast) */}
+              <p className="text-[12px] text-slate-100 font-sans font-bold leading-relaxed mb-2.5">
                 {theme.sciDescription}
               </p>
 
-              {/* Real-time Interactive Pointer Telemetry */}
-              <div className="p-1.5 rounded-lg bg-indigo-950/40 border border-indigo-500/30 text-[10px] text-indigo-300 font-mono">
-                <span className="text-slate-400">遙測態勢: </span>
-                {activeTelemetry}
-              </div>
-
-              <div className="mt-2 pt-1.5 border-t border-slate-800/80 flex items-center justify-between text-[10px] text-slate-400">
-                <span>💡 移動滑鼠即時探測天體物理參數</span>
-                <span>點擊發射探測器 🚀</span>
+              <div className="pt-2 border-t border-slate-700/90 flex items-center justify-between text-[11px] text-slate-300 font-bold">
+                <span className="text-cyan-300 flex items-center gap-1">⚡ WebGL GLSL 片段著色器</span>
+                <span className="text-slate-200 bg-slate-800 px-2 py-0.5 rounded-md border border-slate-600">平穩優雅渲染</span>
               </div>
             </div>
           </motion.div>
         )}
 
-        {!showSciHUD && (
+        {theme.category === 'galaxy' && !showSciHUD && (
           <motion.button
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             onClick={() => setShowSciHUD(true)}
-            className="fixed top-3.5 right-4 z-[990] bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white p-2 rounded-full border border-slate-700 shadow-md cursor-pointer transition-colors"
+            className="fixed top-3.5 right-4 z-[990] bg-black/85 hover:bg-slate-900 text-white p-2 rounded-full border-2 border-slate-500 shadow-xl cursor-pointer transition-all hover:scale-105"
             title="開啟天文物理科學說明面板"
           >
-            <Info className="w-4 h-4 text-indigo-400" />
+            <Info className="w-4 h-4 text-cyan-300 stroke-[2.5]" />
           </motion.button>
         )}
       </AnimatePresence>

@@ -6332,7 +6332,10 @@ export default function Dashboard() {
       </div>
 
 {/* Tab Row (No bottom border, pill styling for selected tab with Lenis smooth scroll and motion layout transition) */}
-      <div className="flex flex-row snap-x flex-nowrap w-full gap-2 sm:gap-3 mb-4 sm:mb-6 mt-4 sm:mt-5 overflow-x-auto pt-2 pb-px scrollbar-hide">
+      <div 
+        id="main-view-tabs"
+        className="flex flex-row snap-x flex-nowrap w-full gap-2 sm:gap-3 mb-4 sm:mb-6 mt-4 sm:mt-5 overflow-x-auto pt-2 pb-px scrollbar-hide scroll-mt-2"
+      >
         {[
           { id: "active", label: "持有中", icon: Activity, count: visibleActiveTabs.filter((t) => t.tradeType === "simulated").length },
           { id: "real", label: "真實交易", icon: ShieldCheck, count: visibleActiveTabs.filter((t) => t.tradeType === "real").length },
