@@ -188,33 +188,87 @@ export function generateAveragingDownRows(
 }
 
 /**
- * 判斷是否需要自動更新並儲存向下攤平試算設定
+ * 判斷是否需要自動更新並儲存向下攤平與向上突破加碼試算設定
  * 條件：非已完成 tab，且籌碼管理區塊有持有數量 (totalQuantity > 0 且 averagePrice > 0)
  */
 export function shouldUpdateAveragingRows(
-  tab: { status?: string; holdingStatus?: string; averagingRows?: AveragingRow[]; averagingRowsSys2?: AveragingRow[] },
+  tab: { status?: string; holdingStatus?: string; averagingRows?: AveragingRow[]; averagingRowsSys2?: AveragingRow[]; pyramidRows?: AveragingRow[]; pyramidRowsSys2?: AveragingRow[] },
   stats: { totalQuantity?: number; averagePrice?: number }
-): { needsUpdate: boolean; sys1: AveragingRow[]; sys2: AveragingRow[] } {
+): { needsUpdate: boolean; sys1: AveragingRow[]; sys2: AveragingRow[]; up1: AveragingRow[]; up2: AveragingRow[] } {
   if (tab.status === 'COMPLETED') {
-    return { needsUpdate: false, sys1: [], sys2: [] };
+    return { needsUpdate: false, sys1: [], sys2: [], up1: [], up2: [] };
   }
   const qty = stats.totalQuantity ?? 0;
   const avg = stats.averagePrice ?? 0;
   if (qty === 0 || avg <= 0) {
-    return { needsUpdate: false, sys1: [], sys2: [] };
+    return { needsUpdate: false, sys1: [], sys2: [], up1: [], up2: [] };
   }
 
   const { sys1, sys2 } = generateAveragingDownRows(avg, tab.averagingRows, tab.averagingRowsSys2);
+  const { sys1: up1, sys2: up2 } = generatePyramidUpRows(avg, tab.pyramidRows, tab.pyramidRowsSys2);
 
   const sys1Changed = sys1.some((r, i) => r.price !== (tab.averagingRows?.[i]?.price ?? ''));
   const sys2Changed = sys2.some((r, i) => r.price !== (tab.averagingRowsSys2?.[i]?.price ?? ''));
+  const up1Changed = up1.some((r, i) => r.price !== (tab.pyramidRows?.[i]?.price ?? ''));
+  const up2Changed = up2.some((r, i) => r.price !== (tab.pyramidRowsSys2?.[i]?.price ?? ''));
 
   return {
-    needsUpdate: sys1Changed || sys2Changed,
+    needsUpdate: sys1Changed || sys2Changed || up1Changed || up2Changed,
     sys1,
     sys2,
+    up1,
+    up2,
   };
 }
+
+/**
+ * 依據平均成本自動計算向上突破加碼試算的預計購入股價 ($)
+ * 系統一 (2% 階梯遞增):
+ *   組別 1: +2% (avg * 1.02)
+ *   組別 2: +4% (avg * 1.04)
+ *   組別 3: +6% (avg * 1.06)
+ *   組別 4: +8% (avg * 1.08)
+ * 系統二 (3% 階梯遞增):
+ *   組別 1: +3% (avg * 1.03)
+ *   組別 2: +6% (avg * 1.06)
+ *   組別 3: +9% (avg * 1.09)
+ *   組別 4: +12% (avg * 1.12)
+ */
+export function generatePyramidUpRows(
+  averagePrice: number,
+  prevRowsSys1?: AveragingRow[],
+  prevRowsSys2?: AveragingRow[]
+): { sys1: AveragingRow[]; sys2: AveragingRow[] } {
+  const sys1Ratios = [1.02, 1.04, 1.06, 1.08];
+  const sys2Ratios = [1.03, 1.06, 1.09, 1.12];
+
+  const sys1: AveragingRow[] = [0, 1, 2, 3].map((i) => {
+    const prev = prevRowsSys1?.[i];
+    const calcPrice = averagePrice > 0 ? (averagePrice * sys1Ratios[i]).toFixed(2) : (prev?.price ?? '');
+    return {
+      price: calcPrice,
+      quantity: prev?.quantity ?? '',
+      quantity2: prev?.quantity2 ?? '',
+      bought: !!prev?.bought,
+      riskFlag: !!prev?.riskFlag,
+    };
+  });
+
+  const sys2: AveragingRow[] = [0, 1, 2, 3].map((i) => {
+    const prev = prevRowsSys2?.[i];
+    const calcPrice = averagePrice > 0 ? (averagePrice * sys2Ratios[i]).toFixed(2) : (prev?.price ?? '');
+    return {
+      price: calcPrice,
+      quantity: prev?.quantity ?? '',
+      quantity2: prev?.quantity2 ?? '',
+      bought: !!prev?.bought,
+      riskFlag: !!prev?.riskFlag,
+    };
+  });
+
+  return { sys1, sys2 };
+}
+
 
 export interface BatchPlanSplit {
   name: string;

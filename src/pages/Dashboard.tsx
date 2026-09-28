@@ -1571,8 +1571,10 @@ export default function Dashboard() {
         updateTab(tab.id, {
           averagingRows: check.sys1,
           averagingRowsSys2: check.sys2,
+          pyramidRows: check.up1,
+          pyramidRowsSys2: check.up2,
         }).catch((err) => {
-          console.error("Auto update averaging down rows error for tab", tab.symbol, err);
+          console.error("Auto update averaging down and pyramid rows error for tab", tab.symbol, err);
         });
       }
     });
@@ -2003,6 +2005,63 @@ export default function Dashboard() {
     }
   };
 
+  const handleResetAllActionSettings = async (tabId: string) => {
+    try {
+      const currentStrategy = activeTabStrategies[tabId] || {};
+      const updatedStrategy = { 
+        ...currentStrategy, 
+        notesHighlighted: false,
+        tpChecked: false,
+        slChecked: false,
+        addChecked: false,
+        closeChecked: false,
+        observeChecked: false,
+        selectedSplitTrade: "",
+        updatedAt: serverTimestamp() 
+      };
+      
+      setActiveTabStrategies((prev) => ({
+        ...prev,
+        [tabId]: updatedStrategy
+      }));
+
+      updateTab(tabId, {
+        selectedSplitTrade: "",
+        isFavoriteHighlight: false,
+        isOperationConfirmed: false,
+        isDeviationConfirmed: false,
+        isNew: false,
+      });
+
+      setSelectedActionTab((prev: any) => prev && prev.id === tabId ? {
+        ...prev,
+        selectedSplitTrade: "",
+        isFavoriteHighlight: false,
+        isOperationConfirmed: false,
+        isDeviationConfirmed: false,
+        isNew: false,
+      } : prev);
+
+      const docRef = doc(db, `stockTabs/${tabId}/strategy`, 'main');
+      await setDoc(docRef, {
+        notesHighlighted: false,
+        tpChecked: false,
+        slChecked: false,
+        addChecked: false,
+        closeChecked: false,
+        observeChecked: false,
+        selectedSplitTrade: "",
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+
+      toast.success("已重置所有勾選與狀態設定");
+      playClickSound();
+    } catch (error) {
+      console.error(error);
+      toast.error("重置狀態設定失敗");
+    }
+  };
+
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [isImportingPrices, setIsImportingPrices] = useState(false);
@@ -2017,6 +2076,41 @@ export default function Dashboard() {
   const [isImportingFeatured, setIsImportingFeatured] = useState(false);
   const featuredJsonFileInputRef = useRef<HTMLInputElement>(null);
 
+  // 全域卡片計算模式 (突破加碼: "breakout" | 分批攤平: "averaging") 與重置設定
+  const [globalBatchCalcMode, setGlobalBatchCalcMode] = useState<"averaging" | "breakout">("averaging");
+  const [cardBatchCalcModes, setCardBatchCalcModes] = useState<Record<string, "averaging" | "breakout">>({});
+
+  const handleApplyBreakoutToAllCards = useCallback(() => {
+    setGlobalBatchCalcMode("breakout");
+    setCardBatchCalcModes({});
+    playClickSound();
+    toast.success("已將全部卡片套用為「突破加碼」模式 (+2%, +4%, +6%, +8%)", {
+      id: "all-cards-calc-mode",
+      duration: 2000,
+    });
+  }, []);
+
+  const handleApplyAveragingToAllCards = useCallback(() => {
+    setGlobalBatchCalcMode("averaging");
+    setCardBatchCalcModes({});
+    playClickSound();
+    toast.success("已將全部卡片套用為「分批攤平」模式 (-3%, -6%, -9%, -12%)", {
+      id: "all-cards-calc-mode",
+      duration: 2000,
+    });
+  }, []);
+
+  const handleResetAllCardsBatchSettings = useCallback(() => {
+    setGlobalBatchCalcMode("averaging");
+    setCardBatchCalcModes({});
+    setManualHighlight({});
+    playClickSound();
+    toast.success("已重置全部卡片的計算模式與高亮設定", {
+      id: "all-cards-calc-mode-reset",
+      duration: 2000,
+    });
+  }, []);
+
   // Carousel State & Refs
   const carouselRef = useRef<HTMLDivElement>(null);
   const renderCardRef = useRef<((tab: any, idx: number) => React.ReactNode) | null>(null);
@@ -2029,20 +2123,6 @@ export default function Dashboard() {
     lastX: 0,
     vx: 0,
     startIdx: 0,
-  });
-
-  const cardDragTrackerRef = useRef<{
-    startY: number;
-    startX: number;
-    cardId: string | null;
-    hasTriggeredFlip: boolean;
-    startTime: number;
-  }>({
-    startY: 0,
-    startX: 0,
-    cardId: null,
-    hasTriggeredFlip: false,
-    startTime: 0,
   });
 
   const animFrameId = useRef<number | null>(null);
@@ -2108,26 +2188,6 @@ export default function Dashboard() {
       "touches" in e && e.touches && e.touches.length > 0
         ? e.touches[0].pageX
         : (e as MouseEvent).pageX;
-
-    // Prevent horizontal carousel scroll if user is doing a vertical gesture to flip a card
-    if (cardDragTrackerRef.current.cardId) {
-      const tracker = cardDragTrackerRef.current;
-      const pageY =
-        "touches" in e && e.touches && e.touches.length > 0
-          ? e.touches[0].pageY
-          : (e as MouseEvent).pageY;
-      const dy = Math.abs(tracker.startY - pageY);
-      const dx = Math.abs(tracker.startX - pageX);
-      if (dy > dx) {
-        if (dy > 2) {
-          // Confirmed vertical card flip gesture, cancel carousel dragging immediately
-          dragRef.current.isDragging = false;
-          ele.style.cursor = "grab";
-          document.body.style.userSelect = "";
-        }
-        return;
-      }
-    }
 
     const x = pageX - ele.offsetLeft;
     const dx = x - dragRef.current.startX;
@@ -3086,7 +3146,12 @@ export default function Dashboard() {
           isFavoriteHighlight: !currentStatus,
           updatedAt: serverTimestamp(),
         });
-        setIsActionDialogOpen(false);
+        setSelectedActionTab((prev: any) =>
+          prev && prev.id === tabId
+            ? { ...prev, isFavoriteHighlight: !currentStatus }
+            : prev,
+        );
+        playClickSound();
         toast.success(!currentStatus ? "已加入重點關注" : "已取消重點關注");
       } catch (err) {
         console.error("Error updating tab highlight", err);
@@ -3199,6 +3264,10 @@ export default function Dashboard() {
       const nextState = { ...prev };
       visibleIds.forEach((id) => {
         nextState[id] = targetState;
+      });
+      toast.info(targetState ? "已翻至背面（數據圖示化）" : "已翻至正面（個股基本與策略資訊）", {
+        id: "flip-all-cards-state",
+        duration: 1800,
       });
       return nextState;
     });
@@ -6457,391 +6526,422 @@ export default function Dashboard() {
         {/* Card Action Choice Dialog */}
         <Dialog open={isActionDialogOpen} onOpenChange={(open) => {
           setIsActionDialogOpen(open);
-          if (open) {
-            setActionActiveTab("general");
-          }
         }}>
-          <DialogContent className="border border-zinc-200 shadow-2xl bg-white text-zinc-800 w-[92vw] max-w-[380px] p-5 sm:p-6 rounded-2xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader className="mb-3">
-              <DialogTitle className="font-black text-xl text-zinc-900 flex items-center justify-center gap-2">
-                <span className="bg-zinc-105 text-zinc-800 px-2 py-0.5 rounded text-sm font-black border border-zinc-200">{selectedActionTab?.symbol}</span> 操作
-              </DialogTitle>
-            </DialogHeader>
+          <DialogContent className="border border-zinc-200/90 shadow-2xl bg-white text-zinc-800 w-[95vw] sm:w-[420px] max-w-[430px] p-4 sm:p-5 rounded-2xl max-h-[90vh] overflow-y-auto space-y-3.5">
+            {(() => {
+              const currentActionTab = tabs.find((t) => t.id === selectedActionTab?.id) || selectedActionTab;
+              if (!currentActionTab) return null;
 
-            {/* Strategy Tickboxes Row: 選取 | 止盈 | 止損 | 加碼 | 平倉 | 觀察 */}
-            {selectedActionTab && (
-              <div className="flex items-center justify-between gap-1 bg-zinc-100/90 border border-zinc-200/90 p-1.5 sm:p-2 rounded-2xl mb-4 shadow-xs">
-                {/* 選取 */}
-                <label className="flex-1 flex flex-col items-center justify-center py-1.5 px-0.5 rounded-xl transition-all cursor-pointer group hover:bg-white/80 select-none">
-                  <input
-                    type="checkbox"
-                    checked={!!activeTabStrategies[selectedActionTab.id]?.notesHighlighted}
-                    onChange={(e) => handleUpdateNotesHighlighted(selectedActionTab.id, e.target.checked)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="h-3.5 w-3.5 rounded border border-zinc-300 bg-white checked:bg-amber-500 checked:border-amber-500 text-amber-600 focus:ring-0 cursor-pointer accent-amber-500 transition-all shrink-0 mb-1"
-                  />
-                  <span className={`text-[11px] font-bold select-none transition-colors ${activeTabStrategies[selectedActionTab.id]?.notesHighlighted ? "text-amber-600 font-black" : "text-zinc-500 group-hover:text-zinc-800"}`}>
-                    選取
-                  </span>
-                </label>
+              const strategyState = activeTabStrategies[currentActionTab.id] || {};
+              const currentSplitTrade = strategyState.selectedSplitTrade || currentActionTab.selectedSplitTrade || "";
 
-                {/* 止盈 */}
-                <label className="flex-1 flex flex-col items-center justify-center py-1.5 px-0.5 rounded-xl transition-all cursor-pointer group hover:bg-white/80 select-none">
-                  <input
-                    type="checkbox"
-                    checked={!!activeTabStrategies[selectedActionTab.id]?.tpChecked}
-                    onChange={(e) => handleUpdateTPChecked(selectedActionTab.id, e.target.checked)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="h-3.5 w-3.5 rounded border border-zinc-300 bg-white checked:bg-emerald-500 checked:border-emerald-500 text-emerald-600 focus:ring-0 cursor-pointer accent-emerald-500 transition-all shrink-0 mb-1"
-                  />
-                  <span className={`text-[11px] font-bold select-none transition-colors ${activeTabStrategies[selectedActionTab.id]?.tpChecked ? "text-emerald-600 font-black" : "text-zinc-500 group-hover:text-zinc-800"}`}>
-                    止盈
-                  </span>
-                </label>
-
-                {/* 止損 */}
-                <label className="flex-1 flex flex-col items-center justify-center py-1.5 px-0.5 rounded-xl transition-all cursor-pointer group hover:bg-white/80 select-none">
-                  <input
-                    type="checkbox"
-                    checked={!!activeTabStrategies[selectedActionTab.id]?.slChecked}
-                    onChange={(e) => handleUpdateSLChecked(selectedActionTab.id, e.target.checked)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="h-3.5 w-3.5 rounded border border-zinc-300 bg-white checked:bg-rose-500 checked:border-rose-500 text-rose-600 focus:ring-0 cursor-pointer accent-rose-500 transition-all shrink-0 mb-1"
-                  />
-                  <span className={`text-[11px] font-bold select-none transition-colors ${activeTabStrategies[selectedActionTab.id]?.slChecked ? "text-rose-600 font-black" : "text-zinc-500 group-hover:text-zinc-800"}`}>
-                    止損
-                  </span>
-                </label>
-
-                {/* 加碼 */}
-                <label className="flex-1 flex flex-col items-center justify-center py-1.5 px-0.5 rounded-xl transition-all cursor-pointer group hover:bg-white/80 select-none">
-                  <input
-                    type="checkbox"
-                    checked={!!activeTabStrategies[selectedActionTab.id]?.addChecked}
-                    onChange={(e) => handleUpdateAddChecked(selectedActionTab.id, e.target.checked)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="h-3.5 w-3.5 rounded border border-zinc-300 bg-white checked:bg-sky-500 checked:border-sky-500 text-sky-600 focus:ring-0 cursor-pointer accent-sky-500 transition-all shrink-0 mb-1"
-                  />
-                  <span className={`text-[11px] font-bold select-none transition-colors ${activeTabStrategies[selectedActionTab.id]?.addChecked ? "text-sky-600 font-black" : "text-zinc-500 group-hover:text-zinc-800"}`}>
-                    加碼
-                  </span>
-                </label>
-
-                {/* 平倉 */}
-                <label className="flex-1 flex flex-col items-center justify-center py-1.5 px-0.5 rounded-xl transition-all cursor-pointer group hover:bg-white/80 select-none">
-                  <input
-                    type="checkbox"
-                    checked={!!activeTabStrategies[selectedActionTab.id]?.closeChecked}
-                    onChange={(e) => handleUpdateCloseChecked(selectedActionTab.id, e.target.checked)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="h-3.5 w-3.5 rounded border border-zinc-300 bg-white checked:bg-violet-500 checked:border-violet-500 text-violet-600 focus:ring-0 cursor-pointer accent-violet-500 transition-all shrink-0 mb-1"
-                  />
-                  <span className={`text-[11px] font-bold select-none transition-colors ${activeTabStrategies[selectedActionTab.id]?.closeChecked ? "text-violet-600 font-black" : "text-zinc-500 group-hover:text-zinc-800"}`}>
-                    平倉
-                  </span>
-                </label>
-
-                {/* 觀察 */}
-                <label className="flex-1 flex flex-col items-center justify-center py-1.5 px-0.5 rounded-xl transition-all cursor-pointer group hover:bg-white/80 select-none">
-                  <input
-                    type="checkbox"
-                    checked={!!activeTabStrategies[selectedActionTab.id]?.observeChecked}
-                    onChange={(e) => handleUpdateObserveChecked(selectedActionTab.id, e.target.checked)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="h-3.5 w-3.5 rounded border border-zinc-300 bg-white checked:bg-[#929292] checked:border-[#929292] text-[#929292] focus:ring-0 cursor-pointer accent-[#929292] transition-all shrink-0 mb-1"
-                  />
-                  <span className={`text-[11px] font-bold select-none transition-colors ${activeTabStrategies[selectedActionTab.id]?.observeChecked ? "text-zinc-700 font-black" : "text-zinc-500 group-hover:text-zinc-800"}`}>
-                    觀察
-                  </span>
-                </label>
-              </div>
-            )}
-
-            {/* Split Trade Tickboxes: 4 Batches (8 Options) */}
-            {selectedActionTab && (
-              <div className="bg-zinc-50 border border-zinc-200/90 p-2.5 rounded-2xl mb-4 shadow-xs">
-                <div className="flex items-center justify-between mb-2 px-1">
-                  <span className="text-[11px] font-black text-zinc-700 tracking-wide">
-                    拆分交易階段
-                  </span>
-                  {Boolean(activeTabStrategies[selectedActionTab.id]?.selectedSplitTrade || selectedActionTab?.selectedSplitTrade) && (
-                    <button
-                      type="button"
-                      onClick={() => handleUpdateSelectedSplitTrade(selectedActionTab.id, "")}
-                      className="text-[10px] text-zinc-400 hover:text-red-500 font-bold underline cursor-pointer"
-                    >
-                      清除勾選
-                    </button>
-                  )}
-                </div>
-                <div className="grid grid-cols-2 gap-1.5">
-                  {SPLIT_TRADE_OPTIONS.map((opt) => {
-                    const currentSelected = activeTabStrategies[selectedActionTab.id]?.selectedSplitTrade || selectedActionTab?.selectedSplitTrade;
-                    const isChecked = currentSelected === opt.id || currentSelected === opt.label;
-                    return (
-                      <label
-                        key={opt.id}
-                        onClick={(e) => e.stopPropagation()}
-                        className={`flex items-center gap-1.5 p-1.5 rounded-xl border transition-all cursor-pointer select-none ${
-                          isChecked
-                            ? "bg-amber-100/90 border-amber-400 text-amber-950 font-black shadow-xs ring-1 ring-amber-400"
-                            : "bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-100/80 font-medium"
-                        }`}
+              return (
+                <>
+                  <DialogHeader className="p-0 space-y-0">
+                    <div className="flex items-center justify-between w-full">
+                      <DialogTitle className="font-black text-lg text-zinc-900 flex items-center gap-2">
+                        <span className="bg-zinc-900 text-white px-2.5 py-0.5 rounded-lg text-sm font-black tracking-wide shadow-2xs">
+                          {currentActionTab.symbol}
+                        </span>
+                        {currentActionTab.name && (
+                          <span className="text-zinc-700 font-bold text-sm truncate max-w-[130px]">
+                            {currentActionTab.name}
+                          </span>
+                        )}
+                        <span className="text-zinc-400 font-bold text-xs">操作設定</span>
+                      </DialogTitle>
+                      <button
+                        type="button"
+                        onClick={() => handleResetAllActionSettings(currentActionTab.id)}
+                        className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold text-zinc-600 hover:text-red-600 bg-zinc-100 hover:bg-red-50 border border-zinc-200 hover:border-red-200 rounded-lg transition-all cursor-pointer shadow-2xs group"
+                        title="一次取消操作對話窗所有勾選與狀態設定"
                       >
+                        <RotateCcw className="w-3.5 h-3.5 text-zinc-500 group-hover:text-red-500 group-hover:-rotate-90 transition-all duration-200" />
+                        <span>重置設定</span>
+                      </button>
+                    </div>
+                  </DialogHeader>
+
+                  {/* 1. TOP PRIMARY ACTION: 檢視細節 (View Details / Detail Page) */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigate(`/stock/${currentActionTab.id}`);
+                      setIsActionDialogOpen(false);
+                    }}
+                    onMouseEnter={() => prefetchStockPrice(currentActionTab.symbol)}
+                    className="w-full p-3 bg-gradient-to-r from-blue-50/90 via-indigo-50/60 to-blue-50/90 hover:from-blue-100 hover:via-indigo-100/80 hover:to-blue-100 border border-blue-200/90 hover:border-blue-400/80 rounded-xl flex items-center justify-between transition-all group shadow-xs cursor-pointer text-left ring-1 ring-blue-500/10 hover:ring-blue-500/20"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-9 h-9 rounded-lg bg-blue-600/15 text-blue-600 flex items-center justify-center group-hover:scale-105 group-hover:bg-blue-600 group-hover:text-white transition-all shadow-2xs shrink-0">
+                        <ExternalLink className="w-4.5 h-4.5 transition-transform" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="font-black text-sm text-blue-950 group-hover:text-blue-900">
+                            檢視個股詳情
+                          </p>
+                          <span className="text-[10px] bg-blue-100/80 text-blue-700 font-bold px-1.5 py-0.5 rounded border border-blue-200 shrink-0">
+                            進入詳情
+                          </span>
+                        </div>
+                        <p className="text-[11px] font-medium text-blue-700/80 mt-0.5 truncate">
+                          即時走勢、K線圖表、交易策略與操作筆記
+                        </p>
+                      </div>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-blue-400 group-hover:text-blue-600 group-hover:translate-x-1 transition-all shrink-0 ml-1.5" />
+                  </button>
+
+                  {/* 2. STRATEGY FLAGS ROW: 選取 | 止盈 | 止損 | 加碼 | 平倉 | 觀察 */}
+                  <div className="bg-zinc-50/80 border border-zinc-200/90 p-2.5 rounded-xl">
+                    <div className="flex items-center justify-between mb-2 px-0.5">
+                      <span className="text-[11px] font-black text-zinc-700 tracking-wide flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block"></span>
+                        策略標記
+                      </span>
+                      <span className="text-[10px] text-zinc-400 font-semibold">快速勾選</span>
+                    </div>
+                    <div className="grid grid-cols-6 gap-1">
+                      {/* 選取 */}
+                      <label className={`flex flex-col items-center justify-center py-1.5 px-0.5 rounded-lg border transition-all cursor-pointer group select-none ${
+                        strategyState.notesHighlighted
+                          ? "bg-amber-500/15 border-amber-400 text-amber-900 shadow-2xs"
+                          : "bg-white border-zinc-200/80 text-zinc-600 hover:bg-zinc-100/80 hover:border-zinc-300"
+                      }`}>
                         <input
                           type="checkbox"
-                          checked={isChecked}
-                          onChange={() => handleUpdateSelectedSplitTrade(selectedActionTab.id, opt.id)}
-                          className="h-3.5 w-3.5 rounded border border-zinc-300 bg-white checked:bg-amber-500 checked:border-amber-500 text-amber-600 focus:ring-0 cursor-pointer accent-amber-500 transition-all shrink-0"
+                          checked={!!strategyState.notesHighlighted}
+                          onChange={(e) => handleUpdateNotesHighlighted(currentActionTab.id, e.target.checked)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="h-3.5 w-3.5 rounded border border-zinc-300 bg-white checked:bg-amber-500 checked:border-amber-500 text-amber-600 focus:ring-0 cursor-pointer accent-amber-500 transition-all shrink-0 mb-1"
                         />
-                        <span className="text-[10.5px] leading-tight truncate">
-                          {opt.label}
+                        <span className={`text-[11px] font-bold select-none transition-colors ${strategyState.notesHighlighted ? "text-amber-700 font-black" : "text-zinc-600"}`}>
+                          選取
                         </span>
                       </label>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
 
-            {/* Tab Switched Header buttons */}
-            <div className="flex bg-zinc-100 p-1 rounded-xl border border-zinc-200/80 mb-4 shadow-inner">
-              <button
-                type="button"
-                onClick={() => setActionActiveTab("general")}
-                className={`flex-1 py-2 text-xs font-black rounded-lg transition-all cursor-pointer text-center ${
-                  actionActiveTab === "general"
-                    ? "bg-white text-zinc-900 shadow-sm border border-zinc-200/30 font-black"
-                    : "text-zinc-500 hover:text-zinc-800"
-                }`}
-              >
-                基本檢視
-              </button>
-              <button
-                type="button"
-                onClick={() => setActionActiveTab("status")}
-                className={`flex-1 py-2 text-xs font-black rounded-lg transition-all cursor-pointer text-center relative ${
-                  actionActiveTab === "status"
-                    ? "bg-white text-zinc-900 shadow-sm border border-zinc-200/30 font-black"
-                    : "text-zinc-500 hover:text-zinc-800"
-                }`}
-              >
-                狀態設定
-                {(selectedActionTab?.isFavoriteHighlight || selectedActionTab?.isOperationConfirmed || selectedActionTab?.isDeviationConfirmed) && (
-                  <span className="absolute top-2 right-4 w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
-                )}
-              </button>
-            </div>
+                      {/* 止盈 */}
+                      <label className={`flex flex-col items-center justify-center py-1.5 px-0.5 rounded-lg border transition-all cursor-pointer group select-none ${
+                        strategyState.tpChecked
+                          ? "bg-emerald-500/15 border-emerald-400 text-emerald-900 shadow-2xs"
+                          : "bg-white border-zinc-200/80 text-zinc-600 hover:bg-zinc-100/80 hover:border-zinc-300"
+                      }`}>
+                        <input
+                          type="checkbox"
+                          checked={!!strategyState.tpChecked}
+                          onChange={(e) => handleUpdateTPChecked(currentActionTab.id, e.target.checked)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="h-3.5 w-3.5 rounded border border-zinc-300 bg-white checked:bg-emerald-500 checked:border-emerald-500 text-emerald-600 focus:ring-0 cursor-pointer accent-emerald-500 transition-all shrink-0 mb-1"
+                        />
+                        <span className={`text-[11px] font-bold select-none transition-colors ${strategyState.tpChecked ? "text-emerald-700 font-black" : "text-zinc-600"}`}>
+                          止盈
+                        </span>
+                      </label>
 
-            {/* Tab content with transition */}
-            <div className="min-h-[220px]">
-              <AnimatePresence mode="wait">
-                <motion.div
-                  key={actionActiveTab}
-                  initial={{ opacity: 0, x: actionActiveTab === "general" ? -8 : 8 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: actionActiveTab === "general" ? 8 : -8 }}
-                  transition={{ duration: 0.15 }}
-                  className="grid grid-cols-1 gap-3"
-                >
-                  {actionActiveTab === "general" ? (
-                    <>
-                      <button
-                        onClick={() => {
-                          if (selectedActionTab) {
-                            navigate(`/stock/${selectedActionTab.id}`);
-                            setIsActionDialogOpen(false);
-                          }
-                        }}
-                        onMouseEnter={() => selectedActionTab && prefetchStockPrice(selectedActionTab.symbol)}
-                        className="w-full py-4 px-4 bg-zinc-50 hover:bg-zinc-100/70 border border-zinc-200 rounded-xl flex items-center justify-between transition-all group shadow-sm cursor-pointer"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center group-hover:scale-110 transition-transform">
-                            <ExternalLink className="w-5 h-5 text-blue-600" />
-                          </div>
-                          <div className="text-left">
-                            <p className="font-black text-sm text-zinc-800">檢視細節</p>
-                            <p className="text-[10px] font-bold text-zinc-500">
-                              進入個股詳情頁面
-                            </p>
-                          </div>
-                        </div>
-                        <ChevronRight className="w-4 h-4 text-zinc-400 group-hover:text-blue-600 group-hover:translate-x-1 transition-all" />
-                      </button>
+                      {/* 止損 */}
+                      <label className={`flex flex-col items-center justify-center py-1.5 px-0.5 rounded-lg border transition-all cursor-pointer group select-none ${
+                        strategyState.slChecked
+                          ? "bg-rose-500/15 border-rose-400 text-rose-900 shadow-2xs"
+                          : "bg-white border-zinc-200/80 text-zinc-600 hover:bg-zinc-100/80 hover:border-zinc-300"
+                      }`}>
+                        <input
+                          type="checkbox"
+                          checked={!!strategyState.slChecked}
+                          onChange={(e) => handleUpdateSLChecked(currentActionTab.id, e.target.checked)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="h-3.5 w-3.5 rounded border border-zinc-300 bg-white checked:bg-rose-500 checked:border-rose-500 text-rose-600 focus:ring-0 cursor-pointer accent-rose-500 transition-all shrink-0 mb-1"
+                        />
+                        <span className={`text-[11px] font-bold select-none transition-colors ${strategyState.slChecked ? "text-rose-700 font-black" : "text-zinc-600"}`}>
+                          止損
+                        </span>
+                      </label>
 
-                      <button
-                        onClick={() => {
-                          if (selectedActionTab) {
-                            updateTab(selectedActionTab.id, {
-                              isNew: !selectedActionTab.isNew,
-                            });
-                            setIsActionDialogOpen(false);
-                          }
-                        }}
-                        className={`w-full py-4 px-4 border rounded-xl flex items-center justify-between transition-all group cursor-pointer ${
-                          selectedActionTab?.isNew
-                            ? "bg-emerald-50 border-emerald-250 hover:bg-[#D8F3E5]"
-                            : "bg-zinc-50 border-zinc-200 hover:bg-zinc-100/70 shadow-sm"
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className={`w-10 h-10 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform ${selectedActionTab?.isNew ? 'bg-emerald-500/20' : 'bg-zinc-200/80'}`}>
-                            <Sparkles className={`w-5 h-5 ${selectedActionTab?.isNew ? 'text-emerald-600' : 'text-zinc-550'}`} />
-                          </div>
-                          <div className="text-left">
-                            <p className={`font-black text-sm ${selectedActionTab?.isNew ? 'text-emerald-700' : 'text-zinc-800'}`}>
-                              更新版本
-                            </p>
-                            <p className={`text-[10px] font-bold ${selectedActionTab?.isNew ? 'text-emerald-700/80' : 'text-zinc-500'}`}>
-                              新增或移除卡片頂部的 NEW 標籤與彩色漸層細線
-                            </p>
-                          </div>
-                        </div>
-                        <ChevronRight className={`w-4 h-4 transition-all group-hover:translate-x-1 ${selectedActionTab?.isNew ? 'text-emerald-600' : 'text-zinc-400 group-hover:text-emerald-500'}`} />
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <button
-                        onClick={() => {
-                          if (selectedActionTab) {
-                            handleToggleTabHighlight(
-                              selectedActionTab.id,
-                              selectedActionTab.isFavoriteHighlight,
-                            );
-                          }
-                        }}
-                        className={`w-full py-4 px-4 border rounded-xl flex items-center justify-between transition-all group cursor-pointer ${
-                          selectedActionTab?.isFavoriteHighlight
-                            ? "bg-[#B1C28D]/20 border-[#B1C28D]/50 hover:bg-[#B1C28D]/30"
-                            : "bg-zinc-50 border-zinc-200 hover:bg-zinc-100/70 shadow-sm"
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div
-                            className={`w-10 h-10 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform ${
-                              selectedActionTab?.isFavoriteHighlight
-                                ? "bg-[#B1C28D]/30"
-                                : "bg-amber-100"
+                      {/* 加碼 */}
+                      <label className={`flex flex-col items-center justify-center py-1.5 px-0.5 rounded-lg border transition-all cursor-pointer group select-none ${
+                        strategyState.addChecked
+                          ? "bg-sky-500/15 border-sky-400 text-sky-900 shadow-2xs"
+                          : "bg-white border-zinc-200/80 text-zinc-600 hover:bg-zinc-100/80 hover:border-zinc-300"
+                      }`}>
+                        <input
+                          type="checkbox"
+                          checked={!!strategyState.addChecked}
+                          onChange={(e) => handleUpdateAddChecked(currentActionTab.id, e.target.checked)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="h-3.5 w-3.5 rounded border border-zinc-300 bg-white checked:bg-sky-500 checked:border-sky-500 text-sky-600 focus:ring-0 cursor-pointer accent-sky-500 transition-all shrink-0 mb-1"
+                        />
+                        <span className={`text-[11px] font-bold select-none transition-colors ${strategyState.addChecked ? "text-sky-700 font-black" : "text-zinc-600"}`}>
+                          加碼
+                        </span>
+                      </label>
+
+                      {/* 平倉 */}
+                      <label className={`flex flex-col items-center justify-center py-1.5 px-0.5 rounded-lg border transition-all cursor-pointer group select-none ${
+                        strategyState.closeChecked
+                          ? "bg-violet-500/15 border-violet-400 text-violet-900 shadow-2xs"
+                          : "bg-white border-zinc-200/80 text-zinc-600 hover:bg-zinc-100/80 hover:border-zinc-300"
+                      }`}>
+                        <input
+                          type="checkbox"
+                          checked={!!strategyState.closeChecked}
+                          onChange={(e) => handleUpdateCloseChecked(currentActionTab.id, e.target.checked)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="h-3.5 w-3.5 rounded border border-zinc-300 bg-white checked:bg-violet-500 checked:border-violet-500 text-violet-600 focus:ring-0 cursor-pointer accent-violet-500 transition-all shrink-0 mb-1"
+                        />
+                        <span className={`text-[11px] font-bold select-none transition-colors ${strategyState.closeChecked ? "text-violet-700 font-black" : "text-zinc-600"}`}>
+                          平倉
+                        </span>
+                      </label>
+
+                      {/* 觀察 */}
+                      <label className={`flex flex-col items-center justify-center py-1.5 px-0.5 rounded-lg border transition-all cursor-pointer group select-none ${
+                        strategyState.observeChecked
+                          ? "bg-zinc-200 border-zinc-400 text-zinc-900 shadow-2xs"
+                          : "bg-white border-zinc-200/80 text-zinc-600 hover:bg-zinc-100/80 hover:border-zinc-300"
+                      }`}>
+                        <input
+                          type="checkbox"
+                          checked={!!strategyState.observeChecked}
+                          onChange={(e) => handleUpdateObserveChecked(currentActionTab.id, e.target.checked)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="h-3.5 w-3.5 rounded border border-zinc-300 bg-white checked:bg-[#929292] checked:border-[#929292] text-[#929292] focus:ring-0 cursor-pointer accent-[#929292] transition-all shrink-0 mb-1"
+                        />
+                        <span className={`text-[11px] font-bold select-none transition-colors ${strategyState.observeChecked ? "text-zinc-800 font-black" : "text-zinc-600"}`}>
+                          觀察
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* 3. SPLIT TRADE STAGES (拆分交易階段) */}
+                  <div className="bg-zinc-50/80 border border-zinc-200/90 p-2.5 rounded-xl">
+                    <div className="flex items-center justify-between mb-2 px-0.5">
+                      <span className="text-[11px] font-black text-zinc-700 tracking-wide flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block"></span>
+                        拆分交易階段
+                      </span>
+                      {Boolean(currentSplitTrade) && (
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateSelectedSplitTrade(currentActionTab.id, "")}
+                          className="text-[10px] text-zinc-400 hover:text-red-500 font-bold underline cursor-pointer"
+                        >
+                          清除勾選
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {SPLIT_TRADE_OPTIONS.map((opt) => {
+                        const isChecked = currentSplitTrade === opt.id || currentSplitTrade === opt.label;
+                        return (
+                          <label
+                            key={opt.id}
+                            onClick={(e) => e.stopPropagation()}
+                            className={`flex items-center gap-1.5 p-1.5 rounded-lg border transition-all cursor-pointer select-none ${
+                              isChecked
+                                ? "bg-amber-100/90 border-amber-400 text-amber-950 font-black shadow-2xs ring-1 ring-amber-400/80"
+                                : "bg-white border-zinc-200/80 text-zinc-700 hover:bg-zinc-100/80 font-medium"
                             }`}
                           >
-                            <Star
-                              className={`w-5 h-5 ${selectedActionTab?.isFavoriteHighlight ? "text-[#58633F] fill-[#58633F]/50" : "text-amber-600"}`}
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => handleUpdateSelectedSplitTrade(currentActionTab.id, opt.id)}
+                              className="h-3.5 w-3.5 rounded border border-zinc-300 bg-white checked:bg-amber-500 checked:border-amber-500 text-amber-600 focus:ring-0 cursor-pointer accent-amber-500 transition-all shrink-0"
                             />
-                          </div>
-                          <div className="text-left">
-                            <p className="font-black text-sm text-zinc-800">
-                              {selectedActionTab?.isFavoriteHighlight
-                                ? "取消重點"
-                                : "重點關注"}
-                            </p>
-                            <p className="text-[10px] font-bold text-zinc-505">
-                              切換首頁卡片高亮狀態
-                            </p>
-                          </div>
-                        </div>
-                        <ChevronRight
-                          className={`w-4 h-4 transition-all group-hover:translate-x-1 ${
-                            selectedActionTab?.isFavoriteHighlight
-                              ? "text-[#58633F]"
-                              : "text-zinc-400 group-hover:text-amber-500"
-                          }`}
-                        />
-                      </button>
+                            <span className="text-[10.5px] leading-tight truncate">
+                              {opt.label}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
 
+                  {/* 4. CARD STATUS & APPEARANCE (卡片狀態設定) */}
+                  <div className="bg-zinc-50/80 border border-zinc-200/90 p-2.5 rounded-xl">
+                    <div className="flex items-center justify-between mb-2 px-0.5">
+                      <span className="text-[11px] font-black text-zinc-700 tracking-wide flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
+                        卡片狀態與樣式
+                      </span>
+                      <span className="text-[10px] text-zinc-400 font-semibold">即時設定</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      {/* 重點關注 */}
                       <button
+                        type="button"
                         onClick={() => {
-                          if (selectedActionTab) {
-                            updateTab(selectedActionTab.id, {
-                              isOperationConfirmed:
-                                !selectedActionTab.isOperationConfirmed,
-                            });
-                            setIsActionDialogOpen(false);
-                          }
+                          handleToggleTabHighlight(
+                            currentActionTab.id,
+                            currentActionTab.isFavoriteHighlight,
+                          );
                         }}
-                        className={`w-full py-4 px-4 border rounded-xl flex items-center justify-between transition-all group cursor-pointer ${
-                          selectedActionTab?.isOperationConfirmed
-                            ? "bg-emerald-50 border-emerald-250 hover:bg-emerald-100/50"
-                            : "bg-zinc-50 border-zinc-200 hover:bg-zinc-100/70 shadow-sm"
+                        className={`p-2.5 rounded-xl border flex items-center gap-2.5 transition-all cursor-pointer text-left ${
+                          currentActionTab.isFavoriteHighlight
+                            ? "bg-[#B1C28D]/25 border-[#8E9F6B] text-[#424c29] shadow-2xs ring-1 ring-[#8E9F6B]/60"
+                            : "bg-white border-zinc-200/80 hover:bg-zinc-100/70 text-zinc-700"
                         }`}
                       >
-                        <div className="flex items-center gap-3">
-                          <div
-                            className={`w-10 h-10 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform ${
-                              selectedActionTab?.isOperationConfirmed
-                                ? "bg-[#5cb884]/20"
-                                : "bg-emerald-500/10"
-                            }`}
-                          >
-                            <CheckCircle2
-                              className={`w-5 h-5 ${selectedActionTab?.isOperationConfirmed ? "text-emerald-700 font-bold" : "text-emerald-600"}`}
-                            />
-                          </div>
-                          <div className="text-left">
-                            <p className="font-black text-sm text-zinc-800">操作確認</p>
-                            <p className="text-[10px] font-bold text-zinc-500">
-                              切換首頁卡片顏色
-                            </p>
-                          </div>
-                        </div>
-                        <ChevronRight
-                          className={`w-4 h-4 transition-all group-hover:translate-x-1 ${
-                            selectedActionTab?.isOperationConfirmed
-                              ? "text-emerald-700"
-                              : "text-zinc-400 group-hover:text-emerald-600"
+                        <div
+                          className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-all ${
+                            currentActionTab.isFavoriteHighlight
+                              ? "bg-[#8E9F6B]/30 text-[#424c29]"
+                              : "bg-amber-100/80 text-amber-600"
                           }`}
-                        />
+                        >
+                          <Star
+                            className={`w-4 h-4 ${
+                              currentActionTab.isFavoriteHighlight
+                                ? "fill-[#58633F] text-[#58633F]"
+                                : "text-amber-500"
+                            }`}
+                          />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between">
+                            <p className="font-black text-xs truncate">重點關注</p>
+                            {currentActionTab.isFavoriteHighlight && (
+                              <span className="text-[9px] font-black px-1 rounded bg-[#8E9F6B]/30 text-[#3d4725]">ON</span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-zinc-500 truncate mt-0.5">
+                            黃綠高亮卡片
+                          </p>
+                        </div>
                       </button>
 
+                      {/* 操作確認 */}
                       <button
+                        type="button"
                         onClick={() => {
-                          if (selectedActionTab) {
-                            updateTab(selectedActionTab.id, {
-                              isDeviationConfirmed:
-                                !selectedActionTab.isDeviationConfirmed,
-                            });
-                            setIsActionDialogOpen(false);
-                          }
+                          const updated = !currentActionTab.isOperationConfirmed;
+                          updateTab(currentActionTab.id, {
+                            isOperationConfirmed: updated,
+                          });
+                          setSelectedActionTab((prev: any) =>
+                            prev ? { ...prev, isOperationConfirmed: updated } : null,
+                          );
+                          playClickSound();
+                          toast.success(updated ? "已開啟操作確認" : "已取消操作確認");
                         }}
-                        className={`w-full py-4 px-4 border rounded-xl flex items-center justify-between transition-all group cursor-pointer ${
-                          selectedActionTab?.isDeviationConfirmed
-                            ? "bg-[#F5E6DB]/90 border-[#A55F2A]/35 hover:bg-[#F5E6DB]"
-                            : "bg-zinc-50 border-zinc-200 hover:bg-zinc-100/70 shadow-sm"
+                        className={`p-2.5 rounded-xl border flex items-center gap-2.5 transition-all cursor-pointer text-left ${
+                          currentActionTab.isOperationConfirmed
+                            ? "bg-emerald-500/15 border-emerald-400 text-emerald-900 shadow-2xs ring-1 ring-emerald-400/60"
+                            : "bg-white border-zinc-200/80 hover:bg-zinc-100/70 text-zinc-700"
                         }`}
                       >
-                        <div className="flex items-center gap-3">
-                          <div
-                            className={`w-10 h-10 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform ${
-                              selectedActionTab?.isDeviationConfirmed
-                                ? "bg-[#F0D1B9]/60"
-                                : "bg-[#F0D1B9]/30"
-                            }`}
-                          >
-                            <Star
-                              className={`w-5 h-5 ${selectedActionTab?.isDeviationConfirmed ? "text-[#854D20]" : "text-[#b06a34]"}`}
-                            />
-                          </div>
-                          <div className="text-left">
-                            <p className="font-black text-sm text-zinc-800">乖離確認</p>
-                            <p className="text-[10px] font-bold text-zinc-505">
-                              更改卡片標題背景顏色
-                            </p>
-                          </div>
-                        </div>
-                        <ChevronRight
-                          className={`w-4 h-4 transition-all group-hover:translate-x-1 ${
-                            selectedActionTab?.isDeviationConfirmed
-                              ? "text-[#854D20]"
-                              : "text-zinc-400 group-hover:text-[#b06a34]"
+                        <div
+                          className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-all ${
+                            currentActionTab.isOperationConfirmed
+                              ? "bg-emerald-500/25 text-emerald-700"
+                              : "bg-emerald-50 text-emerald-600"
                           }`}
-                        />
+                        >
+                          <CheckCircle2 className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between">
+                            <p className="font-black text-xs truncate">操作確認</p>
+                            {currentActionTab.isOperationConfirmed && (
+                              <span className="text-[9px] font-black px-1 rounded bg-emerald-200 text-emerald-800">ON</span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-zinc-500 truncate mt-0.5">
+                            綠色卡片樣式
+                          </p>
+                        </div>
                       </button>
-                    </>
-                  )}
-                </motion.div>
-              </AnimatePresence>
-            </div>
+
+                      {/* 乖離確認 */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const updated = !currentActionTab.isDeviationConfirmed;
+                          updateTab(currentActionTab.id, {
+                            isDeviationConfirmed: updated,
+                          });
+                          setSelectedActionTab((prev: any) =>
+                            prev ? { ...prev, isDeviationConfirmed: updated } : null,
+                          );
+                          playClickSound();
+                          toast.success(updated ? "已開啟乖離確認" : "已取消乖離確認");
+                        }}
+                        className={`p-2.5 rounded-xl border flex items-center gap-2.5 transition-all cursor-pointer text-left ${
+                          currentActionTab.isDeviationConfirmed
+                            ? "bg-[#F5E6DB] border-[#A55F2A]/60 text-[#713D15] shadow-2xs ring-1 ring-[#A55F2A]/50"
+                            : "bg-white border-zinc-200/80 hover:bg-zinc-100/70 text-zinc-700"
+                        }`}
+                      >
+                        <div
+                          className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-all ${
+                            currentActionTab.isDeviationConfirmed
+                              ? "bg-[#F0D1B9]/80 text-[#854D20]"
+                              : "bg-[#F0D1B9]/30 text-[#b06a34]"
+                          }`}
+                        >
+                          <Star className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between">
+                            <p className="font-black text-xs truncate">乖離確認</p>
+                            {currentActionTab.isDeviationConfirmed && (
+                              <span className="text-[9px] font-black px-1 rounded bg-[#E4BCA0]/60 text-[#683711]">ON</span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-zinc-500 truncate mt-0.5">
+                            橙褐色標題樣式
+                          </p>
+                        </div>
+                      </button>
+
+                      {/* 更新版本 / NEW 標籤 */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const updated = !currentActionTab.isNew;
+                          updateTab(currentActionTab.id, {
+                            isNew: updated,
+                          });
+                          setSelectedActionTab((prev: any) =>
+                            prev ? { ...prev, isNew: updated } : null,
+                          );
+                          playClickSound();
+                          toast.success(updated ? "已開啟 NEW 標籤" : "已關閉 NEW 標籤");
+                        }}
+                        className={`p-2.5 rounded-xl border flex items-center gap-2.5 transition-all cursor-pointer text-left ${
+                          currentActionTab.isNew
+                            ? "bg-emerald-500/15 border-emerald-400 text-emerald-900 shadow-2xs ring-1 ring-emerald-400/60"
+                            : "bg-white border-zinc-200/80 hover:bg-zinc-100/70 text-zinc-700"
+                        }`}
+                      >
+                        <div
+                          className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-all ${
+                            currentActionTab.isNew
+                              ? "bg-emerald-500/25 text-emerald-700"
+                              : "bg-zinc-100 text-zinc-500"
+                          }`}
+                        >
+                          <Sparkles className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between">
+                            <p className="font-black text-xs truncate">更新版本</p>
+                            {currentActionTab.isNew && (
+                              <span className="text-[9px] font-black px-1 rounded bg-emerald-200 text-emerald-800">NEW</span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-zinc-500 truncate mt-0.5">
+                            頂部彩色線與標記
+                          </p>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
           </DialogContent>
         </Dialog>
 
@@ -6958,15 +7058,15 @@ export default function Dashboard() {
                   </span>
                   <div className="grid grid-cols-2 gap-2">
                     {[
-                      { key: "Alt + Z / Shift + B", desc: "回到交易總覽頁面" },
+                      { key: "Shift + B", desc: "回到交易總覽頁面" },
                       { key: "Shift + I", desc: "匯入最新價格" },
                       { key: "快速連按 H H / Shift + H", desc: "預覽模式 / 全螢幕" },
                       { key: "Shift + F", desc: "搜尋股票" },
                       { key: "Shift + M", desc: "電影觀賞模式" },
                       { key: "Shift + D", desc: "AI 分析回傳" },
                       { key: "Shift + A", desc: "新增股票" },
+                      { key: "Alt + Z", desc: "全體卡片翻頁（正面/背面圖表切換）" },
                       { key: "Alt + W", desc: "動態視覺圖示標籤" },
-                      { key: "Alt + Z", desc: "全部翻頁" },
                       { key: "Alt + Q", desc: "顯示 / 隱藏數據統計" },
                       { key: "Alt + ← / →", desc: "橫向滾動卡片" },
                     ].map((item, i) => (
@@ -7063,10 +7163,12 @@ export default function Dashboard() {
                 <div className={`w-screen relative left-1/2 -translate-x-1/2 border-y flex flex-col group transition-all duration-500 ${activeViewTab === "real" ? "border-teal-500/10 bg-teal-500/[0.01]" : "border-emerald-500/10 bg-emerald-500/[0.01]"}`}>
                   <div className={`py-2 border-b w-full ${activeViewTab === "real" ? "border-teal-500/10" : "border-emerald-500/10"}`}>
                     {/* Desktop/Tablet version */}
-                    <div className="hidden md:flex max-w-6xl mx-auto px-4 items-center justify-between w-full">
-                      <div className="flex items-center gap-4">
-                        <div className={`w-1.5 h-6 rounded-full transition-all duration-300 ${activeViewTab === "real" ? "bg-gradient-to-b from-teal-400 to-teal-600 shadow-[0_0_10px_rgba(20,184,166,0.5)]" : "bg-gradient-to-b from-emerald-400 to-emerald-600 rounded-full shadow-[0_0_10px_rgba(16,185,129,0.5)]"}`}></div>
-                        <div className="flex bg-zinc-100 p-1 border border-zinc-200/80 rounded-xl gap-1 shadow-inner">
+                    <div className="hidden md:flex max-w-[1440px] mx-auto px-4 sm:px-6 items-center justify-between w-full gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className={`w-1.5 h-6 rounded-full shrink-0 transition-all duration-300 ${activeViewTab === "real" ? "bg-gradient-to-b from-teal-400 to-teal-600 shadow-[0_0_10px_rgba(20,184,166,0.5)]" : "bg-gradient-to-b from-emerald-400 to-emerald-600 shadow-[0_0_10px_rgba(16,185,129,0.5)]"}`}></div>
+                        
+                        {/* Sub-tab pills container */}
+                        <div className="flex items-center bg-zinc-100/90 p-1 border border-zinc-200/90 rounded-2xl gap-1 shadow-2xs overflow-x-auto no-scrollbar">
                           {visibleSubTabs.map((tab) => {
                             const conf = holdingTabConfig[tab];
                             const TabIcon = conf.icon;
@@ -7085,18 +7187,18 @@ export default function Dashboard() {
                                     scrollToElement("#active-cards-section", -20);
                                   }, 50);
                                 }}
-                                className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-2 border cursor-pointer ${
+                                className={`px-3.5 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center gap-2 border cursor-pointer whitespace-nowrap shrink-0 ${
                                   isActive
                                     ? `${conf.colorClass} ${conf.bgClass} ${conf.borderClass} ${conf.shadowClass}`
-                                    : "text-zinc-500 hover:text-zinc-800 hover:bg-zinc-200/50 border-transparent shadow-none"
+                                    : "text-zinc-600 hover:text-zinc-900 hover:bg-white/70 border-transparent shadow-none"
                                 }`}
                               >
-                                <TabIcon className="w-3.5 h-3.5" />
-                                {tab === "觀察中" && activeViewTab === "active" ? "虛擬交易" : tab}
-                                <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full border ${
+                                <TabIcon className="w-3.5 h-3.5 shrink-0" />
+                                <span>{tab === "觀察中" && activeViewTab === "active" ? "虛擬交易" : tab}</span>
+                                <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full border leading-none ${
                                   isActive 
                                     ? conf.activeCountClass 
-                                    : "bg-zinc-200/50 border-zinc-300/40 text-zinc-650"
+                                    : "bg-zinc-200/60 border-zinc-300/40 text-zinc-600"
                                 }`}>
                                   <AnimatedNumber value={tabCount} />{" "}檔
                                 </span>
@@ -7104,104 +7206,173 @@ export default function Dashboard() {
                             );
                           })}
                         </div>
+
                         {effectiveHiddenActiveTabs.length > 0 && (
-                          <span className="text-xs font-bold border border-zinc-200 bg-zinc-50 text-zinc-500 px-3 py-1 rounded-full flex items-center gap-1.5">
+                          <span className="text-xs font-bold border border-zinc-200 bg-zinc-50 text-zinc-500 px-3 py-1.5 rounded-xl flex items-center gap-1.5 shrink-0 whitespace-nowrap">
                             <EyeOff className="w-3.5 h-3.5 text-zinc-400" />
                             已隱藏 {effectiveHiddenActiveTabs.length} 檔
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-2">
-                        <InteractiveButton
-                          noGlow
-                          as="button"
-                          onClick={() => {
-                            setIsAiAnalysisOpen(true);
-                            playClickSound();
-                          }}
-                          title="Ai分析回傳"
-                          className="p-2 bg-zinc-50 border border-zinc-200 text-zinc-500 hover:text-zinc-850 hover:bg-zinc-100 rounded-md transition-all cursor-pointer flex items-center justify-center"
-                        >
-                          <Sparkles className="w-4 h-4 text-amber-600 animate-pulse" />
-                        </InteractiveButton>
-                        <InteractiveButton
-                          noGlow
-                          as="button"
-                          onClick={() => {
-                            setIsVisualLinesBoardOpen(true);
-                            playClickSound();
-                          }}
-                          title="動態視覺線標籤 (Alt + W)"
-                          className="p-2 bg-zinc-50 border border-zinc-200 text-zinc-500 hover:text-zinc-850 hover:bg-zinc-100 rounded-md transition-all cursor-pointer flex items-center justify-center"
-                        >
-                          <SlidersHorizontal className="w-4 h-4" />
-                        </InteractiveButton>
-                        <InteractiveButton
-                          noGlow
-                          as="button"
-                          onClick={() => setIsManageHiddenOpen(true)}
-                          title="管理持有中股票"
-                          className="p-2 bg-zinc-50 border border-zinc-200 text-zinc-500 hover:text-zinc-850 hover:bg-zinc-100 rounded-md transition-all cursor-pointer"
-                        >
-                          <Settings2 className="w-4 h-4" />
-                        </InteractiveButton>
-                        <InteractiveButton
-                          noGlow
-                          as="button"
-                          onClick={() => {
-                            if (filteredSubTabVisibleTabs.length > 0) {
-                              const isCurrentActiveVisible = filteredSubTabVisibleTabs.some(t => t.id === activeCardTabId);
-                              const targetId = isCurrentActiveVisible ? (activeCardTabId || filteredSubTabVisibleTabs[0].id) : filteredSubTabVisibleTabs[0].id;
-                              setActiveCinemaCardId(targetId);
-                              setIsCinemaModeActive(true);
-                              
-                              if (document.documentElement.requestFullscreen) {
-                                document.documentElement.requestFullscreen().catch((err) => {
-                                  console.warn("Fullscreen request rejected:", err);
-                                });
-                              }
+
+                      {/* Right side controls: 模式切換 + 功能按鈕 */}
+                      <div className="flex items-center gap-2 shrink-0">
+                        {/* 突破加碼 | 分批攤平 | 重置設定 (一次套用到全部卡片) */}
+                        <div className="flex items-center bg-zinc-100/90 p-1 rounded-2xl border border-zinc-200/90 shadow-2xs select-none shrink-0">
+                          <button
+                            type="button"
+                            onClick={handleApplyBreakoutToAllCards}
+                            className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer select-none flex items-center gap-1.5 whitespace-nowrap ${
+                              globalBatchCalcMode === "breakout"
+                                ? "bg-indigo-600 text-white shadow-xs font-black"
+                                : "text-zinc-600 hover:text-zinc-900 hover:bg-white/70"
+                            }`}
+                            title="一鍵將全部卡片套用為「突破加碼」模式 (+2%, +4%, +6%, +8%)"
+                          >
+                            <span>突破加碼</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleApplyAveragingToAllCards}
+                            className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer select-none flex items-center gap-1.5 whitespace-nowrap ${
+                              globalBatchCalcMode === "averaging"
+                                ? "bg-emerald-600 text-white shadow-xs font-black"
+                                : "text-zinc-600 hover:text-zinc-900 hover:bg-white/70"
+                            }`}
+                            title="一鍵將全部卡片套用為「分批攤平」模式 (-3%, -6%, -9%, -12%)"
+                          >
+                            <span>分批攤平</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleResetAllCardsBatchSettings}
+                            className="px-2.5 py-1.5 text-xs font-bold rounded-xl text-zinc-500 hover:text-red-600 hover:bg-red-50 transition-all cursor-pointer select-none flex items-center gap-1.5 border-l border-zinc-200/80 ml-0.5 group whitespace-nowrap"
+                            title="一鍵重置所有卡片的計算模式與高亮設定"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5 text-zinc-400 group-hover:text-red-500 group-hover:-rotate-90 transition-transform duration-200" />
+                            <span>重置設定</span>
+                          </button>
+                        </div>
+
+                        {/* Action buttons group */}
+                        <div className="flex items-center bg-zinc-100/90 p-1 rounded-2xl border border-zinc-200/90 shadow-2xs gap-1 select-none shrink-0">
+                          <InteractiveButton
+                            noGlow
+                            as="button"
+                            onClick={() => {
+                              setIsAiAnalysisOpen(true);
                               playClickSound();
-                            } else {
-                              toast.error("目前無可見的股票卡片可供放大");
-                            }
-                          }}
-                          title="放大卡片 (電影觀賞模式)"
-                          className="p-2 bg-zinc-50 border border-zinc-200 text-zinc-500 hover:text-zinc-850 hover:bg-zinc-100 rounded-md transition-all cursor-pointer flex items-center justify-center"
-                        >
-                          <Maximize2 className="w-4 h-4" />
-                        </InteractiveButton>
-                        <InteractiveButton
-                          noGlow
-                          as="button"
-                          onClick={handleFlipAllCards}
-                          title="卡片全部翻面 (Alt + Z)"
-                          className="p-2 bg-zinc-50 border border-zinc-200 text-zinc-500 hover:text-zinc-850 hover:bg-zinc-100 rounded-md transition-all cursor-pointer flex items-center justify-center"
-                        >
-                          <BookOpen className="w-4 h-4" />
-                        </InteractiveButton>
-                        <InteractiveButton
-                          noGlow
-                          as="button"
-                          onClick={handleExportMd}
-                          title="匯出持有股數交易數據 (.md)"
-                          className="p-2 bg-zinc-50 border border-zinc-200 text-zinc-500 hover:text-zinc-850 hover:bg-zinc-100 rounded-md transition-all cursor-pointer flex items-center justify-center"
-                        >
-                          <Printer className="w-4 h-4" />
-                        </InteractiveButton>
+                            }}
+                            title="Ai分析回傳"
+                            className="w-8 h-8 p-0 bg-white hover:bg-amber-50/60 border border-zinc-200/80 hover:border-amber-300 text-zinc-600 hover:text-amber-700 rounded-xl transition-all cursor-pointer flex items-center justify-center shrink-0 shadow-2xs hover:shadow-xs"
+                          >
+                            <Sparkles className="w-4 h-4 text-amber-500 animate-pulse" />
+                          </InteractiveButton>
+                          <InteractiveButton
+                            noGlow
+                            as="button"
+                            onClick={() => {
+                              setIsVisualLinesBoardOpen(true);
+                              playClickSound();
+                            }}
+                            title="動態視覺線標籤 (Alt + W)"
+                            className="w-8 h-8 p-0 bg-white hover:bg-zinc-50 border border-zinc-200/80 hover:border-zinc-300 text-zinc-600 hover:text-zinc-900 rounded-xl transition-all cursor-pointer flex items-center justify-center shrink-0 shadow-2xs hover:shadow-xs"
+                          >
+                            <SlidersHorizontal className="w-4 h-4" />
+                          </InteractiveButton>
+                          <InteractiveButton
+                            noGlow
+                            as="button"
+                            onClick={() => setIsManageHiddenOpen(true)}
+                            title="管理持有中股票"
+                            className="w-8 h-8 p-0 bg-white hover:bg-zinc-50 border border-zinc-200/80 hover:border-zinc-300 text-zinc-600 hover:text-zinc-900 rounded-xl transition-all cursor-pointer flex items-center justify-center shrink-0 shadow-2xs hover:shadow-xs"
+                          >
+                            <Settings2 className="w-4 h-4" />
+                          </InteractiveButton>
+                          <InteractiveButton
+                            noGlow
+                            as="button"
+                            onClick={() => {
+                              if (filteredSubTabVisibleTabs.length > 0) {
+                                const isCurrentActiveVisible = filteredSubTabVisibleTabs.some(t => t.id === activeCardTabId);
+                                const targetId = isCurrentActiveVisible ? (activeCardTabId || filteredSubTabVisibleTabs[0].id) : filteredSubTabVisibleTabs[0].id;
+                                setActiveCinemaCardId(targetId);
+                                setIsCinemaModeActive(true);
+                                
+                                if (document.documentElement.requestFullscreen) {
+                                  document.documentElement.requestFullscreen().catch((err) => {
+                                    console.warn("Fullscreen request rejected:", err);
+                                  });
+                                }
+                                playClickSound();
+                              } else {
+                                toast.error("目前無可見的股票卡片可供放大");
+                              }
+                            }}
+                            title="放大卡片 (電影觀賞模式)"
+                            className="w-8 h-8 p-0 bg-white hover:bg-zinc-50 border border-zinc-200/80 hover:border-zinc-300 text-zinc-600 hover:text-zinc-900 rounded-xl transition-all cursor-pointer flex items-center justify-center shrink-0 shadow-2xs hover:shadow-xs"
+                          >
+                            <Maximize2 className="w-4 h-4" />
+                          </InteractiveButton>
+                          <InteractiveButton
+                            noGlow
+                            as="button"
+                            onClick={handleExportMd}
+                            title="匯出持有股數交易數據 (.md)"
+                            className="w-8 h-8 p-0 bg-white hover:bg-zinc-50 border border-zinc-200/80 hover:border-zinc-300 text-zinc-600 hover:text-zinc-900 rounded-xl transition-all cursor-pointer flex items-center justify-center shrink-0 shadow-2xs hover:shadow-xs"
+                          >
+                            <Printer className="w-4 h-4" />
+                          </InteractiveButton>
+                        </div>
                       </div>
                     </div>
 
                     {/* Redesigned Premium Mobile version */}
-                    <div className="flex md:hidden flex-col w-full gap-3.5 px-4 py-1.5">
-                      <div className="flex items-center justify-between pb-1.5 border-b border-zinc-150 w-full">
-                        <div className="flex items-center gap-2">
-                          {effectiveHiddenActiveTabs.length > 0 && (
-                            <span className="text-[10px] font-black border border-zinc-250 bg-zinc-50 text-zinc-500 px-2.5 py-0.5 rounded-lg flex items-center gap-1">
-                              <EyeOff className="w-3 h-3 text-zinc-400" />
-                              已隱藏 {effectiveHiddenActiveTabs.length} 檔
-                            </span>
-                          )}
+                    <div className="flex md:hidden flex-col w-full gap-2.5 px-4 py-1.5">
+                      {/* Mobile Top Row: 突破加碼 | 分批攤平 | 重置設定 全域切換 */}
+                      <div className="flex items-center justify-between gap-2 overflow-x-auto no-scrollbar pb-1 border-b border-zinc-150 w-full">
+                        <div className="flex items-center bg-zinc-100 p-0.5 rounded-lg border border-zinc-250 shadow-2xs select-none shrink-0">
+                          <button
+                            type="button"
+                            onClick={handleApplyBreakoutToAllCards}
+                            className={`px-2 py-0.5 text-[11px] font-bold rounded-md transition-all cursor-pointer flex items-center gap-1 ${
+                              globalBatchCalcMode === "breakout"
+                                ? "bg-indigo-600 text-white shadow-xs font-black"
+                                : "text-zinc-650 hover:text-zinc-900"
+                            }`}
+                          >
+                            <span>突破加碼</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleApplyAveragingToAllCards}
+                            className={`px-2 py-0.5 text-[11px] font-bold rounded-md transition-all cursor-pointer flex items-center gap-1 ${
+                              globalBatchCalcMode === "averaging"
+                                ? "bg-emerald-600 text-white shadow-xs font-black"
+                                : "text-zinc-650 hover:text-zinc-900"
+                            }`}
+                          >
+                            <span>分批攤平</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleResetAllCardsBatchSettings}
+                            className="px-1.5 py-0.5 text-[11px] font-bold rounded-md text-zinc-500 hover:text-red-600 border-l border-zinc-250 ml-0.5 flex items-center gap-0.5"
+                          >
+                            <RotateCcw className="w-2.5 h-2.5" />
+                            <span>重置</span>
+                          </button>
                         </div>
+
+                        {effectiveHiddenActiveTabs.length > 0 && (
+                          <span className="text-[10px] font-black border border-zinc-250 bg-zinc-50 text-zinc-500 px-2 py-0.5 rounded-lg flex items-center gap-1 shrink-0">
+                            <EyeOff className="w-3 h-3 text-zinc-400" />
+                            隱藏 {effectiveHiddenActiveTabs.length}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center justify-end pb-1 w-full">
                         <div className="flex items-center gap-2">
                           <InteractiveButton
                             noGlow
@@ -7236,15 +7407,6 @@ export default function Dashboard() {
                           >
                             <Settings2 className="w-3 h-3" />
                             管理
-                          </InteractiveButton>
-                          <InteractiveButton
-                            noGlow
-                            as="button"
-                            onClick={handleFlipAllCards}
-                            className="px-2.5 py-1 bg-zinc-50 border border-zinc-200 text-zinc-650 hover:text-zinc-850 hover:bg-zinc-100 rounded-lg transition-all text-[11px] flex items-center gap-1 font-extrabold cursor-pointer"
-                          >
-                            <BookOpen className="w-3 h-3" />
-                            翻面
                           </InteractiveButton>
                           <InteractiveButton
                             noGlow
@@ -7909,84 +8071,13 @@ export default function Dashboard() {
                                     <div
                                       key={tab.id}
                                       id={`stock-card-${tab.id}`}
-                                      className={`card-wrapper w-[calc(100vw-24px)] ${isHoldingActive ? "sm:w-[617px] md:w-[617px] lg:w-[617px] xl:w-[617px] 2xl:w-[617px]" : "sm:w-[480px] md:w-[480px] lg:w-[480px] xl:w-[480px] 2xl:w-[480px]"} shrink-0 flex flex-col transition-all duration-300 ${isCardExpanded ? "h-[620px] min-h-[540px] sm:min-h-[620px] max-h-[calc(100dvh-56px)] sm:max-h-none select-none" : "min-h-[135px] h-[135px]"}`}
-                                      style={{ touchAction: isCardExpanded ? "none" : "auto" }}
-                                      onMouseDown={(e) => {
-                                        if (e.button !== 0) return; // only left click
-                                        cardDragTrackerRef.current = {
-                                          startY: e.pageY,
-                                          startX: e.pageX,
-                                          cardId: tab.id,
-                                          hasTriggeredFlip: false,
-                                          startTime: Date.now(),
-                                        };
-                                      }}
-                                      onTouchStart={(e) => {
-                                        if (e.touches.length > 0) {
-                                          cardDragTrackerRef.current = {
-                                            startY: e.touches[0].pageY,
-                                            startX: e.touches[0].pageX,
-                                            cardId: tab.id,
-                                            hasTriggeredFlip: false,
-                                            startTime: Date.now(),
-                                          };
-                                        }
-                                      }}
-                                      onMouseMove={(e) => {
-                                        const tracker = cardDragTrackerRef.current;
-                                        if (tracker.cardId !== tab.id || tracker.hasTriggeredFlip) return;
-                                        
-                                        // Require holding down for about 0.5 seconds (~500ms) before vertical gesture triggers card flip
-                                        const holdDuration = Date.now() - (tracker.startTime || 0);
-                                        if (holdDuration < 500) return;
-
-                                        const dy = tracker.startY - e.pageY; // dragging upward means final Y is smaller, so dy is positive
-                                        const dx = Math.abs(tracker.startX - e.pageX);
-                                        const absDy = Math.abs(dy);
-                                        const currentShowBack = flippedCards[tab.id] !== false;
-                                        
-                                        if (absDy > 30 && absDy > dx && isCardExpanded) {
-                                          tracker.hasTriggeredFlip = true;
-                                          setFlippedCards((prev) => ({
-                                            ...prev,
-                                            [tab.id]: !currentShowBack,
-                                          }));
-                                          playClickSound();
-                                        }
-                                      }}
-                                      onTouchMove={(e) => {
-                                        const tracker = cardDragTrackerRef.current;
-                                        if (tracker.cardId !== tab.id || tracker.hasTriggeredFlip) return;
-                                        if (e.touches.length > 0) {
-                                          // Require holding down for about 0.5 seconds (~500ms) before vertical gesture triggers card flip
-                                          const holdDuration = Date.now() - (tracker.startTime || 0);
-                                          if (holdDuration < 500) return;
-
-                                          const dy = tracker.startY - e.touches[0].pageY;
-                                          const dx = Math.abs(tracker.startX - e.touches[0].pageX);
-                                          const absDy = Math.abs(dy);
-                                          const currentShowBack = flippedCards[tab.id] !== false;
-                                          
-                                          if (absDy > 30 && absDy > dx && isCardExpanded) {
-                                            tracker.hasTriggeredFlip = true;
-                                            setFlippedCards((prev) => ({
-                                              ...prev,
-                                              [tab.id]: !currentShowBack,
-                                            }));
-                                            playClickSound();
-                                          }
-                                        }
-                                      }}
-                                      onMouseUp={() => {
-                                        // keep cardId and hasTriggeredFlip intact for onClick to intercept
-                                        cardDragTrackerRef.current.startY = 0;
-                                        cardDragTrackerRef.current.startX = 0;
-                                        cardDragTrackerRef.current.startTime = 0;
-                                      }}
-                                      onTouchEnd={() => {
-                                        cardDragTrackerRef.current.startY = 0;
-                                        cardDragTrackerRef.current.startX = 0;
-                                        cardDragTrackerRef.current.startTime = 0;
+                                      className={`card-wrapper w-[calc(100vw-24px)] ${isHoldingActive ? "sm:w-[617px] md:w-[617px] lg:w-[617px] xl:w-[617px] 2xl:w-[617px]" : "sm:w-[480px] md:w-[480px] lg:w-[480px] xl:w-[480px] 2xl:w-[480px]"} shrink-0 flex flex-col transition-all duration-300 ${isCardExpanded ? "h-[626px] min-h-[546px] sm:min-h-[626px] max-h-[calc(100dvh-56px)] sm:max-h-none select-none" : "min-h-[135px] h-[135px]"}`}
+                                      onContextMenu={(e) => {
+                                        e.preventDefault();
+                                        setSelectedActionTab(tab);
+                                        setActionActiveTab("status");
+                                        setIsActionDialogOpen(true);
+                                        playClickSound();
                                       }}
                                       onClickCapture={(e) => {
                                         if (
@@ -7998,20 +8089,6 @@ export default function Dashboard() {
                                         }
                                       }}
                                       onClick={(e) => {
-                                        const tracker = cardDragTrackerRef.current;
-                                        const wasFlippedThisGesture = tracker.cardId === tab.id && tracker.hasTriggeredFlip;
-                                        
-                                        // Reset tracker state for subsequent gestures
-                                        tracker.cardId = null;
-                                        tracker.hasTriggeredFlip = false;
-                                        tracker.startTime = 0;
-
-                                        if (wasFlippedThisGesture) {
-                                          e.preventDefault();
-                                          e.stopPropagation();
-                                          return;
-                                        }
-
                                         if (
                                           dragRef.current
                                             .hasDraggedBeyondThreshold
@@ -8027,12 +8104,10 @@ export default function Dashboard() {
                                           }));
                                           return;
                                         }
-                                        // If expanded, clicking the border does not flip anymore!
-                                        // Flipping is handled exclusively by dragging upwards.
                                       }}
                                     >
                                       <div
-                                        className={`card-inner-parallax w-full h-full flex flex-col transition-all duration-300 ${isCardExpanded ? "h-[620px] min-h-[540px] sm:min-h-[620px] max-h-[calc(100dvh-56px)] sm:max-h-none" : "min-h-[135px] h-[135px]"}`}
+                                        className={`card-inner-parallax w-full h-full flex flex-col transition-all duration-300 ${isCardExpanded ? "h-[626px] min-h-[546px] sm:min-h-[626px] max-h-[calc(100dvh-56px)] sm:max-h-none" : "min-h-[135px] h-[135px]"}`}
                                         style={{ perspective: "1200px" }}
                                       >
                                         <motion.div
@@ -8050,7 +8125,7 @@ export default function Dashboard() {
                                             delay: idx * 0.05,
                                           }}
                                           key={tab.id}
-                                          className={`relative w-full h-full flex-1 flex flex-col cursor-pointer slide-drawer-container transition-all duration-300 ${isCardExpanded ? "h-[620px] min-h-[540px] sm:min-h-[620px] max-h-[calc(100dvh-56px)] sm:max-h-none" : "min-h-[135px] h-[135px]"} ${
+                                          className={`relative w-full h-full flex-1 flex flex-col cursor-pointer slide-drawer-container transition-all duration-300 ${isCardExpanded ? "h-[626px] min-h-[546px] sm:min-h-[626px] max-h-[calc(100dvh-56px)] sm:max-h-none" : "min-h-[135px] h-[135px]"} ${
                                             ((flippedCards[tab.id] !== false) && isCardExpanded) ? "show-back" : ""
                                           } ${activeTabStrategies[tab.id]?.observeChecked ? "card-breathe-observe" : activeTabStrategies[tab.id]?.closeChecked ? "card-breathe-close" : activeTabStrategies[tab.id]?.slChecked ? "card-breathe-sl" : activeTabStrategies[tab.id]?.addChecked ? "card-breathe-add" : activeTabStrategies[tab.id]?.tpChecked ? "card-breathe-tp" : ""}`}
                                         >
@@ -8101,9 +8176,9 @@ export default function Dashboard() {
                                           </div>
 
                                           {/* Top Center Edge Badge: Stock's Unrealized PnL (未實現損益) */}
-                                          <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 z-40 pointer-events-none flex items-center justify-center">
+                                          <div className="absolute -top-4.5 left-1/2 -translate-x-1/2 z-40 pointer-events-none flex items-center justify-center">
                                             <div
-                                              className={`flex items-center gap-1.5 text-[14px] font-black whitespace-nowrap select-none font-mono ${
+                                              className={`flex items-center gap-1.5 text-[18px] font-black whitespace-nowrap select-none font-mono ${
                                                 unrealizedPnL > 0
                                                   ? "text-emerald-500"
                                                   : unrealizedPnL < 0
@@ -8111,7 +8186,7 @@ export default function Dashboard() {
                                                     : "text-zinc-400"
                                               }`}
                                             >
-                                              <span className="text-[13px] font-bold opacity-90">未實現:</span>
+                                              <span className="text-[17px] font-bold opacity-90">未實現:</span>
                                               <span className="tabular-nums font-black">
                                                 {unrealizedPnL > 0 ? "+" : ""}
                                                 ${unrealizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -8188,7 +8263,7 @@ export default function Dashboard() {
                                                   }}
                                                   style={{ backgroundColor: bannerBgColor }}
                                                   className={`w-full h-[18px] flex items-center justify-between px-3 transition-colors duration-500 shrink-0 border-b ${isBannerActive ? "border-transparent" : "border-zinc-200/50"} select-none cursor-pointer`}
-                                                  title="雙擊開啟操作對話窗"
+                                                  title="滑鼠右鍵或雙擊開啟操作對話窗"
                                                 >
                                                   {/* Status with dot */}
                                                   <div className="flex items-center gap-1.5 font-sans">
@@ -8242,7 +8317,7 @@ export default function Dashboard() {
                                                 activeTabStrategies[tab.id]
                                                   ?.operationNote
                                                   ? `[執行操作備註]\n${activeTabStrategies[tab.id].operationNote}`
-                                                  : "雙擊開啟操作對話窗"
+                                                  : "滑鼠右鍵或雙擊開啟操作對話窗"
                                               }
                                             >
                                               <div className="flex flex-col w-full min-w-0">
@@ -8282,7 +8357,7 @@ export default function Dashboard() {
                                                           setActionActiveTab("general");
                                                           setIsActionDialogOpen(true);
                                                         }}
-                                                        title="雙擊開啟操作對話窗"
+                                                        title="滑鼠右鍵或雙擊開啟操作對話窗"
                                                       >
                                                         {tab.symbol}
                                                       </span>
@@ -8534,19 +8609,7 @@ export default function Dashboard() {
                                                   </div>
                                                 )}
 
-                                                {/* Flip hint overlay */}
-                                                {!isCinemaModeActive && (
-                                                  <div
-                                                    className="absolute bottom-0 left-0 right-0 h-[40px] z-20 pointer-events-none bg-gradient-to-t from-white/[0.03] to-transparent transition-colors"
-                                                  >
-                                                    <div className="absolute bottom-2 right-3 opacity-60 text-[10px] text-white flex items-center gap-1 font-bold">
-                                                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                                        <path d="M7 13l5 5 5-5M7 11l5-5 5 5" />
-                                                      </svg>
-                                                      ↑↓ 按住約0.5秒後上下滑動
-                                                    </div>
-                                                  </div>
-                                                )}
+                                                {/* Card Front Footer / Content End */}
                                               </>
                                             )}
                                           </div>
@@ -8572,7 +8635,7 @@ export default function Dashboard() {
                                       {isCardExpanded && (
                                         <div
                                           onClick={(e) => {
-                                            // Stop click event from bubbling to card-wrapper's onClick, so clicking on the chart side doesn't accidentally flip it back to the front!
+                                            // Stop click event from bubbling
                                             e.stopPropagation();
                                           }}
                                           style={{ pointerEvents: (flippedCards[tab.id] !== false) ? "auto" : "none" }}
@@ -8609,7 +8672,7 @@ export default function Dashboard() {
                                                   setActionActiveTab("status");
                                                   setIsActionDialogOpen(true);
                                                 }}
-                                                title="雙擊開啟操作對話窗"
+                                                title="滑鼠右鍵或雙擊開啟操作對話窗"
                                               >
                                                 <div className="flex items-center gap-1.5 font-sans">
                                                   <span className="w-1.5 h-1.5 rounded-full inline-block transition-colors duration-500" style={{ backgroundColor: textIndicatorColor }} />
@@ -8620,17 +8683,6 @@ export default function Dashboard() {
                                                       {formatTimestamp(tab.updatedAt, "yyyy/MM/dd HH:mm")}
                                                     </span>
                                                   )}
-                                                  <button
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      setFlippedCards(prev => ({ ...prev, [tab.id]: false }));
-                                                    }}
-                                                    style={{ color: labelCol, borderColor: isSpecialHighlight ? "rgba(122,74,30,0.2)" : "rgba(255,255,255,0.1)" }}
-                                                    className="w-3.5 h-3.5 flex items-center justify-center rounded-full border bg-black/10 sm:hover:bg-black/20 text-[7px] font-black transition-all leading-none"
-                                                    title="返回正面"
-                                                  >
-                                                    ✕
-                                                  </button>
                                                 </div>
                                               </div>
                                             );
@@ -8641,6 +8693,8 @@ export default function Dashboard() {
                                               plannedOrders={plannedOrders}
                                               currentPrice={tab.currentPrice}
                                               selectedSplitTrade={activeTabStrategies[tab.id]?.selectedSplitTrade || tab.selectedSplitTrade}
+                                              batchCalcMode={cardBatchCalcModes[tab.id] || globalBatchCalcMode}
+                                              onBatchCalcModeChange={(mode) => setCardBatchCalcModes(prev => ({ ...prev, [tab.id]: mode }))}
                                               onOpenActionSettings={() => {
                                                 setSelectedActionTab(tab);
                                                 setActionActiveTab("status");
@@ -8700,6 +8754,8 @@ export default function Dashboard() {
                                               virtualCapital={virtualCapital}
                                               averagingRows={tab.averagingRows}
                                               averagingRowsSys2={tab.averagingRowsSys2}
+                                              pyramidRows={tab.pyramidRows}
+                                              pyramidRowsSys2={tab.pyramidRowsSys2}
                                               plannedBuyQty={tab.plannedBuyQty}
                                               plannedBuyPercent={tab.plannedBuyPercent}
                                               holdingQuantity={tab.status !== "COMPLETED" ? effectiveHoldingQuantity : 0}
@@ -9098,6 +9154,13 @@ export default function Dashboard() {
                               key={tab.id}
                               id={`stock-card-${tab.id}`}
                               onClick={() => navigate(`/stock/${tab.id}`)}
+                              onContextMenu={(e) => {
+                                e.preventDefault();
+                                setSelectedActionTab(tab);
+                                setActionActiveTab("status");
+                                setIsActionDialogOpen(true);
+                                playClickSound();
+                              }}
                               onMouseEnter={() => tab.symbol && prefetchStockPrice(tab.symbol)}
                               className="bg-white border border-zinc-200 hover:border-zinc-350 shadow-2xs hover:shadow-md p-3.5 rounded-xl cursor-pointer relative overflow-hidden group flex flex-col justify-between transition-all duration-200 gap-2.5"
                             >
@@ -9423,6 +9486,13 @@ export default function Dashboard() {
                                     <tr
                                       key={tab.id}
                                       id={`notes-row-${tab.id}`}
+                                      onContextMenu={(e) => {
+                                        e.preventDefault();
+                                        setSelectedActionTab(tab);
+                                        setActionActiveTab("status");
+                                        setIsActionDialogOpen(true);
+                                        playClickSound();
+                                      }}
                                       className={`transition-colors duration-200 ${
                                         isHighlighted
                                           ? "bg-amber-500/10 hover:bg-amber-500/15"

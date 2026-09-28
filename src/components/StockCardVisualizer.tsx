@@ -8,6 +8,7 @@ import { getAxisLetterForColor } from "../utils/visualLinesSync";
 import { calculateBatchPlanning } from "../lib/calculations";
 import { formatTimestamp } from "../lib/dateUtils";
 import { safeSessionStorage } from "../lib/utils";
+import { playClickSound } from "../lib/audio";
 import {
   Chart as ChartJS,
   registerables,
@@ -28,6 +29,8 @@ interface Props {
   trades?: Trade[];
   averagingRows?: { price: string; quantity: string; quantity2?: string; bought?: boolean; riskFlag?: boolean }[];
   averagingRowsSys2?: { price: string; quantity: string; quantity2?: string; bought?: boolean; riskFlag?: boolean }[];
+  pyramidRows?: { price: string; quantity: string; quantity2?: string; bought?: boolean; riskFlag?: boolean }[];
+  pyramidRowsSys2?: { price: string; quantity: string; quantity2?: string; bought?: boolean; riskFlag?: boolean }[];
   plannedBuyQty?: number;
   plannedBuyPercent?: number;
   totalCapital?: number;
@@ -83,6 +86,8 @@ interface Props {
   tradeType?: string;
   isSelected?: boolean;
   onToggleSelected?: () => void;
+  batchCalcMode?: "averaging" | "breakout";
+  onBatchCalcModeChange?: (mode: "averaging" | "breakout") => void;
   onOpenMiniVisualLinesModal?: (info: {
     stockName: string;
     currentPrice?: number;
@@ -430,6 +435,8 @@ export const StockCardVisualizer: React.FC<Props> = ({
   trades,
   averagingRows,
   averagingRowsSys2,
+  pyramidRows,
+  pyramidRowsSys2,
   plannedBuyQty,
   plannedBuyPercent,
   totalCapital,
@@ -461,6 +468,8 @@ export const StockCardVisualizer: React.FC<Props> = ({
   tradeType,
   isSelected,
   onToggleSelected,
+  batchCalcMode: propBatchCalcMode,
+  onBatchCalcModeChange,
   onOpenMiniVisualLinesModal,
 }) => {
   const activeSplitTrade = selectedSplitTrade || strategy?.selectedSplitTrade;
@@ -483,6 +492,16 @@ export const StockCardVisualizer: React.FC<Props> = ({
     type: "pyramid" | "trade" | "price" | "order";
     data: any;
   } | null>(null);
+
+  const [internalBatchCalcMode, setInternalBatchCalcMode] = useState<"averaging" | "breakout">("averaging");
+  const batchCalcMode = propBatchCalcMode !== undefined ? propBatchCalcMode : internalBatchCalcMode;
+  const setBatchCalcMode = (mode: "averaging" | "breakout") => {
+    if (onBatchCalcModeChange) {
+      onBatchCalcModeChange(mode);
+    } else {
+      setInternalBatchCalcMode(mode);
+    }
+  };
 
   const [liveTrades, setLiveTrades] = useState<Trade[]>(() => {
     if (trades && trades.length > 0) return trades;
@@ -2254,7 +2273,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
       currentPrice: activePrice,
       holdingQty: currentHoldingQty,
       trades: liveTrades,
-      averagingRowsSys2,
+      averagingRowsSys2: batchCalcMode === "breakout" ? (pyramidRows || averagingRows) : averagingRowsSys2,
       plannedBuyQty,
       plannedBuyPercent,
       totalCapital,
@@ -2264,28 +2283,54 @@ export const StockCardVisualizer: React.FC<Props> = ({
     });
     const effPlannedQty = planResult.plannedQty;
 
-    const stepConfigs = [
-      { index: 0, name: "第1批", fullName: "第一批 (15%)", percent: "15%", dropPct: 3, subtitle: "初期試探" },
-      { index: 1, name: "第2批", fullName: "第二批 (25%)", percent: "25%", dropPct: 6, subtitle: "基準倉位", isBasePosition: true },
-      { index: 2, name: "第3批", fullName: "第三批 (35%)", percent: "35%", dropPct: 9, subtitle: "主力加碼" },
-      { index: 3, name: "第4批", fullName: "第四批 (25%)", percent: "25%", dropPct: 12, subtitle: "強制平倉", isForceClose: true },
+    // 依切換模式決定階梯配置:
+    // 突破加碼: 向上突破試算 (系統一 2% 階梯遞增: +2%, +4%, +6%, +8%)
+    // 分批攤平: 向下攤平試算 (系統二 3% 階梯遞減: -3%, -6%, -9%, -12%)
+    const stepConfigs = batchCalcMode === "breakout" ? [
+      { index: 0, name: "加碼#1", fullName: "第一批 (+2%)", percent: "+2%", addPct: 2, subtitle: "初期試探", isBreakout: true },
+      { index: 1, name: "加碼#2", fullName: "第二批 (+4%)", percent: "+4%", addPct: 4, subtitle: "突破加碼", isBreakout: true },
+      { index: 2, name: "加碼#3", fullName: "第三批 (+6%)", percent: "+6%", addPct: 6, subtitle: "強勢加碼", isBreakout: true },
+      { index: 3, name: "加碼#4", fullName: "第四批 (+8%)", percent: "+8%", addPct: 8, subtitle: "目標達標", isBreakout: true },
+    ] : [
+      { index: 0, name: "攤平#1", fullName: "第一批 (-3%)", percent: "-3%", dropPct: 3, subtitle: "初期試探", allocPercent: "15%" },
+      { index: 1, name: "攤平#2", fullName: "第二批 (-6%)", percent: "-6%", dropPct: 6, subtitle: "基準倉位", isBasePosition: true, allocPercent: "25%" },
+      { index: 2, name: "攤平#3", fullName: "第三批 (-9%)", percent: "-9%", dropPct: 9, subtitle: "主力加碼", allocPercent: "35%" },
+      { index: 3, name: "攤平#4", fullName: "第四批 (-12%)", percent: "-12%", dropPct: 12, subtitle: "強制平倉", isForceClose: true, allocPercent: "25%" },
     ];
 
     const baseRef = (averageCost && averageCost > 0) ? averageCost : (dynamicPrice > 0 ? dynamicPrice : (currentPrice || 0));
     const isHoldingActive = typeof holdingQuantity === "number" && holdingQuantity > 0;
 
     const pyramidStepItems = isHoldingActive ? stepConfigs.map((cfg) => {
-      const row = averagingRowsSys2?.[cfg.index];
+      let manualPrice = 0;
+      if (batchCalcMode === "breakout") {
+        const row = pyramidRows?.[cfg.index] || averagingRows?.[cfg.index];
+        if (row?.price) manualPrice = parseFloat(row.price);
+      } else {
+        const row = averagingRowsSys2?.[cfg.index];
+        if (row?.price) manualPrice = parseFloat(row.price);
+      }
+
       const planBatch = planResult?.batches?.[cfg.index];
-      const manualPrice = row?.price ? parseFloat(row.price) : 0;
-      const stepPrice = manualPrice > 0
-        ? manualPrice
-        : (baseRef > 0 ? Math.round(baseRef * (1 - cfg.dropPct / 100) * 100) / 100 : 0);
+      let stepPrice = 0;
+      if (manualPrice > 0) {
+        stepPrice = manualPrice;
+      } else if (baseRef > 0) {
+        if (batchCalcMode === "breakout") {
+          // 向上突破加碼系統一: +2%, +4%, +6%, +8%
+          stepPrice = Math.round(baseRef * (1 + ((cfg as any).addPct || (cfg.index + 1) * 2) / 100) * 100) / 100;
+        } else {
+          // 向下攤平系統二: -3%, -6%, -9%, -12%
+          stepPrice = Math.round(baseRef * (1 - ((cfg as any).dropPct || (cfg.index + 1) * 3) / 100) * 100) / 100;
+        }
+      }
 
       const targetQty = planBatch?.size || 0;
       const boughtQty = planBatch?.bought || 0;
       const remainingQty = Math.max(0, targetQty - boughtQty);
-      const isReached = (dynamicPrice > 0 && stepPrice > 0 && dynamicPrice <= stepPrice);
+      const isReached = batchCalcMode === "breakout"
+        ? (dynamicPrice > 0 && stepPrice > 0 && dynamicPrice >= stepPrice)
+        : (dynamicPrice > 0 && stepPrice > 0 && dynamicPrice <= stepPrice);
       const isFullyBought = targetQty > 0 && boughtQty >= targetQty;
       const isPartiallyBought = boughtQty > 0 && !isFullyBought;
 
@@ -2307,8 +2352,8 @@ export const StockCardVisualizer: React.FC<Props> = ({
       } else if (isReached) {
         status = 'reached';
         statusText = '價格已達標';
-        statusColor = '#0284c7';
-        statusBg = 'bg-sky-600 text-white border-sky-400 animate-pulse';
+        statusColor = batchCalcMode === "breakout" ? '#6366f1' : '#0284c7';
+        statusBg = batchCalcMode === "breakout" ? 'bg-indigo-600 text-white border-indigo-400 animate-pulse' : 'bg-sky-600 text-white border-sky-400 animate-pulse';
       }
 
       return {
@@ -2552,7 +2597,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
       getPriceFromYPct,
       uniqueSortedPrices,
     };
-  }, [plannedOrders, dynamicPrice, currentPrice, averageCost, averageCostQuantity, averagingRows, averagingRowsSys2, plannedBuyQty, plannedBuyPercent, holdingQuantity, liveTrades, totalCapital, virtualCapital, tradeType, maxStrategyRiskPool60]);
+  }, [plannedOrders, dynamicPrice, currentPrice, averageCost, averageCostQuantity, averagingRows, averagingRowsSys2, pyramidRows, pyramidRowsSys2, plannedBuyQty, plannedBuyPercent, holdingQuantity, liveTrades, totalCapital, virtualCapital, tradeType, maxStrategyRiskPool60, batchCalcMode]);
 
   if (!data)
     return (
@@ -2853,7 +2898,12 @@ export const StockCardVisualizer: React.FC<Props> = ({
                   e.stopPropagation();
                   onOpenActionSettings?.();
                 }}
-                title="雙擊開啟操作設定對話窗"
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onOpenActionSettings?.();
+                }}
+                title="滑鼠右鍵或雙擊開啟操作設定對話窗"
               >
                 <span className="stock-symbol-text font-black">{stockName}</span>
                 {(!plannedBuyPercent || plannedBuyPercent <= 0) && (
@@ -2863,6 +2913,42 @@ export const StockCardVisualizer: React.FC<Props> = ({
                 )}
               </div>
             )}
+          </div>
+
+          {/* Top-Right Corner Mode Switch: (突破加碼 | 分批攤平) */}
+          <div className="flex items-center gap-1 bg-zinc-100/95 hover:bg-zinc-100 backdrop-blur-md p-0.5 rounded-lg border border-zinc-200/90 shadow-2xs pointer-events-auto transition-all select-none shrink-0">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setBatchCalcMode("breakout");
+                playClickSound();
+              }}
+              className={`px-2 py-0.5 rounded-md text-[10.5px] sm:text-[11px] font-bold transition-all cursor-pointer select-none leading-tight flex items-center gap-1 ${
+                batchCalcMode === "breakout"
+                  ? "bg-indigo-600 text-white shadow-2xs font-black"
+                  : "text-zinc-600 hover:text-zinc-900 hover:bg-white/80"
+              }`}
+              title="股價向上突破加碼試算 (顯示系統一的標籤價格 +2%, +4%, +6%, +8%)"
+            >
+              <span>突破加碼</span>
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setBatchCalcMode("averaging");
+                playClickSound();
+              }}
+              className={`px-2 py-0.5 rounded-md text-[10.5px] sm:text-[11px] font-bold transition-all cursor-pointer select-none leading-tight flex items-center gap-1 ${
+                batchCalcMode === "averaging"
+                  ? "bg-emerald-600 text-white shadow-2xs font-black"
+                  : "text-zinc-600 hover:text-zinc-900 hover:bg-white/80"
+              }`}
+              title="股價向下攤平試算 (顯示系統二的標籤價格 -3%, -6%, -9%, -12%)"
+            >
+              <span>分批攤平</span>
+            </button>
           </div>
         </div>
 
@@ -3826,7 +3912,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
                 </span>
               </div>
               <div className="flex items-center gap-2 truncate text-zinc-100 font-medium">
-                <span>目標價: <strong className="font-mono text-amber-300 font-bold">${hoveredDetail.data.price?.toFixed(2)}</strong> <span className="text-rose-300 text-[10px] font-bold">(-{hoveredDetail.data.dropPct}%)</span></span>
+                <span>目標價: <strong className="font-mono text-amber-300 font-bold">${hoveredDetail.data.price?.toFixed(2)}</strong> <span className={hoveredDetail.data.addPct ? "text-indigo-300 text-[10px] font-bold" : "text-rose-300 text-[10px] font-bold"}>({hoveredDetail.data.addPct ? `+${hoveredDetail.data.addPct}%` : `-${hoveredDetail.data.dropPct}%`})</span></span>
                 <span className="text-zinc-500 font-bold">|</span>
                 <span>規劃: <strong className="font-mono text-white font-bold">{hoveredDetail.data.size}</strong>股</span>
                 <span className="text-zinc-500 font-bold">|</span>

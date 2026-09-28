@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useStockTabs } from '../hooks/useStockTabs';
 import { playClickSound, playSuccessSound, playPriceImportSound } from '../lib/audio';
 import { useTrades } from '../hooks/useTrades';
-import { calculateStats, generateAveragingDownRows, shouldUpdateAveragingRows, calculateBatchPlanning } from '../lib/calculations';
+import { calculateStats, generateAveragingDownRows, generatePyramidUpRows, shouldUpdateAveragingRows, calculateBatchPlanning } from '../lib/calculations';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
 import { format } from 'date-fns';
 import { Timestamp, collection, writeBatch, doc, serverTimestamp, addDoc, getDocs, deleteDoc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
-import { Trash2, BarChart3, ChevronDown, ChevronUp, Gamepad2, ShieldCheck, Upload, Download, ChevronLeft, CheckCircle2, RotateCcw, Loader2, HelpCircle, AlertTriangle, Save, Calculator, History, RefreshCw, Layers } from 'lucide-react';
+import { Trash2, BarChart3, ChevronDown, ChevronUp, Gamepad2, ShieldCheck, Upload, Download, ChevronLeft, CheckCircle2, RotateCcw, Loader2, HelpCircle, AlertTriangle, Save, Calculator, History, RefreshCw, Layers, TrendingDown, TrendingUp } from 'lucide-react';
 import { toast } from "sonner";
 import { motion, AnimatePresence } from 'motion/react';
 import { db } from '../lib/firebase';
@@ -115,14 +115,17 @@ export default function StockTabDetail() {
     fetchSettings();
   }, [user]);
 
-  // 4 rows for stock averaging (System 1: -2%, -4%, -6%, -8%)
+  // Tab state for Dual System Calculation (Down Averaging vs Up Breakout Pyramiding)
+  const [calcComparisonTab, setCalcComparisonTab] = useState<'down' | 'up'>('down');
+
+  // 4 rows for stock averaging down (System 1: -2%, -4%, -6%, -8%)
   const [averagingRows, setAveragingRows] = useState<{ price: string; quantity: string; quantity2?: string; bought?: boolean; riskFlag?: boolean }[]>([
     { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false },
     { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false },
     { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false },
     { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false }
   ]);
-  // 4 rows for stock averaging (System 2: -3%, -6%, -9%, -12%)
+  // 4 rows for stock averaging down (System 2: -3%, -6%, -9%, -12%)
   const [averagingRowsSys2, setAveragingRowsSys2] = useState<{ price: string; quantity: string; quantity2?: string; bought?: boolean; riskFlag?: boolean }[]>([
     { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false },
     { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false },
@@ -132,6 +135,24 @@ export default function StockTabDetail() {
   const [includeCurrentHolding, setIncludeCurrentHolding] = useState(true);
   const [refPnLPoint, setRefPnLPoint] = useState('');
   const [refPnLPointSys2, setRefPnLPointSys2] = useState('');
+
+  // 4 rows for stock breakout pyramid up (System 1: +2%, +4%, +6%, +8%)
+  const [pyramidRows, setPyramidRows] = useState<{ price: string; quantity: string; quantity2?: string; bought?: boolean; riskFlag?: boolean }[]>([
+    { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false },
+    { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false },
+    { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false },
+    { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false }
+  ]);
+  // 4 rows for stock breakout pyramid up (System 2: +3%, +6%, +9%, +12%)
+  const [pyramidRowsSys2, setPyramidRowsSys2] = useState<{ price: string; quantity: string; quantity2?: string; bought?: boolean; riskFlag?: boolean }[]>([
+    { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false },
+    { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false },
+    { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false },
+    { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false }
+  ]);
+  const [includeCurrentHoldingUp, setIncludeCurrentHoldingUp] = useState(true);
+  const [refPnLPointUp, setRefPnLPointUp] = useState('');
+  const [refPnLPointUpSys2, setRefPnLPointUpSys2] = useState('');
 
   // Percentage calculator states
   const [calcExpression, setCalcExpression] = useState('');
@@ -557,6 +578,13 @@ export default function StockTabDetail() {
       setCalcPercent('3');
       setCalcType('SUB');
 
+      if (tab.pyramidRows && Array.isArray(tab.pyramidRows)) {
+        setPyramidRows(tab.pyramidRows);
+      }
+      if (tab.pyramidRowsSys2 && Array.isArray(tab.pyramidRowsSys2)) {
+        setPyramidRowsSys2(tab.pyramidRowsSys2);
+      }
+
       if (curPrice > 0) {
         if (!tab.refPnLPoint) {
           setRefPnLPoint(curPrice.toFixed(2));
@@ -564,9 +592,17 @@ export default function StockTabDetail() {
         if (!tab.refPnLPointSys2) {
           setRefPnLPointSys2(curPrice.toFixed(2));
         }
+        if (!tab.refPnLPointUp) {
+          setRefPnLPointUp(curPrice.toFixed(2));
+        }
+        if (!tab.refPnLPointUpSys2) {
+          setRefPnLPointUpSys2(curPrice.toFixed(2));
+        }
       } else {
         if (!tab.refPnLPoint) setRefPnLPoint('');
         if (!tab.refPnLPointSys2) setRefPnLPointSys2('');
+        if (!tab.refPnLPointUp) setRefPnLPointUp('');
+        if (!tab.refPnLPointUpSys2) setRefPnLPointUpSys2('');
       }
     } else {
       // If user has not manually modified the base price, keep it synced to average cost (if holding) or current price
@@ -575,11 +611,11 @@ export default function StockTabDetail() {
           setCalcBasePrice(baseVal.toFixed(2));
         }
       }
-      if (curPrice > 0 && !refPnLPoint) {
-        setRefPnLPoint(curPrice.toFixed(2));
-      }
-      if (curPrice > 0 && !refPnLPointSys2) {
-        setRefPnLPointSys2(curPrice.toFixed(2));
+      if (curPrice > 0) {
+        if (!refPnLPoint) setRefPnLPoint(curPrice.toFixed(2));
+        if (!refPnLPointSys2) setRefPnLPointSys2(curPrice.toFixed(2));
+        if (!refPnLPointUp) setRefPnLPointUp(curPrice.toFixed(2));
+        if (!refPnLPointUpSys2) setRefPnLPointUpSys2(curPrice.toFixed(2));
       }
     }
   }, [tab?.id, tab?.currentPrice, stats?.averagePrice, stats?.totalQuantity]);
@@ -658,7 +694,7 @@ export default function StockTabDetail() {
     }
   }, [tab?.id, tab?.status, tab?.holdingQuantity, tab?.averageCost, stats?.totalQuantity, stats?.averagePrice, updateTab]);
 
-  // 當個股在籌碼管理區塊有持有數量數據且非已完成狀態時，自動依平均成本計算系統一與系統二組別1~4的預計購入股價 ($) 並且自動儲存設定
+  // 當個股在籌碼管理區塊有持有數量數據且非已完成狀態時，自動依平均成本計算系統一與系統二組別1~4的預計購入股價 ($)（攤平與加碼）並且自動儲存設定
   React.useEffect(() => {
     if (!tab) return;
     if (tab.status === 'COMPLETED') return;
@@ -667,21 +703,28 @@ export default function StockTabDetail() {
     if (!hasHolding) return;
 
     const avgPrice = stats.averagePrice;
-    const { sys1, sys2 } = generateAveragingDownRows(avgPrice, averagingRows, averagingRowsSys2);
+    const { sys1: down1, sys2: down2 } = generateAveragingDownRows(avgPrice, averagingRows, averagingRowsSys2);
+    const { sys1: up1, sys2: up2 } = generatePyramidUpRows(avgPrice, pyramidRows, pyramidRowsSys2);
 
-    const isSys1Changed = sys1.some((r, i) => r.price !== averagingRows[i]?.price);
-    const isSys2Changed = sys2.some((r, i) => r.price !== averagingRowsSys2[i]?.price);
+    const isSys1Changed = down1.some((r, i) => r.price !== averagingRows[i]?.price);
+    const isSys2Changed = down2.some((r, i) => r.price !== averagingRowsSys2[i]?.price);
+    const isUp1Changed = up1.some((r, i) => r.price !== pyramidRows[i]?.price);
+    const isUp2Changed = up2.some((r, i) => r.price !== pyramidRowsSys2[i]?.price);
 
-    if (isSys1Changed || isSys2Changed) {
-      if (isSys1Changed) setAveragingRows(sys1);
-      if (isSys2Changed) setAveragingRowsSys2(sys2);
+    if (isSys1Changed || isSys2Changed || isUp1Changed || isUp2Changed) {
+      if (isSys1Changed) setAveragingRows(down1);
+      if (isSys2Changed) setAveragingRowsSys2(down2);
+      if (isUp1Changed) setPyramidRows(up1);
+      if (isUp2Changed) setPyramidRowsSys2(up2);
 
-      // 自動將向下攤平試算設定儲存至 Firestore
+      // 自動將向下攤平與向上突破加碼試算設定儲存至 Firestore
       updateTab(tab.id, {
-        averagingRows: sys1,
-        averagingRowsSys2: sys2,
+        averagingRows: down1,
+        averagingRowsSys2: down2,
+        pyramidRows: up1,
+        pyramidRowsSys2: up2,
       }).catch((err) => {
-        console.error('Failed to auto-save averaging rows:', err);
+        console.error('Failed to auto-save calculation rows:', err);
       });
     }
   }, [tab?.id, tab?.status, tab?.holdingStatus, stats?.averagePrice, stats?.totalQuantity]);
@@ -700,6 +743,18 @@ export default function StockTabDetail() {
         return newRows;
       });
       setAveragingRowsSys2((prevRows) => {
+        if (prevRows[0].price === formattedResult) return prevRows;
+        const newRows = [...prevRows];
+        newRows[0] = { ...newRows[0], price: formattedResult };
+        return newRows;
+      });
+      setPyramidRows((prevRows) => {
+        if (prevRows[0].price === formattedResult) return prevRows;
+        const newRows = [...prevRows];
+        newRows[0] = { ...newRows[0], price: formattedResult };
+        return newRows;
+      });
+      setPyramidRowsSys2((prevRows) => {
         if (prevRows[0].price === formattedResult) return prevRows;
         const newRows = [...prevRows];
         newRows[0] = { ...newRows[0], price: formattedResult };
@@ -725,7 +780,7 @@ export default function StockTabDetail() {
     }
   };
 
-  // 一鍵根據手動輸入的基準股價 ($) 計算結果並匯入到系統一 (-2%, -4%, -6%, -8%)
+  // 一鍵根據手動輸入的基準股價 ($) 計算結果並匯入到系統一
   const handleImportBaseToSys1 = () => {
     const hasHolding = (stats?.totalQuantity ?? 0) !== 0 && (stats?.averagePrice ?? 0) > 0;
     const fallbackPrice = hasHolding ? stats.averagePrice : (tab?.currentPrice || 0);
@@ -735,22 +790,41 @@ export default function StockTabDetail() {
       return;
     }
     playSuccessSound();
-    const p2 = (base * 0.98).toFixed(2);
-    const p4 = (base * 0.96).toFixed(2);
-    const p6 = (base * 0.94).toFixed(2);
-    const p8 = (base * 0.92).toFixed(2);
-    setAveragingRows(prev => {
-      const next = [...prev];
-      next[0] = { ...next[0], price: p2 };
-      next[1] = { ...next[1], price: p4 };
-      next[2] = { ...next[2], price: p6 };
-      next[3] = { ...next[3], price: p8 };
-      return next;
-    });
-    toast.success(`已將基準價 $${base.toFixed(2)} 依系統一階梯 (-2%, -4%, -6%, -8%) 匯入至系統一欄位`);
+
+    if (calcComparisonTab === 'up') {
+      // 向上突破加碼: +2%, +4%, +6%, +8%
+      const p2 = (base * 1.02).toFixed(2);
+      const p4 = (base * 1.04).toFixed(2);
+      const p6 = (base * 1.06).toFixed(2);
+      const p8 = (base * 1.08).toFixed(2);
+      setPyramidRows(prev => {
+        const next = [...prev];
+        next[0] = { ...next[0], price: p2 };
+        next[1] = { ...next[1], price: p4 };
+        next[2] = { ...next[2], price: p6 };
+        next[3] = { ...next[3], price: p8 };
+        return next;
+      });
+      toast.success(`已將基準價 $${base.toFixed(2)} 依系統一階梯 (+2%, +4%, +6%, +8%) 匯入至加碼系統一欄位`);
+    } else {
+      // 向下攤平: -2%, -4%, -6%, -8%
+      const p2 = (base * 0.98).toFixed(2);
+      const p4 = (base * 0.96).toFixed(2);
+      const p6 = (base * 0.94).toFixed(2);
+      const p8 = (base * 0.92).toFixed(2);
+      setAveragingRows(prev => {
+        const next = [...prev];
+        next[0] = { ...next[0], price: p2 };
+        next[1] = { ...next[1], price: p4 };
+        next[2] = { ...next[2], price: p6 };
+        next[3] = { ...next[3], price: p8 };
+        return next;
+      });
+      toast.success(`已將基準價 $${base.toFixed(2)} 依系統一階梯 (-2%, -4%, -6%, -8%) 匯入至系統一欄位`);
+    }
   };
 
-  // 一鍵根據手動輸入的基準股價 ($) 計算結果並匯入到系統二 (-3%, -6%, -9%, -12%)
+  // 一鍵根據手動輸入的基準股價 ($) 計算結果並匯入到系統二
   const handleImportBaseToSys2 = () => {
     const hasHolding = (stats?.totalQuantity ?? 0) !== 0 && (stats?.averagePrice ?? 0) > 0;
     const fallbackPrice = hasHolding ? stats.averagePrice : (tab?.currentPrice || 0);
@@ -760,19 +834,38 @@ export default function StockTabDetail() {
       return;
     }
     playSuccessSound();
-    const p3 = (base * 0.97).toFixed(2);
-    const p6 = (base * 0.94).toFixed(2);
-    const p9 = (base * 0.91).toFixed(2);
-    const p12 = (base * 0.88).toFixed(2);
-    setAveragingRowsSys2(prev => {
-      const next = [...prev];
-      next[0] = { ...next[0], price: p3 };
-      next[1] = { ...next[1], price: p6 };
-      next[2] = { ...next[2], price: p9 };
-      next[3] = { ...next[3], price: p12 };
-      return next;
-    });
-    toast.success(`已將基準價 $${base.toFixed(2)} 依系統二階梯 (-3%, -6%, -9%, -12%) 匯入至系統二欄位`);
+
+    if (calcComparisonTab === 'up') {
+      // 向上突破加碼: +3%, +6%, +9%, +12%
+      const p3 = (base * 1.03).toFixed(2);
+      const p6 = (base * 1.06).toFixed(2);
+      const p9 = (base * 1.09).toFixed(2);
+      const p12 = (base * 1.12).toFixed(2);
+      setPyramidRowsSys2(prev => {
+        const next = [...prev];
+        next[0] = { ...next[0], price: p3 };
+        next[1] = { ...next[1], price: p6 };
+        next[2] = { ...next[2], price: p9 };
+        next[3] = { ...next[3], price: p12 };
+        return next;
+      });
+      toast.success(`已將基準價 $${base.toFixed(2)} 依系統二階梯 (+3%, +6%, +9%, +12%) 匯入至加碼系統二欄位`);
+    } else {
+      // 向下攤平: -3%, -6%, -9%, -12%
+      const p3 = (base * 0.97).toFixed(2);
+      const p6 = (base * 0.94).toFixed(2);
+      const p9 = (base * 0.91).toFixed(2);
+      const p12 = (base * 0.88).toFixed(2);
+      setAveragingRowsSys2(prev => {
+        const next = [...prev];
+        next[0] = { ...next[0], price: p3 };
+        next[1] = { ...next[1], price: p6 };
+        next[2] = { ...next[2], price: p9 };
+        next[3] = { ...next[3], price: p12 };
+        return next;
+      });
+      toast.success(`已將基準價 $${base.toFixed(2)} 依系統二階梯 (-3%, -6%, -9%, -12%) 匯入至系統二欄位`);
+    }
   };
 
   // 一鍵同步匯入雙系統欄位
@@ -785,33 +878,64 @@ export default function StockTabDetail() {
       return;
     }
     playSuccessSound();
-    // 系統一: -2%, -4%, -6%, -8%
-    const p2 = (base * 0.98).toFixed(2);
-    const p4 = (base * 0.96).toFixed(2);
-    const p6 = (base * 0.94).toFixed(2);
-    const p8 = (base * 0.92).toFixed(2);
-    setAveragingRows(prev => {
-      const next = [...prev];
-      next[0] = { ...next[0], price: p2 };
-      next[1] = { ...next[1], price: p4 };
-      next[2] = { ...next[2], price: p6 };
-      next[3] = { ...next[3], price: p8 };
-      return next;
-    });
-    // 系統二: -3%, -6%, -9%, -12%
-    const p3 = (base * 0.97).toFixed(2);
-    const p6_2 = (base * 0.94).toFixed(2);
-    const p9 = (base * 0.91).toFixed(2);
-    const p12 = (base * 0.88).toFixed(2);
-    setAveragingRowsSys2(prev => {
-      const next = [...prev];
-      next[0] = { ...next[0], price: p3 };
-      next[1] = { ...next[1], price: p6_2 };
-      next[2] = { ...next[2], price: p9 };
-      next[3] = { ...next[3], price: p12 };
-      return next;
-    });
-    toast.success(`已將基準價 $${base.toFixed(2)} 同步匯入至系統一 (-2%~-8%) 與系統二 (-3%~-12%) 全部欄位！`);
+
+    if (calcComparisonTab === 'up') {
+      // 系統一: +2%, +4%, +6%, +8%
+      const p2 = (base * 1.02).toFixed(2);
+      const p4 = (base * 1.04).toFixed(2);
+      const p6 = (base * 1.06).toFixed(2);
+      const p8 = (base * 1.08).toFixed(2);
+      setPyramidRows(prev => {
+        const next = [...prev];
+        next[0] = { ...next[0], price: p2 };
+        next[1] = { ...next[1], price: p4 };
+        next[2] = { ...next[2], price: p6 };
+        next[3] = { ...next[3], price: p8 };
+        return next;
+      });
+      // 系統二: +3%, +6%, +9%, +12%
+      const p3 = (base * 1.03).toFixed(2);
+      const p6_2 = (base * 1.06).toFixed(2);
+      const p9 = (base * 1.09).toFixed(2);
+      const p12 = (base * 1.12).toFixed(2);
+      setPyramidRowsSys2(prev => {
+        const next = [...prev];
+        next[0] = { ...next[0], price: p3 };
+        next[1] = { ...next[1], price: p6_2 };
+        next[2] = { ...next[2], price: p9 };
+        next[3] = { ...next[3], price: p12 };
+        return next;
+      });
+      toast.success(`已將基準價 $${base.toFixed(2)} 同步匯入至加碼系統一 (+2%~+8%) 與加碼系統二 (+3%~+12%) 全部欄位！`);
+    } else {
+      // 系統一: -2%, -4%, -6%, -8%
+      const p2 = (base * 0.98).toFixed(2);
+      const p4 = (base * 0.96).toFixed(2);
+      const p6 = (base * 0.94).toFixed(2);
+      const p8 = (base * 0.92).toFixed(2);
+      setAveragingRows(prev => {
+        const next = [...prev];
+        next[0] = { ...next[0], price: p2 };
+        next[1] = { ...next[1], price: p4 };
+        next[2] = { ...next[2], price: p6 };
+        next[3] = { ...next[3], price: p8 };
+        return next;
+      });
+      // 系統二: -3%, -6%, -9%, -12%
+      const p3 = (base * 0.97).toFixed(2);
+      const p6_2 = (base * 0.94).toFixed(2);
+      const p9 = (base * 0.91).toFixed(2);
+      const p12 = (base * 0.88).toFixed(2);
+      setAveragingRowsSys2(prev => {
+        const next = [...prev];
+        next[0] = { ...next[0], price: p3 };
+        next[1] = { ...next[1], price: p6_2 };
+        next[2] = { ...next[2], price: p9 };
+        next[3] = { ...next[3], price: p12 };
+        return next;
+      });
+      toast.success(`已將基準價 $${base.toFixed(2)} 同步匯入至系統一 (-2%~-8%) 與系統二 (-3%~-12%) 全部欄位！`);
+    }
   };
 
   // Calculation of stock averaging for System 1 (-2%, -4%, -6%, -8%)
@@ -892,6 +1016,84 @@ export default function StockTabDetail() {
     };
   };
 
+  // Calculation of stock breakout pyramid up for System 1 (+2%, +4%, +6%, +8%)
+  const calculatePyramidUp = () => {
+    let newSharesSum = 0;
+    let newCostSum = 0;
+
+    pyramidRows.forEach(row => {
+      const p = parseFloat(row.price);
+      const q1 = parseFloat(row.quantity) || 0;
+      const q2 = parseFloat(row.quantity2 ?? '') || 0;
+      const q = q1 + q2;
+      if (!isNaN(p) && p > 0 && q > 0) {
+        newSharesSum += q;
+        newCostSum += p * q;
+      }
+    });
+
+    const currentShares = includeCurrentHoldingUp ? stats.totalQuantity : 0;
+    const currentPrice = includeCurrentHoldingUp ? stats.averagePrice : 0;
+    const currentCost = currentShares * currentPrice;
+
+    const totalShares = currentShares + newSharesSum;
+    const totalCost = currentCost + newCostSum;
+    const finalAveragePrice = totalShares > 0 ? (totalCost / totalShares) : 0;
+
+    let costDiffPercent = 0;
+    if (stats.averagePrice > 0 && finalAveragePrice > 0) {
+      costDiffPercent = ((finalAveragePrice - stats.averagePrice) / stats.averagePrice) * 100;
+    }
+
+    return {
+      newSharesSum,
+      newCostSum,
+      totalShares,
+      totalCost,
+      finalAveragePrice,
+      costDiffPercent
+    };
+  };
+
+  // Calculation of stock breakout pyramid up for System 2 (+3%, +6%, +9%, +12%)
+  const calculatePyramidUpSys2 = () => {
+    let newSharesSum = 0;
+    let newCostSum = 0;
+
+    pyramidRowsSys2.forEach(row => {
+      const p = parseFloat(row.price);
+      const q1 = parseFloat(row.quantity) || 0;
+      const q2 = parseFloat(row.quantity2 ?? '') || 0;
+      const q = q1 + q2;
+      if (!isNaN(p) && p > 0 && q > 0) {
+        newSharesSum += q;
+        newCostSum += p * q;
+      }
+    });
+
+    const currentShares = includeCurrentHoldingUp ? stats.totalQuantity : 0;
+    const currentPrice = includeCurrentHoldingUp ? stats.averagePrice : 0;
+    const currentCost = currentShares * currentPrice;
+
+    const totalShares = currentShares + newSharesSum;
+    const totalCost = currentCost + newCostSum;
+    const finalAveragePrice = totalShares > 0 ? (totalCost / totalShares) : 0;
+
+    let costDiffPercent = 0;
+    if (stats.averagePrice > 0 && finalAveragePrice > 0) {
+      costDiffPercent = ((finalAveragePrice - stats.averagePrice) / stats.averagePrice) * 100;
+    }
+
+    return {
+      newSharesSum,
+      newCostSum,
+      totalShares,
+      totalCost,
+      finalAveragePrice,
+      costDiffPercent
+    };
+  };
+
   const avgResult = calculateAveraging();
   const parsedRefPnL = parseFloat(refPnLPoint);
   const hasRefPnL = refPnLPoint.trim() !== '' && !isNaN(parsedRefPnL);
@@ -904,6 +1106,20 @@ export default function StockTabDetail() {
   const hasRefPnLSys2 = refPnLPointSys2.trim() !== '' && !isNaN(parsedRefPnLSys2);
   const calculatedPnLResultSys2 = hasRefPnLSys2
     ? (avgResultSys2.finalAveragePrice - parsedRefPnLSys2) * avgResultSys2.totalShares
+    : null;
+
+  const pyrResult = calculatePyramidUp();
+  const parsedRefPnLUp = parseFloat(refPnLPointUp);
+  const hasRefPnLUp = refPnLPointUp.trim() !== '' && !isNaN(parsedRefPnLUp);
+  const calculatedPnLResultUp = hasRefPnLUp
+    ? (parsedRefPnLUp - pyrResult.finalAveragePrice) * pyrResult.totalShares
+    : null;
+
+  const pyrResultSys2 = calculatePyramidUpSys2();
+  const parsedRefPnLUpSys2 = parseFloat(refPnLPointUpSys2);
+  const hasRefPnLUpSys2 = refPnLPointUpSys2.trim() !== '' && !isNaN(parsedRefPnLUpSys2);
+  const calculatedPnLResultUpSys2 = hasRefPnLUpSys2
+    ? (parsedRefPnLUpSys2 - pyrResultSys2.finalAveragePrice) * pyrResultSys2.totalShares
     : null;
 
   // Four-batch transaction planning calculations
@@ -1164,36 +1380,48 @@ export default function StockTabDetail() {
       ? stats.averagePrice
       : (tab?.currentPrice && tab.currentPrice > 0 ? tab.currentPrice : 0);
 
-    // 系統一階梯比例: 第一欄 -2%, 第二欄 -4%, 第三欄 -6%, 第四欄 -8%
-    const sys1Ratios = [0.98, 0.96, 0.94, 0.92];
-    const sys1PercentTexts = ['-2%', '-4%', '-6%', '-8%'];
-    // 系統二階梯比例: 第一欄 -3%, 第二欄 -6%, 第三欄 -9%, 第四欄 -12%
-    const sys2Ratios = [0.97, 0.94, 0.91, 0.88];
-    const sys2PercentTexts = ['-3%', '-6%', '-9%', '-12%'];
+    // 系統一階梯比例:
+    // 向下攤平: -2%, -4%, -6%, -8%
+    const sys1RatiosDown = [0.98, 0.96, 0.94, 0.92];
+    const sys1PercentTextsDown = ['-2%', '-4%', '-6%', '-8%'];
+    // 向上加碼: +2%, +4%, +6%, +8%
+    const sys1RatiosUp = [1.02, 1.04, 1.06, 1.08];
+    const sys1PercentTextsUp = ['+2%', '+4%', '+6%', '+8%'];
+
+    // 系統二階梯比例:
+    // 向下攤平: -3%, -6%, -9%, -12%
+    const sys2RatiosDown = [0.97, 0.94, 0.91, 0.88];
+    const sys2PercentTextsDown = ['-3%', '-6%', '-9%', '-12%'];
+    // 向上加碼: +3%, +6%, +9%, +12%
+    const sys2RatiosUp = [1.03, 1.06, 1.09, 1.12];
+    const sys2PercentTextsUp = ['+3%', '+6%', '+9%', '+12%'];
 
     if (batchIndex >= 0 && batchIndex < 4) {
-      const priceSys1 = basePrice > 0 ? (basePrice * sys1Ratios[batchIndex]).toFixed(2) : '';
-      const priceSys2 = basePrice > 0 ? (basePrice * sys2Ratios[batchIndex]).toFixed(2) : '';
+      const priceSys1Down = basePrice > 0 ? (basePrice * sys1RatiosDown[batchIndex]).toFixed(2) : '';
+      const priceSys2Down = basePrice > 0 ? (basePrice * sys2RatiosDown[batchIndex]).toFixed(2) : '';
+      const priceSys1Up = basePrice > 0 ? (basePrice * sys1RatiosUp[batchIndex]).toFixed(2) : '';
+      const priceSys2Up = basePrice > 0 ? (basePrice * sys2RatiosUp[batchIndex]).toFixed(2) : '';
 
+      // 更新向下攤平系統一
       setAveragingRows(prev => {
         const next = [...prev];
         const currentRow = next[batchIndex] || { price: '', quantity: '', quantity2: '' };
         if (targetSplit === 1) {
           next[batchIndex] = {
             ...currentRow,
-            price: currentRow.price || priceSys1,
+            price: currentRow.price || priceSys1Down,
             quantity: split1Qty.toString(),
           };
         } else if (targetSplit === 2) {
           next[batchIndex] = {
             ...currentRow,
-            price: currentRow.price || priceSys1,
+            price: currentRow.price || priceSys1Down,
             quantity2: split2Qty.toString(),
           };
         } else {
           next[batchIndex] = {
             ...currentRow,
-            price: currentRow.price || priceSys1,
+            price: currentRow.price || priceSys1Down,
             quantity: split1Qty.toString(),
             quantity2: split2Qty.toString(),
           };
@@ -1201,25 +1429,80 @@ export default function StockTabDetail() {
         return next;
       });
 
+      // 更新向下攤平系統二
       setAveragingRowsSys2(prev => {
         const next = [...prev];
         const currentRow = next[batchIndex] || { price: '', quantity: '', quantity2: '' };
         if (targetSplit === 1) {
           next[batchIndex] = {
             ...currentRow,
-            price: currentRow.price || priceSys2,
+            price: currentRow.price || priceSys2Down,
             quantity: split1Qty.toString(),
           };
         } else if (targetSplit === 2) {
           next[batchIndex] = {
             ...currentRow,
-            price: currentRow.price || priceSys2,
+            price: currentRow.price || priceSys2Down,
             quantity2: split2Qty.toString(),
           };
         } else {
           next[batchIndex] = {
             ...currentRow,
-            price: currentRow.price || priceSys2,
+            price: currentRow.price || priceSys2Down,
+            quantity: split1Qty.toString(),
+            quantity2: split2Qty.toString(),
+          };
+        }
+        return next;
+      });
+
+      // 同步更新向上突破加碼系統一
+      setPyramidRows(prev => {
+        const next = [...prev];
+        const currentRow = next[batchIndex] || { price: '', quantity: '', quantity2: '' };
+        if (targetSplit === 1) {
+          next[batchIndex] = {
+            ...currentRow,
+            price: currentRow.price || priceSys1Up,
+            quantity: split1Qty.toString(),
+          };
+        } else if (targetSplit === 2) {
+          next[batchIndex] = {
+            ...currentRow,
+            price: currentRow.price || priceSys1Up,
+            quantity2: split2Qty.toString(),
+          };
+        } else {
+          next[batchIndex] = {
+            ...currentRow,
+            price: currentRow.price || priceSys1Up,
+            quantity: split1Qty.toString(),
+            quantity2: split2Qty.toString(),
+          };
+        }
+        return next;
+      });
+
+      // 同步更新向上突破加碼系統二
+      setPyramidRowsSys2(prev => {
+        const next = [...prev];
+        const currentRow = next[batchIndex] || { price: '', quantity: '', quantity2: '' };
+        if (targetSplit === 1) {
+          next[batchIndex] = {
+            ...currentRow,
+            price: currentRow.price || priceSys2Up,
+            quantity: split1Qty.toString(),
+          };
+        } else if (targetSplit === 2) {
+          next[batchIndex] = {
+            ...currentRow,
+            price: currentRow.price || priceSys2Up,
+            quantity2: split2Qty.toString(),
+          };
+        } else {
+          next[batchIndex] = {
+            ...currentRow,
+            price: currentRow.price || priceSys2Up,
             quantity: split1Qty.toString(),
             quantity2: split2Qty.toString(),
           };
@@ -1228,11 +1511,11 @@ export default function StockTabDetail() {
       });
 
       if (targetSplit === 1) {
-        toast.success(`已將 ${batchName} (${split1Qty}股) 帶入第 ${batchIndex + 1} 組系統一與系統二第一預計購入數量`);
+        toast.success(`已將 ${batchName} (${split1Qty}股) 帶入第 ${batchIndex + 1} 組雙系統第一預計購入數量`);
       } else if (targetSplit === 2) {
-        toast.success(`已將 ${batchName} (${split2Qty}股) 帶入第 ${batchIndex + 1} 組系統一與系統二第二預計購入數量`);
+        toast.success(`已將 ${batchName} (${split2Qty}股) 帶入第 ${batchIndex + 1} 組雙系統第二預計購入數量`);
       } else {
-        toast.success(`已將 ${batchName} 拆分雙數量 (${split1Qty} + ${split2Qty} 股) 分別帶入第 ${batchIndex + 1} 組：系統一 (${sys1PercentTexts[batchIndex]}) 與系統二 (${sys2PercentTexts[batchIndex]}) 的預計購入數量`);
+        toast.success(`已將 ${batchName} 拆分雙數量 (${split1Qty} + ${split2Qty} 股) 同步帶入第 ${batchIndex + 1} 組攤平與加碼雙系統試算！`);
       }
     }
   };
@@ -2441,682 +2724,1338 @@ export default function StockTabDetail() {
                     )}
                   </div>
 
-                  {/* 股價攤平 (雙系統) 與 比例計算工具 */}
+                  {/* 股價攤平 (雙系統) / 突破加碼 (雙系統) 與 比例計算工具 */}
                   <div className="mt-6 pt-6 border-t border-zinc-200/80 space-y-6">
-                    {/* Header for 股價向下攤平試算區塊 */}
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-zinc-150">
-                      <div>
-                        <div className="flex items-center space-x-2 flex-wrap gap-y-1">
-                          <div className="p-1 bg-emerald-50 text-emerald-700 rounded-md">
-                            <span className="text-xs">📉</span>
-                          </div>
-                          <h4 className="font-bold text-base tracking-wide text-zinc-800">股價向下攤平試算 (雙系統對比)</h4>
-                          {tab.status !== 'COMPLETED' && stats.totalQuantity > 0 && stats.averagePrice > 0 && (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200/80 px-2 py-0.5 rounded-md">
-                              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                              已依平均成本 (${stats.averagePrice.toFixed(2)}) 自動試算組別 1~4 股價並儲存
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-[11px] text-zinc-500 mt-0.5">
-                          系統一採用 2% 遞減策略；系統二採用 3% 遞減策略。當有持有數量時，系統會自動隨平均成本變動計算並匯入組別 1~4 預計購入股價 ($) 且即時儲存。
-                        </p>
-                      </div>
+                    {/* 頂部 Tab 切換列：股價向下攤平試算 (雙系統對比) | 股價向上突破加碼試算 (雙系統對比) */}
+                    <div className="flex items-center gap-2 p-1.5 bg-zinc-100/90 dark:bg-zinc-800/80 rounded-2xl border border-zinc-200/80 shadow-2xs">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          playClickSound();
+                          setCalcComparisonTab('down');
+                        }}
+                        className={`flex-1 py-2.5 px-4 rounded-xl text-xs sm:text-sm font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                          calcComparisonTab === 'down'
+                            ? 'bg-emerald-800 text-white shadow-sm ring-1 ring-emerald-700/50'
+                            : 'bg-transparent text-zinc-600 hover:text-zinc-900 hover:bg-zinc-200/50'
+                        }`}
+                      >
+                        <TrendingDown className="w-4 h-4" />
+                        <span>股價向下攤平試算 (雙系統對比)</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-mono font-bold ${
+                          calcComparisonTab === 'down' ? 'bg-emerald-700/80 text-emerald-100' : 'bg-zinc-200/80 text-zinc-500'
+                        }`}>
+                          -2% ~ -12%
+                        </span>
+                      </button>
 
-                      <div className="flex items-center gap-3 shrink-0">
-                        <label className="flex items-center gap-1.5 cursor-pointer select-none text-xs text-zinc-700 font-semibold bg-zinc-100/80 hover:bg-zinc-100 px-3 py-1.5 rounded-lg border border-zinc-200/60 transition-colors">
-                          <input
-                            type="checkbox"
-                            checked={includeCurrentHolding}
-                            onChange={(e) => setIncludeCurrentHolding(e.target.checked)}
-                            className="rounded border-zinc-300 text-[#0F6E56] focus:ring-[#0F6E56] h-3.5 w-3.5"
-                          />
-                          <span>包含當前庫存 ({stats.totalQuantity} 股 @ ${stats.averagePrice.toFixed(2)})</span>
-                        </label>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setAveragingRows([
-                              { price: '', quantity: '', bought: false, riskFlag: false },
-                              { price: '', quantity: '', bought: false, riskFlag: false },
-                              { price: '', quantity: '', bought: false, riskFlag: false },
-                              { price: '', quantity: '', bought: false, riskFlag: false }
-                            ]);
-                            setAveragingRowsSys2([
-                              { price: '', quantity: '', bought: false, riskFlag: false },
-                              { price: '', quantity: '', bought: false, riskFlag: false },
-                              { price: '', quantity: '', bought: false, riskFlag: false },
-                              { price: '', quantity: '', bought: false, riskFlag: false }
-                            ]);
-                            setRefPnLPoint('');
-                            setRefPnLPointSys2('');
-                          }}
-                          className="text-xs font-bold text-zinc-400 hover:text-zinc-700 transition-colors px-2 py-1"
-                          title="清除雙系統所有輸入"
-                        >
-                          ✕ 清除全域輸入
-                        </button>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          playClickSound();
+                          setCalcComparisonTab('up');
+                        }}
+                        className={`flex-1 py-2.5 px-4 rounded-xl text-xs sm:text-sm font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                          calcComparisonTab === 'up'
+                            ? 'bg-emerald-800 text-white shadow-sm ring-1 ring-emerald-700/50'
+                            : 'bg-transparent text-zinc-600 hover:text-zinc-900 hover:bg-zinc-200/50'
+                        }`}
+                      >
+                        <TrendingUp className="w-4 h-4" />
+                        <span>股價向上突破加碼試算 (雙系統對比)</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-mono font-bold ${
+                          calcComparisonTab === 'up' ? 'bg-emerald-700/80 text-emerald-100' : 'bg-zinc-200/80 text-zinc-500'
+                        }`}>
+                          +2% ~ +12%
+                        </span>
+                      </button>
                     </div>
 
-                    {/* Dual System Comparison Layout: Left = System 1 (-2%/-4%/-6%/-8%), Right = System 2 (-3%/-6%/-9%/-12%) */}
-                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-                      {/* System 1 (Left) */}
-                      <div className="bg-white/90 border border-emerald-200/70 rounded-2xl p-4 shadow-2xs space-y-3.5 flex flex-col justify-between">
-                        <div className="space-y-3">
-                          <div className="flex items-center justify-between pb-2 border-b border-emerald-100/80">
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs font-black text-white bg-[#0F6E56] px-2.5 py-0.5 rounded-md shadow-2xs">
-                                系統一
-                              </span>
-                              <span className="text-xs font-bold text-zinc-700">2% 階梯攤平</span>
+                    {/* Tab 1: 股價向下攤平試算 (雙系統對比) */}
+                    {calcComparisonTab === 'down' && (
+                      <div className="space-y-6">
+                        {/* Header for 股價向下攤平試算區塊 */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-zinc-150">
+                          <div>
+                            <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                              <div className="p-1 bg-emerald-50 text-emerald-700 rounded-md">
+                                <span className="text-xs">📉</span>
+                              </div>
+                              <h4 className="font-bold text-base tracking-wide text-zinc-800">股價向下攤平試算 (雙系統對比)</h4>
+                              {tab.status !== 'COMPLETED' && stats.totalQuantity > 0 && stats.averagePrice > 0 && (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200/80 px-2 py-0.5 rounded-md">
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                  已依平均成本 (${stats.averagePrice.toFixed(2)}) 自動試算組別 1~4 股價並儲存
+                                </span>
+                              )}
                             </div>
-                            <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/60">
-                              -2% / -4% / -6% / -8%
-                            </span>
+                            <p className="text-[11px] text-zinc-500 mt-0.5">
+                              系統一採用 2% 遞減策略；系統二採用 3% 遞減策略。當有持有數量時，系統會自動隨平均成本變動計算並匯入組別 1~4 預計購入股價 ($) 且即時儲存。
+                            </p>
                           </div>
 
-                          {/* 剩餘預計購買與當前順序資訊 (系統一) */}
-                          {plannedQty > 0 && (
-                            <div className="text-[11px] font-bold bg-[#B1C28D]/20 text-[#6F7D50] border border-[#B1C28D]/40 px-2.5 py-1 rounded-xl flex flex-wrap items-center justify-between gap-1.5 shadow-2xs">
-                              <div className="flex items-center gap-1.5">
-                                <span className="w-1.5 h-1.5 rounded-full bg-[#6F7D50] animate-pulse" />
-                                <span>剩餘預計購買: <span className="font-mono font-black">{remainingToBuy}</span> 股</span>
-                              </div>
-                              <div>
-                                <span>當前順序: <span className="font-bold text-zinc-800">{currentBatchOrderText}</span></span>
-                                {currentBatchOrderText !== "無" && currentBatchOrderText !== "已滿批" && (
-                                  <span className="ml-1 text-zinc-700 font-medium">
-                                    (已購 <span className="font-mono font-bold text-zinc-800">{currentBatchBought}</span> / 餘額 <span className="font-mono font-bold text-zinc-800">{currentBatchRemaining}</span> 股)
+                          <div className="flex items-center gap-3 shrink-0">
+                            <label className="flex items-center gap-1.5 cursor-pointer select-none text-xs text-zinc-700 font-semibold bg-zinc-100/80 hover:bg-zinc-100 px-3 py-1.5 rounded-lg border border-zinc-200/60 transition-colors">
+                              <input
+                                type="checkbox"
+                                checked={includeCurrentHolding}
+                                onChange={(e) => setIncludeCurrentHolding(e.target.checked)}
+                                className="rounded border-zinc-300 text-[#0F6E56] focus:ring-[#0F6E56] h-3.5 w-3.5"
+                              />
+                              <span>包含當前庫存 ({stats.totalQuantity} 股 @ ${stats.averagePrice.toFixed(2)})</span>
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAveragingRows([
+                                  { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false },
+                                  { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false },
+                                  { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false },
+                                  { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false }
+                                ]);
+                                setAveragingRowsSys2([
+                                  { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false },
+                                  { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false },
+                                  { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false },
+                                  { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false }
+                                ]);
+                                setRefPnLPoint('');
+                                setRefPnLPointSys2('');
+                              }}
+                              className="text-xs font-bold text-zinc-400 hover:text-zinc-700 transition-colors px-2 py-1"
+                              title="清除雙系統向下攤平所有輸入"
+                            >
+                              ✕ 清除攤平輸入
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Dual System Comparison Layout: Left = System 1 (-2%/-4%/-6%/-8%), Right = System 2 (-3%/-6%/-9%/-12%) */}
+                        <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+                          {/* System 1 (Left: -2% / -4% / -6% / -8%) */}
+                          <div className="bg-white/90 border border-emerald-200/70 rounded-2xl p-4 shadow-2xs space-y-3.5 flex flex-col justify-between">
+                            <div className="space-y-3">
+                              <div className="flex items-center justify-between pb-2 border-b border-emerald-100/80">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-black text-white bg-[#0F6E56] px-2.5 py-0.5 rounded-md shadow-2xs">
+                                    系統一
                                   </span>
-                                )}
+                                  <span className="text-xs font-bold text-zinc-700">2% 階梯攤平</span>
+                                </div>
+                                <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/60">
+                                  -2% / -4% / -6% / -8%
+                                </span>
                               </div>
-                            </div>
-                          )}
 
-                          <div className="space-y-2">
-                            <div className="grid grid-cols-12 gap-1.5 text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-1 items-center">
-                              <span className="col-span-3 text-left">組別</span>
-                              <span className="col-span-3">預計購入股價 ($)</span>
-                              <span className="col-span-4">預計購入數量 (股)</span>
-                              <span className="col-span-2 text-right pr-1">狀態</span>
-                            </div>
-
-                            {averagingRows.map((row, idx) => {
-                              const discountLabels = ['-2%', '-4%', '-6%', '-8%'];
-                              const discountLabel = discountLabels[idx];
-                              const isBasePosition = idx === 2; // 系統一第三欄位 (-6%) 為基準倉位(下注終局)
-                              const isHighlightedRow = isBasePosition;
-                              const riskMessages: Record<number, string> = {
-                                1: '(進入觀察倉位)',
-                                2: '(進入基準倉位(下注終局))',
-                                3: '(進入強制關閉倉位)',
-                              };
-
-                              return (
-                                <div
-                                  key={idx}
-                                  className={`grid grid-cols-12 gap-1.5 items-center p-1 rounded-xl transition-all ${
-                                    isHighlightedRow
-                                      ? 'bg-rose-50/80 border border-rose-300/90 ring-1 ring-rose-200 shadow-2xs'
-                                      : 'border border-transparent'
-                                  }`}
-                                >
-                                  {/* 組別 */}
-                                  <div className="col-span-3 flex flex-col justify-center min-w-0">
-                                    <div className="flex items-center gap-1 min-w-0 flex-wrap">
-                                      <input
-                                        type="checkbox"
-                                        checked={!!row.bought}
-                                        onChange={(e) => {
-                                          const newRows = [...averagingRows];
-                                          newRows[idx] = { ...newRows[idx], bought: e.target.checked };
-                                          setAveragingRows(newRows);
-                                        }}
-                                        className="rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500 h-3.5 w-3.5 cursor-pointer shrink-0"
-                                        title={row.bought ? "已購入" : "勾選標記為已購入"}
-                                      />
-                                      <span className={`text-xs font-bold shrink-0 ${isHighlightedRow ? 'text-rose-700 font-black' : 'text-zinc-500'}`}>
-                                        #{idx + 1}
+                              {/* 剩餘預計購買與當前順序資訊 (系統一) */}
+                              {plannedQty > 0 && (
+                                <div className="text-[11px] font-bold bg-[#B1C28D]/20 text-[#6F7D50] border border-[#B1C28D]/40 px-2.5 py-1 rounded-xl flex flex-wrap items-center justify-between gap-1.5 shadow-2xs">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-[#6F7D50] animate-pulse" />
+                                    <span>剩餘預計購買: <span className="font-mono font-black">{remainingToBuy}</span> 股</span>
+                                  </div>
+                                  <div>
+                                    <span>當前順序: <span className="font-bold text-zinc-800">{currentBatchOrderText}</span></span>
+                                    {currentBatchOrderText !== "無" && currentBatchOrderText !== "已滿批" && (
+                                      <span className="ml-1 text-zinc-700 font-medium">
+                                        (已購 <span className="font-mono font-bold text-zinc-800">{currentBatchBought}</span> / 餘額 <span className="font-mono font-bold text-zinc-800">{currentBatchRemaining}</span> 股)
                                       </span>
-                                      {discountLabel && (
-                                        <span
-                                          className={`text-[11px] font-black shrink-0 ${
-                                            isHighlightedRow
-                                              ? 'text-rose-700 bg-rose-200/90 px-1 py-0.5 rounded border border-rose-300 shadow-2xs flex items-center gap-0.5'
-                                              : 'text-red-600'
-                                          }`}
-                                        >
-                                          {discountLabel}
-                                          {isBasePosition && <span className="text-[10px] font-bold text-rose-800">(基準倉位)</span>}
-                                        </span>
-                                      )}
+                                    )}
+                                  </div>
+                                </div>
+                              )}
 
-                                      {idx >= 1 && (
-                                        <label
-                                          className="inline-flex items-center cursor-pointer ml-0.5 shrink-0"
-                                          title="點擊勾選切換風險倉位提示"
-                                        >
+                              <div className="space-y-2">
+                                <div className="grid grid-cols-12 gap-1.5 text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-1 items-center">
+                                  <span className="col-span-3 text-left">組別</span>
+                                  <span className="col-span-3">預計購入股價 ($)</span>
+                                  <span className="col-span-4">預計購入數量 (股)</span>
+                                  <span className="col-span-2 text-right pr-1">狀態</span>
+                                </div>
+
+                                {averagingRows.map((row, idx) => {
+                                  const discountLabels = ['-2%', '-4%', '-6%', '-8%'];
+                                  const discountLabel = discountLabels[idx];
+                                  const isBasePosition = idx === 2; // 系統一第三欄位 (-6%) 為基準倉位(下注終局)
+                                  const isHighlightedRow = isBasePosition;
+                                  const riskMessages: Record<number, string> = {
+                                    1: '(進入觀察倉位)',
+                                    2: '(進入基準倉位(下注終局))',
+                                    3: '(進入強制關閉倉位)',
+                                  };
+
+                                  return (
+                                    <div
+                                      key={idx}
+                                      className={`grid grid-cols-12 gap-1.5 items-center p-1 rounded-xl transition-all ${
+                                        isHighlightedRow
+                                          ? 'bg-rose-50/80 border border-rose-300/90 ring-1 ring-rose-200 shadow-2xs'
+                                          : 'border border-transparent'
+                                      }`}
+                                    >
+                                      {/* 組別 */}
+                                      <div className="col-span-3 flex flex-col justify-center min-w-0">
+                                        <div className="flex items-center gap-1 min-w-0 flex-wrap">
                                           <input
                                             type="checkbox"
-                                            checked={row.riskFlag !== undefined ? !!row.riskFlag : isHighlightedRow}
+                                            checked={!!row.bought}
                                             onChange={(e) => {
                                               const newRows = [...averagingRows];
-                                              newRows[idx] = { ...newRows[idx], riskFlag: e.target.checked };
+                                              newRows[idx] = { ...newRows[idx], bought: e.target.checked };
                                               setAveragingRows(newRows);
                                             }}
-                                            className="sr-only"
+                                            className="rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500 h-3.5 w-3.5 cursor-pointer shrink-0"
+                                            title={row.bought ? "已購入" : "勾選標記為已購入"}
                                           />
-                                          <div className={`p-0.5 rounded transition-all flex items-center justify-center ${
-                                            (row.riskFlag ?? isHighlightedRow)
-                                              ? 'bg-rose-100 text-rose-600 ring-1 ring-rose-400'
-                                              : 'text-zinc-400 hover:text-rose-500 hover:bg-rose-50'
-                                          }`}>
-                                            <AlertTriangle className="h-3 w-3 fill-current" />
+                                          <span className={`text-xs font-bold shrink-0 ${isHighlightedRow ? 'text-rose-700 font-black' : 'text-zinc-500'}`}>
+                                            #{idx + 1}
+                                          </span>
+                                          {discountLabel && (
+                                            <span
+                                              className={`text-[11px] font-black shrink-0 ${
+                                                isHighlightedRow
+                                                  ? 'text-rose-700 bg-rose-200/90 px-1 py-0.5 rounded border border-rose-300 shadow-2xs flex items-center gap-0.5'
+                                                  : 'text-red-600'
+                                              }`}
+                                            >
+                                              {discountLabel}
+                                              {isBasePosition && <span className="text-[10px] font-bold text-rose-800">(基準倉位)</span>}
+                                            </span>
+                                          )}
+
+                                          {idx >= 1 && (
+                                            <label
+                                              className="inline-flex items-center cursor-pointer ml-0.5 shrink-0"
+                                              title="點擊勾選切換風險倉位提示"
+                                            >
+                                              <input
+                                                type="checkbox"
+                                                checked={row.riskFlag !== undefined ? !!row.riskFlag : isHighlightedRow}
+                                                onChange={(e) => {
+                                                  const newRows = [...averagingRows];
+                                                  newRows[idx] = { ...newRows[idx], riskFlag: e.target.checked };
+                                                  setAveragingRows(newRows);
+                                                }}
+                                                className="sr-only"
+                                              />
+                                              <div className={`p-0.5 rounded transition-all flex items-center justify-center ${
+                                                (row.riskFlag ?? isHighlightedRow)
+                                                  ? 'bg-rose-100 text-rose-600 ring-1 ring-rose-400'
+                                                  : 'text-zinc-400 hover:text-rose-500 hover:bg-rose-50'
+                                              }`}>
+                                                <AlertTriangle className="h-3 w-3 fill-current" />
+                                              </div>
+                                            </label>
+                                          )}
+                                        </div>
+
+                                        {/* 組別已購數量註明與拆分佔比 */}
+                                        {batchConfigList[idx] && plannedQty > 0 && (
+                                          <div className="text-[10px] text-zinc-600 font-medium mt-0.5 flex items-center gap-1 flex-wrap">
+                                            <span className="text-zinc-500 font-bold">已購:</span>
+                                            <span className="font-mono font-bold text-emerald-800">{batchConfigList[idx].bought}</span>
+                                            <span className="text-zinc-400">/</span>
+                                            <span className="font-mono text-zinc-700">{batchConfigList[idx].size}股</span>
+                                            <span className="text-[9px] text-zinc-400 font-semibold">({batchConfigList[idx].split1.percent}+{batchConfigList[idx].split2.percent})</span>
                                           </div>
-                                        </label>
-                                      )}
-                                    </div>
-
-                                    {/* 組別已購數量註明與拆分佔比 */}
-                                    {batchConfigList[idx] && plannedQty > 0 && (
-                                      <div className="text-[10px] text-zinc-600 font-medium mt-0.5 flex items-center gap-1 flex-wrap">
-                                        <span className="text-zinc-500 font-bold">已購:</span>
-                                        <span className="font-mono font-bold text-emerald-800">{batchConfigList[idx].bought}</span>
-                                        <span className="text-zinc-400">/</span>
-                                        <span className="font-mono text-zinc-700">{batchConfigList[idx].size}股</span>
-                                        <span className="text-[9px] text-zinc-400 font-semibold">({batchConfigList[idx].split1.percent}+{batchConfigList[idx].split2.percent})</span>
+                                        )}
                                       </div>
-                                    )}
-                                  </div>
 
-                                  {/* 預計購入股價 */}
-                                  <div className="col-span-3 relative">
-                                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-zinc-400 font-semibold">$</span>
-                                    <Input
-                                      type="number"
-                                      placeholder="股價"
-                                      value={row.price}
-                                      onChange={(e) => {
-                                        const newRows = [...averagingRows];
-                                        newRows[idx] = { ...newRows[idx], price: e.target.value };
-                                        setAveragingRows(newRows);
-                                      }}
-                                      className={`h-8 pl-5 pr-1 text-xs font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 ${
-                                        isHighlightedRow ? 'border-rose-300 font-bold text-rose-900 bg-rose-50/30' : ''
-                                      }`}
-                                    />
-                                  </div>
-
-                                  {/* 預計購入數量 (拆分為兩個輸入框，分別為拆分一與拆分二預計購入數量) + 清除按鈕 */}
-                                  <div className="col-span-4 flex flex-col justify-center">
-                                    <div className="flex items-center gap-1">
-                                      <div className="flex-1 flex items-center gap-0.5 min-w-0">
+                                      {/* 預計購入股價 */}
+                                      <div className="col-span-3 relative">
+                                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-zinc-400 font-semibold">$</span>
                                         <Input
                                           type="number"
-                                          placeholder={batchConfigList[idx] ? `${batchConfigList[idx].split1.size}` : "股數"}
-                                          value={row.quantity}
+                                          placeholder="股價"
+                                          value={row.price}
                                           onChange={(e) => {
                                             const newRows = [...averagingRows];
-                                            newRows[idx] = { ...newRows[idx], quantity: e.target.value };
+                                            newRows[idx] = { ...newRows[idx], price: e.target.value };
                                             setAveragingRows(newRows);
                                           }}
-                                          className="h-8 px-1 text-center text-xs font-mono font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 rounded-lg min-w-0"
-                                          title={`第一拆分股數: ${batchConfigList[idx]?.split1.size || 0} 股 (${batchConfigList[idx]?.split1.percent || ''})`}
-                                        />
-                                        <span className="text-[10px] font-bold text-zinc-400 shrink-0 select-none">+</span>
-                                        <Input
-                                          type="number"
-                                          placeholder={batchConfigList[idx] ? `${batchConfigList[idx].split2.size}` : "股數"}
-                                          value={row.quantity2 ?? ''}
-                                          onChange={(e) => {
-                                            const newRows = [...averagingRows];
-                                            newRows[idx] = { ...newRows[idx], quantity2: e.target.value };
-                                            setAveragingRows(newRows);
-                                          }}
-                                          className="h-8 px-1 text-center text-xs font-mono font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 rounded-lg min-w-0"
-                                          title={`第二拆分股數: ${batchConfigList[idx]?.split2.size || 0} 股 (${batchConfigList[idx]?.split2.percent || ''})`}
+                                          className={`h-8 pl-5 pr-1 text-xs font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 ${
+                                            isHighlightedRow ? 'border-rose-300 font-bold text-rose-900 bg-rose-50/30' : ''
+                                          }`}
                                         />
                                       </div>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          const newRows = [...averagingRows];
-                                          newRows[idx] = { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false };
-                                          setAveragingRows(newRows);
-                                        }}
-                                        className="h-8 w-5 text-zinc-400 hover:text-red-600 hover:bg-zinc-100 rounded-md shrink-0 transition-colors flex items-center justify-center font-bold text-xs cursor-pointer"
-                                        title="清除這組"
-                                      >
-                                        ✕
-                                      </button>
-                                    </div>
 
-                                    {/* 若有已購的數量順便反映在此下方註明 (綠色字體) */}
-                                    {batchConfigList[idx] && plannedQty > 0 && (
-                                      <div className="text-[10px] text-emerald-600 font-bold mt-1 flex items-center justify-between px-1">
-                                        <span className="flex items-center gap-1">
-                                          <span className="text-emerald-700">已購:</span>
-                                          <span className="font-mono text-emerald-800 font-black">{batchConfigList[idx].bought}</span>
-                                          <span className="text-emerald-700">股</span>
-                                        </span>
-                                        <span className="text-zinc-400 font-medium text-[9px]">
-                                          餘額: <span className="font-mono text-zinc-600 font-semibold">{batchConfigList[idx].remaining}</span> 股
-                                        </span>
+                                      {/* 預計購入數量 (拆分為兩個輸入框，分別為拆分一與拆分二預計購入數量) + 清除按鈕 */}
+                                      <div className="col-span-4 flex flex-col justify-center">
+                                        <div className="flex items-center gap-1">
+                                          <div className="flex-1 flex items-center gap-0.5 min-w-0">
+                                            <Input
+                                              type="number"
+                                              placeholder={batchConfigList[idx] ? `${batchConfigList[idx].split1.size}` : "股數"}
+                                              value={row.quantity}
+                                              onChange={(e) => {
+                                                const newRows = [...averagingRows];
+                                                newRows[idx] = { ...newRows[idx], quantity: e.target.value };
+                                                setAveragingRows(newRows);
+                                              }}
+                                              className="h-8 px-1 text-center text-xs font-mono font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 rounded-lg min-w-0"
+                                              title={`第一拆分股數: ${batchConfigList[idx]?.split1.size || 0} 股 (${batchConfigList[idx]?.split1.percent || ''})`}
+                                            />
+                                            <span className="text-[10px] font-bold text-zinc-400 shrink-0 select-none">+</span>
+                                            <Input
+                                              type="number"
+                                              placeholder={batchConfigList[idx] ? `${batchConfigList[idx].split2.size}` : "股數"}
+                                              value={row.quantity2 ?? ''}
+                                              onChange={(e) => {
+                                                const newRows = [...averagingRows];
+                                                newRows[idx] = { ...newRows[idx], quantity2: e.target.value };
+                                                setAveragingRows(newRows);
+                                              }}
+                                              className="h-8 px-1 text-center text-xs font-mono font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 rounded-lg min-w-0"
+                                              title={`第二拆分股數: ${batchConfigList[idx]?.split2.size || 0} 股 (${batchConfigList[idx]?.split2.percent || ''})`}
+                                            />
+                                          </div>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const newRows = [...averagingRows];
+                                              newRows[idx] = { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false };
+                                              setAveragingRows(newRows);
+                                            }}
+                                            className="h-8 w-5 text-zinc-400 hover:text-red-600 hover:bg-zinc-100 rounded-md shrink-0 transition-colors flex items-center justify-center font-bold text-xs cursor-pointer"
+                                            title="清除這組"
+                                          >
+                                            ✕
+                                          </button>
+                                        </div>
+
+                                        {/* 若有已購的數量順便反映在此下方註明 (綠色字體) */}
+                                        {batchConfigList[idx] && plannedQty > 0 && (
+                                          <div className="text-[10px] text-emerald-600 font-bold mt-1 flex items-center justify-between px-1">
+                                            <span className="flex items-center gap-1">
+                                              <span className="text-emerald-700">已購:</span>
+                                              <span className="font-mono text-emerald-800 font-black">{batchConfigList[idx].bought}</span>
+                                              <span className="text-emerald-700">股</span>
+                                            </span>
+                                            <span className="text-zinc-400 font-medium text-[9px]">
+                                              餘額: <span className="font-mono text-zinc-600 font-semibold">{batchConfigList[idx].remaining}</span> 股
+                                            </span>
+                                          </div>
+                                        )}
                                       </div>
-                                    )}
-                                  </div>
 
-                                  {/* 狀態 */}
-                                  <div className="col-span-2 text-right pr-0.5 flex flex-col items-end justify-center gap-0.5">
-                                    <div>
-                                      {row.bought ? (
-                                        <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/80 inline-block whitespace-nowrap">
-                                          已購入
-                                        </span>
-                                      ) : (
-                                        <span className="text-[11px] font-medium text-zinc-600 bg-zinc-50 px-1.5 py-0.5 rounded border border-zinc-200/60 inline-block whitespace-nowrap">
-                                          尚未購入
-                                        </span>
-                                      )}
+                                      {/* 狀態 */}
+                                      <div className="col-span-2 text-right pr-0.5 flex flex-col items-end justify-center gap-0.5">
+                                        <div>
+                                          {row.bought ? (
+                                            <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/80 inline-block whitespace-nowrap">
+                                              已購入
+                                            </span>
+                                          ) : (
+                                            <span className="text-[11px] font-medium text-zinc-600 bg-zinc-50 px-1.5 py-0.5 rounded border border-zinc-200/60 inline-block whitespace-nowrap">
+                                              尚未購入
+                                            </span>
+                                          )}
+                                        </div>
+                                        {idx >= 1 && (row.riskFlag ?? isHighlightedRow) && riskMessages[idx] && (
+                                          <span className="text-[9px] font-bold text-red-600 leading-tight whitespace-nowrap">
+                                            {riskMessages[idx]}
+                                          </span>
+                                        )}
+                                      </div>
                                     </div>
-                                    {idx >= 1 && (row.riskFlag ?? isHighlightedRow) && riskMessages[idx] && (
-                                      <span className="text-[9px] font-bold text-red-600 leading-tight whitespace-nowrap">
-                                        {riskMessages[idx]}
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
+                                  );
+                                })}
+                              </div>
 
-                          {/* 系統一 參考損益點 */}
-                          <div className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-zinc-50 border border-zinc-200/80 mt-2">
-                            <div className="flex flex-col">
-                              <span className="text-xs font-bold text-zinc-700">系統一參考損益點 ($)</span>
-                              <span className="text-[10px] text-zinc-400">估算目標價格與攤平後成本之差額</span>
-                            </div>
-                            <div className="relative w-32 shrink-0">
-                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-zinc-400 font-semibold">$</span>
-                              <Input
-                                type="number"
-                                placeholder="參考價"
-                                value={refPnLPoint}
-                                onChange={(e) => setRefPnLPoint(e.target.value)}
-                                className="h-8 pl-6 pr-2 text-xs font-bold text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 rounded-lg"
-                              />
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* 系統一 計算結果卡片 */}
-                        <div className="p-3.5 rounded-xl bg-zinc-50/80 border border-zinc-200/80 space-y-2">
-                          <div className="flex justify-between text-xs text-zinc-500">
-                            <span>加碼購入總股數:</span>
-                            <span className="font-bold font-mono text-zinc-800">{avgResult.newSharesSum} 股</span>
-                          </div>
-                          <div className="flex justify-between text-xs text-zinc-500">
-                            <span>加碼所需資金:</span>
-                            <span className="font-bold font-mono text-zinc-800">${avgResult.newCostSum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                          </div>
-                          <div className="h-[0.5px] bg-zinc-200/80 my-1" />
-                          <div className="flex justify-between items-baseline">
-                            <span className="text-xs font-semibold text-zinc-600">攤平後總股數:</span>
-                            <span className="text-sm font-bold font-mono text-zinc-800">{avgResult.totalShares} 股</span>
-                          </div>
-                          <div className="flex justify-between items-baseline">
-                            <span className="text-xs font-semibold text-zinc-600">攤平後平均成本:</span>
-                            <span className="text-base font-black font-mono text-[#0F6E56]">
-                              ${avgResult.finalAveragePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </span>
-                          </div>
-                          {hasRefPnL && calculatedPnLResult !== null && (() => {
-                            const isLoss = avgResult.finalAveragePrice > parsedRefPnL;
-                            const isProfit = avgResult.finalAveragePrice < parsedRefPnL;
-                            const absAmount = Math.abs(calculatedPnLResult);
-                            const formattedAmount = absAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-                            let textColor = "text-zinc-800";
-                            let displayText = `$0.00`;
-
-                            if (isLoss) {
-                              textColor = "text-rose-600 font-bold";
-                              displayText = `-$${formattedAmount}`;
-                            } else if (isProfit) {
-                              textColor = "text-emerald-700 font-bold";
-                              displayText = `+$${formattedAmount}`;
-                            }
-
-                            return (
-                              <div className="flex justify-between items-baseline pt-2 border-t border-zinc-200/80 mt-1">
+                              {/* 系統一 參考損益點 */}
+                              <div className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-zinc-50 border border-zinc-200/80 mt-2">
                                 <div className="flex flex-col">
-                                  <span className="text-xs font-semibold text-zinc-600">試算結果:</span>
-                                  <span className="text-[10px] text-zinc-400 font-normal">(攤平成本 - 參考損益點) × 總股數</span>
+                                  <span className="text-xs font-bold text-zinc-700">系統一參考損益點 ($)</span>
+                                  <span className="text-[10px] text-zinc-400">估算目標價格與攤平後成本之差額</span>
                                 </div>
-                                <span className={`text-base font-black font-mono ${textColor}`}>
-                                  {displayText}
+                                <div className="relative w-32 shrink-0">
+                                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-zinc-400 font-semibold">$</span>
+                                  <Input
+                                    type="number"
+                                    placeholder="參考價"
+                                    value={refPnLPoint}
+                                    onChange={(e) => setRefPnLPoint(e.target.value)}
+                                    className="h-8 pl-6 pr-2 text-xs font-bold text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 rounded-lg"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* 系統一 計算結果卡片 */}
+                            <div className="p-3.5 rounded-xl bg-zinc-50/80 border border-zinc-200/80 space-y-2">
+                              <div className="flex justify-between text-xs text-zinc-500">
+                                <span>加碼購入總股數:</span>
+                                <span className="font-bold font-mono text-zinc-800">{avgResult.newSharesSum} 股</span>
+                              </div>
+                              <div className="flex justify-between text-xs text-zinc-500">
+                                <span>加碼所需資金:</span>
+                                <span className="font-bold font-mono text-zinc-800">${avgResult.newCostSum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                              </div>
+                              <div className="h-[0.5px] bg-zinc-200/80 my-1" />
+                              <div className="flex justify-between items-baseline">
+                                <span className="text-xs font-semibold text-zinc-600">攤平後總股數:</span>
+                                <span className="text-sm font-bold font-mono text-zinc-800">{avgResult.totalShares} 股</span>
+                              </div>
+                              <div className="flex justify-between items-baseline">
+                                <span className="text-xs font-semibold text-zinc-600">攤平後平均成本:</span>
+                                <span className="text-base font-black font-mono text-[#0F6E56]">
+                                  ${avgResult.finalAveragePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </span>
                               </div>
-                            );
-                          })()}
-                          {includeCurrentHolding && avgResult.costReducedPercent > 0 && (
-                            <div className="text-[11px] text-emerald-700 font-semibold text-center bg-emerald-50 py-1 px-2 rounded-lg border border-emerald-100 mt-1">
-                              📉 平均成本降低 {avgResult.costReducedPercent.toFixed(2)}%
-                            </div>
-                          )}
-                        </div>
-                      </div>
+                              {hasRefPnL && calculatedPnLResult !== null && (() => {
+                                const isLoss = avgResult.finalAveragePrice > parsedRefPnL;
+                                const isProfit = avgResult.finalAveragePrice < parsedRefPnL;
+                                const absAmount = Math.abs(calculatedPnLResult);
+                                const formattedAmount = absAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-                      {/* System 2 (Right) */}
-                      <div className="bg-white/90 border border-blue-200/70 rounded-2xl p-4 shadow-2xs space-y-3.5 flex flex-col justify-between">
-                        <div className="space-y-3">
-                          <div className="flex items-center justify-between pb-2 border-b border-blue-100/80">
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs font-black text-white bg-blue-600 px-2.5 py-0.5 rounded-md shadow-2xs">
-                                系統二
-                              </span>
-                              <span className="text-xs font-bold text-zinc-700">3% 階梯攤平</span>
+                                let textColor = "text-zinc-800";
+                                let displayText = `$0.00`;
+
+                                if (isLoss) {
+                                  textColor = "text-rose-600 font-bold";
+                                  displayText = `-$${formattedAmount}`;
+                                } else if (isProfit) {
+                                  textColor = "text-emerald-700 font-bold";
+                                  displayText = `+$${formattedAmount}`;
+                                }
+
+                                return (
+                                  <div className="flex justify-between items-baseline pt-2 border-t border-zinc-200/80 mt-1">
+                                    <div className="flex flex-col">
+                                      <span className="text-xs font-semibold text-zinc-600">試算結果:</span>
+                                      <span className="text-[10px] text-zinc-400 font-normal">(攤平成本 - 參考損益點) × 總股數</span>
+                                    </div>
+                                    <span className={`text-base font-black font-mono ${textColor}`}>
+                                      {displayText}
+                                    </span>
+                                  </div>
+                                );
+                              })()}
+                              {includeCurrentHolding && avgResult.costReducedPercent > 0 && (
+                                <div className="text-[11px] text-emerald-700 font-semibold text-center bg-emerald-50 py-1 px-2 rounded-lg border border-emerald-100 mt-1">
+                                  📉 平均成本降低 {avgResult.costReducedPercent.toFixed(2)}%
+                                </div>
+                              )}
                             </div>
-                            <span className="text-[11px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200/60">
-                              -3% / -6% / -9% / -12%
-                            </span>
                           </div>
 
-                          {/* 剩餘預計購買與當前順序資訊 (系統二) */}
-                          {plannedQty > 0 && (
-                            <div className="text-[11px] font-bold bg-[#B1C28D]/20 text-[#6F7D50] border border-[#B1C28D]/40 px-2.5 py-1 rounded-xl flex flex-wrap items-center justify-between gap-1.5 shadow-2xs">
-                              <div className="flex items-center gap-1.5">
-                                <span className="w-1.5 h-1.5 rounded-full bg-[#6F7D50] animate-pulse" />
-                                <span>剩餘預計購買: <span className="font-mono font-black">{remainingToBuy}</span> 股</span>
-                              </div>
-                              <div>
-                                <span>當前順序: <span className="font-bold text-zinc-800">{currentBatchOrderText}</span></span>
-                                {currentBatchOrderText !== "無" && currentBatchOrderText !== "已滿批" && (
-                                  <span className="ml-1 text-zinc-700 font-medium">
-                                    (已購 <span className="font-mono font-bold text-zinc-800">{currentBatchBought}</span> / 餘額 <span className="font-mono font-bold text-zinc-800">{currentBatchRemaining}</span> 股)
+                          {/* System 2 (Right: -3% / -6% / -9% / -12%) */}
+                          <div className="bg-white/90 border border-blue-200/70 rounded-2xl p-4 shadow-2xs space-y-3.5 flex flex-col justify-between">
+                            <div className="space-y-3">
+                              <div className="flex items-center justify-between pb-2 border-b border-blue-100/80">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-black text-white bg-blue-600 px-2.5 py-0.5 rounded-md shadow-2xs">
+                                    系統二
                                   </span>
-                                )}
+                                  <span className="text-xs font-bold text-zinc-700">3% 階梯攤平</span>
+                                </div>
+                                <span className="text-[11px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200/60">
+                                  -3% / -6% / -9% / -12%
+                                </span>
                               </div>
-                            </div>
-                          )}
 
-                          <div className="space-y-2">
-                            <div className="grid grid-cols-12 gap-1.5 text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-1 items-center">
-                              <span className="col-span-3 text-left">組別</span>
-                              <span className="col-span-3">預計購入股價 ($)</span>
-                              <span className="col-span-4">預計購入數量 (股)</span>
-                              <span className="col-span-2 text-right pr-1">狀態</span>
-                            </div>
-
-                            {averagingRowsSys2.map((row, idx) => {
-                              const discountLabels = ['-3%', '-6%', '-9%', '-12%'];
-                              const discountLabel = discountLabels[idx];
-                              const isBasePosition = idx === 1; // 系統二第二欄位 (-6%) 為基準倉位
-                              const isForceClosePosition = idx === 3; // 系統二第四欄位 (-12%) 為強制平倉
-                              const isHighlightedRow = isBasePosition || isForceClosePosition;
-                              const riskMessages: Record<number, string> = {
-                                1: '(進入基準倉位(下注終局))',
-                                2: '(進入負籌碼博弈倉位)',
-                                3: '(進入強制平倉)',
-                              };
-
-                              return (
-                                <div
-                                  key={idx}
-                                  className={`grid grid-cols-12 gap-1.5 items-center p-1 rounded-xl transition-all ${
-                                    isHighlightedRow
-                                      ? 'bg-rose-50/80 border border-rose-300/90 ring-1 ring-rose-200 shadow-2xs'
-                                      : 'border border-transparent'
-                                  }`}
-                                >
-                                  {/* 組別 */}
-                                  <div className="col-span-3 flex flex-col justify-center min-w-0">
-                                    <div className="flex items-center gap-1 min-w-0 flex-wrap">
-                                      <input
-                                        type="checkbox"
-                                        checked={!!row.bought}
-                                        onChange={(e) => {
-                                          const newRows = [...averagingRowsSys2];
-                                          newRows[idx] = { ...newRows[idx], bought: e.target.checked };
-                                          setAveragingRowsSys2(newRows);
-                                        }}
-                                        className="rounded border-zinc-300 text-blue-600 focus:ring-blue-500 h-3.5 w-3.5 cursor-pointer shrink-0"
-                                        title={row.bought ? "已購入" : "勾選標記為已購入"}
-                                      />
-                                      <span className={`text-xs font-bold shrink-0 ${isHighlightedRow ? 'text-rose-700 font-black' : 'text-zinc-500'}`}>
-                                        #{idx + 1}
+                              {/* 剩餘預計購買與當前順序資訊 (系統二) */}
+                              {plannedQty > 0 && (
+                                <div className="text-[11px] font-bold bg-[#B1C28D]/20 text-[#6F7D50] border border-[#B1C28D]/40 px-2.5 py-1 rounded-xl flex flex-wrap items-center justify-between gap-1.5 shadow-2xs">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-[#6F7D50] animate-pulse" />
+                                    <span>剩餘預計購買: <span className="font-mono font-black">{remainingToBuy}</span> 股</span>
+                                  </div>
+                                  <div>
+                                    <span>當前順序: <span className="font-bold text-zinc-800">{currentBatchOrderText}</span></span>
+                                    {currentBatchOrderText !== "無" && currentBatchOrderText !== "已滿批" && (
+                                      <span className="ml-1 text-zinc-700 font-medium">
+                                        (已購 <span className="font-mono font-bold text-zinc-800">{currentBatchBought}</span> / 餘額 <span className="font-mono font-bold text-zinc-800">{currentBatchRemaining}</span> 股)
                                       </span>
-                                      {discountLabel && (
-                                        <span
-                                          className={`text-[11px] font-black shrink-0 ${
-                                            isHighlightedRow
-                                              ? 'text-rose-700 bg-rose-200/90 px-1 py-0.5 rounded border border-rose-300 shadow-2xs flex items-center gap-0.5'
-                                              : 'text-red-600'
-                                          }`}
-                                        >
-                                          {discountLabel}
-                                          {isBasePosition && <span className="text-[10px] font-bold text-rose-800">(基準倉位)</span>}
-                                          {isForceClosePosition && <span className="text-[10px] font-bold text-rose-800">(強制平倉)</span>}
-                                        </span>
-                                      )}
+                                    )}
+                                  </div>
+                                </div>
+                              )}
 
-                                      {idx >= 1 && (
-                                        <label
-                                          className="inline-flex items-center cursor-pointer ml-0.5 shrink-0"
-                                          title="點擊勾選切換風險倉位提示"
-                                        >
+                              <div className="space-y-2">
+                                <div className="grid grid-cols-12 gap-1.5 text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-1 items-center">
+                                  <span className="col-span-3 text-left">組別</span>
+                                  <span className="col-span-3">預計購入股價 ($)</span>
+                                  <span className="col-span-4">預計購入數量 (股)</span>
+                                  <span className="col-span-2 text-right pr-1">狀態</span>
+                                </div>
+
+                                {averagingRowsSys2.map((row, idx) => {
+                                  const discountLabels = ['-3%', '-6%', '-9%', '-12%'];
+                                  const discountLabel = discountLabels[idx];
+                                  const isBasePosition = idx === 1; // 系統二第二欄位 (-6%) 為基準倉位
+                                  const isForceClosePosition = idx === 3; // 系統二第四欄位 (-12%) 為強制平倉
+                                  const isHighlightedRow = isBasePosition || isForceClosePosition;
+                                  const riskMessages: Record<number, string> = {
+                                    1: '(進入基準倉位(下注終局))',
+                                    2: '(進入負籌碼博弈倉位)',
+                                    3: '(進入強制平倉)',
+                                  };
+
+                                  return (
+                                    <div
+                                      key={idx}
+                                      className={`grid grid-cols-12 gap-1.5 items-center p-1 rounded-xl transition-all ${
+                                        isHighlightedRow
+                                          ? 'bg-rose-50/80 border border-rose-300/90 ring-1 ring-rose-200 shadow-2xs'
+                                          : 'border border-transparent'
+                                      }`}
+                                    >
+                                      {/* 組別 */}
+                                      <div className="col-span-3 flex flex-col justify-center min-w-0">
+                                        <div className="flex items-center gap-1 min-w-0 flex-wrap">
                                           <input
                                             type="checkbox"
-                                            checked={row.riskFlag !== undefined ? !!row.riskFlag : isHighlightedRow}
+                                            checked={!!row.bought}
                                             onChange={(e) => {
                                               const newRows = [...averagingRowsSys2];
-                                              newRows[idx] = { ...newRows[idx], riskFlag: e.target.checked };
+                                              newRows[idx] = { ...newRows[idx], bought: e.target.checked };
                                               setAveragingRowsSys2(newRows);
                                             }}
-                                            className="sr-only"
+                                            className="rounded border-zinc-300 text-blue-600 focus:ring-blue-500 h-3.5 w-3.5 cursor-pointer shrink-0"
+                                            title={row.bought ? "已購入" : "勾選標記為已購入"}
                                           />
-                                          <div className={`p-0.5 rounded transition-all flex items-center justify-center ${
-                                            (row.riskFlag ?? isHighlightedRow)
-                                              ? 'bg-rose-100 text-rose-600 ring-1 ring-rose-400'
-                                              : 'text-zinc-400 hover:text-rose-500 hover:bg-rose-50'
-                                          }`}>
-                                            <AlertTriangle className="h-3 w-3 fill-current" />
+                                          <span className={`text-xs font-bold shrink-0 ${isHighlightedRow ? 'text-rose-700 font-black' : 'text-zinc-500'}`}>
+                                            #{idx + 1}
+                                          </span>
+                                          {discountLabel && (
+                                            <span
+                                              className={`text-[11px] font-black shrink-0 ${
+                                                isHighlightedRow
+                                                  ? 'text-rose-700 bg-rose-200/90 px-1 py-0.5 rounded border border-rose-300 shadow-2xs flex items-center gap-0.5'
+                                                  : 'text-red-600'
+                                              }`}
+                                            >
+                                              {discountLabel}
+                                              {isBasePosition && <span className="text-[10px] font-bold text-rose-800">(基準倉位)</span>}
+                                              {isForceClosePosition && <span className="text-[10px] font-bold text-rose-800">(強制平倉)</span>}
+                                            </span>
+                                          )}
+
+                                          {idx >= 1 && (
+                                            <label
+                                              className="inline-flex items-center cursor-pointer ml-0.5 shrink-0"
+                                              title="點擊勾選切換風險倉位提示"
+                                            >
+                                              <input
+                                                type="checkbox"
+                                                checked={row.riskFlag !== undefined ? !!row.riskFlag : isHighlightedRow}
+                                                onChange={(e) => {
+                                                  const newRows = [...averagingRowsSys2];
+                                                  newRows[idx] = { ...newRows[idx], riskFlag: e.target.checked };
+                                                  setAveragingRowsSys2(newRows);
+                                                }}
+                                                className="sr-only"
+                                              />
+                                              <div className={`p-0.5 rounded transition-all flex items-center justify-center ${
+                                                (row.riskFlag ?? isHighlightedRow)
+                                                  ? 'bg-rose-100 text-rose-600 ring-1 ring-rose-400'
+                                                  : 'text-zinc-400 hover:text-rose-500 hover:bg-rose-50'
+                                              }`}>
+                                                <AlertTriangle className="h-3 w-3 fill-current" />
+                                              </div>
+                                            </label>
+                                          )}
+                                        </div>
+
+                                        {/* 組別已購數量註明與拆分佔比 */}
+                                        {batchConfigList[idx] && plannedQty > 0 && (
+                                          <div className="text-[10px] text-zinc-600 font-medium mt-0.5 flex items-center gap-1 flex-wrap">
+                                            <span className="text-zinc-500 font-bold">已購:</span>
+                                            <span className="font-mono font-bold text-blue-800">{batchConfigList[idx].bought}</span>
+                                            <span className="text-zinc-400">/</span>
+                                            <span className="font-mono text-zinc-700">{batchConfigList[idx].size}股</span>
+                                            <span className="text-[9px] text-zinc-400 font-semibold">({batchConfigList[idx].split1.percent}+{batchConfigList[idx].split2.percent})</span>
                                           </div>
-                                        </label>
-                                      )}
-                                    </div>
-
-                                    {/* 組別已購數量註明與拆分佔比 */}
-                                    {batchConfigList[idx] && plannedQty > 0 && (
-                                      <div className="text-[10px] text-zinc-600 font-medium mt-0.5 flex items-center gap-1 flex-wrap">
-                                        <span className="text-zinc-500 font-bold">已購:</span>
-                                        <span className="font-mono font-bold text-blue-800">{batchConfigList[idx].bought}</span>
-                                        <span className="text-zinc-400">/</span>
-                                        <span className="font-mono text-zinc-700">{batchConfigList[idx].size}股</span>
-                                        <span className="text-[9px] text-zinc-400 font-semibold">({batchConfigList[idx].split1.percent}+{batchConfigList[idx].split2.percent})</span>
+                                        )}
                                       </div>
-                                    )}
-                                  </div>
 
-                                  {/* 預計購入股價 */}
-                                  <div className="col-span-3 relative">
-                                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-zinc-400 font-semibold">$</span>
-                                    <Input
-                                      type="number"
-                                      placeholder="股價"
-                                      value={row.price}
-                                      onChange={(e) => {
-                                        const newRows = [...averagingRowsSys2];
-                                        newRows[idx] = { ...newRows[idx], price: e.target.value };
-                                        setAveragingRowsSys2(newRows);
-                                      }}
-                                      className={`h-8 pl-5 pr-1 text-xs font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 ${
-                                        isHighlightedRow ? 'border-rose-300 font-bold text-rose-900 bg-rose-50/30' : ''
-                                      }`}
-                                    />
-                                  </div>
-
-                                  {/* 預計購入數量 (拆分為兩個輸入框，分別為拆分一與拆分二預計購入數量) + 清除按鈕 */}
-                                  <div className="col-span-4 flex flex-col justify-center">
-                                    <div className="flex items-center gap-1">
-                                      <div className="flex-1 flex items-center gap-0.5 min-w-0">
+                                      {/* 預計購入股價 */}
+                                      <div className="col-span-3 relative">
+                                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-zinc-400 font-semibold">$</span>
                                         <Input
                                           type="number"
-                                          placeholder={batchConfigList[idx] ? `${batchConfigList[idx].split1.size}` : "股數"}
-                                          value={row.quantity}
+                                          placeholder="股價"
+                                          value={row.price}
                                           onChange={(e) => {
                                             const newRows = [...averagingRowsSys2];
-                                            newRows[idx] = { ...newRows[idx], quantity: e.target.value };
+                                            newRows[idx] = { ...newRows[idx], price: e.target.value };
                                             setAveragingRowsSys2(newRows);
                                           }}
-                                          className="h-8 px-1 text-center text-xs font-mono font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 rounded-lg min-w-0"
-                                          title={`第一拆分股數: ${batchConfigList[idx]?.split1.size || 0} 股 (${batchConfigList[idx]?.split1.percent || ''})`}
-                                        />
-                                        <span className="text-[10px] font-bold text-zinc-400 shrink-0 select-none">+</span>
-                                        <Input
-                                          type="number"
-                                          placeholder={batchConfigList[idx] ? `${batchConfigList[idx].split2.size}` : "股數"}
-                                          value={row.quantity2 ?? ''}
-                                          onChange={(e) => {
-                                            const newRows = [...averagingRowsSys2];
-                                            newRows[idx] = { ...newRows[idx], quantity2: e.target.value };
-                                            setAveragingRowsSys2(newRows);
-                                          }}
-                                          className="h-8 px-1 text-center text-xs font-mono font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 rounded-lg min-w-0"
-                                          title={`第二拆分股數: ${batchConfigList[idx]?.split2.size || 0} 股 (${batchConfigList[idx]?.split2.percent || ''})`}
+                                          className={`h-8 pl-5 pr-1 text-xs font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 ${
+                                            isHighlightedRow ? 'border-rose-300 font-bold text-rose-900 bg-rose-50/30' : ''
+                                          }`}
                                         />
                                       </div>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          const newRows = [...averagingRowsSys2];
-                                          newRows[idx] = { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false };
-                                          setAveragingRowsSys2(newRows);
-                                        }}
-                                        className="h-8 w-5 text-zinc-400 hover:text-red-600 hover:bg-zinc-100 rounded-md shrink-0 transition-colors flex items-center justify-center font-bold text-xs cursor-pointer"
-                                        title="清除這組"
-                                      >
-                                        ✕
-                                      </button>
-                                    </div>
 
-                                    {/* 若有已購的數量順便反映在此下方註明 (綠色字體) */}
-                                    {batchConfigList[idx] && plannedQty > 0 && (
-                                      <div className="text-[10px] text-emerald-600 font-bold mt-1 flex items-center justify-between px-1">
-                                        <span className="flex items-center gap-1">
-                                          <span className="text-emerald-700">已購:</span>
-                                          <span className="font-mono text-emerald-800 font-black">{batchConfigList[idx].bought}</span>
-                                          <span className="text-emerald-700">股</span>
-                                        </span>
-                                        <span className="text-zinc-400 font-medium text-[9px]">
-                                          餘額: <span className="font-mono text-zinc-600 font-semibold">{batchConfigList[idx].remaining}</span> 股
-                                        </span>
+                                      {/* 預計購入數量 (拆分為兩個輸入框，分別為拆分一與拆分二預計購入數量) + 清除按鈕 */}
+                                      <div className="col-span-4 flex flex-col justify-center">
+                                        <div className="flex items-center gap-1">
+                                          <div className="flex-1 flex items-center gap-0.5 min-w-0">
+                                            <Input
+                                              type="number"
+                                              placeholder={batchConfigList[idx] ? `${batchConfigList[idx].split1.size}` : "股數"}
+                                              value={row.quantity}
+                                              onChange={(e) => {
+                                                const newRows = [...averagingRowsSys2];
+                                                newRows[idx] = { ...newRows[idx], quantity: e.target.value };
+                                                setAveragingRowsSys2(newRows);
+                                              }}
+                                              className="h-8 px-1 text-center text-xs font-mono font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 rounded-lg min-w-0"
+                                              title={`第一拆分股數: ${batchConfigList[idx]?.split1.size || 0} 股 (${batchConfigList[idx]?.split1.percent || ''})`}
+                                            />
+                                            <span className="text-[10px] font-bold text-zinc-400 shrink-0 select-none">+</span>
+                                            <Input
+                                              type="number"
+                                              placeholder={batchConfigList[idx] ? `${batchConfigList[idx].split2.size}` : "股數"}
+                                              value={row.quantity2 ?? ''}
+                                              onChange={(e) => {
+                                                const newRows = [...averagingRowsSys2];
+                                                newRows[idx] = { ...newRows[idx], quantity2: e.target.value };
+                                                setAveragingRowsSys2(newRows);
+                                              }}
+                                              className="h-8 px-1 text-center text-xs font-mono font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 rounded-lg min-w-0"
+                                              title={`第二拆分股數: ${batchConfigList[idx]?.split2.size || 0} 股 (${batchConfigList[idx]?.split2.percent || ''})`}
+                                            />
+                                          </div>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const newRows = [...averagingRowsSys2];
+                                              newRows[idx] = { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false };
+                                              setAveragingRowsSys2(newRows);
+                                            }}
+                                            className="h-8 w-5 text-zinc-400 hover:text-red-600 hover:bg-zinc-100 rounded-md shrink-0 transition-colors flex items-center justify-center font-bold text-xs cursor-pointer"
+                                            title="清除這組"
+                                          >
+                                            ✕
+                                          </button>
+                                        </div>
+
+                                        {/* 若有已購的數量順便反映在此下方註明 (綠色字體) */}
+                                        {batchConfigList[idx] && plannedQty > 0 && (
+                                          <div className="text-[10px] text-emerald-600 font-bold mt-1 flex items-center justify-between px-1">
+                                            <span className="flex items-center gap-1">
+                                              <span className="text-emerald-700">已購:</span>
+                                              <span className="font-mono text-emerald-800 font-black">{batchConfigList[idx].bought}</span>
+                                              <span className="text-emerald-700">股</span>
+                                            </span>
+                                            <span className="text-zinc-400 font-medium text-[9px]">
+                                              餘額: <span className="font-mono text-zinc-600 font-semibold">{batchConfigList[idx].remaining}</span> 股
+                                            </span>
+                                          </div>
+                                        )}
                                       </div>
-                                    )}
+
+                                      {/* 狀態 */}
+                                      <div className="col-span-2 text-right pr-0.5 flex flex-col items-end justify-center gap-0.5">
+                                        <div>
+                                          {row.bought ? (
+                                            <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/80 inline-block whitespace-nowrap">
+                                              已購入
+                                            </span>
+                                          ) : (
+                                            <span className="text-[11px] font-medium text-zinc-600 bg-zinc-50 px-1.5 py-0.5 rounded border border-zinc-200/60 inline-block whitespace-nowrap">
+                                              尚未購入
+                                            </span>
+                                          )}
+                                        </div>
+                                        {idx >= 1 && (row.riskFlag ?? isHighlightedRow) && riskMessages[idx] && (
+                                          <span className="text-[9px] font-bold text-red-600 leading-tight whitespace-nowrap">
+                                            {riskMessages[idx]}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+
+                              {/* 系統二 參考損益點 */}
+                              <div className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-zinc-50 border border-zinc-200/80 mt-2">
+                                <div className="flex flex-col">
+                                  <span className="text-xs font-bold text-zinc-700">系統二參考損益點 ($)</span>
+                                  <span className="text-[10px] text-zinc-400">估算目標價格與攤平後成本之差額</span>
+                                </div>
+                                <div className="relative w-32 shrink-0">
+                                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-zinc-400 font-semibold">$</span>
+                                  <Input
+                                    type="number"
+                                    placeholder="參考價"
+                                    value={refPnLPointSys2}
+                                    onChange={(e) => setRefPnLPointSys2(e.target.value)}
+                                    className="h-8 pl-6 pr-2 text-xs font-bold text-zinc-800 bg-white border-zinc-200 focus-visible:ring-blue-500 rounded-lg"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* 系統二 計算結果卡片 */}
+                            <div className="p-3.5 rounded-xl bg-zinc-50/80 border border-zinc-200/80 space-y-2">
+                              <div className="flex justify-between text-xs text-zinc-500">
+                                <span>加碼購入總股數:</span>
+                                <span className="font-bold font-mono text-zinc-800">{avgResultSys2.newSharesSum} 股</span>
+                              </div>
+                              <div className="flex justify-between text-xs text-zinc-500">
+                                <span>加碼所需資金:</span>
+                                <span className="font-bold font-mono text-zinc-800">${avgResultSys2.newCostSum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                              </div>
+                              <div className="h-[0.5px] bg-zinc-200/80 my-1" />
+                              <div className="flex justify-between items-baseline">
+                                <span className="text-xs font-semibold text-zinc-600">攤平後總股數:</span>
+                                <span className="text-sm font-bold font-mono text-zinc-800">{avgResultSys2.totalShares} 股</span>
+                              </div>
+                              <div className="flex justify-between items-baseline">
+                                <span className="text-xs font-semibold text-zinc-600">攤平後平均成本:</span>
+                                <span className="text-base font-black font-mono text-blue-700">
+                                  ${avgResultSys2.finalAveragePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                              </div>
+                              {hasRefPnLSys2 && calculatedPnLResultSys2 !== null && (() => {
+                                const isLoss = avgResultSys2.finalAveragePrice > parsedRefPnLSys2;
+                                const isProfit = avgResultSys2.finalAveragePrice < parsedRefPnLSys2;
+                                const absAmount = Math.abs(calculatedPnLResultSys2);
+                                const formattedAmount = absAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+                                let textColor = "text-zinc-800";
+                                let displayText = `$0.00`;
+
+                                if (isLoss) {
+                                  textColor = "text-rose-600 font-bold";
+                                  displayText = `-$${formattedAmount}`;
+                                } else if (isProfit) {
+                                  textColor = "text-[#0F6E56] font-bold";
+                                  displayText = `+$${formattedAmount}`;
+                                }
+
+                                return (
+                                  <div className="flex justify-between items-baseline pt-2 border-t border-zinc-200/80 mt-1">
+                                    <div className="flex flex-col">
+                                      <span className="text-xs font-semibold text-zinc-600">試算結果:</span>
+                                      <span className="text-[10px] text-zinc-400 font-normal">(攤平成本 - 參考損益點) × 總股數</span>
+                                    </div>
+                                    <span className={`text-base font-black font-mono ${textColor}`}>
+                                      {displayText}
+                                    </span>
                                   </div>
+                                );
+                              })()}
+                              {includeCurrentHolding && avgResultSys2.costReducedPercent > 0 && (
+                                <div className="text-[11px] text-blue-700 font-semibold text-center bg-blue-50 py-1 px-2 rounded-lg border border-blue-100 mt-1">
+                                  📉 平均成本降低 {avgResultSys2.costReducedPercent.toFixed(2)}%
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
-                                  {/* 狀態 */}
-                                  <div className="col-span-2 text-right pr-0.5 flex flex-col items-end justify-center gap-0.5">
-                                    <div>
-                                      {row.bought ? (
-                                        <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/80 inline-block whitespace-nowrap">
-                                          已購入
-                                        </span>
-                                      ) : (
-                                        <span className="text-[11px] font-medium text-zinc-600 bg-zinc-50 px-1.5 py-0.5 rounded border border-zinc-200/60 inline-block whitespace-nowrap">
-                                          尚未購入
-                                        </span>
-                                      )}
-                                    </div>
-                                    {idx >= 1 && (row.riskFlag ?? isHighlightedRow) && riskMessages[idx] && (
-                                      <span className="text-[9px] font-bold text-red-600 leading-tight whitespace-nowrap">
-                                        {riskMessages[idx]}
+                    {/* Tab 2: 股價向上突破加碼試算 (雙系統對比) */}
+                    {calcComparisonTab === 'up' && (
+                      <div className="space-y-6">
+                        {/* Header for 股價向上突破加碼試算區塊 */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-zinc-150">
+                          <div>
+                            <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                              <div className="p-1 bg-emerald-50 text-emerald-700 rounded-md">
+                                <span className="text-xs">🚀</span>
+                              </div>
+                              <h4 className="font-bold text-base tracking-wide text-zinc-800">股價向上突破加碼試算 (雙系統對比)</h4>
+                              {tab.status !== 'COMPLETED' && stats.totalQuantity > 0 && stats.averagePrice > 0 && (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200/80 px-2 py-0.5 rounded-md">
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                  已依平均成本 (${stats.averagePrice.toFixed(2)}) 自動試算加碼組別 1~4 股價並儲存
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-zinc-500 mt-0.5">
+                              其核心邏輯為股價突破後分批加碼。系統一採用 +2% 階梯遞增 (+2%/+4%/+6%/+8%)；系統二採用 +3% 階梯遞增 (+3%/+6%/+9%/+12%)。核心加碼邏輯一樣沿用分批進場百分比與詳細拆分交易。
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-3 shrink-0">
+                            <label className="flex items-center gap-1.5 cursor-pointer select-none text-xs text-zinc-700 font-semibold bg-zinc-100/80 hover:bg-zinc-100 px-3 py-1.5 rounded-lg border border-zinc-200/60 transition-colors">
+                              <input
+                                type="checkbox"
+                                checked={includeCurrentHoldingUp}
+                                onChange={(e) => setIncludeCurrentHoldingUp(e.target.checked)}
+                                className="rounded border-zinc-300 text-[#0F6E56] focus:ring-[#0F6E56] h-3.5 w-3.5"
+                              />
+                              <span>包含當前庫存 ({stats.totalQuantity} 股 @ ${stats.averagePrice.toFixed(2)})</span>
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPyramidRows([
+                                  { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false },
+                                  { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false },
+                                  { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false },
+                                  { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false }
+                                ]);
+                                setPyramidRowsSys2([
+                                  { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false },
+                                  { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false },
+                                  { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false },
+                                  { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false }
+                                ]);
+                                setRefPnLPointUp('');
+                                setRefPnLPointUpSys2('');
+                              }}
+                              className="text-xs font-bold text-zinc-400 hover:text-zinc-700 transition-colors px-2 py-1"
+                              title="清除雙系統向上加碼所有輸入"
+                            >
+                              ✕ 清除加碼輸入
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Dual System Comparison Layout: Left = System 1 (+2%/+4%/+6%/+8%), Right = System 2 (+3%/+6%/+9%/+12%) */}
+                        <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+                          {/* System 1 (Left: +2% / +4% / +6% / +8%) */}
+                          <div className="bg-white/90 border border-emerald-200/70 rounded-2xl p-4 shadow-2xs space-y-3.5 flex flex-col justify-between">
+                            <div className="space-y-3">
+                              <div className="flex items-center justify-between pb-2 border-b border-emerald-100/80">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-black text-white bg-[#0F6E56] px-2.5 py-0.5 rounded-md shadow-2xs">
+                                    系統一
+                                  </span>
+                                  <span className="text-xs font-bold text-zinc-700">2% 突破加碼</span>
+                                </div>
+                                <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/60">
+                                  +2% / +4% / +6% / +8%
+                                </span>
+                              </div>
+
+                              {/* 剩餘預計購買與當前順序資訊 (系統一) */}
+                              {plannedQty > 0 && (
+                                <div className="text-[11px] font-bold bg-[#B1C28D]/20 text-[#6F7D50] border border-[#B1C28D]/40 px-2.5 py-1 rounded-xl flex flex-wrap items-center justify-between gap-1.5 shadow-2xs">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-[#6F7D50] animate-pulse" />
+                                    <span>剩餘預計加碼: <span className="font-mono font-black">{remainingToBuy}</span> 股</span>
+                                  </div>
+                                  <div>
+                                    <span>當前順序: <span className="font-bold text-zinc-800">{currentBatchOrderText}</span></span>
+                                    {currentBatchOrderText !== "無" && currentBatchOrderText !== "已滿批" && (
+                                      <span className="ml-1 text-zinc-700 font-medium">
+                                        (已購 <span className="font-mono font-bold text-zinc-800">{currentBatchBought}</span> / 餘額 <span className="font-mono font-bold text-zinc-800">{currentBatchRemaining}</span> 股)
                                       </span>
                                     )}
                                   </div>
                                 </div>
-                              );
-                            })}
-                          </div>
+                              )}
 
-                          {/* 系統二 參考損益點 */}
-                          <div className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-zinc-50 border border-zinc-200/80 mt-2">
-                            <div className="flex flex-col">
-                              <span className="text-xs font-bold text-zinc-700">系統二參考損益點 ($)</span>
-                              <span className="text-[10px] text-zinc-400">估算目標價格與攤平後成本之差額</span>
-                            </div>
-                            <div className="relative w-32 shrink-0">
-                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-zinc-400 font-semibold">$</span>
-                              <Input
-                                type="number"
-                                placeholder="參考價"
-                                value={refPnLPointSys2}
-                                onChange={(e) => setRefPnLPointSys2(e.target.value)}
-                                className="h-8 pl-6 pr-2 text-xs font-bold text-zinc-800 bg-white border-zinc-200 focus-visible:ring-blue-500 rounded-lg"
-                              />
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* 系統二 計算結果卡片 */}
-                        <div className="p-3.5 rounded-xl bg-zinc-50/80 border border-zinc-200/80 space-y-2">
-                          <div className="flex justify-between text-xs text-zinc-500">
-                            <span>加碼購入總股數:</span>
-                            <span className="font-bold font-mono text-zinc-800">{avgResultSys2.newSharesSum} 股</span>
-                          </div>
-                          <div className="flex justify-between text-xs text-zinc-500">
-                            <span>加碼所需資金:</span>
-                            <span className="font-bold font-mono text-zinc-800">${avgResultSys2.newCostSum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                          </div>
-                          <div className="h-[0.5px] bg-zinc-200/80 my-1" />
-                          <div className="flex justify-between items-baseline">
-                            <span className="text-xs font-semibold text-zinc-600">攤平後總股數:</span>
-                            <span className="text-sm font-bold font-mono text-zinc-800">{avgResultSys2.totalShares} 股</span>
-                          </div>
-                          <div className="flex justify-between items-baseline">
-                            <span className="text-xs font-semibold text-zinc-600">攤平後平均成本:</span>
-                            <span className="text-base font-black font-mono text-blue-700">
-                              ${avgResultSys2.finalAveragePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </span>
-                          </div>
-                          {hasRefPnLSys2 && calculatedPnLResultSys2 !== null && (() => {
-                            const isLoss = avgResultSys2.finalAveragePrice > parsedRefPnLSys2;
-                            const isProfit = avgResultSys2.finalAveragePrice < parsedRefPnLSys2;
-                            const absAmount = Math.abs(calculatedPnLResultSys2);
-                            const formattedAmount = absAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-                            let textColor = "text-zinc-800";
-                            let displayText = `$0.00`;
-
-                            if (isLoss) {
-                              textColor = "text-rose-600 font-bold";
-                              displayText = `-$${formattedAmount}`;
-                            } else if (isProfit) {
-                              textColor = "text-[#0F6E56] font-bold";
-                              displayText = `+$${formattedAmount}`;
-                            }
-
-                            return (
-                              <div className="flex justify-between items-baseline pt-2 border-t border-zinc-200/80 mt-1">
-                                <div className="flex flex-col">
-                                  <span className="text-xs font-semibold text-zinc-600">試算結果:</span>
-                                  <span className="text-[10px] text-zinc-400 font-normal">(攤平成本 - 參考損益點) × 總股數</span>
+                              <div className="space-y-2">
+                                <div className="grid grid-cols-12 gap-1.5 text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-1 items-center">
+                                  <span className="col-span-3 text-left">組別</span>
+                                  <span className="col-span-3">預計加碼股價 ($)</span>
+                                  <span className="col-span-4">預計加碼數量 (股)</span>
+                                  <span className="col-span-2 text-right pr-1">狀態</span>
                                 </div>
-                                <span className={`text-base font-black font-mono ${textColor}`}>
-                                  {displayText}
+
+                                {pyramidRows.map((row, idx) => {
+                                  const discountLabels = ['+2%', '+4%', '+6%', '+8%'];
+                                  const discountLabel = discountLabels[idx];
+                                  const isKeyStage = idx === 2; // +6% 主升段加碼
+
+                                  return (
+                                    <div
+                                      key={idx}
+                                      className={`grid grid-cols-12 gap-1.5 items-center p-1 rounded-xl transition-all ${
+                                        isKeyStage
+                                          ? 'bg-emerald-50/80 border border-emerald-300/90 ring-1 ring-emerald-200 shadow-2xs'
+                                          : 'border border-transparent'
+                                      }`}
+                                    >
+                                      {/* 組別 */}
+                                      <div className="col-span-3 flex flex-col justify-center min-w-0">
+                                        <div className="flex items-center gap-1 min-w-0 flex-wrap">
+                                          <input
+                                            type="checkbox"
+                                            checked={!!row.bought}
+                                            onChange={(e) => {
+                                              const newRows = [...pyramidRows];
+                                              newRows[idx] = { ...newRows[idx], bought: e.target.checked };
+                                              setPyramidRows(newRows);
+                                            }}
+                                            className="rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500 h-3.5 w-3.5 cursor-pointer shrink-0"
+                                            title={row.bought ? "已購入" : "勾選標記為已購入"}
+                                          />
+                                          <span className={`text-xs font-bold shrink-0 ${isKeyStage ? 'text-emerald-800 font-black' : 'text-zinc-500'}`}>
+                                            #{idx + 1}
+                                          </span>
+                                          {discountLabel && (
+                                            <span
+                                              className={`text-[11px] font-black shrink-0 ${
+                                                isKeyStage
+                                                  ? 'text-emerald-800 bg-emerald-100 px-1 py-0.5 rounded border border-emerald-300 shadow-2xs flex items-center gap-0.5'
+                                                  : 'text-emerald-700'
+                                              }`}
+                                            >
+                                              {discountLabel}
+                                              {isKeyStage && <span className="text-[10px] font-bold text-emerald-900">(主升段)</span>}
+                                            </span>
+                                          )}
+                                        </div>
+
+                                        {/* 組別已購數量註明與拆分佔比 */}
+                                        {batchConfigList[idx] && plannedQty > 0 && (
+                                          <div className="text-[10px] text-zinc-600 font-medium mt-0.5 flex items-center gap-1 flex-wrap">
+                                            <span className="text-zinc-500 font-bold">已購:</span>
+                                            <span className="font-mono font-bold text-emerald-800">{batchConfigList[idx].bought}</span>
+                                            <span className="text-zinc-400">/</span>
+                                            <span className="font-mono text-zinc-700">{batchConfigList[idx].size}股</span>
+                                            <span className="text-[9px] text-zinc-400 font-semibold">({batchConfigList[idx].split1.percent}+{batchConfigList[idx].split2.percent})</span>
+                                          </div>
+                                        )}
+                                      </div>
+
+                                      {/* 預計購入股價 */}
+                                      <div className="col-span-3 relative">
+                                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-zinc-400 font-semibold">$</span>
+                                        <Input
+                                          type="number"
+                                          placeholder="股價"
+                                          value={row.price}
+                                          onChange={(e) => {
+                                            const newRows = [...pyramidRows];
+                                            newRows[idx] = { ...newRows[idx], price: e.target.value };
+                                            setPyramidRows(newRows);
+                                          }}
+                                          className={`h-8 pl-5 pr-1 text-xs font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 ${
+                                            isKeyStage ? 'border-emerald-300 font-bold text-emerald-900 bg-emerald-50/30' : ''
+                                          }`}
+                                        />
+                                      </div>
+
+                                      {/* 預計購入數量 (拆分為兩個輸入框，分別為拆分一與拆分二預計購入數量) + 清除按鈕 */}
+                                      <div className="col-span-4 flex flex-col justify-center">
+                                        <div className="flex items-center gap-1">
+                                          <div className="flex-1 flex items-center gap-0.5 min-w-0">
+                                            <Input
+                                              type="number"
+                                              placeholder={batchConfigList[idx] ? `${batchConfigList[idx].split1.size}` : "股數"}
+                                              value={row.quantity}
+                                              onChange={(e) => {
+                                                const newRows = [...pyramidRows];
+                                                newRows[idx] = { ...newRows[idx], quantity: e.target.value };
+                                                setPyramidRows(newRows);
+                                              }}
+                                              className="h-8 px-1 text-center text-xs font-mono font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 rounded-lg min-w-0"
+                                              title={`第一拆分股數: ${batchConfigList[idx]?.split1.size || 0} 股 (${batchConfigList[idx]?.split1.percent || ''})`}
+                                            />
+                                            <span className="text-[10px] font-bold text-zinc-400 shrink-0 select-none">+</span>
+                                            <Input
+                                              type="number"
+                                              placeholder={batchConfigList[idx] ? `${batchConfigList[idx].split2.size}` : "股數"}
+                                              value={row.quantity2 ?? ''}
+                                              onChange={(e) => {
+                                                const newRows = [...pyramidRows];
+                                                newRows[idx] = { ...newRows[idx], quantity2: e.target.value };
+                                                setPyramidRows(newRows);
+                                              }}
+                                              className="h-8 px-1 text-center text-xs font-mono font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 rounded-lg min-w-0"
+                                              title={`第二拆分股數: ${batchConfigList[idx]?.split2.size || 0} 股 (${batchConfigList[idx]?.split2.percent || ''})`}
+                                            />
+                                          </div>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const newRows = [...pyramidRows];
+                                              newRows[idx] = { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false };
+                                              setPyramidRows(newRows);
+                                            }}
+                                            className="h-8 w-5 text-zinc-400 hover:text-red-600 hover:bg-zinc-100 rounded-md shrink-0 transition-colors flex items-center justify-center font-bold text-xs cursor-pointer"
+                                            title="清除這組"
+                                          >
+                                            ✕
+                                          </button>
+                                        </div>
+
+                                        {/* 若有已購的數量順便反映在此下方註明 (綠色字體) */}
+                                        {batchConfigList[idx] && plannedQty > 0 && (
+                                          <div className="text-[10px] text-emerald-600 font-bold mt-1 flex items-center justify-between px-1">
+                                            <span className="flex items-center gap-1">
+                                              <span className="text-emerald-700">已購:</span>
+                                              <span className="font-mono text-emerald-800 font-black">{batchConfigList[idx].bought}</span>
+                                              <span className="text-emerald-700">股</span>
+                                            </span>
+                                            <span className="text-zinc-400 font-medium text-[9px]">
+                                              餘額: <span className="font-mono text-zinc-600 font-semibold">{batchConfigList[idx].remaining}</span> 股
+                                            </span>
+                                          </div>
+                                        )}
+                                      </div>
+
+                                      {/* 狀態 */}
+                                      <div className="col-span-2 text-right pr-0.5 flex flex-col items-end justify-center gap-0.5">
+                                        <div>
+                                          {row.bought ? (
+                                            <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/80 inline-block whitespace-nowrap">
+                                              已購入
+                                            </span>
+                                          ) : (
+                                            <span className="text-[11px] font-medium text-zinc-600 bg-zinc-50 px-1.5 py-0.5 rounded border border-zinc-200/60 inline-block whitespace-nowrap">
+                                              尚未購入
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+
+                              {/* 系統一 參考目標價 / 損益點 */}
+                              <div className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-zinc-50 border border-zinc-200/80 mt-2">
+                                <div className="flex flex-col">
+                                  <span className="text-xs font-bold text-zinc-700">系統一目標/參考損益點 ($)</span>
+                                  <span className="text-[10px] text-zinc-400">估算目標出場合理獲利與加碼後成本之差額</span>
+                                </div>
+                                <div className="relative w-32 shrink-0">
+                                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-zinc-400 font-semibold">$</span>
+                                  <Input
+                                    type="number"
+                                    placeholder="目標價"
+                                    value={refPnLPointUp}
+                                    onChange={(e) => setRefPnLPointUp(e.target.value)}
+                                    className="h-8 pl-6 pr-2 text-xs font-bold text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 rounded-lg"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* 系統一 計算結果卡片 */}
+                            <div className="p-3.5 rounded-xl bg-zinc-50/80 border border-zinc-200/80 space-y-2">
+                              <div className="flex justify-between text-xs text-zinc-500">
+                                <span>突破加碼總股數:</span>
+                                <span className="font-bold font-mono text-zinc-800">{pyrResult.newSharesSum} 股</span>
+                              </div>
+                              <div className="flex justify-between text-xs text-zinc-500">
+                                <span>加碼所需資金:</span>
+                                <span className="font-bold font-mono text-zinc-800">${pyrResult.newCostSum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                              </div>
+                              <div className="h-[0.5px] bg-zinc-200/80 my-1" />
+                              <div className="flex justify-between items-baseline">
+                                <span className="text-xs font-semibold text-zinc-600">加碼後總股數:</span>
+                                <span className="text-sm font-bold font-mono text-zinc-800">{pyrResult.totalShares} 股</span>
+                              </div>
+                              <div className="flex justify-between items-baseline">
+                                <span className="text-xs font-semibold text-zinc-600">加碼後平均成本:</span>
+                                <span className="text-base font-black font-mono text-[#0F6E56]">
+                                  ${pyrResult.finalAveragePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </span>
                               </div>
-                            );
-                          })()}
-                          {includeCurrentHolding && avgResultSys2.costReducedPercent > 0 && (
-                            <div className="text-[11px] text-blue-700 font-semibold text-center bg-blue-50 py-1 px-2 rounded-lg border border-blue-100 mt-1">
-                              📉 平均成本降低 {avgResultSys2.costReducedPercent.toFixed(2)}%
+                              {hasRefPnLUp && calculatedPnLResultUp !== null && (() => {
+                                const isLoss = pyrResult.finalAveragePrice > parsedRefPnLUp;
+                                const isProfit = pyrResult.finalAveragePrice < parsedRefPnLUp;
+                                const absAmount = Math.abs(calculatedPnLResultUp);
+                                const formattedAmount = absAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+                                let textColor = "text-zinc-800";
+                                let displayText = `$0.00`;
+
+                                if (isLoss) {
+                                  textColor = "text-rose-600 font-bold";
+                                  displayText = `-$${formattedAmount}`;
+                                } else if (isProfit) {
+                                  textColor = "text-emerald-700 font-bold";
+                                  displayText = `+$${formattedAmount}`;
+                                }
+
+                                return (
+                                  <div className="flex justify-between items-baseline pt-2 border-t border-zinc-200/80 mt-1">
+                                    <div className="flex flex-col">
+                                      <span className="text-xs font-semibold text-zinc-600">試算獲利結果:</span>
+                                      <span className="text-[10px] text-zinc-400 font-normal">(參考目標價 - 加碼成本) × 總股數</span>
+                                    </div>
+                                    <span className={`text-base font-black font-mono ${textColor}`}>
+                                      {displayText}
+                                    </span>
+                                  </div>
+                                );
+                              })()}
+                              {includeCurrentHoldingUp && pyrResult.newSharesSum > 0 && stats.averagePrice > 0 && (
+                                <div className="text-[11px] text-emerald-800 font-semibold text-center bg-emerald-50 py-1 px-2 rounded-lg border border-emerald-200 mt-1">
+                                  🚀 突破加碼後平均成本變動: {pyrResult.costDiffPercent >= 0 ? `+${pyrResult.costDiffPercent.toFixed(2)}%` : `${pyrResult.costDiffPercent.toFixed(2)}%`}
+                                </div>
+                              )}
                             </div>
-                          )}
+                          </div>
+
+                          {/* System 2 (Right: +3% / +6% / +9% / +12%) */}
+                          <div className="bg-white/90 border border-blue-200/70 rounded-2xl p-4 shadow-2xs space-y-3.5 flex flex-col justify-between">
+                            <div className="space-y-3">
+                              <div className="flex items-center justify-between pb-2 border-b border-blue-100/80">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-black text-white bg-blue-600 px-2.5 py-0.5 rounded-md shadow-2xs">
+                                    系統二
+                                  </span>
+                                  <span className="text-xs font-bold text-zinc-700">3% 突破加碼</span>
+                                </div>
+                                <span className="text-[11px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200/60">
+                                  +3% / +6% / +9% / +12%
+                                </span>
+                              </div>
+
+                              {/* 剩餘預計購買與當前順序資訊 (系統二) */}
+                              {plannedQty > 0 && (
+                                <div className="text-[11px] font-bold bg-[#B1C28D]/20 text-[#6F7D50] border border-[#B1C28D]/40 px-2.5 py-1 rounded-xl flex flex-wrap items-center justify-between gap-1.5 shadow-2xs">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-[#6F7D50] animate-pulse" />
+                                    <span>剩餘預計加碼: <span className="font-mono font-black">{remainingToBuy}</span> 股</span>
+                                  </div>
+                                  <div>
+                                    <span>當前順序: <span className="font-bold text-zinc-800">{currentBatchOrderText}</span></span>
+                                    {currentBatchOrderText !== "無" && currentBatchOrderText !== "已滿批" && (
+                                      <span className="ml-1 text-zinc-700 font-medium">
+                                        (已購 <span className="font-mono font-bold text-zinc-800">{currentBatchBought}</span> / 餘額 <span className="font-mono font-bold text-zinc-800">{currentBatchRemaining}</span> 股)
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+
+                              <div className="space-y-2">
+                                <div className="grid grid-cols-12 gap-1.5 text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-1 items-center">
+                                  <span className="col-span-3 text-left">組別</span>
+                                  <span className="col-span-3">預計加碼股價 ($)</span>
+                                  <span className="col-span-4">預計加碼數量 (股)</span>
+                                  <span className="col-span-2 text-right pr-1">狀態</span>
+                                </div>
+
+                                {pyramidRowsSys2.map((row, idx) => {
+                                  const discountLabels = ['+3%', '+6%', '+9%', '+12%'];
+                                  const discountLabel = discountLabels[idx];
+                                  const isKeyStage = idx === 1; // +6% 突破加碼
+
+                                  return (
+                                    <div
+                                      key={idx}
+                                      className={`grid grid-cols-12 gap-1.5 items-center p-1 rounded-xl transition-all ${
+                                        isKeyStage
+                                          ? 'bg-blue-50/80 border border-blue-300/90 ring-1 ring-blue-200 shadow-2xs'
+                                          : 'border border-transparent'
+                                      }`}
+                                    >
+                                      {/* 組別 */}
+                                      <div className="col-span-3 flex flex-col justify-center min-w-0">
+                                        <div className="flex items-center gap-1 min-w-0 flex-wrap">
+                                          <input
+                                            type="checkbox"
+                                            checked={!!row.bought}
+                                            onChange={(e) => {
+                                              const newRows = [...pyramidRowsSys2];
+                                              newRows[idx] = { ...newRows[idx], bought: e.target.checked };
+                                              setPyramidRowsSys2(newRows);
+                                            }}
+                                            className="rounded border-zinc-300 text-blue-600 focus:ring-blue-500 h-3.5 w-3.5 cursor-pointer shrink-0"
+                                            title={row.bought ? "已購入" : "勾選標記為已購入"}
+                                          />
+                                          <span className={`text-xs font-bold shrink-0 ${isKeyStage ? 'text-blue-800 font-black' : 'text-zinc-500'}`}>
+                                            #{idx + 1}
+                                          </span>
+                                          {discountLabel && (
+                                            <span
+                                              className={`text-[11px] font-black shrink-0 ${
+                                                isKeyStage
+                                                  ? 'text-blue-800 bg-blue-100 px-1 py-0.5 rounded border border-blue-300 shadow-2xs flex items-center gap-0.5'
+                                                  : 'text-blue-700'
+                                              }`}
+                                            >
+                                              {discountLabel}
+                                              {isKeyStage && <span className="text-[10px] font-bold text-blue-900">(主升段)</span>}
+                                            </span>
+                                          )}
+                                        </div>
+
+                                        {/* 組別已購數量註明與拆分佔比 */}
+                                        {batchConfigList[idx] && plannedQty > 0 && (
+                                          <div className="text-[10px] text-zinc-600 font-medium mt-0.5 flex items-center gap-1 flex-wrap">
+                                            <span className="text-zinc-500 font-bold">已購:</span>
+                                            <span className="font-mono font-bold text-blue-800">{batchConfigList[idx].bought}</span>
+                                            <span className="text-zinc-400">/</span>
+                                            <span className="font-mono text-zinc-700">{batchConfigList[idx].size}股</span>
+                                            <span className="text-[9px] text-zinc-400 font-semibold">({batchConfigList[idx].split1.percent}+{batchConfigList[idx].split2.percent})</span>
+                                          </div>
+                                        )}
+                                      </div>
+
+                                      {/* 預計購入股價 */}
+                                      <div className="col-span-3 relative">
+                                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-zinc-400 font-semibold">$</span>
+                                        <Input
+                                          type="number"
+                                          placeholder="股價"
+                                          value={row.price}
+                                          onChange={(e) => {
+                                            const newRows = [...pyramidRowsSys2];
+                                            newRows[idx] = { ...newRows[idx], price: e.target.value };
+                                            setPyramidRowsSys2(newRows);
+                                          }}
+                                          className={`h-8 pl-5 pr-1 text-xs font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 ${
+                                            isKeyStage ? 'border-blue-300 font-bold text-blue-900 bg-blue-50/30' : ''
+                                          }`}
+                                        />
+                                      </div>
+
+                                      {/* 預計購入數量 (拆分為兩個輸入框，分別為拆分一與拆分二預計購入數量) + 清除按鈕 */}
+                                      <div className="col-span-4 flex flex-col justify-center">
+                                        <div className="flex items-center gap-1">
+                                          <div className="flex-1 flex items-center gap-0.5 min-w-0">
+                                            <Input
+                                              type="number"
+                                              placeholder={batchConfigList[idx] ? `${batchConfigList[idx].split1.size}` : "股數"}
+                                              value={row.quantity}
+                                              onChange={(e) => {
+                                                const newRows = [...pyramidRowsSys2];
+                                                newRows[idx] = { ...newRows[idx], quantity: e.target.value };
+                                                setPyramidRowsSys2(newRows);
+                                              }}
+                                              className="h-8 px-1 text-center text-xs font-mono font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 rounded-lg min-w-0"
+                                              title={`第一拆分股數: ${batchConfigList[idx]?.split1.size || 0} 股 (${batchConfigList[idx]?.split1.percent || ''})`}
+                                            />
+                                            <span className="text-[10px] font-bold text-zinc-400 shrink-0 select-none">+</span>
+                                            <Input
+                                              type="number"
+                                              placeholder={batchConfigList[idx] ? `${batchConfigList[idx].split2.size}` : "股數"}
+                                              value={row.quantity2 ?? ''}
+                                              onChange={(e) => {
+                                                const newRows = [...pyramidRowsSys2];
+                                                newRows[idx] = { ...newRows[idx], quantity2: e.target.value };
+                                                setPyramidRowsSys2(newRows);
+                                              }}
+                                              className="h-8 px-1 text-center text-xs font-mono font-medium text-zinc-800 bg-white border-zinc-200 focus-visible:ring-emerald-500 rounded-lg min-w-0"
+                                              title={`第二拆分股數: ${batchConfigList[idx]?.split2.size || 0} 股 (${batchConfigList[idx]?.split2.percent || ''})`}
+                                            />
+                                          </div>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const newRows = [...pyramidRowsSys2];
+                                              newRows[idx] = { price: '', quantity: '', quantity2: '', bought: false, riskFlag: false };
+                                              setPyramidRowsSys2(newRows);
+                                            }}
+                                            className="h-8 w-5 text-zinc-400 hover:text-red-600 hover:bg-zinc-100 rounded-md shrink-0 transition-colors flex items-center justify-center font-bold text-xs cursor-pointer"
+                                            title="清除這組"
+                                          >
+                                            ✕
+                                          </button>
+                                        </div>
+
+                                        {/* 若有已購的數量順便反映在此下方註明 (綠色字體) */}
+                                        {batchConfigList[idx] && plannedQty > 0 && (
+                                          <div className="text-[10px] text-emerald-600 font-bold mt-1 flex items-center justify-between px-1">
+                                            <span className="flex items-center gap-1">
+                                              <span className="text-emerald-700">已購:</span>
+                                              <span className="font-mono text-emerald-800 font-black">{batchConfigList[idx].bought}</span>
+                                              <span className="text-emerald-700">股</span>
+                                            </span>
+                                            <span className="text-zinc-400 font-medium text-[9px]">
+                                              餘額: <span className="font-mono text-zinc-600 font-semibold">{batchConfigList[idx].remaining}</span> 股
+                                            </span>
+                                          </div>
+                                        )}
+                                      </div>
+
+                                      {/* 狀態 */}
+                                      <div className="col-span-2 text-right pr-0.5 flex flex-col items-end justify-center gap-0.5">
+                                        <div>
+                                          {row.bought ? (
+                                            <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/80 inline-block whitespace-nowrap">
+                                              已購入
+                                            </span>
+                                          ) : (
+                                            <span className="text-[11px] font-medium text-zinc-600 bg-zinc-50 px-1.5 py-0.5 rounded border border-zinc-200/60 inline-block whitespace-nowrap">
+                                              尚未購入
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+
+                              {/* 系統二 參考目標價 / 損益點 */}
+                              <div className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-zinc-50 border border-zinc-200/80 mt-2">
+                                <div className="flex flex-col">
+                                  <span className="text-xs font-bold text-zinc-700">系統二目標/參考損益點 ($)</span>
+                                  <span className="text-[10px] text-zinc-400">估算目標出場合理獲利與加碼後成本之差額</span>
+                                </div>
+                                <div className="relative w-32 shrink-0">
+                                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-zinc-400 font-semibold">$</span>
+                                  <Input
+                                    type="number"
+                                    placeholder="目標價"
+                                    value={refPnLPointUpSys2}
+                                    onChange={(e) => setRefPnLPointUpSys2(e.target.value)}
+                                    className="h-8 pl-6 pr-2 text-xs font-bold text-zinc-800 bg-white border-zinc-200 focus-visible:ring-blue-500 rounded-lg"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* 系統二 計算結果卡片 */}
+                            <div className="p-3.5 rounded-xl bg-zinc-50/80 border border-zinc-200/80 space-y-2">
+                              <div className="flex justify-between text-xs text-zinc-500">
+                                <span>突破加碼總股數:</span>
+                                <span className="font-bold font-mono text-zinc-800">{pyrResultSys2.newSharesSum} 股</span>
+                              </div>
+                              <div className="flex justify-between text-xs text-zinc-500">
+                                <span>加碼所需資金:</span>
+                                <span className="font-bold font-mono text-zinc-800">${pyrResultSys2.newCostSum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                              </div>
+                              <div className="h-[0.5px] bg-zinc-200/80 my-1" />
+                              <div className="flex justify-between items-baseline">
+                                <span className="text-xs font-semibold text-zinc-600">加碼後總股數:</span>
+                                <span className="text-sm font-bold font-mono text-zinc-800">{pyrResultSys2.totalShares} 股</span>
+                              </div>
+                              <div className="flex justify-between items-baseline">
+                                <span className="text-xs font-semibold text-zinc-600">加碼後平均成本:</span>
+                                <span className="text-base font-black font-mono text-blue-700">
+                                  ${pyrResultSys2.finalAveragePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                              </div>
+                              {hasRefPnLUpSys2 && calculatedPnLResultUpSys2 !== null && (() => {
+                                const isLoss = pyrResultSys2.finalAveragePrice > parsedRefPnLUpSys2;
+                                const isProfit = pyrResultSys2.finalAveragePrice < parsedRefPnLUpSys2;
+                                const absAmount = Math.abs(calculatedPnLResultUpSys2);
+                                const formattedAmount = absAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+                                let textColor = "text-zinc-800";
+                                let displayText = `$0.00`;
+
+                                if (isLoss) {
+                                  textColor = "text-rose-600 font-bold";
+                                  displayText = `-$${formattedAmount}`;
+                                } else if (isProfit) {
+                                  textColor = "text-blue-700 font-bold";
+                                  displayText = `+$${formattedAmount}`;
+                                }
+
+                                return (
+                                  <div className="flex justify-between items-baseline pt-2 border-t border-zinc-200/80 mt-1">
+                                    <div className="flex flex-col">
+                                      <span className="text-xs font-semibold text-zinc-600">試算獲利結果:</span>
+                                      <span className="text-[10px] text-zinc-400 font-normal">(參考目標價 - 加碼成本) × 總股數</span>
+                                    </div>
+                                    <span className={`text-base font-black font-mono ${textColor}`}>
+                                      {displayText}
+                                    </span>
+                                  </div>
+                                );
+                              })()}
+                              {includeCurrentHoldingUp && pyrResultSys2.newSharesSum > 0 && stats.averagePrice > 0 && (
+                                <div className="text-[11px] text-blue-700 font-semibold text-center bg-blue-50 py-1 px-2 rounded-lg border border-blue-100 mt-1">
+                                  🚀 突破加碼後平均成本變動: {pyrResultSys2.costDiffPercent >= 0 ? `+${pyrResultSys2.costDiffPercent.toFixed(2)}%` : `${pyrResultSys2.costDiffPercent.toFixed(2)}%`}
+                                </div>
+                              )}
+                            </div>
+                          </div>
                         </div>
                       </div>
-                    </div>
+                    )}
 
                     {/* Full-width Section: 比例股價變動計算器 */}
                     <div className="pt-4 border-t border-zinc-200/80 space-y-4 bg-zinc-50/70 p-4 sm:p-5 rounded-2xl border border-zinc-200/70 shadow-2xs">

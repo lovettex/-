@@ -45,7 +45,7 @@ import { StockTab } from "../types";
 import { getTimestampMillis } from "../lib/dateUtils";
 import { System2PlanningChart } from "./System2PlanningChart";
 import { getVisualPriceLevels } from "../lib/visualLevels";
-import { generateAveragingDownRows, calculateStats, calculateBatchPlanning } from "../lib/calculations";
+import { generateAveragingDownRows, generatePyramidUpRows, calculateStats, calculateBatchPlanning } from "../lib/calculations";
 import {
   syncSubTabDividersToCanvas,
   formatTagDate,
@@ -1824,8 +1824,9 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
   const [collapsedCards, setCollapsedCards] = useState<Record<string, boolean>>({});
   const pyramidScrollContainerRef = useRef<HTMLDivElement>(null);
 
-  // 分批進場金字塔圖表之卡片分隔線 (Alt+D)、支撐 (Alt+R)、壓力 (Alt+P) 狀態控制
+  // 分批進場金字塔圖表之卡片分隔線 (Alt+D)、支撐 (Alt+R)、壓力 (Alt+P)、攤平與突破價位 (Alt+T / Alt+B) 狀態控制
   const [pyramidShowCardDividers, setPyramidShowCardDividers] = useState<boolean>(false);
+  const [pyramidCalcMode, setPyramidCalcMode] = useState<"averaging" | "breakout">("averaging");
   const [pyramidLevelTypes, setPyramidLevelTypes] = useState<{
     support: boolean;
     stopLoss: boolean;
@@ -4098,6 +4099,26 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     });
   }, []);
 
+  // 快捷切換 Primial 金字塔圖表 攤平 | 突破價位 (Alt + T / Alt + B)
+  const handleTogglePyramidCalcMode = useCallback((targetMode?: "averaging" | "breakout") => {
+    playClickSound();
+    setPyramidCalcMode((prev) => {
+      const next = targetMode !== undefined ? targetMode : (prev === "averaging" ? "breakout" : "averaging");
+      if (next === "breakout") {
+        toast.info("已切換為：向上突破加碼價位試算 (+2%, +4%, +6%, +8%)", {
+          id: "pyramid-calc-mode-toggle",
+          duration: 1500,
+        });
+      } else {
+        toast.info("已切換為：向下分批攤平價位試算 (-3%, -6%, -9%, -12%)", {
+          id: "pyramid-calc-mode-toggle",
+          duration: 1500,
+        });
+      }
+      return next;
+    });
+  }, []);
+
   // 計算個股 Primial 金字塔圖表所有必要資料
   const getStockPyramidData = useCallback(
     (symbol: string) => {
@@ -4191,10 +4212,14 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
           plannedQty = Number(tab.plannedBuyQty);
         }
 
-        // 向下攤平試算設定 (系統2)
+        // 向下攤平試算設定 (系統2) 與 向上突破加碼試算設定 (系統1)
         const { sys2: defaultSys2 } = generateAveragingDownRows(
           holdingAvgPrice > 0 ? holdingAvgPrice : currentPrice
         );
+        const { sys1: defaultUp1 } = generatePyramidUpRows(
+          holdingAvgPrice > 0 ? holdingAvgPrice : currentPrice
+        );
+
         const averagingRowsSys2 =
           tab?.averagingRowsSys2 &&
           Array.isArray(tab.averagingRowsSys2) &&
@@ -4202,9 +4227,18 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
             ? tab.averagingRowsSys2
             : defaultSys2;
 
-        // 若尚未設定 plannedQty，嘗試從 averagingRowsSys2 計算填寫之各批總預購股數
-        if (plannedQty <= 0 && averagingRowsSys2 && averagingRowsSys2.length > 0) {
-          const rowsSum = averagingRowsSys2.reduce((acc: number, r: any) => {
+        const pyramidRows =
+          tab?.pyramidRows &&
+          Array.isArray(tab.pyramidRows) &&
+          tab.pyramidRows.length > 0
+            ? tab.pyramidRows
+            : (tab?.averagingRows && Array.isArray(tab.averagingRows) && tab.averagingRows.length > 0 ? tab.averagingRows : defaultUp1);
+
+        const activeRows = pyramidCalcMode === "breakout" ? pyramidRows : averagingRowsSys2;
+
+        // 若尚未設定 plannedQty，嘗試從 activeRows 計算填寫之各批總預購股數
+        if (plannedQty <= 0 && activeRows && activeRows.length > 0) {
+          const rowsSum = activeRows.reduce((acc: number, r: any) => {
             const q1 = r?.quantity ? parseFloat(r.quantity) : 0;
             const q2 = r?.quantity2 ? parseFloat(r.quantity2) : 0;
             return acc + (isNaN(q1) ? 0 : q1) + (isNaN(q2) ? 0 : q2);
@@ -4224,7 +4258,7 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
           currentPrice,
           holdingQty,
           trades,
-          averagingRowsSys2,
+          averagingRowsSys2: activeRows,
           plannedBuyQty: tab?.plannedBuyQty ? Number(tab.plannedBuyQty) : undefined,
           plannedBuyPercent: tab?.plannedBuyPercent !== undefined && tab?.plannedBuyPercent !== null ? Number(tab.plannedBuyPercent) : undefined,
           tradeType: tab?.tradeType,
@@ -4252,6 +4286,7 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
           plannedQty: plannedShares || plannedQty,
           batchConfigList,
           averagingRowsSys2,
+          pyramidRows,
           trades,
           visualLevels,
         };
@@ -4466,6 +4501,38 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
         e.stopImmediatePropagation();
         if (isInput) (activeEl as HTMLElement)?.blur?.();
         handleTogglePyramidResistance();
+        return;
+      }
+
+      // 快捷鍵 Alt + T: 快速切換攤平價位 (金字塔圖表)
+      if (
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        (e.key === "T" || e.key === "t" || e.code === "KeyT" || e.key === "†")
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        if (isInput) (activeEl as HTMLElement)?.blur?.();
+        handleTogglePyramidCalcMode("averaging");
+        return;
+      }
+
+      // 快捷鍵 Alt + B: 快速切換突破價位 (金字塔圖表)
+      if (
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        (e.key === "B" || e.key === "b" || e.code === "KeyB" || e.key === "∫")
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        if (isInput) (activeEl as HTMLElement)?.blur?.();
+        handleTogglePyramidCalcMode("breakout");
         return;
       }
 
@@ -6683,8 +6750,51 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
               })}
             </div>
 
-            {/* 右側：防線/分隔線快捷開關 + 全部展開/收合 + 關閉 */}
+            {/* 右側：防線/分隔線快捷開關 + 攤平/突破價位 + 全部展開/收合 + 關閉 */}
             <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+              {/* 攤平 | 突破價位 (快捷按鍵: Alt+T / Alt+B) */}
+              <div className="flex items-center bg-zinc-900/90 border border-zinc-700/80 rounded-full p-0.5 shadow-xs shrink-0 select-none">
+                <button
+                  type="button"
+                  onClick={() => handleTogglePyramidCalcMode("averaging")}
+                  className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-full text-xs font-black transition-all cursor-pointer border active:scale-95 select-none ${
+                    pyramidCalcMode === "averaging"
+                      ? "bg-emerald-600 text-white border-emerald-400/60 shadow-[0_0_8px_rgba(16,185,129,0.4)]"
+                      : "bg-transparent hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border-transparent"
+                  }`}
+                  title="向下分批攤平價位試算 (-3%, -6%, -9%, -12%) [快捷鍵 Alt + T]"
+                >
+                  <span>攤平</span>
+                  <span className="text-[10px] font-mono opacity-80 font-normal">Alt+T</span>
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      pyramidCalcMode === "averaging" ? "bg-emerald-300 shadow-[0_0_6px_#6ee7b7]" : "bg-zinc-600"
+                    }`}
+                  />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleTogglePyramidCalcMode("breakout")}
+                  className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-full text-xs font-black transition-all cursor-pointer border active:scale-95 select-none ${
+                    pyramidCalcMode === "breakout"
+                      ? "bg-indigo-600 text-white border-indigo-400/60 shadow-[0_0_8px_rgba(99,102,241,0.4)]"
+                      : "bg-transparent hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border-transparent"
+                  }`}
+                  title="向上突破加碼價位試算 (+2%, +4%, +6%, +8%) [快捷鍵 Alt + B]"
+                >
+                  <span>突破價位</span>
+                  <span className="text-[10px] font-mono opacity-80 font-normal">Alt+B</span>
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      pyramidCalcMode === "breakout" ? "bg-indigo-300 shadow-[0_0_6px_#a5b4fc]" : "bg-zinc-600"
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <div className="h-4 w-[1px] bg-zinc-700 hidden sm:block" />
+
               {/* 卡片分隔線 (Alt + D) */}
               <button
                 type="button"
@@ -6809,6 +6919,8 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
                         holdingQty={pData.holdingQty}
                         batches={pData.batchConfigList}
                         averagingRowsSys2={pData.averagingRowsSys2}
+                        pyramidRows={pData.pyramidRows}
+                        calcMode={pyramidCalcMode}
                         includeCurrentHolding={true}
                         refPnLPointSys2=""
                         usableCapital={pData.usableCapital}

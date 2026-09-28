@@ -44,6 +44,10 @@ export interface StockTab {
   includeCurrentHolding?: boolean;
   averagingRowsSys2?: { price: string; quantity: string; quantity2?: string; bought?: boolean; riskFlag?: boolean }[];
   refPnLPointSys2?: number | string;
+  pyramidRows?: { price: string; quantity: string; quantity2?: string; bought?: boolean; riskFlag?: boolean }[];
+  refPnLPointUp?: number | string;
+  pyramidRowsSys2?: { price: string; quantity: string; quantity2?: string; bought?: boolean; riskFlag?: boolean }[];
+  refPnLPointUpSys2?: number | string;
   selectedSplitTrade?: string;
 }
 

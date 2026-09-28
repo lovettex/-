@@ -70,6 +70,8 @@ interface System2PlanningChartProps {
   holdingQty: number;
   batches: BatchInfo[];
   averagingRowsSys2: AveragingRowData[];
+  pyramidRows?: AveragingRowData[];
+  calcMode?: 'averaging' | 'breakout';
   includeCurrentHolding: boolean;
   refPnLPointSys2?: string;
   usableCapital?: number;
@@ -107,6 +109,8 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
   holdingQty,
   batches,
   averagingRowsSys2,
+  pyramidRows,
+  calcMode = 'averaging',
   includeCurrentHolding,
   usableCapital = 0,
   plannedQty = 0,
@@ -257,15 +261,22 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
     return typeof holdingAvgPrice === 'number' ? holdingAvgPrice : parseFloat(String(holdingAvgPrice)) || 0;
   }, [holdingAvgPrice]);
 
-  // System 2 four-stage config (-3%, -6%, -9%, -12%)
+  // 依切換模式決定階梯配置:
+  // 突破加碼: 向上突破試算 (系統一 2% 階梯遞增: +2%, +4%, +6%, +8%)
+  // 分批攤平: 向下攤平試算 (系統二 3% 階梯遞減: -3%, -6%, -9%, -12%)
   const stepConfigs = useMemo(
-    () => [
+    () => calcMode === 'breakout' ? [
+      { index: 0, label: '加碼#1', addPct: 2, percent: 15, name: '第一批 (+2%)', subtitle: '初期試探', isBreakout: true },
+      { index: 1, label: '加碼#2', addPct: 4, percent: 25, name: '第二批 (+4%)', subtitle: '突破加碼', isBreakout: true },
+      { index: 2, label: '加碼#3', addPct: 6, percent: 35, name: '第三批 (+6%)', subtitle: '強勢加碼', isBreakout: true },
+      { index: 3, label: '加碼#4', addPct: 8, percent: 25, name: '第四批 (+8%)', subtitle: '目標達標', isBreakout: true },
+    ] : [
       { index: 0, label: '第1批', dropPct: 3, percent: 15, name: '第一批 (15%)', subtitle: '初期試探' },
       { index: 1, label: '第2批', dropPct: 6, percent: 25, name: '第二批 (25%)', subtitle: '基準倉位' },
       { index: 2, label: '第3批', dropPct: 9, percent: 35, name: '第三批 (35%)', subtitle: '防守加碼' },
       { index: 3, label: '第4批', dropPct: 12, percent: 25, name: '第四批 (25%)', subtitle: '強制平倉防線' },
     ],
-    []
+    [calcMode]
   );
 
   // 計算有效持有股數 (優先取 holdingQty，次取 trades 計算之淨買入股數，再取 batch 中的已購買總和，與 averagingRowsSys2 已購合計)
@@ -278,23 +289,25 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
       return sum;
     }, 0);
     const propBatchesBought = (batches || []).reduce((acc, b) => acc + (b?.bought || 0), 0);
-    const checkedRowsBought = (averagingRowsSys2 || []).reduce((sum, r) => {
+    const activeRows = calcMode === 'breakout' ? (pyramidRows || averagingRowsSys2) : averagingRowsSys2;
+    const checkedRowsBought = (activeRows || []).reduce((sum, r) => {
       if (!r?.bought) return sum;
       const q1 = r?.quantity ? parseFloat(r.quantity) : 0;
       const q2 = r?.quantity2 ? parseFloat(r.quantity2) : 0;
       return sum + (q1 + q2 > 0 ? q1 + q2 : 0);
     }, 0);
     return Math.max(0, numHolding, netTradeShares, propBatchesBought, checkedRowsBought);
-  }, [holdingQty, trades, batches, averagingRowsSys2]);
+  }, [holdingQty, trades, batches, averagingRowsSys2, pyramidRows, calcMode]);
 
   // Compute calculated values for each pyramid step
   const stepItems = useMemo(() => {
     const baseRef = currentPrice > 0 ? currentPrice : (holdingAvgPrice > 0 ? holdingAvgPrice : 100);
+    const activeRows = calcMode === 'breakout' ? (pyramidRows || averagingRowsSys2) : averagingRowsSys2;
 
-    // 若尚未提供 plannedQty，但已有持股或 averagingRowsSys2，智慧推算預估目標總股數
+    // 若尚未提供 plannedQty，但已有持股或 activeRows，智慧推算預估目標總股數
     let effPlannedQty = plannedQty && plannedQty > 0 ? plannedQty : 0;
-    if (effPlannedQty <= 0 && averagingRowsSys2 && averagingRowsSys2.length > 0) {
-      const sumRows = averagingRowsSys2.reduce((acc, r) => {
+    if (effPlannedQty <= 0 && activeRows && activeRows.length > 0) {
+      const sumRows = activeRows.reduce((acc, r) => {
         const q1 = r?.quantity ? parseFloat(r.quantity) : 0;
         const q2 = r?.quantity2 ? parseFloat(r.quantity2) : 0;
         return acc + q1 + q2;
@@ -312,12 +325,12 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
       currentPrice: currentPriceNum,
       holdingQty: effectiveHoldingShares,
       trades,
-      averagingRowsSys2,
+      averagingRowsSys2: activeRows,
       plannedBuyQty: effPlannedQty,
     });
 
     return stepConfigs.map((cfg) => {
-      const row = averagingRowsSys2?.[cfg.index];
+      const row = activeRows?.[cfg.index];
       const batch = batches?.[cfg.index];
       const planBatch = planResult?.batches?.[cfg.index];
       const safePlanBatch = {
@@ -345,9 +358,14 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
 
       // Step price: user manual input or formula from current price
       const manualPrice = row?.price ? parseFloat(row.price) : 0;
-      const stepPrice = manualPrice > 0
-        ? manualPrice
-        : Math.round(baseRef * (1 - cfg.dropPct / 100) * 100) / 100;
+      let stepPrice = 0;
+      if (manualPrice > 0) {
+        stepPrice = manualPrice;
+      } else if (calcMode === 'breakout') {
+        stepPrice = Math.round(baseRef * (1 + ((cfg as any).addPct || (cfg.index + 1) * 2) / 100) * 100) / 100;
+      } else {
+        stepPrice = Math.round(baseRef * (1 - ((cfg as any).dropPct || (cfg.index + 1) * 3) / 100) * 100) / 100;
+      }
 
       // 優先採用 batch props，若未設定則以集中計算結果為基準
       const s1Size = (batch?.split1?.size && batch.split1.size > 0)
@@ -375,11 +393,9 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
       const s1Remaining = Math.max(0, s1Size - s1Bought);
       const s2Remaining = Math.max(0, s2Size - s2Bought);
 
-      const isReached =
-        (currentPrice > 0 && currentPrice <= stepPrice) ||
-        (targetQty > 0 && boughtQty >= targetQty) ||
-        boughtQty > 0 ||
-        Boolean(row?.bought);
+      const isReached = calcMode === 'breakout'
+        ? ((currentPrice > 0 && currentPrice >= stepPrice) || (targetQty > 0 && boughtQty >= targetQty) || boughtQty > 0 || Boolean(row?.bought))
+        : ((currentPrice > 0 && currentPrice <= stepPrice) || (targetQty > 0 && boughtQty >= targetQty) || boughtQty > 0 || Boolean(row?.bought));
 
       const stepCost = stepPrice * (targetQty > 0 ? targetQty : boughtQty);
 
@@ -403,6 +419,8 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
 
       return {
         ...cfg,
+        dropPct: (cfg as any).dropPct,
+        addPct: (cfg as any).addPct,
         price: stepPrice,
         size: targetQty,
         bought: boughtQty,
@@ -413,7 +431,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
         split2,
       };
     });
-  }, [stepConfigs, averagingRowsSys2, batches, currentPrice, holdingAvgPrice, plannedQty, effectiveHoldingShares, trades]);
+  }, [stepConfigs, averagingRowsSys2, pyramidRows, calcMode, batches, currentPrice, currentPriceNum, holdingAvgPrice, plannedQty, effectiveHoldingShares, trades, usableCapital]);
 
   // Filter & sort past trades (valid prices and positive quantities)
   const validTrades = useMemo(() => {
@@ -1139,8 +1157,9 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
             ctx.stroke();
             ctx.restore();
 
-            // Text Line 1: "$80.93 -3% (15%)"
-            const line1 = `$${step.price.toFixed(2)}  -${step.dropPct}% (${step.percent}%)`;
+            // Text Line 1: "$80.93 -3% (15%)" or "$80.93 +2% (15%)"
+            const pctSign = step.addPct !== undefined ? `+${step.addPct}%` : `-${step.dropPct}%`;
+            const line1 = `$${step.price.toFixed(2)}  ${pctSign} (${step.percent}%)`;
             // Text Line 2: "已購買 X / 預購 Y 股 (進度%)"
             const pctText = step.size > 0 ? ` (${Math.round((step.bought / step.size) * 100)}%)` : '';
             const line2 = `已購買: ${step.bought} / 預購: ${step.size} 股${pctText}`;
@@ -1782,7 +1801,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
                       {hoveredItem.data.name}
                     </span>
                     <span className="text-xs font-bold text-emerald-100 hidden sm:inline">
-                      {hoveredItem.data.subtitle} (-{hoveredItem.data.dropPct}%)
+                      {hoveredItem.data.subtitle} ({hoveredItem.data.addPct !== undefined ? `+${hoveredItem.data.addPct}%` : `-${hoveredItem.data.dropPct}%`})
                     </span>
                     <span
                       className={`text-[10px] font-black px-1.5 py-0.5 rounded ${
@@ -2081,7 +2100,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
                         {selectedItem.data.name}
                       </span>
                       <span className="text-xs font-bold text-zinc-800">
-                        {selectedItem.data.subtitle} (-{selectedItem.data.dropPct}%)
+                        {selectedItem.data.subtitle} ({selectedItem.data.addPct !== undefined ? `+${selectedItem.data.addPct}%` : `-${selectedItem.data.dropPct}%`})
                       </span>
                       <span
                         className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
@@ -2347,7 +2366,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
                                   {step.name}
                                 </span>
                                 <span className="text-xs font-bold text-zinc-700">
-                                  目標進場價 ${step.price.toFixed(2)} (-{step.dropPct}%)
+                                  目標進場價 ${step.price.toFixed(2)} ({step.addPct !== undefined ? `+${step.addPct}%` : `-${step.dropPct}%`})
                                 </span>
                                 <span className="text-[11px] text-zinc-500 font-mono">
                                   總預購: {step.size} 股 ｜ 總已購: {step.bought} 股
