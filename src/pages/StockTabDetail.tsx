@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useStockTabs } from '../hooks/useStockTabs';
 import { playClickSound, playSuccessSound, playPriceImportSound } from '../lib/audio';
@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
 import { format } from 'date-fns';
 import { Timestamp, collection, writeBatch, doc, serverTimestamp, addDoc, getDocs, deleteDoc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
-import { Trash2, BarChart3, ChevronDown, ChevronUp, Gamepad2, ShieldCheck, Upload, Download, ChevronLeft, CheckCircle2, RotateCcw, Loader2, HelpCircle, AlertTriangle, Save, Calculator, History, RefreshCw, Layers, TrendingDown, TrendingUp } from 'lucide-react';
+import { Trash2, BarChart3, ChevronDown, ChevronUp, Gamepad2, ShieldCheck, Upload, Download, ChevronLeft, CheckCircle2, RotateCcw, Loader2, HelpCircle, AlertTriangle, Save, Calculator, History, RefreshCw, Layers, TrendingDown, TrendingUp, Split } from 'lucide-react';
 import { toast } from "sonner";
 import { motion, AnimatePresence } from 'motion/react';
 import { db } from '../lib/firebase';
@@ -153,6 +153,166 @@ export default function StockTabDetail() {
   const [includeCurrentHoldingUp, setIncludeCurrentHoldingUp] = useState(true);
   const [refPnLPointUp, setRefPnLPointUp] = useState('');
   const [refPnLPointUpSys2, setRefPnLPointUpSys2] = useState('');
+
+  // Primial 分批進場金字塔動態圖表頂部功能按鈕控制狀態 (完全對齊 Primial 頁面)
+  const [pyramidCalcMode, setPyramidCalcMode] = useState<'averaging' | 'breakout'>('averaging');
+  const [pyramidShowCardDividers, setPyramidShowCardDividers] = useState<boolean>(false);
+  const [pyramidLevelTypes, setPyramidLevelTypes] = useState<{
+    support: boolean;
+    stopLoss: boolean;
+    resistance: boolean;
+    takeProfit: boolean;
+  }>({
+    support: true,
+    stopLoss: false,
+    resistance: false,
+    takeProfit: false,
+  });
+
+  // 快捷切換金字塔圖表卡片分隔線 (Alt + D)
+  const handleTogglePyramidCardDividers = useCallback(() => {
+    playClickSound();
+    setPyramidShowCardDividers((prev) => {
+      const next = !prev;
+      toast.info(next ? "已開啟「卡片分隔線」(Alt + D)" : "已關閉「卡片分隔線」(Alt + D)", {
+        id: "pyramid-card-dividers-toggle",
+        duration: 1200,
+      });
+      return next;
+    });
+  }, []);
+
+  // 快捷切換金字塔圖表支撐 (Alt + R)
+  const handleTogglePyramidSupport = useCallback(() => {
+    playClickSound();
+    setPyramidLevelTypes((prev) => {
+      const next = { ...prev, support: !prev.support };
+      toast.info(next.support ? "已開啟「支撐防線」(Alt + R)" : "已關閉「支撐防線」(Alt + R)", {
+        id: "pyramid-support-toggle",
+        duration: 1200,
+      });
+      return next;
+    });
+  }, []);
+
+  // 快捷切換金字塔圖表壓力 (Alt + P)
+  const handleTogglePyramidResistance = useCallback(() => {
+    playClickSound();
+    setPyramidLevelTypes((prev) => {
+      const next = { ...prev, resistance: !prev.resistance };
+      toast.info(next.resistance ? "已開啟「壓力防線」(Alt + P)" : "已關閉「壓力防線」(Alt + P)", {
+        id: "pyramid-resistance-toggle",
+        duration: 1200,
+      });
+      return next;
+    });
+  }, []);
+
+  // 快捷切換金字塔圖表 攤平 | 突破價位 (Alt + T / Alt + B)
+  const handleTogglePyramidCalcMode = useCallback((targetMode?: "averaging" | "breakout") => {
+    playClickSound();
+    setPyramidCalcMode((prev) => {
+      const next = targetMode !== undefined ? targetMode : (prev === "averaging" ? "breakout" : "averaging");
+      if (next === "breakout") {
+        toast.info("已切換為：向上突破加碼價位試算 (+2%, +4%, +6%, +8%)", {
+          id: "pyramid-calc-mode-toggle",
+          duration: 1500,
+        });
+      } else {
+        toast.info("已切換為：向下分批攤平價位試算 (-3%, -6%, -9%, -12%)", {
+          id: "pyramid-calc-mode-toggle",
+          duration: 1500,
+        });
+      }
+      return next;
+    });
+  }, []);
+
+  // 金字塔快捷鍵監聽 (Alt + D, Alt + R, Alt + P, Alt + T, Alt + B)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const isInput =
+        activeEl?.tagName === "INPUT" ||
+        activeEl?.tagName === "TEXTAREA" ||
+        activeEl?.getAttribute("contenteditable") === "true";
+
+      if (isInput) return;
+
+      // Alt + D: 卡片分隔線
+      if (
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        (e.key === "D" || e.key === "d" || e.code === "KeyD" || e.key === "∂")
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        handleTogglePyramidCardDividers();
+        return;
+      }
+
+      // Alt + R: 支撐防線
+      if (
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        (e.key === "R" || e.key === "r" || e.code === "KeyR" || e.key === "®")
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        handleTogglePyramidSupport();
+        return;
+      }
+
+      // Alt + P: 壓力防線
+      if (
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        (e.key === "P" || e.key === "p" || e.code === "KeyP" || e.key === "π")
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        handleTogglePyramidResistance();
+        return;
+      }
+
+      // Alt + T: 分批攤平
+      if (
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        (e.key === "T" || e.key === "t" || e.code === "KeyT" || e.key === "†")
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        handleTogglePyramidCalcMode("averaging");
+        return;
+      }
+
+      // Alt + B: 突破價位
+      if (
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        (e.key === "B" || e.key === "b" || e.code === "KeyB" || e.key === "∫")
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        handleTogglePyramidCalcMode("breakout");
+        return;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleTogglePyramidCardDividers, handleTogglePyramidSupport, handleTogglePyramidResistance, handleTogglePyramidCalcMode]);
 
   // Percentage calculator states
   const [calcExpression, setCalcExpression] = useState('');
@@ -2482,6 +2642,133 @@ export default function StockTabDetail() {
 
                     {/* 子分頁 1: 籌碼試算與規劃 */}
                     <TabsContent value="calc" className="pt-2 space-y-3 outline-none">
+                      {/* Primial 分批進場金字塔快捷功能工具列 (完全對齊 Primial 頁面上的功能按鈕) */}
+                      <div className="w-full bg-[#18181b] border border-zinc-800/90 rounded-2xl px-3.5 sm:px-4 py-2 sm:py-2.5 flex flex-wrap items-center justify-between gap-2.5 shadow-md">
+                        {/* 左側：Primial 標籤與提示 */}
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs sm:text-sm font-black text-white tracking-tight flex items-center gap-1.5">
+                            <Layers className="w-4 h-4 text-amber-400" />
+                            <span>Primial</span>
+                            <span className="hidden sm:inline text-xs font-bold text-zinc-400">分批進場金字塔動態互動圖表</span>
+                          </span>
+                          {tab?.symbol && (
+                            <span className="px-2 py-0.5 bg-amber-400/15 border border-amber-400/30 text-amber-300 text-[11px] font-mono font-black rounded-full">
+                              {tab.symbol}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* 右側：防線/分隔線快捷開關 + 攤平/突破價位 (同 Primial 頂部按鈕) */}
+                        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-wrap">
+                          {/* 攤平 | 突破價位 (快捷按鍵: Alt+T / Alt+B) */}
+                          <div className="flex items-center bg-zinc-900/90 border border-zinc-700/80 rounded-full p-0.5 shadow-xs shrink-0 select-none">
+                            <button
+                              type="button"
+                              onClick={() => handleTogglePyramidCalcMode("averaging")}
+                              className={`flex items-center gap-1 px-2.5 sm:px-3 py-1 rounded-full text-xs font-black transition-all cursor-pointer border active:scale-95 select-none ${
+                                pyramidCalcMode === "averaging"
+                                  ? "bg-emerald-600 text-white border-emerald-400/60 shadow-[0_0_8px_rgba(16,185,129,0.4)]"
+                                  : "bg-transparent hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border-transparent"
+                              }`}
+                              title="向下分批攤平價位試算 (-3%, -6%, -9%, -12%) [快捷鍵 Alt + T]"
+                            >
+                              <span>攤平</span>
+                              <span className="text-[10px] font-mono opacity-80 font-normal">Alt+T</span>
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full ${
+                                  pyramidCalcMode === "averaging" ? "bg-emerald-300 shadow-[0_0_6px_#6ee7b7]" : "bg-zinc-600"
+                                }`}
+                              />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleTogglePyramidCalcMode("breakout")}
+                              className={`flex items-center gap-1 px-2.5 sm:px-3 py-1 rounded-full text-xs font-black transition-all cursor-pointer border active:scale-95 select-none ${
+                                pyramidCalcMode === "breakout"
+                                  ? "bg-indigo-600 text-white border-indigo-400/60 shadow-[0_0_8px_rgba(99,102,241,0.4)]"
+                                  : "bg-transparent hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border-transparent"
+                              }`}
+                              title="向上突破加碼價位試算 (+2%, +4%, +6%, +8%) [快捷鍵 Alt + B]"
+                            >
+                              <span>突破價位</span>
+                              <span className="text-[10px] font-mono opacity-80 font-normal">Alt+B</span>
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full ${
+                                  pyramidCalcMode === "breakout" ? "bg-indigo-300 shadow-[0_0_6px_#a5b4fc]" : "bg-zinc-600"
+                                }`}
+                              />
+                            </button>
+                          </div>
+
+                          <div className="h-4 w-[1px] bg-zinc-700 hidden sm:block" />
+
+                          {/* 卡片分隔線 (Alt + D) */}
+                          <button
+                            type="button"
+                            onClick={handleTogglePyramidCardDividers}
+                            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-black transition-all cursor-pointer border active:scale-95 shrink-0 select-none ${
+                              pyramidShowCardDividers
+                                ? "bg-indigo-500/20 text-indigo-300 border-indigo-400/60 shadow-[0_0_8px_rgba(99,102,241,0.3)] ring-1 ring-indigo-400/50"
+                                : "bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white border-zinc-700/60"
+                            }`}
+                            title="快速打開/關閉卡片分隔線 (Alt + D)"
+                          >
+                            <Split className={`w-3.5 h-3.5 ${pyramidShowCardDividers ? "text-indigo-400" : "text-zinc-400"}`} />
+                            <span className="hidden sm:inline">分隔線</span>
+                            <span className="sm:hidden">分</span>
+                            <span className="text-[10px] font-mono text-zinc-400 font-normal">Alt+D</span>
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full ${
+                                pyramidShowCardDividers ? "bg-indigo-400 shadow-[0_0_6px_#818cf8]" : "bg-zinc-500"
+                              }`}
+                            />
+                          </button>
+
+                          {/* 支撐 (Alt + R) */}
+                          <button
+                            type="button"
+                            onClick={handleTogglePyramidSupport}
+                            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-black transition-all cursor-pointer border active:scale-95 shrink-0 select-none ${
+                              pyramidLevelTypes.support
+                                ? "bg-amber-500/20 text-amber-300 border-amber-400/60 shadow-[0_0_8px_rgba(245,158,11,0.3)] ring-1 ring-amber-400/50"
+                                : "bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white border-zinc-700/60"
+                            }`}
+                            title="快速打開/關閉支撐防線 (Alt + R)"
+                          >
+                            <span className="w-2.5 h-0 border-t-2 border-dashed border-amber-400 shrink-0" />
+                            <span>支撐</span>
+                            <span className="text-[10px] font-mono text-zinc-400 font-normal">Alt+R</span>
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full ${
+                                pyramidLevelTypes.support ? "bg-amber-400 shadow-[0_0_6px_#fbbf24]" : "bg-zinc-500"
+                              }`}
+                            />
+                          </button>
+
+                          {/* 壓力 (Alt + P) */}
+                          <button
+                            type="button"
+                            onClick={handleTogglePyramidResistance}
+                            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-black transition-all cursor-pointer border active:scale-95 shrink-0 select-none ${
+                              pyramidLevelTypes.resistance
+                                ? "bg-rose-500/20 text-rose-300 border-rose-400/60 shadow-[0_0_8px_rgba(244,63,94,0.3)] ring-1 ring-rose-400/50"
+                                : "bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white border-zinc-700/60"
+                            }`}
+                            title="快速打開/關閉壓力防線 (Alt + P)"
+                          >
+                            <span className="w-2.5 h-0 border-t-2 border-dashed border-rose-400 shrink-0" />
+                            <span>壓力</span>
+                            <span className="text-[10px] font-mono text-zinc-400 font-normal">Alt+P</span>
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full ${
+                                pyramidLevelTypes.resistance ? "bg-rose-400 shadow-[0_0_6px_#fb7185]" : "bg-zinc-500"
+                              }`}
+                            />
+                          </button>
+                        </div>
+                      </div>
+
                       {/* 系統二 3% 階梯攤平與分批進場計畫動態互動圖表 (Chart.js) */}
                       <System2PlanningChart
                         compact={true}
@@ -2492,12 +2779,39 @@ export default function StockTabDetail() {
                         holdingQty={effectiveHoldingQty}
                         batches={batchConfigList}
                         averagingRowsSys2={averagingRowsSys2}
+                        pyramidRows={pyramidRowsSys2 && pyramidRowsSys2.length > 0 ? pyramidRowsSys2 : pyramidRows}
+                        calcMode={pyramidCalcMode}
                         includeCurrentHolding={includeCurrentHolding}
                         refPnLPointSys2={refPnLPointSys2}
                         usableCapital={usableCapital}
                         plannedQty={plannedQty}
                         trades={trades}
                         visualLevels={visualLevels}
+                        showCardDividers={pyramidShowCardDividers}
+                        onToggleCardDividers={handleTogglePyramidCardDividers}
+                        selectedLevelTypes={pyramidLevelTypes}
+                        onToggleLevelType={(type) => {
+                          setPyramidLevelTypes((prev) => ({
+                            ...prev,
+                            [type]: !prev[type],
+                          }));
+                        }}
+                        onSelectAllLevelTypes={() => {
+                          setPyramidLevelTypes({
+                            support: true,
+                            stopLoss: true,
+                            resistance: true,
+                            takeProfit: true,
+                          });
+                        }}
+                        onDeselectAllLevelTypes={() => {
+                          setPyramidLevelTypes({
+                            support: false,
+                            stopLoss: false,
+                            resistance: false,
+                            takeProfit: false,
+                          });
+                        }}
                         onBatchClick={handleBatchClick}
                       />
 
