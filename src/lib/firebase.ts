@@ -14,7 +14,7 @@ import {
   persistentMultipleTabManager,
   setLogLevel,
   doc,
-  getDocFromServer
+  getDocFromCache
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
@@ -27,7 +27,7 @@ try {
   // Ignore in case setLogLevel is restricted
 }
 
-// Initialize Firestore with robust multi-tab persistent IndexedDB cache & forced long-polling for iframe/proxy reliability
+// Initialize Firestore with robust multi-tab persistent IndexedDB cache & auto-detecting transport for optimal reliability
 let firestoreInstance;
 try {
   firestoreInstance = initializeFirestore(
@@ -36,7 +36,6 @@ try {
       localCache: persistentLocalCache({
         tabManager: persistentMultipleTabManager(),
       }),
-      experimentalForceLongPolling: true,
       experimentalAutoDetectLongPolling: true,
     },
     firebaseConfig.firestoreDatabaseId
@@ -47,18 +46,6 @@ try {
 }
 
 export const db = firestoreInstance;
-
-// Initial connection test as recommended by Firebase integration guidelines
-async function testConnection() {
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if (error instanceof Error && (error.message.includes('the client is offline') || error.message.includes('offline') || error.message.includes('unavailable'))) {
-      console.info("[Firestore Connection Status] Firestore client operates with local cache persistence.");
-    }
-  }
-}
-testConnection();
 
 // Initialize Firebase Auth with multiple persistence targets to prevent WKWebView/Chrome iOS sandboxed storage crashes.
 let authInstance;

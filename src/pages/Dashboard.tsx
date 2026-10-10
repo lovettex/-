@@ -18,6 +18,7 @@ import {
   where,
   getDocs,
   getDoc,
+  getDocFromCache,
   deleteDoc,
   doc,
   setDoc,
@@ -305,21 +306,53 @@ export default function Dashboard() {
     if (!user) return;
     const fetchSettings = async () => {
       try {
-        let snapshot = await getDoc(doc(db, "userSettings", user.uid));
-        if (!snapshot.exists()) {
-          // Fallback to shared default settings or any existing user settings document in the workspace
-          const defaultSnap = await getDoc(doc(db, "userSettings", "default"));
-          if (defaultSnap.exists()) {
-            snapshot = defaultSnap;
+        let snapshot;
+        try {
+          snapshot = await getDoc(doc(db, "userSettings", user.uid));
+        } catch (err) {
+          const errMsg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+          if (
+            errMsg.includes("offline") ||
+            errMsg.includes("unavailable") ||
+            errMsg.includes("could not reach") ||
+            errMsg.includes("failed-precondition") ||
+            errMsg.includes("deadline") ||
+            errMsg.includes("network") ||
+            errMsg.includes("timed out")
+          ) {
+            try {
+              snapshot = await getDocFromCache(doc(db, "userSettings", user.uid));
+            } catch {
+              // Ignore cache miss
+            }
           } else {
-            const allSettings = await getDocs(collection(db, "userSettings"));
-            const validDoc = allSettings.docs.find(d => typeof d.data()?.totalCapital === "number");
-            if (validDoc) {
-              snapshot = validDoc;
+            throw err;
+          }
+        }
+
+        if (!snapshot || !snapshot.exists()) {
+          // Fallback to shared default settings or any existing user settings document in the workspace
+          try {
+            const defaultSnap = await getDoc(doc(db, "userSettings", "default"));
+            if (defaultSnap && defaultSnap.exists()) {
+              snapshot = defaultSnap;
+            } else {
+              const allSettings = await getDocs(collection(db, "userSettings"));
+              const validDoc = allSettings.docs.find(d => typeof d.data()?.totalCapital === "number");
+              if (validDoc) {
+                snapshot = validDoc;
+              }
+            }
+          } catch {
+            // Check cache for default doc if offline
+            try {
+              snapshot = await getDocFromCache(doc(db, "userSettings", "default"));
+            } catch {
+              // Ignore fallback network error
             }
           }
         }
-        if (snapshot.exists()) {
+        if (snapshot && snapshot.exists()) {
           const data = snapshot.data();
           if (typeof data.totalCapital === "number") {
             setTotalCapital(data.totalCapital);
@@ -338,8 +371,22 @@ export default function Dashboard() {
           }
         }
       } catch (error) {
-        console.error("Failed to fetch userSettings:", error);
-        handleFirestoreError(error, OperationType.GET, `userSettings/${user.uid}`, user);
+        const errMsg = (error instanceof Error ? error.message : String(error)).toLowerCase();
+        const isOffline =
+          errMsg.includes("offline") ||
+          errMsg.includes("unavailable") ||
+          errMsg.includes("could not reach") ||
+          errMsg.includes("backend didn't respond") ||
+          errMsg.includes("failed-precondition") ||
+          errMsg.includes("deadline") ||
+          errMsg.includes("network") ||
+          errMsg.includes("timed out");
+        if (!isOffline) {
+          console.error("Failed to fetch userSettings:", error);
+          handleFirestoreError(error, OperationType.GET, `userSettings/${user.uid}`, user);
+        } else {
+          console.info("[userSettings] Operating with local cache/storage.");
+        }
       }
     };
     fetchSettings();
@@ -7168,7 +7215,7 @@ export default function Dashboard() {
                         <div className={`w-1.5 h-6 rounded-full shrink-0 transition-all duration-300 ${activeViewTab === "real" ? "bg-gradient-to-b from-teal-400 to-teal-600 shadow-[0_0_10px_rgba(20,184,166,0.5)]" : "bg-gradient-to-b from-emerald-400 to-emerald-600 shadow-[0_0_10px_rgba(16,185,129,0.5)]"}`}></div>
                         
                         {/* Sub-tab pills container */}
-                        <div className="flex items-center bg-zinc-100/90 p-1 border border-zinc-200/90 rounded-2xl gap-1 shadow-2xs overflow-x-auto no-scrollbar">
+                        <div className="flex items-center bg-zinc-100/90 dark:bg-zinc-800/80 p-1 border border-zinc-200/90 dark:border-zinc-700/80 rounded-2xl gap-1 shadow-2xs overflow-x-auto no-scrollbar">
                           {visibleSubTabs.map((tab) => {
                             const conf = holdingTabConfig[tab];
                             const TabIcon = conf.icon;
@@ -7190,17 +7237,17 @@ export default function Dashboard() {
                                 className={`px-3.5 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center gap-2 border cursor-pointer whitespace-nowrap shrink-0 ${
                                   isActive
                                     ? `${conf.colorClass} ${conf.bgClass} ${conf.borderClass} ${conf.shadowClass}`
-                                    : "text-zinc-600 hover:text-zinc-900 hover:bg-white/70 border-transparent shadow-none"
+                                    : "text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white hover:bg-white/70 dark:hover:bg-zinc-700/50 border-transparent shadow-none"
                                 }`}
                               >
-                                <TabIcon className="w-3.5 h-3.5 shrink-0" />
+                                <TabIcon className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
                                 <span>{tab === "觀察中" && activeViewTab === "active" ? "虛擬交易" : tab}</span>
-                                <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full border leading-none ${
+                                <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border leading-none min-w-[18px] inline-flex items-center justify-center ${
                                   isActive 
                                     ? conf.activeCountClass 
-                                    : "bg-zinc-200/60 border-zinc-300/40 text-zinc-600"
+                                    : "bg-zinc-200/60 dark:bg-zinc-700/80 border-zinc-300/40 dark:border-zinc-600/50 text-zinc-600 dark:text-zinc-300"
                                 }`}>
-                                  <AnimatedNumber value={tabCount} />{" "}檔
+                                  <AnimatedNumber value={tabCount} />
                                 </span>
                               </button>
                             );
@@ -8175,19 +8222,19 @@ export default function Dashboard() {
                                             })()}
                                           </div>
 
-                                          {/* Top Center Edge Badge: Stock's Unrealized PnL (未實現損益) */}
-                                          <div className="absolute -top-4.5 left-1/2 -translate-x-1/2 z-40 pointer-events-none flex items-center justify-center">
+                                          {/* Top Center Edge Badge: Stock's Unrealized PnL (未實現損益) - 支援 PS5 動態背景高對比顯示，字體放大 3px */}
+                                          <div className="absolute -top-5 left-1/2 -translate-x-1/2 z-40 pointer-events-none flex items-center justify-center stock-card-top-unrealized-badge">
                                             <div
-                                              className={`flex items-center gap-1.5 text-[18px] font-black whitespace-nowrap select-none font-mono ${
+                                              className={`flex items-center gap-1.5 text-[21px] font-black whitespace-nowrap select-none font-mono px-2.5 py-0.5 rounded-full transition-all duration-300 ${
                                                 unrealizedPnL > 0
-                                                  ? "text-emerald-500"
+                                                  ? "text-emerald-500 stock-pnl-pos"
                                                   : unrealizedPnL < 0
-                                                    ? "text-rose-500"
-                                                    : "text-zinc-400"
+                                                    ? "text-rose-500 stock-pnl-neg"
+                                                    : "text-zinc-400 stock-pnl-zero"
                                               }`}
                                             >
-                                              <span className="text-[17px] font-bold opacity-90">未實現:</span>
-                                              <span className="tabular-nums font-black">
+                                              <span className="text-[20px] font-bold opacity-90 stock-pnl-label">未實現:</span>
+                                              <span className="tabular-nums font-black stock-pnl-val">
                                                 {unrealizedPnL > 0 ? "+" : ""}
                                                 ${unrealizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                               </span>

@@ -94,6 +94,8 @@ const getTrackIcon = (iconName: string, className: string = 'w-3.5 h-3.5') => {
       return <Radio className={className} />;
     case 'Activity':
       return <Activity className={className} />;
+    case 'Music':
+      return <Music className={className} />;
     default:
       return <Sparkles className={className} />;
   }
@@ -592,10 +594,11 @@ export function WhiteNoisePlayer() {
                 <div className="flex items-center gap-1 py-2.5 overflow-x-auto scrollbar-hide no-scrollbar [scrollbar-width:none] [&::-webkit-scrollbar]:hidden border-b border-zinc-150">
                   {[
                     { id: 'all', label: '全部' },
+                    { id: 'music', label: '🎵 平靜輕音樂' },
                     { id: 'nature', label: '自然雨聲' },
-                    { id: 'noise', label: '頻譜噪音' },
                     { id: 'meditation', label: '冥想腦波' },
                     { id: 'ambience', label: '環境生活' },
+                    { id: 'noise', label: '頻譜噪音' },
                   ].map((cat) => (
                     <button
                       key={cat.id}

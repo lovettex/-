@@ -310,207 +310,293 @@
 }
 
 /* =========================================================
-   PS5 THEME HIGH CONTRAST & FLUORESCENT NEON GLOW STYLES
+   PS5 THEME HIGH CONTRAST & TRANSLUCENT FROSTED GLASS STYLES
    ========================================================= */
 
 body.ps5-theme-active {
-  --foreground: #f8fafc;
+  --foreground: #09090b;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  color: #09090b;
 }
 
-/* 1. Main Header Title & Page Titles Fluorescent Glow */
-body.ps5-theme-active h1,
-body.ps5-theme-active .ps5-fluorescent-title {
-  color: #ffffff !important;
-  text-shadow: 
-    0 0 8px rgba(255, 255, 255, 0.95),
-    0 0 18px var(--ps5-accent, #00d4ff),
-    0 0 35px var(--ps5-glow, rgba(0, 212, 255, 0.8)) !important;
-  letter-spacing: 0.02em;
-}
-
-/* 2. Stock Symbol Titles on Cards & Detail Page (AAPL, TSLA, NVDA, V, SE...) */
-body.ps5-theme-active .stock-symbol-title,
-body.ps5-theme-active .stock-symbol-title span,
-body.ps5-theme-active .stock-symbol-text {
-  color: #ffffff !important;
-  font-weight: 900 !important;
-  -webkit-text-stroke: 0.15px rgba(0, 0, 0, 0.95) !important;
-  paint-order: stroke fill !important;
-  text-shadow: 
-    0 0 0.15px #000000,
-    0 0 1px rgba(0, 0, 0, 0.9),
-    0 0 3px #ffffff,
-    0 0 8px var(--ps5-accent, #00d4ff),
-    0 0 16px var(--ps5-glow, rgba(0, 212, 255, 0.55)) !important;
-  letter-spacing: -0.02em !important;
-}
-
-body.ps5-theme-active .not-ready-badge {
-  color: #ffffff !important;
-  opacity: 0.85 !important;
-  text-shadow: 0 0 8px var(--ps5-glow, rgba(0, 212, 255, 0.6)) !important;
-}
-
-/* 3. Section Titles & Dialog Headers */
-body.ps5-theme-active h2,
-body.ps5-theme-active h3,
-body.ps5-theme-active [data-slot="dialog-title"] {
-  text-shadow: 
-    0 0 6px rgba(255, 255, 255, 0.8),
-    0 0 14px var(--ps5-accent, #00d4ff),
-    0 0 28px var(--ps5-glow, rgba(0, 212, 255, 0.45)) !important;
-}
-
-/* 4. Portfolio Overview Badges & Subtitles */
-body.ps5-theme-active .portfolio-overview-badge {
-  color: #ffffff !important;
-  background-color: rgba(255, 255, 255, 0.18) !important;
-  border: 1px solid var(--ps5-accent, #00d4ff) !important;
-  box-shadow: 0 0 14px var(--ps5-glow, rgba(0, 212, 255, 0.5)), inset 0 0 8px rgba(255, 255, 255, 0.25) !important;
-  text-shadow: 0 0 10px var(--ps5-accent, #00d4ff) !important;
-}
-
-/* 5. Metrics & HUD Numbers High Contrast */
-body.ps5-theme-active .metric-label {
-  color: #ffffff !important;
-  opacity: 0.95;
-  text-shadow: 0 0 8px var(--ps5-accent, #00d4ff);
-}
-
-body.ps5-theme-active .metric-value {
-  color: #ffffff !important;
-  text-shadow: 0 0 8px rgba(255, 255, 255, 0.9), 0 0 18px var(--ps5-accent, #00d4ff) !important;
-}
-
-/* 6. Card Containers: Semi-Transparent Frosted Glass Texture (半透明磨砂玻璃質感) */
+/* 1. Transparent Frosted Glass Containers (Cards, Panels, Modals, Popovers) */
 body.ps5-theme-active .glass-card,
 body.ps5-theme-active .card-front,
-body.ps5-theme-active .card-back {
-  background-color: rgba(255, 255, 255, 0.52) !important;
-  backdrop-filter: blur(28px) saturate(190%) !important;
-  -webkit-backdrop-filter: blur(28px) saturate(190%) !important;
-  border: 2px solid rgba(255, 255, 255, 0.6) !important;
+body.ps5-theme-active .card-back,
+body.ps5-theme-active .glass-panel,
+body.ps5-theme-active [id^="stock-card-"],
+body.ps5-theme-active [data-slot="dialog-content"],
+body.ps5-theme-active .modal-frosted,
+body.ps5-theme-active .white-noise-menu {
+  background-color: rgba(255, 255, 255, 0.85) !important;
+  backdrop-filter: blur(24px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.8) !important;
   box-shadow: 
-    0 16px 40px rgba(0, 0, 0, 0.45),
-    0 0 25px var(--ps5-glow, rgba(0, 212, 255, 0.25)),
-    inset 0 1px 2px rgba(255, 255, 255, 0.8) !important;
-  transition: all 400ms ease-out;
+    0 12px 36px rgba(0, 0, 0, 0.12),
+    0 2px 8px rgba(0, 0, 0, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95) !important;
+  transition: all 250ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 body.ps5-theme-active .glass-card:hover,
 body.ps5-theme-active .card-front:hover,
 body.ps5-theme-active .card-back:hover {
-  background-color: rgba(255, 255, 255, 0.62) !important;
-  border-color: rgba(255, 255, 255, 0.85) !important;
+  background-color: rgba(255, 255, 255, 0.92) !important;
+  border-color: rgba(255, 255, 255, 0.95) !important;
   box-shadow: 
-    0 20px 50px rgba(0, 0, 0, 0.55),
-    0 0 35px var(--ps5-glow, rgba(0, 212, 255, 0.4)),
-    inset 0 1px 2px rgba(255, 255, 255, 0.95) !important;
+    0 18px 48px rgba(0, 0, 0, 0.16),
+    0 0 20px var(--ps5-glow, rgba(0, 212, 255, 0.2)),
+    inset 0 1px 0 rgba(255, 255, 255, 1) !important;
 }
 
-body.ps5-theme-active .glass-panel {
-  background-color: rgba(255, 255, 255, 0.55) !important;
-  backdrop-filter: blur(28px) saturate(190%) !important;
-  -webkit-backdrop-filter: blur(28px) saturate(190%) !important;
-  border: 1.5px solid rgba(255, 255, 255, 0.6) !important;
-  box-shadow: 
-    0 16px 40px rgba(0, 0, 0, 0.4),
-    0 0 25px var(--ps5-glow, rgba(0, 212, 255, 0.2)) !important;
+/* 2. Deep Crisp Black & Charcoal Text (High Contrast, No Blurry White Glows) */
+body.ps5-theme-active h1,
+body.ps5-theme-active h2,
+body.ps5-theme-active h3,
+body.ps5-theme-active h4,
+body.ps5-theme-active h5,
+body.ps5-theme-active h6,
+body.ps5-theme-active .stock-symbol-title,
+body.ps5-theme-active .stock-symbol-text {
+  color: #09090b !important;
+  font-weight: 800 !important;
+  text-shadow: none !important;
+  -webkit-text-stroke: 0 !important;
 }
 
-/* 7. Main Navigation Tabs & Subtabs: Fluorescent Neon Glow with Crisp Black Outline Stroke (持有中 | 真實交易 | 已完成 | 操作備註 等等) */
-body.ps5-theme-active #main-view-tabs button,
-body.ps5-theme-active #main-view-tabs button span,
-body.ps5-theme-active #main-view-tabs button svg,
-body.ps5-theme-active [role="tab"],
-body.ps5-theme-active [data-slot="tabs-trigger"],
-body.ps5-theme-active .ps5-tab-neon,
-body.ps5-theme-active .subtab-glow-btn {
-  color: #ffffff !important;
-  font-weight: 900 !important;
-  -webkit-text-stroke: 0.35px #000000 !important;
-  text-stroke: 0.35px #000000 !important;
-  paint-order: stroke fill !important;
-  text-shadow: 
-    0 0 0.5px #000000,
-    0 0 1.5px #000000,
-    0 0 3px #ffffff,
-    0 0 8px var(--ps5-accent, #00d4ff),
-    0 0 16px var(--ps5-glow, rgba(0, 212, 255, 0.7)),
-    0 0 28px var(--ps5-glow, rgba(0, 212, 255, 0.45)) !important;
-  letter-spacing: 0.015em !important;
-  transition: all 0.25s ease-out;
+body.ps5-theme-active .text-zinc-900,
+body.ps5-theme-active .text-zinc-950,
+body.ps5-theme-active .text-slate-900,
+body.ps5-theme-active .text-slate-950,
+body.ps5-theme-active .text-gray-900 {
+  color: #09090b !important;
+  font-weight: 700 !important;
 }
 
+body.ps5-theme-active .text-zinc-800,
+body.ps5-theme-active .text-slate-800,
+body.ps5-theme-active .text-gray-800 {
+  color: #18181b !important;
+  font-weight: 700 !important;
+}
+
+body.ps5-theme-active .text-zinc-700,
+body.ps5-theme-active .text-slate-700,
+body.ps5-theme-active .text-gray-700 {
+  color: #27272a !important;
+  font-weight: 600 !important;
+}
+
+body.ps5-theme-active .text-zinc-600,
+body.ps5-theme-active .text-slate-600,
+body.ps5-theme-active .text-gray-600 {
+  color: #3f3f46 !important;
+  font-weight: 600 !important;
+}
+
+body.ps5-theme-active .text-zinc-500,
+body.ps5-theme-active .text-slate-500,
+body.ps5-theme-active .text-gray-500 {
+  color: #52525b !important;
+  font-weight: 600 !important;
+}
+
+/* 3. Navigation Bar & Tabs: Frosted Glass with Crisp Dark Text & High-Contrast Active States */
 body.ps5-theme-active #main-view-tabs {
-  background-color: rgba(0, 0, 0, 0.35) !important;
-  backdrop-filter: blur(20px) saturate(180%) !important;
-  -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-  padding: 6px 10px !important;
+  background-color: rgba(255, 255, 255, 0.85) !important;
+  backdrop-filter: blur(24px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+  padding: 6px 8px !important;
   border-radius: 9999px !important;
-  border: 1px solid rgba(255, 255, 255, 0.18) !important;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 15px var(--ps5-glow, rgba(0, 212, 255, 0.15)) !important;
+  border: 1px solid rgba(255, 255, 255, 0.85) !important;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.9) !important;
   width: fit-content !important;
   max-width: 100% !important;
 }
 
+body.ps5-theme-active #main-view-tabs button {
+  color: #18181b !important;
+  font-weight: 700 !important;
+  text-shadow: none !important;
+  -webkit-text-stroke: 0 !important;
+  transition: all 0.2s ease-out;
+}
+
 body.ps5-theme-active #main-view-tabs button:hover {
-  background-color: rgba(255, 255, 255, 0.12) !important;
+  color: #09090b !important;
+  background-color: rgba(0, 0, 0, 0.05) !important;
   border-radius: 9999px !important;
 }
 
 body.ps5-theme-active #main-view-tabs button > div[class*="bg-"] {
-  background-color: rgba(255, 255, 255, 0.22) !important;
-  border: 1px solid var(--ps5-accent, #00d4ff) !important;
-  box-shadow: 0 0 16px var(--ps5-glow, rgba(0, 212, 255, 0.55)), inset 0 0 8px rgba(255, 255, 255, 0.2) !important;
   border-radius: 9999px !important;
 }
 
-/* Subtabs bar (觀察中 | 候選名單 | 買進操作 | 賣出操作 | 平倉操作 | 乖離名單 | 持股監控) in PS5 Mode */
+/* Subtabs bar in PS5 Mode */
 body.ps5-theme-active .snap-mandatory button,
 body.ps5-theme-active .snap-x button,
 body.ps5-theme-active button.snap-center {
-  color: #ffffff !important;
+  color: #18181b !important;
+  font-weight: 700 !important;
+  text-shadow: none !important;
+  -webkit-text-stroke: 0 !important;
+}
+
+body.ps5-theme-active .snap-mandatory button:hover,
+body.ps5-theme-active .snap-x button:hover {
+  color: #09090b !important;
+}
+
+/* 4. High Contrast Stock Profit & Loss Colors on Frosted Glass */
+body.ps5-theme-active .text-emerald-500,
+body.ps5-theme-active .text-emerald-600,
+body.ps5-theme-active .text-emerald-700,
+body.ps5-theme-active .text-emerald-800,
+body.ps5-theme-active .text-green-600,
+body.ps5-theme-active .text-green-700 {
+  color: #047857 !important; /* Deep Crisp Emerald */
   font-weight: 800 !important;
-  -webkit-text-stroke: 0.3px #000000 !important;
-  paint-order: stroke fill !important;
-  text-shadow: 
-    0 0 0.5px #000000,
-    0 0 1.2px #000000,
-    0 0 3px #ffffff,
-    0 0 8px var(--ps5-accent, #00d4ff),
-    0 0 16px var(--ps5-glow, rgba(0, 212, 255, 0.6)) !important;
-  backdrop-filter: blur(14px) !important;
-  -webkit-backdrop-filter: blur(14px) !important;
+  text-shadow: none !important;
 }
 
-/* Detail page TabsList & Triggers */
-body.ps5-theme-active [data-slot="tabs-list"] {
-  background-color: rgba(0, 0, 0, 0.5) !important;
-  border: 1px solid rgba(255, 255, 255, 0.25) !important;
-  backdrop-filter: blur(20px) !important;
-  -webkit-backdrop-filter: blur(20px) !important;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4) !important;
+body.ps5-theme-active .text-rose-500,
+body.ps5-theme-active .text-rose-600,
+body.ps5-theme-active .text-rose-700,
+body.ps5-theme-active .text-red-500,
+body.ps5-theme-active .text-red-600,
+body.ps5-theme-active .text-red-700 {
+  color: #be123c !important; /* Deep Crisp Crimson Rose */
+  font-weight: 800 !important;
+  text-shadow: none !important;
 }
 
-body.ps5-theme-active [data-slot="tabs-trigger"][data-state="active"],
-body.ps5-theme-active [data-slot="tabs-trigger"][aria-selected="true"],
-body.ps5-theme-active [role="tab"][aria-selected="true"] {
-  background-color: rgba(255, 255, 255, 0.22) !important;
-  border: 1px solid var(--ps5-accent, #00d4ff) !important;
-  box-shadow: 0 0 16px var(--ps5-glow, rgba(0, 212, 255, 0.5)), inset 0 0 8px rgba(255, 255, 255, 0.2) !important;
+body.ps5-theme-active .text-amber-600,
+body.ps5-theme-active .text-amber-700,
+body.ps5-theme-active .text-amber-800 {
+  color: #b45309 !important; /* Deep Amber */
+  font-weight: 800 !important;
+  text-shadow: none !important;
+}
+
+body.ps5-theme-active .text-purple-600,
+body.ps5-theme-active .text-purple-700,
+body.ps5-theme-active .text-purple-800 {
+  color: #6d28d9 !important; /* Deep Purple */
+  font-weight: 800 !important;
+  text-shadow: none !important;
+}
+
+body.ps5-theme-active .text-indigo-600,
+body.ps5-theme-active .text-indigo-700,
+body.ps5-theme-active .text-blue-600,
+body.ps5-theme-active .text-blue-700 {
+  color: #1d4ed8 !important; /* Deep Blue */
+  font-weight: 800 !important;
+  text-shadow: none !important;
+}
+
+/* 5. Stock Card Top Unrealized PnL (未實現損益) Badge in PS5 Active Mode */
+body.ps5-theme-active .stock-card-top-unrealized-badge > div {
+  background-color: rgba(255, 255, 255, 0.88) !important;
+  backdrop-filter: blur(16px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(180%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.9) !important;
+  box-shadow: 
+    0 4px 16px rgba(0, 0, 0, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95) !important;
+}
+
+body.ps5-theme-active .stock-card-top-unrealized-badge .stock-pnl-label {
+  color: #09090b !important;
+  opacity: 1 !important;
+  font-weight: 900 !important;
+  letter-spacing: -0.01em !important;
+  text-shadow: none !important;
+}
+
+body.ps5-theme-active .stock-card-top-unrealized-badge .stock-pnl-pos {
+  color: #047857 !important; /* Deep crisp high-contrast emerald */
+  border-color: rgba(4, 120, 87, 0.35) !important;
+}
+body.ps5-theme-active .stock-card-top-unrealized-badge .stock-pnl-pos .stock-pnl-val {
+  color: #047857 !important;
+  font-weight: 900 !important;
+  text-shadow: none !important;
+}
+
+body.ps5-theme-active .stock-card-top-unrealized-badge .stock-pnl-neg {
+  color: #be123c !important; /* Deep crisp high-contrast crimson */
+  border-color: rgba(190, 18, 60, 0.35) !important;
+}
+body.ps5-theme-active .stock-card-top-unrealized-badge .stock-pnl-neg .stock-pnl-val {
+  color: #be123c !important;
+  font-weight: 900 !important;
+  text-shadow: none !important;
+}
+
+body.ps5-theme-active .stock-card-top-unrealized-badge .stock-pnl-zero {
+  color: #475569 !important;
+  border-color: rgba(71, 85, 105, 0.3) !important;
+}
+body.ps5-theme-active .stock-card-top-unrealized-badge .stock-pnl-zero .stock-pnl-val {
+  color: #334155 !important;
+  font-weight: 900 !important;
+  text-shadow: none !important;
+}
+
+/* 6. Chips Summary Panel & KPI Cards in PS5 Active Mode (Transparent Frosted Glass, No Dark Layer) */
+body.ps5-theme-active .chips-summary-panel {
+  background-color: rgba(255, 255, 255, 0.85) !important;
+  backdrop-filter: blur(24px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+  border-color: rgba(255, 255, 255, 0.85) !important;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.95) !important;
+}
+
+body.ps5-theme-active .chips-summary-panel .group\/card {
+  background-color: rgba(255, 255, 255, 0.75) !important;
+  border-color: rgba(228, 228, 231, 0.8) !important;
+}
+
+body.ps5-theme-active .chips-summary-panel .group\/card:hover {
+  background-color: rgba(255, 255, 255, 0.95) !important;
+  border-color: rgba(255, 255, 255, 1) !important;
+}
+
+/* 7. iOS Style Segmented Control in PS5 Active Mode */
+body.ps5-theme-active .chips-subtabs-track {
+  background-color: rgba(236, 239, 243, 0.9) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  border-color: rgba(255, 255, 255, 0.6) !important;
+}
+
+/* 8. Main Tabs in PS5 Active Mode */
+body.ps5-theme-active .main-tabs-track {
+  background-color: rgba(255, 255, 255, 0.20) !important;
+  border-color: rgba(255, 255, 255, 0.25) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+}
+
+body.ps5-theme-active .main-tabs-track button[aria-selected="false"] {
+  color: rgba(255, 255, 255, 0.90) !important;
+}
+
+body.ps5-theme-active .main-tabs-track button[aria-selected="false"]:hover {
   color: #ffffff !important;
+  background-color: rgba(255, 255, 255, 0.10) !important;
 }
 
-/* Completed tabs & filter buttons in PS5 mode */
-body.ps5-theme-active #completed-cards-section button {
-  -webkit-text-stroke: 0.25px #000000 !important;
-  paint-order: stroke fill !important;
-  text-shadow: 
-    0 0 0.5px #000000,
-    0 0 2px #ffffff,
-    0 0 6px var(--ps5-accent, #00d4ff) !important;
+body.ps5-theme-active .main-tabs-track button[aria-selected="false"] .main-tab-badge {
+  background-color: rgba(0, 0, 0, 0.30) !important;
+  color: rgba(255, 255, 255, 0.90) !important;
 }
+
+
 
 
 

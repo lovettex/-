@@ -714,7 +714,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
       },
     ];
 
-    // 3. Past BUY trades
+    // 3. Past BUY trades (平時只顯示藍點，滑鼠懸停時顯示價格標籤)
     if (showTrades && buyTrades.length > 0) {
       datasets.push({
         type: 'line' as const,
@@ -725,12 +725,15 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
           raw: t,
         })),
         showLine: false,
-        pointStyle: 'rectRot' as const, // diamond 🔷
-        pointRadius: 8,
-        pointHoverRadius: 12,
-        pointBackgroundColor: '#3b82f6', // blue-500
+        pointStyle: 'circle' as const, // 圓形藍點
+        pointRadius: 6.5,
+        pointHoverRadius: 10,
+        pointBackgroundColor: '#2563eb', // blue-600
         pointBorderColor: '#ffffff',
         pointBorderWidth: 2,
+        pointHoverBackgroundColor: '#1d4ed8',
+        pointHoverBorderColor: '#ffffff',
+        pointHoverBorderWidth: 2.5,
         order: 0,
       });
     }
@@ -746,12 +749,15 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
           raw: t,
         })),
         showLine: false,
-        pointStyle: 'triangle' as const,
-        pointRadius: 8,
-        pointHoverRadius: 12,
-        pointBackgroundColor: '#f97316', // orange-500
+        pointStyle: 'circle' as const,
+        pointRadius: 6.5,
+        pointHoverRadius: 10,
+        pointBackgroundColor: '#ea580c', // orange-600
         pointBorderColor: '#ffffff',
         pointBorderWidth: 2,
+        pointHoverBackgroundColor: '#c2410c',
+        pointHoverBorderColor: '#ffffff',
+        pointHoverBorderWidth: 2.5,
         order: 0,
       });
     }
@@ -776,6 +782,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
     buyTrades,
     sellTrades,
     isAllLevelsSelected,
+    hoveredItem,
   });
 
   drawDataRef.current = {
@@ -790,6 +797,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
     buyTrades,
     sellTrades,
     isAllLevelsSelected,
+    hoveredItem,
   };
 
   useEffect(() => {
@@ -810,6 +818,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
     buyTrades,
     sellTrades,
     isAllLevelsSelected,
+    hoveredItem,
   ]);
 
   // Custom Chart.js annotation plugin:
@@ -1188,8 +1197,12 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
         });
         ctx.restore();
 
-        // 4. Draw Historical Trades Price & Quantity directly on the canvas!
+        // 4. Draw Historical Trades Price & Quantity ONLY on hover (平常狀態下只顯示藍點，滑鼠經過時才顯示價格標籤)
         if (showTrades && validTrades.length > 0) {
+          const activeElements = (chart as any).getActiveElements ? (chart as any).getActiveElements() : [];
+          const currentHover = drawDataRef.current?.hoveredItem;
+          const hoveredTradeData = currentHover?.type === 'trade' ? currentHover.data : null;
+
           ctx.save();
           validTrades.forEach((trade, idx) => {
             const tx = xScale.getPixelForValue(trade.price);
@@ -1198,36 +1211,62 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
 
             if (tx >= chartArea.left - 15 && tx <= chartArea.right + 15) {
               const isBuy = trade.type === 'BUY';
-              const label = `${isBuy ? '買' : '賣'} ${trade.quantity}股 @ $${trade.price.toFixed(2)}`;
 
-              ctx.font = 'bold 10px monospace, system-ui, sans-serif';
-              const textWidth = ctx.measureText(label).width;
-              const tagW = textWidth + 10;
-              const tagH = 18;
+              // 判斷此筆交易是否正被滑鼠懸停 (hover)
+              const isHovered = Boolean(
+                (hoveredTradeData && (
+                  (hoveredTradeData.id && trade.id && hoveredTradeData.id === trade.id) ||
+                  (hoveredTradeData.price === trade.price && hoveredTradeData.quantity === trade.quantity && (hoveredTradeData.dateFormatted === trade.dateFormatted || !hoveredTradeData.dateFormatted)) ||
+                  hoveredTradeData === trade
+                )) ||
+                activeElements.some((el: any) => {
+                  const ds = chart.data.datasets[el.datasetIndex];
+                  return ds && (ds.label?.includes('買入') || ds.label?.includes('賣出')) && (ds.data[el.index] as any)?.raw === trade;
+                })
+              );
 
-              // Alternate offset to prevent collision
-              const offsetY = idx % 2 === 0 ? -12 - tagH : 10;
-              const tagX = Math.max(chartArea.left, Math.min(chartArea.right - tagW, tx - tagW / 2));
-              const tagY = ty + offsetY;
+              // 只有在滑鼠經過該點時才渲染價格與股數標籤浮動卡片
+              if (isHovered) {
+                const label = `${isBuy ? '買' : '賣'} ${trade.quantity}股 @ $${trade.price.toFixed(2)}${trade.dateFormatted ? ` (${trade.dateFormatted})` : ''}`;
 
-              // Mini pill background
-              ctx.fillStyle = isBuy ? 'rgba(239, 246, 255, 0.95)' : 'rgba(255, 247, 237, 0.95)';
-              ctx.strokeStyle = isBuy ? '#3b82f6' : '#f97316';
-              ctx.lineWidth = 1;
-              ctx.beginPath();
-              if (typeof ctx.roundRect === 'function') {
-                ctx.roundRect(tagX, tagY, tagW, tagH, 4);
-              } else {
-                ctx.rect(tagX, tagY, tagW, tagH);
+                ctx.font = 'bold 11px monospace, system-ui, sans-serif';
+                const textWidth = ctx.measureText(label).width;
+                const tagW = textWidth + 14;
+                const tagH = 22;
+
+                // Alternate offset to ensure tag is well-placed above point
+                const tagX = Math.max(chartArea.left + 4, Math.min(chartArea.right - tagW - 4, tx - tagW / 2));
+                const tagY = ty - tagH - 12 < chartArea.top ? ty + 12 : ty - tagH - 10;
+
+                // Drop shadow
+                ctx.shadowColor = 'rgba(0, 0, 0, 0.25)';
+                ctx.shadowBlur = 8;
+                ctx.shadowOffsetX = 0;
+                ctx.shadowOffsetY = 3;
+
+                // Pill background
+                ctx.fillStyle = isBuy ? 'rgba(239, 246, 255, 0.98)' : 'rgba(255, 247, 237, 0.98)';
+                ctx.strokeStyle = isBuy ? '#2563eb' : '#ea580c';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                if (typeof ctx.roundRect === 'function') {
+                  ctx.roundRect(tagX, tagY, tagW, tagH, 6);
+                } else {
+                  ctx.rect(tagX, tagY, tagW, tagH);
+                }
+                ctx.fill();
+                ctx.stroke();
+
+                // Clear shadow for crisp text
+                ctx.shadowColor = 'transparent';
+                ctx.shadowBlur = 0;
+
+                // Text
+                ctx.fillStyle = isBuy ? '#1e40af' : '#9a3412';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(label, tagX + tagW / 2, tagY + tagH / 2);
               }
-              ctx.fill();
-              ctx.stroke();
-
-              // Text
-              ctx.fillStyle = isBuy ? '#1d4ed8' : '#c2410c';
-              ctx.textAlign = 'center';
-              ctx.textBaseline = 'middle';
-              ctx.fillText(label, tagX + tagW / 2, tagY + tagH / 2);
             }
           });
           ctx.restore();
@@ -1237,7 +1276,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
       }
     },
   };
-}, [currentPriceNum, holdingAvgPriceNum, showAvgCost, stepItems, yAxisMode, showTrades, validTrades, displayedVisualLevels, isAllLevelsSelected]);
+}, [currentPriceNum, holdingAvgPriceNum, showAvgCost, stepItems, yAxisMode, showTrades, validTrades, displayedVisualLevels, isAllLevelsSelected, hoveredItem]);
 
   // Chart options with disabled in-canvas tooltip and onHover handler to update fixed top HUD
   const chartOptions: ChartOptions<'line'> = useMemo(() => {
@@ -2069,8 +2108,8 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
             {/* 歷史交易紀錄 */}
             {showTrades && totalTradesCount > 0 && (
               <div className="flex items-center gap-1.5 font-bold text-blue-800">
-                <span className="w-2.5 h-2.5 rotate-45 bg-blue-600 shrink-0" />
-                <span>歷史交易紀錄 ({totalTradesCount} 筆)</span>
+                <span className="w-2.5 h-2.5 rounded-full bg-blue-600 border border-white shrink-0" />
+                <span>歷史交易紀錄 ({totalTradesCount} 筆，懸停顯示價格)</span>
               </div>
             )}
 

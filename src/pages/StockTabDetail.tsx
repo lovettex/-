@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useLayoutEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useStockTabs } from '../hooks/useStockTabs';
 import { playClickSound, playSuccessSound, playPriceImportSound } from '../lib/audio';
@@ -14,13 +14,13 @@ import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
 import { format } from 'date-fns';
-import { Timestamp, collection, writeBatch, doc, serverTimestamp, addDoc, getDocs, deleteDoc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
-import { Trash2, BarChart3, ChevronDown, ChevronUp, Gamepad2, ShieldCheck, Upload, Download, ChevronLeft, CheckCircle2, RotateCcw, Loader2, HelpCircle, AlertTriangle, Save, Calculator, History, RefreshCw, Layers, TrendingDown, TrendingUp, Split } from 'lucide-react';
+import { Timestamp, collection, writeBatch, doc, serverTimestamp, addDoc, getDocs, deleteDoc, getDoc, getDocFromCache, setDoc, updateDoc } from 'firebase/firestore';
+import { Trash2, BarChart3, ChevronDown, ChevronUp, Gamepad2, ShieldCheck, Upload, Download, ChevronLeft, CheckCircle2, RotateCcw, Loader2, HelpCircle, AlertTriangle, Save, Calculator, History, RefreshCw, Layers, TrendingDown, TrendingUp, Split, ShieldAlert, DollarSign, Wallet, Coins, Target, Activity, Compass, LineChart } from 'lucide-react';
 import { toast } from "sonner";
 import { motion, AnimatePresence } from 'motion/react';
 import { db } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
-import { safeSessionStorage, safeLocalStorage } from '../lib/utils';
+import { safeSessionStorage, safeLocalStorage, cn } from '../lib/utils';
 import { ScrollIn, InteractiveButton, Magnetic } from '../components/MotionWrappers';
 import StrategyTab from '../components/StrategyTab';
 import { BatchMultiSelect } from '../components/BatchMultiSelect';
@@ -69,6 +69,77 @@ export default function StockTabDetail() {
       playClickSound();
     }
   }, [activeTab]);
+
+  const mainTabListRef = useRef<HTMLDivElement>(null);
+  const mainTabRefs = useRef<{ [key: string]: HTMLButtonElement | null }>({});
+  const [indicatorStyle, setIndicatorStyle] = useState<{ left: number; width: number }>({ left: 0, width: 0 });
+
+  const subTabListRef = useRef<HTMLDivElement>(null);
+  const subTabRefs = useRef<{ [key: string]: HTMLButtonElement | null }>({});
+  const [subIndicatorStyle, setSubIndicatorStyle] = useState<{ left: number; width: number }>({ left: 0, width: 0 });
+
+  const updateMainTabIndicator = useCallback(() => {
+    const activeEl = mainTabRefs.current[activeTab];
+    if (activeEl && mainTabListRef.current) {
+      setIndicatorStyle({
+        left: activeEl.offsetLeft,
+        width: activeEl.offsetWidth,
+      });
+    }
+  }, [activeTab]);
+
+  const updateSubTabIndicator = useCallback(() => {
+    const activeEl = subTabRefs.current[chipsSubTab];
+    if (activeEl && subTabListRef.current) {
+      setSubIndicatorStyle({
+        left: activeEl.offsetLeft,
+        width: activeEl.offsetWidth,
+      });
+    }
+  }, [chipsSubTab]);
+
+  useLayoutEffect(() => {
+    updateMainTabIndicator();
+  }, [updateMainTabIndicator, trades.length, plannedOrders.length]);
+
+  useLayoutEffect(() => {
+    updateSubTabIndicator();
+  }, [updateSubTabIndicator, trades.length]);
+
+  useEffect(() => {
+    updateMainTabIndicator();
+    updateSubTabIndicator();
+    const handleResize = () => {
+      updateMainTabIndicator();
+      updateSubTabIndicator();
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [updateMainTabIndicator, updateSubTabIndicator]);
+
+  const handleMainTabKeyDown = (e: React.KeyboardEvent, currentKey: string) => {
+    const keys = ['trades', 'strategy', 'chips'] as const;
+    const currentIndex = keys.indexOf(currentKey as any);
+    if (currentIndex === -1) return;
+
+    let targetIndex = -1;
+    if (e.key === 'ArrowRight') {
+      targetIndex = (currentIndex + 1) % keys.length;
+    } else if (e.key === 'ArrowLeft') {
+      targetIndex = (currentIndex - 1 + keys.length) % keys.length;
+    } else if (e.key === 'Home') {
+      targetIndex = 0;
+    } else if (e.key === 'End') {
+      targetIndex = keys.length - 1;
+    }
+
+    if (targetIndex !== -1) {
+      e.preventDefault();
+      const targetTab = keys[targetIndex];
+      setActiveTab(targetTab);
+      mainTabRefs.current[targetTab]?.focus();
+    }
+  };
   const [currentPriceInput, setCurrentPriceInput] = useState('');
   const [plannedBuyPercentInput, setPlannedBuyPercentInput] = useState<string>('');
   const [stopLossInput, setStopLossInput] = useState<string>('');
@@ -96,8 +167,31 @@ export default function StockTabDetail() {
     const fetchSettings = async () => {
       try {
         const docRef = doc(db, "userSettings", user.uid);
-        const snapshot = await getDoc(docRef);
-        if (snapshot.exists()) {
+        let snapshot;
+        try {
+          snapshot = await getDoc(docRef);
+        } catch (err) {
+          const errMsg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+          if (
+            errMsg.includes("offline") ||
+            errMsg.includes("unavailable") ||
+            errMsg.includes("could not reach") ||
+            errMsg.includes("failed-precondition") ||
+            errMsg.includes("deadline") ||
+            errMsg.includes("network") ||
+            errMsg.includes("timed out")
+          ) {
+            try {
+              snapshot = await getDocFromCache(docRef);
+            } catch {
+              // Ignore cache miss
+            }
+          } else {
+            throw err;
+          }
+        }
+
+        if (snapshot && snapshot.exists()) {
           const data = snapshot.data();
           if (typeof data.totalCapital === "number") {
             setTotalCapital(data.totalCapital);
@@ -109,7 +203,20 @@ export default function StockTabDetail() {
           }
         }
       } catch (error) {
-        console.error("Failed to fetch userSettings in StockTabDetail:", error);
+        const errMsg = (error instanceof Error ? error.message : String(error)).toLowerCase();
+        if (
+          !errMsg.includes("offline") &&
+          !errMsg.includes("unavailable") &&
+          !errMsg.includes("could not reach") &&
+          !errMsg.includes("failed-precondition") &&
+          !errMsg.includes("deadline") &&
+          !errMsg.includes("network") &&
+          !errMsg.includes("timed out")
+        ) {
+          console.error("Failed to fetch userSettings in StockTabDetail:", error);
+        } else {
+          console.info("[StockTabDetail] Using cached userSettings.");
+        }
       }
     };
     fetchSettings();
@@ -2512,58 +2619,179 @@ export default function StockTabDetail() {
 
       {/* Main Tabs Container */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="flex w-full bg-zinc-100 border border-zinc-200 p-1 rounded-xl gap-1 shadow-sm mb-4">
-          <TabsTrigger value="trades" className="flex-1 py-2 text-[11px] sm:text-xs font-black rounded-lg data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-md text-zinc-700 hover:text-black transition-all cursor-pointer text-center px-1">
-            <span className="hidden sm:inline">籌碼管理與交易紀錄</span>
-            <span className="inline sm:hidden">籌碼與紀錄</span>
-          </TabsTrigger>
-          <TabsTrigger value="strategy" className="flex-1 py-2 text-[11px] sm:text-xs font-black rounded-lg data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-md text-zinc-700 hover:text-black transition-all cursor-pointer text-center px-1">
-            <span>策略計畫</span>
-          </TabsTrigger>
-          <TabsTrigger value="chips" className="flex-1 py-2 text-[11px] sm:text-xs font-black rounded-lg data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-md text-zinc-700 hover:text-black transition-all cursor-pointer text-center px-1">
-            <span className="hidden sm:inline">主力與籌碼分析</span>
-            <span className="inline sm:hidden">主力與籌碼</span>
-          </TabsTrigger>
-        </TabsList>
+        {/* 毛玻璃膠囊式主 Tab 導航列 */}
+        <div className="w-full overflow-x-auto whitespace-nowrap scrollbar-none [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden mb-5">
+          <div
+            ref={mainTabListRef}
+            role="tablist"
+            aria-label="股票分析與紀錄主分頁導航"
+            className="relative inline-flex items-center justify-start gap-1 p-1 bg-slate-200/80 dark:bg-zinc-800/80 backdrop-blur-md border border-slate-300/70 dark:border-zinc-700/70 rounded-full shadow-sm select-none min-w-max main-tabs-track"
+          >
+            {/* 單一白色滑動指示器 (250ms 緩動動畫，高度等於容器內高，絕不溢出) */}
+            <div
+              className="absolute top-1 bottom-1 bg-white dark:bg-zinc-900 rounded-full shadow-md pointer-events-none transition-all duration-[250ms] ease-out motion-reduce:transition-none z-0"
+              style={{
+                left: `${indicatorStyle.left}px`,
+                width: `${indicatorStyle.width}px`,
+              }}
+            />
 
-        <TabsContent value="trades" className="space-y-4 pb-20 outline-none">
+            {/* 1. 籌碼管理與交易紀錄 */}
+            <button
+              ref={(el) => { mainTabRefs.current['trades'] = el; }}
+              role="tab"
+              id="main-tab-trades"
+              aria-selected={activeTab === 'trades'}
+              aria-controls="main-panel-trades"
+              tabIndex={activeTab === 'trades' ? 0 : -1}
+              onClick={() => setActiveTab('trades')}
+              onKeyDown={(e) => handleMainTabKeyDown(e, 'trades')}
+              className={cn(
+                "relative z-10 flex items-center gap-2 h-[40px] px-4 py-0 text-sm rounded-full transition-colors duration-150 cursor-pointer outline-none border-0 shrink-0 select-none",
+                activeTab === 'trades'
+                  ? "text-zinc-900 dark:text-zinc-100 font-bold"
+                  : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-100 hover:bg-black/5 dark:hover:bg-white/10 font-medium"
+              )}
+            >
+              <Wallet className="h-[18px] w-[18px] shrink-0 text-current" strokeWidth={1.75} />
+              <span className="text-sm whitespace-nowrap">籌碼管理與交易紀錄</span>
+              <span
+                className={cn(
+                  "px-2 py-0.5 text-xs font-mono font-bold rounded-full min-w-[20px] inline-flex items-center justify-center leading-none transition-colors duration-150",
+                  activeTab === 'trades'
+                    ? "bg-emerald-500 text-white"
+                    : "bg-slate-300/80 dark:bg-zinc-700/80 text-slate-700 dark:text-zinc-300 main-tab-badge"
+                )}
+              >
+                {trades.length}
+              </span>
+            </button>
+
+            {/* 2. 策略計畫 */}
+            <button
+              ref={(el) => { mainTabRefs.current['strategy'] = el; }}
+              role="tab"
+              id="main-tab-strategy"
+              aria-selected={activeTab === 'strategy'}
+              aria-controls="main-panel-strategy"
+              tabIndex={activeTab === 'strategy' ? 0 : -1}
+              onClick={() => setActiveTab('strategy')}
+              onKeyDown={(e) => handleMainTabKeyDown(e, 'strategy')}
+              className={cn(
+                "relative z-10 flex items-center gap-2 h-[40px] px-4 py-0 text-sm rounded-full transition-colors duration-150 cursor-pointer outline-none border-0 shrink-0 select-none",
+                activeTab === 'strategy'
+                  ? "text-zinc-900 dark:text-zinc-100 font-bold"
+                  : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-100 hover:bg-black/5 dark:hover:bg-white/10 font-medium"
+              )}
+            >
+              <Target className="h-[18px] w-[18px] shrink-0 text-current" strokeWidth={1.75} />
+              <span className="text-sm whitespace-nowrap">策略計畫</span>
+              {plannedOrders.length > 0 && (
+                <span
+                  className={cn(
+                    "px-2 py-0.5 text-xs font-mono font-bold rounded-full min-w-[20px] inline-flex items-center justify-center leading-none transition-colors duration-150",
+                    activeTab === 'strategy'
+                      ? "bg-emerald-500 text-white"
+                      : "bg-slate-300/80 dark:bg-zinc-700/80 text-slate-700 dark:text-zinc-300 main-tab-badge"
+                  )}
+                >
+                  {plannedOrders.length}
+                </span>
+              )}
+            </button>
+
+            {/* 3. 主力與籌碼分析 */}
+            <button
+              ref={(el) => { mainTabRefs.current['chips'] = el; }}
+              role="tab"
+              id="main-tab-chips"
+              aria-selected={activeTab === 'chips'}
+              aria-controls="main-panel-chips"
+              tabIndex={activeTab === 'chips' ? 0 : -1}
+              onClick={() => setActiveTab('chips')}
+              onKeyDown={(e) => handleMainTabKeyDown(e, 'chips')}
+              className={cn(
+                "relative z-10 flex items-center gap-2 h-[40px] px-4 py-0 text-sm rounded-full transition-colors duration-150 cursor-pointer outline-none border-0 shrink-0 select-none",
+                activeTab === 'chips'
+                  ? "text-zinc-900 dark:text-zinc-100 font-bold"
+                  : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-100 hover:bg-black/5 dark:hover:bg-white/10 font-medium"
+              )}
+            >
+              <Activity className="h-[18px] w-[18px] shrink-0 text-current" strokeWidth={1.75} />
+              <span className="text-sm whitespace-nowrap">主力與籌碼分析</span>
+            </button>
+          </div>
+        </div>
+
+        <TabsContent value="trades" id="main-panel-trades" className="space-y-4 pb-20 outline-none">
           {/* Stats Summary & Chips Management */}
           <ScrollIn delay={0.1}>
-            <div className="w-full glass-panel bg-white/95 border border-zinc-200 rounded-2xl p-5 space-y-4 transition-all duration-300 hover:bg-zinc-50 shadow-[0_4px_20px_rgba(0,0,0,0.02)]">
+            <div className="w-full glass-panel bg-white/95 dark:bg-zinc-900/90 border border-zinc-200/90 dark:border-zinc-800 rounded-2xl p-4 sm:p-5.5 space-y-4 transition-all duration-300 shadow-[0_4px_24px_rgba(0,0,0,0.03)] chips-summary-panel">
           <div 
-            className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 cursor-pointer group"
+            className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer group select-none"
             onClick={() => setIsStatsOpen(!isStatsOpen)}
           >
-            <div className="space-y-1">
-              <div className="flex items-center space-x-2 text-zinc-800">
-                <div className="p-1.5 bg-emerald-50 text-emerald-700 rounded-lg shrink-0">
-                  <BarChart3 className="h-4 w-4" />
+            <div className="space-y-2 flex-1 min-w-0">
+              <div className="flex items-center gap-2.5 text-zinc-800 dark:text-zinc-100 flex-wrap">
+                <div className="p-2 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 rounded-xl shrink-0 flex items-center justify-center shadow-2xs">
+                  <BarChart3 className="h-4.5 w-4.5" />
                 </div>
-                <h3 className="font-bold text-base tracking-wide">籌碼管理</h3>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setIsAveragingHelpOpen(true);
-                  }}
-                  className="p-1 text-zinc-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-full transition-colors flex items-center justify-center ml-0.5 shrink-0"
-                  title="股價向下攤平試算與交易紀律說明"
-                >
-                  <HelpCircle className="h-4 w-4" />
-                </button>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="font-black text-base sm:text-lg tracking-tight text-zinc-900 dark:text-zinc-100">籌碼管理</h3>
+                  {tab?.symbol && (
+                    <span className="px-2.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200/90 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 text-xs font-mono font-bold rounded-lg shadow-2xs">
+                      {tab.symbol}
+                    </span>
+                  )}
+                  {stats.totalQuantity > 0 ? (
+                    <span className="px-2.5 py-0.5 bg-emerald-500/15 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-[11px] font-bold rounded-full flex items-center gap-1.5 shadow-2xs">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      持有中
+                    </span>
+                  ) : tab.status === 'COMPLETED' ? (
+                    <span className="px-2.5 py-0.5 bg-blue-500/15 border border-blue-500/30 text-blue-700 dark:text-blue-300 text-[11px] font-bold rounded-full shadow-2xs">
+                      已結算
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 text-[11px] font-semibold rounded-full shadow-2xs">
+                      目前空倉
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsAveragingHelpOpen(true);
+                    }}
+                    className="p-1 text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 rounded-full transition-colors flex items-center justify-center shrink-0 cursor-pointer"
+                    title="股價向下攤平試算與交易紀律說明"
+                  >
+                    <HelpCircle className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
-              <p className="text-[11px] font-semibold text-rose-600 bg-rose-50/80 border border-rose-200/80 px-2.5 py-1 rounded-lg inline-block">
-                註：請遵守分批進出場原則 與 凱利公式。強制執行浮動平倉價位。單筆最大資產使用為40%。總虧損金額為平均成本的 6%
-              </p>
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-rose-500/8 dark:bg-rose-500/15 border border-rose-500/20 rounded-xl text-rose-700 dark:text-rose-300 text-xs font-semibold flex-wrap">
+                <ShieldAlert className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400 shrink-0" />
+                <span className="font-extrabold text-rose-800 dark:text-rose-200">交易紀律：</span>
+                <span>分批進出場原則</span>
+                <span className="opacity-40">·</span>
+                <span>凱利公式資金控管</span>
+                <span className="opacity-40">·</span>
+                <span>強制浮動平倉價位</span>
+                <span className="opacity-40">·</span>
+                <span>單筆上限 40%</span>
+                <span className="opacity-40">·</span>
+                <span>總虧損上限為成本 6%</span>
+              </div>
             </div>
-            <div className="flex items-center gap-3 self-end sm:self-center">
-              <span className="text-xs font-semibold text-zinc-400 tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
-                {isStatsOpen ? '點擊收合' : '點擊展開'}
-              </span>
-              <div className="inline-flex items-center justify-center rounded-full h-8 w-8 bg-zinc-105 border border-zinc-200 text-zinc-500 group-hover:bg-zinc-100 transition-colors">
+
+            <div className="flex items-center gap-2.5 self-end sm:self-center shrink-0">
+              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200/80 dark:bg-zinc-800 dark:hover:bg-zinc-700/80 border border-zinc-200/80 dark:border-zinc-700/60 rounded-xl text-xs font-bold text-zinc-600 dark:text-zinc-300 group-hover:text-zinc-900 dark:group-hover:text-white transition-all shadow-2xs">
+                <span>{isStatsOpen ? '收合指標' : '展開指標'}</span>
                 <motion.div
                   animate={{ rotate: isStatsOpen ? 180 : 0 }}
                   transition={{ type: "spring", stiffness: 200, damping: 20 }}
+                  className="flex items-center justify-center text-zinc-500"
                 >
                   <ChevronDown className="h-4 w-4" />
                 </motion.div>
@@ -2580,65 +2808,221 @@ export default function StockTabDetail() {
                 transition={{ type: "spring", stiffness: 300, damping: 30 }}
                 className="overflow-hidden"
               >
-                <div className="pt-4 pb-1 border-t border-zinc-200/80 mt-2">
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 pt-1">
-                    <div className="flex flex-col">
-                      <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest">持有數量</span>
-                      <span className="text-xl font-bold text-zinc-800 tracking-tight">{stats.totalQuantity} <span className="text-[10px] font-normal text-zinc-400">股</span></span>
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest">平均成本</span>
-                      <span className="text-xl font-bold text-zinc-800 tracking-tight">${stats.averagePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest">持有總成本</span>
-                      <span className="text-xl font-bold text-zinc-800 tracking-tight">${(stats.averagePrice * stats.totalQuantity).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest">已實現損益</span>
-                      <span className={`text-xl font-bold tracking-tight ${stats.realizedPnL >= 0 ? 'text-emerald-700 font-bold' : 'text-rose-600 font-bold'}`}>
-                        ${stats.realizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </span>
-                    </div>
-                    {tab.status === 'COMPLETED' ? (
-                      <div className="flex flex-col">
-                        <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest">最終損益</span>
-                        <span className={`text-xl font-bold tracking-tight ${(tab.finalPnL || 0) >= 0 ? 'text-emerald-700 font-bold' : 'text-rose-600 font-bold'}`}>
-                          ${tab.finalPnL?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || 0}
-                        </span>
-                      </div>
-                    ) : (
-                      <div className="flex flex-col">
-                        <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest">未實現 {tab.currentPrice ? `(${tab.currentPrice})` : ''}</span>
-                        <span className={`text-xl font-bold tracking-tight ${stats.unrealizedPnL >= 0 ? 'text-emerald-700 font-bold' : 'text-rose-600 font-bold'}`}>
-                          {stats.unrealizedPnL >= 0 ? '+' : ''}{stats.unrealizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </span>
-                      </div>
-                    )}
-                    <div className="flex flex-col">
-                      <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest">交易次數</span>
-                      <span className="text-xl font-bold text-zinc-800 tracking-tight">{trades.length} <span className="text-[10px] font-normal text-zinc-400">筆</span></span>
-                    </div>
-                  </div>
+                <div className="pt-3 pb-1 border-t border-zinc-200/80 dark:border-zinc-800 mt-2">
+                  {/* 6 大核心指標卡片區 (精緻比例與卡片化視覺) */}
+                  {(() => {
+                    const totalHoldingCost = (stats?.averagePrice || 0) * (stats?.totalQuantity || 0);
+                    const unrealizedReturnPct = totalHoldingCost > 0 ? ((stats?.unrealizedPnL || 0) / totalHoldingCost) * 100 : 0;
+                    const buyTradesCount = trades.filter(t => t.type === 'BUY').length;
+                    const sellTradesCount = trades.filter(t => t.type === 'SELL').length;
+                    
+                    return (
+                      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2.5 sm:gap-3.5 pt-1">
+                        {/* 1. 持有數量 */}
+                        <div className="flex flex-col justify-between bg-zinc-50/90 dark:bg-zinc-900/60 hover:bg-zinc-100/70 dark:hover:bg-zinc-850/70 border border-zinc-200/80 dark:border-zinc-800 p-3 sm:p-3.5 rounded-xl transition-all shadow-2xs group/card">
+                          <div className="flex items-center justify-between gap-1 mb-1.5">
+                            <span className="text-[10px] sm:text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">持有數量</span>
+                            <div className="p-1 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                              <Layers className="h-3.5 w-3.5" />
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-lg sm:text-xl font-black font-mono tracking-tight text-zinc-900 dark:text-zinc-100">
+                              {stats.totalQuantity.toLocaleString()} <span className="text-xs font-semibold text-zinc-400 font-sans">股</span>
+                            </div>
+                            <div className="text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 mt-0.5 truncate">
+                              {stats.totalQuantity > 0 ? (trades.length > 0 ? '分批持倉中' : '現貨持倉') : '目前無持股'}
+                            </div>
+                          </div>
+                        </div>
 
-                  {/* 籌碼管理內部子分頁 (籌碼與攤平試算 vs 交易紀錄) */}
+                        {/* 2. 平均成本 */}
+                        <div className="flex flex-col justify-between bg-zinc-50/90 dark:bg-zinc-900/60 hover:bg-zinc-100/70 dark:hover:bg-zinc-850/70 border border-zinc-200/80 dark:border-zinc-800 p-3 sm:p-3.5 rounded-xl transition-all shadow-2xs group/card">
+                          <div className="flex items-center justify-between gap-1 mb-1.5">
+                            <span className="text-[10px] sm:text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">平均成本</span>
+                            <div className="p-1 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                              <Target className="h-3.5 w-3.5" />
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-lg sm:text-xl font-black font-mono tracking-tight text-zinc-900 dark:text-zinc-100">
+                              ${stats.averagePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
+                            <div className="text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 mt-0.5 truncate">
+                              {stats.totalQuantity > 0 && tab?.currentPrice ? (
+                                tab.currentPrice >= stats.averagePrice ? (
+                                  <span className="text-emerald-600 dark:text-emerald-400 font-bold">現價高於成本</span>
+                                ) : (
+                                  <span className="text-rose-600 dark:text-rose-400 font-bold">現價低於成本</span>
+                                )
+                              ) : '買入持股均價'}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 3. 持有總成本 */}
+                        <div className="flex flex-col justify-between bg-zinc-50/90 dark:bg-zinc-900/60 hover:bg-zinc-100/70 dark:hover:bg-zinc-850/70 border border-zinc-200/80 dark:border-zinc-800 p-3 sm:p-3.5 rounded-xl transition-all shadow-2xs group/card">
+                          <div className="flex items-center justify-between gap-1 mb-1.5">
+                            <span className="text-[10px] sm:text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">持有總成本</span>
+                            <div className="p-1 rounded-md bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+                              <Wallet className="h-3.5 w-3.5" />
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-lg sm:text-xl font-black font-mono tracking-tight text-zinc-900 dark:text-zinc-100">
+                              ${totalHoldingCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
+                            <div className="text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 mt-0.5 truncate">
+                              累計投入總資金
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 4. 已實現損益 */}
+                        <div className="flex flex-col justify-between bg-zinc-50/90 dark:bg-zinc-900/60 hover:bg-zinc-100/70 dark:hover:bg-zinc-850/70 border border-zinc-200/80 dark:border-zinc-800 p-3 sm:p-3.5 rounded-xl transition-all shadow-2xs group/card">
+                          <div className="flex items-center justify-between gap-1 mb-1.5">
+                            <span className="text-[10px] sm:text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">已實現損益</span>
+                            <div className={`p-1 rounded-md ${stats.realizedPnL >= 0 ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'}`}>
+                              <DollarSign className="h-3.5 w-3.5" />
+                            </div>
+                          </div>
+                          <div>
+                            <div className={`text-lg sm:text-xl font-black font-mono tracking-tight ${stats.realizedPnL >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                              {stats.realizedPnL >= 0 ? '+' : ''}${stats.realizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
+                            <div className="text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 mt-0.5 truncate">
+                              {stats.realizedPnL > 0 ? '已獲利結算' : stats.realizedPnL < 0 ? '已停損結算' : '平倉累計損益'}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 5. 未實現損益 / 最終損益 (核心重點卡) */}
+                        <div className={`flex flex-col justify-between ${
+                          (tab?.status === 'COMPLETED' ? (tab.finalPnL || 0) : stats.unrealizedPnL) >= 0
+                            ? 'bg-emerald-500/6 dark:bg-emerald-500/12 border-emerald-500/35 shadow-[0_2px_12px_rgba(16,185,129,0.08)]'
+                            : 'bg-rose-500/6 dark:bg-rose-500/12 border-rose-500/35 shadow-[0_2px_12px_rgba(244,63,94,0.08)]'
+                        } p-3 sm:p-3.5 rounded-xl transition-all border group/card`}>
+                          <div className="flex items-center justify-between gap-1 mb-1.5">
+                            <span className="text-[10px] sm:text-[11px] font-black text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">
+                              {tab?.status === 'COMPLETED' ? '最終損益' : '未實現損益'}
+                            </span>
+                            {tab?.status !== 'COMPLETED' && tab?.currentPrice ? (
+                              <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-md bg-white/80 dark:bg-zinc-800 border border-zinc-200/80 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 shadow-2xs">
+                                現價 ${tab.currentPrice}
+                              </span>
+                            ) : null}
+                          </div>
+                          <div>
+                            {tab?.status === 'COMPLETED' ? (
+                              <div className={`text-lg sm:text-xl font-black font-mono tracking-tight ${(tab.finalPnL || 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                                {(tab.finalPnL || 0) >= 0 ? '+' : ''}${tab.finalPnL?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                              </div>
+                            ) : (
+                              <div className="flex items-baseline gap-1.5 flex-wrap">
+                                <span className={`text-lg sm:text-xl font-black font-mono tracking-tight ${stats.unrealizedPnL >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                                  {stats.unrealizedPnL >= 0 ? '+' : ''}${stats.unrealizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                                {totalHoldingCost > 0 && (
+                                  <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-md ${
+                                    stats.unrealizedPnL >= 0 
+                                      ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300' 
+                                      : 'bg-rose-500/20 text-rose-700 dark:text-rose-300'
+                                  }`}>
+                                    {unrealizedReturnPct >= 0 ? '+' : ''}{unrealizedReturnPct.toFixed(2)}%
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                            <div className="text-[10px] font-semibold text-zinc-500 dark:text-zinc-400 mt-0.5 truncate">
+                              {tab?.status === 'COMPLETED' ? '交易結束最終結果' : '浮動部位即時試算'}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 6. 交易次數 */}
+                        <div className="flex flex-col justify-between bg-zinc-50/90 dark:bg-zinc-900/60 hover:bg-zinc-100/70 dark:hover:bg-zinc-850/70 border border-zinc-200/80 dark:border-zinc-800 p-3 sm:p-3.5 rounded-xl transition-all shadow-2xs group/card">
+                          <div className="flex items-center justify-between gap-1 mb-1.5">
+                            <span className="text-[10px] sm:text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">交易筆數</span>
+                            <div className="p-1 rounded-md bg-zinc-200/80 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300">
+                              <History className="h-3.5 w-3.5" />
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-lg sm:text-xl font-black font-mono tracking-tight text-zinc-900 dark:text-zinc-100">
+                              {trades.length} <span className="text-xs font-semibold text-zinc-400 font-sans">筆</span>
+                            </div>
+                            <div className="text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 mt-0.5 truncate">
+                              買進 {buyTradesCount} · 賣出 {sellTradesCount}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* iOS 風格 Segmented Control 子分頁 (籌碼與攤平試算 vs 交易紀錄) */}
                   <Tabs value={chipsSubTab} onValueChange={(v) => setChipsSubTab(v as 'calc' | 'trades')} className="w-full mt-4">
-                    <TabsList className="flex w-full bg-zinc-100 border border-zinc-200 p-1 rounded-xl gap-1 shadow-2xs">
-                      <TabsTrigger 
-                        value="calc" 
-                        className="flex-1 py-2 text-xs font-black rounded-lg data-[state=active]:bg-emerald-800 data-[state=active]:text-white data-[state=active]:shadow-sm text-zinc-600 hover:text-zinc-900 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                    <div className="w-full flex justify-start">
+                      <div
+                        ref={subTabListRef}
+                        role="tablist"
+                        aria-label="籌碼與交易紀錄子分頁"
+                        className="relative inline-flex items-center justify-start bg-[#eceff3] dark:bg-zinc-800/90 p-[4px] rounded-[12px] gap-1 select-none w-fit border border-black/5 dark:border-white/5 chips-subtabs-track"
                       >
-                        <Calculator className="h-3.5 w-3.5" />
-                        <span>籌碼與攤平試算</span>
-                      </TabsTrigger>
-                      <TabsTrigger 
-                        value="trades" 
-                        className="flex-1 py-2 text-xs font-black rounded-lg data-[state=active]:bg-emerald-800 data-[state=active]:text-white data-[state=active]:shadow-sm text-zinc-600 hover:text-zinc-900 transition-all cursor-pointer flex items-center justify-center gap-1.5"
-                      >
-                        <History className="h-3.5 w-3.5" />
-                        <span>交易紀錄 ({trades.length} 筆)</span>
-                      </TabsTrigger>
-                    </TabsList>
+                        {/* 白色滑動選中塊 (200ms 滑動動畫，圓角 9px，輕微陰影) */}
+                        <div
+                          className="absolute top-[4px] bottom-[4px] bg-white dark:bg-zinc-900 rounded-[9px] shadow-[0_1px_3px_rgba(0,0,0,0.1),0_1px_2px_rgba(0,0,0,0.06)] pointer-events-none transition-all duration-200 ease-out z-0"
+                          style={{
+                            left: `${subIndicatorStyle.left}px`,
+                            width: `${subIndicatorStyle.width}px`,
+                          }}
+                        />
+
+                        {/* 子選項 1: 籌碼與攤平試算 */}
+                        <button
+                          ref={(el) => { subTabRefs.current['calc'] = el; }}
+                          type="button"
+                          role="tab"
+                          aria-selected={chipsSubTab === 'calc'}
+                          onClick={() => setChipsSubTab('calc')}
+                          className={cn(
+                            "relative z-10 h-[32px] px-3.5 text-xs flex items-center justify-center gap-1.5 rounded-[9px] transition-colors duration-150 cursor-pointer outline-none border-0 shrink-0 select-none",
+                            chipsSubTab === 'calc'
+                              ? "text-zinc-900 dark:text-zinc-100 font-semibold"
+                              : "text-[#475569] dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 font-normal"
+                          )}
+                        >
+                          <Calculator className="h-3.5 w-3.5 shrink-0 text-current" strokeWidth={1.75} />
+                          <span>籌碼與攤平試算</span>
+                        </button>
+
+                        {/* 子選項 2: 交易紀錄 */}
+                        <button
+                          ref={(el) => { subTabRefs.current['trades'] = el; }}
+                          type="button"
+                          role="tab"
+                          aria-selected={chipsSubTab === 'trades'}
+                          onClick={() => setChipsSubTab('trades')}
+                          className={cn(
+                            "relative z-10 h-[32px] px-3.5 text-xs flex items-center justify-center gap-1.5 rounded-[9px] transition-colors duration-150 cursor-pointer outline-none border-0 shrink-0 select-none",
+                            chipsSubTab === 'trades'
+                              ? "text-zinc-900 dark:text-zinc-100 font-semibold"
+                              : "text-[#475569] dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 font-normal"
+                          )}
+                        >
+                          <History className="h-3.5 w-3.5 shrink-0 text-current" strokeWidth={1.75} />
+                          <span>交易紀錄</span>
+                          <span className={cn(
+                            "px-1.5 py-0.5 text-[11px] font-mono font-semibold rounded-md leading-none min-w-[18px] inline-flex items-center justify-center transition-colors",
+                            chipsSubTab === 'trades'
+                              ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20"
+                              : "bg-black/5 dark:bg-white/10 text-[#475569] dark:text-zinc-400"
+                          )}>
+                            {trades.length}
+                          </span>
+                        </button>
+                      </div>
+                    </div>
 
                     {/* 子分頁 1: 籌碼試算與規劃 */}
                     <TabsContent value="calc" className="pt-2 space-y-3 outline-none">
@@ -2815,228 +3199,367 @@ export default function StockTabDetail() {
                         onBatchClick={handleBatchClick}
                       />
 
-                      {/* 預計購買數量、停損/止盈價位與分批規劃 */}
-                      <div className="pt-2 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
-                    {/* Left Column: Input box & Remaining Planned Buy Badge underneath */}
-                    <div className="flex flex-col gap-2 w-full lg:w-auto">
-                      {/* Input box for plannedBuyQty, stopLoss, takeProfit */}
-                      <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 bg-zinc-50 border border-zinc-200 px-3.5 py-2 rounded-2xl shadow-2xs w-full lg:w-auto">
-                        <div className="flex items-center gap-1.5">
-                          <label className="text-xs font-bold text-zinc-700 whitespace-nowrap">預計佔比:</label>
-                          <div className="relative flex items-center">
-                            <Input
-                              type="number"
-                              min="0"
-                              step="any"
-                              placeholder="數值"
-                              className="w-16 sm:w-20 h-8 bg-white border border-zinc-300 text-zinc-900 font-mono font-bold text-center text-xs focus-visible:ring-emerald-500/55 rounded-xl pr-5 p-1 shadow-2xs"
-                              value={plannedBuyPercentInput}
-                              onChange={(e) => handlePlannedBuyPercentChange(e.target.value)}
-                            />
-                            <span className="absolute right-2 text-xs font-bold text-zinc-400 pointer-events-none">%</span>
+                      {/* 預計購買數量、停損/止盈價位與分批規劃 (優化顯示比例與清晰排序架構) */}
+                      <div className="pt-2 flex flex-col gap-4 w-full">
+                        {/* 1. 頂部控制面板：資金佔比試算 + 關鍵防線設定列 + 當前批次狀態 */}
+                        <div className="flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-3 bg-zinc-50/90 dark:bg-zinc-900/60 p-3 rounded-2xl border border-zinc-200/90 shadow-2xs">
+                          {/* 資金與佔比設定區 */}
+                          <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
+                            <div className="flex items-center gap-1.5 bg-white dark:bg-zinc-800 border border-zinc-200/90 px-2.5 py-1.5 rounded-xl shadow-2xs">
+                              <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300 whitespace-nowrap">預計佔比:</label>
+                              <div className="relative flex items-center">
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  step="any"
+                                  placeholder="數值"
+                                  className="w-16 sm:w-20 h-7 bg-zinc-50 dark:bg-zinc-900 border border-zinc-300 text-zinc-900 dark:text-zinc-100 font-mono font-bold text-center text-xs focus-visible:ring-emerald-500/55 rounded-lg pr-5 p-1 shadow-2xs"
+                                  value={plannedBuyPercentInput}
+                                  onChange={(e) => handlePlannedBuyPercentChange(e.target.value)}
+                                />
+                                <span className="absolute right-1.5 text-xs font-bold text-zinc-400 pointer-events-none">%</span>
+                              </div>
+                            </div>
+
+                            {/* 即時計算顯示: 可使用資金 與 可購買總數量 */}
+                            <div className="flex flex-wrap sm:flex-nowrap items-center gap-1.5 sm:gap-2 px-3 py-1.5 bg-emerald-50/90 dark:bg-emerald-950/30 border border-emerald-200/90 dark:border-emerald-800/50 rounded-xl text-xs shadow-2xs">
+                              <span className="text-zinc-600 dark:text-zinc-400 font-medium whitespace-nowrap text-[11px] sm:text-xs">
+                                可用資金: <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400">${usableCapital.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                              </span>
+                              <span className="h-3.5 w-[1px] bg-emerald-300 dark:bg-emerald-700 hidden sm:block" />
+                              <span className="text-zinc-600 dark:text-zinc-400 font-medium whitespace-nowrap text-[11px] sm:text-xs">
+                                可購總數: <span className="font-mono font-black text-emerald-800 dark:text-emerald-300">{plannedQty}</span> 股
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* 關鍵防線設定列 (支撐/止損/壓力/止盈) */}
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300 whitespace-nowrap flex items-center gap-1 hidden sm:inline-flex">
+                              <Layers className="w-3.5 h-3.5 text-amber-600" />
+                              關鍵防線:
+                            </span>
+
+                            {/* 支撐 (琥珀黃 #d97706) */}
+                            <div className="flex items-center gap-1 bg-amber-50/90 dark:bg-amber-950/30 border border-amber-200/90 dark:border-amber-800/50 rounded-xl px-2 py-1 shadow-2xs">
+                              <span className="w-2 h-0 border-t-2 border-dashed border-amber-600 shrink-0" />
+                              <span className="text-[11px] font-bold text-amber-800 dark:text-amber-400 whitespace-nowrap">支撐:</span>
+                              <Input
+                                type="number"
+                                step="any"
+                                placeholder={tab?.currentPrice ? (tab.currentPrice * 0.95).toFixed(2) : "價格"}
+                                className="w-14 sm:w-16 h-6 bg-white dark:bg-zinc-800 border border-amber-300 text-amber-950 dark:text-amber-200 font-mono font-bold text-center text-xs rounded-lg p-0.5 focus-visible:ring-amber-500/50"
+                                value={supportInput}
+                                onChange={(e) => handleSupportChange(e.target.value)}
+                                title="關鍵支撐價位 (琥珀黃虛線)"
+                              />
+                            </div>
+
+                            {/* 止損 (警示紅 #dc2626) */}
+                            <div className="flex items-center gap-1 bg-red-50/90 dark:bg-red-950/30 border border-red-200/90 dark:border-red-800/50 rounded-xl px-2 py-1 shadow-2xs">
+                              <span className="w-2 h-0 border-t-2 border-dashed border-red-600 shrink-0" />
+                              <span className="text-[11px] font-bold text-red-700 dark:text-red-400 whitespace-nowrap">止損:</span>
+                              <Input
+                                type="number"
+                                step="any"
+                                placeholder={tab?.currentPrice ? (tab.currentPrice * 0.92).toFixed(2) : "價格"}
+                                className="w-14 sm:w-16 h-6 bg-white dark:bg-zinc-800 border border-red-300 text-red-950 dark:text-red-200 font-mono font-bold text-center text-xs rounded-lg p-0.5 focus-visible:ring-red-500/50"
+                                value={stopLossInput}
+                                onChange={(e) => handleStopLossChange(e.target.value)}
+                                title="關鍵止損價位 (警示紅虛線)"
+                              />
+                            </div>
+
+                            {/* 壓力 (玫瑰粉 #e11d48) */}
+                            <div className="flex items-center gap-1 bg-rose-50/90 dark:bg-rose-950/30 border border-rose-200/90 dark:border-rose-800/50 rounded-xl px-2 py-1 shadow-2xs">
+                              <span className="w-2 h-0 border-t-2 border-dashed border-rose-600 shrink-0" />
+                              <span className="text-[11px] font-bold text-rose-700 dark:text-rose-400 whitespace-nowrap">壓力:</span>
+                              <Input
+                                type="number"
+                                step="any"
+                                placeholder={tab?.currentPrice ? (tab.currentPrice * 1.05).toFixed(2) : "價格"}
+                                className="w-14 sm:w-16 h-6 bg-white dark:bg-zinc-800 border border-rose-300 text-rose-950 dark:text-rose-200 font-mono font-bold text-center text-xs rounded-lg p-0.5 focus-visible:ring-rose-500/50"
+                                value={resistanceInput}
+                                onChange={(e) => handleResistanceChange(e.target.value)}
+                                title="關鍵壓力價位 (玫瑰粉虛線)"
+                              />
+                            </div>
+
+                            {/* 止盈 (翡翠綠 #059669) */}
+                            <div className="flex items-center gap-1 bg-emerald-50/90 dark:bg-emerald-950/30 border border-emerald-200/90 dark:border-emerald-800/50 rounded-xl px-2 py-1 shadow-2xs">
+                              <span className="w-2 h-0 border-t-2 border-dashed border-emerald-600 shrink-0" />
+                              <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 whitespace-nowrap">止盈:</span>
+                              <Input
+                                type="number"
+                                step="any"
+                                placeholder={tab?.currentPrice ? (tab.currentPrice * 1.12).toFixed(2) : "價格"}
+                                className="w-14 sm:w-16 h-6 bg-white dark:bg-zinc-800 border border-emerald-300 text-emerald-950 dark:text-emerald-200 font-mono font-bold text-center text-xs rounded-lg p-0.5 focus-visible:ring-emerald-500/50"
+                                value={takeProfitInput}
+                                onChange={(e) => handleTakeProfitChange(e.target.value)}
+                                title="關鍵止盈價位 (翡翠綠虛線)"
+                              />
+                            </div>
                           </div>
                         </div>
 
-                        {/* 即時計算顯示: 可使用資金 與 可購買總數量 */}
-                        <div className="flex flex-wrap sm:flex-nowrap items-center gap-1.5 sm:gap-2 px-2.5 py-1 bg-emerald-50/90 border border-emerald-200/90 rounded-xl text-xs shadow-2xs">
-                          <span className="text-zinc-600 font-medium whitespace-nowrap text-[11px] sm:text-xs">
-                            可使用資金: <span className="font-mono font-bold text-emerald-700">${usableCapital.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-                          </span>
-                          <span className="h-3 w-[1px] bg-emerald-300 hidden sm:block" />
-                          <span className="text-zinc-600 font-medium whitespace-nowrap text-[11px] sm:text-xs">
-                            可購買總數量: <span className="font-mono font-black text-emerald-800">{plannedQty}</span> 股
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* 關鍵防線設定列 (支撐/止損/壓力/止盈) - 與圖表虛線連動 */}
-                      <div className="flex flex-wrap items-center gap-2 sm:gap-2.5 bg-zinc-50 border border-zinc-200 px-3.5 py-2 rounded-2xl shadow-2xs w-full lg:w-auto">
-                        <span className="text-xs font-bold text-zinc-700 whitespace-nowrap flex items-center gap-1">
-                          <Layers className="w-3.5 h-3.5 text-amber-600" />
-                          關鍵防線價位:
-                        </span>
-
-                        {/* 支撐 (琥珀黃 #d97706) */}
-                        <div className="flex items-center gap-1 bg-amber-50/80 border border-amber-200/90 rounded-xl px-2 py-1">
-                          <span className="w-2 h-0 border-t-2 border-dashed border-amber-600 shrink-0" />
-                          <span className="text-[11px] font-bold text-amber-800 whitespace-nowrap">支撐:</span>
-                          <Input
-                            type="number"
-                            step="any"
-                            placeholder={tab?.currentPrice ? (tab.currentPrice * 0.95).toFixed(2) : "價格"}
-                            className="w-16 h-6 bg-white border border-amber-300 text-amber-950 font-mono font-bold text-center text-xs rounded-lg p-0.5 focus-visible:ring-amber-500/50"
-                            value={supportInput}
-                            onChange={(e) => handleSupportChange(e.target.value)}
-                            title="關鍵支撐價位 (琥珀黃虛線)"
-                          />
-                        </div>
-
-                        {/* 止損 (警示紅 #dc2626) */}
-                        <div className="flex items-center gap-1 bg-red-50/80 border border-red-200/90 rounded-xl px-2 py-1">
-                          <span className="w-2 h-0 border-t-2 border-dashed border-red-600 shrink-0" />
-                          <span className="text-[11px] font-bold text-red-700 whitespace-nowrap">止損:</span>
-                          <Input
-                            type="number"
-                            step="any"
-                            placeholder={tab?.currentPrice ? (tab.currentPrice * 0.92).toFixed(2) : "價格"}
-                            className="w-16 h-6 bg-white border border-red-300 text-red-950 font-mono font-bold text-center text-xs rounded-lg p-0.5 focus-visible:ring-red-500/50"
-                            value={stopLossInput}
-                            onChange={(e) => handleStopLossChange(e.target.value)}
-                            title="關鍵止損價位 (警示紅虛線)"
-                          />
-                        </div>
-
-                        {/* 壓力 (玫瑰粉 #e11d48) */}
-                        <div className="flex items-center gap-1 bg-rose-50/80 border border-rose-200/90 rounded-xl px-2 py-1">
-                          <span className="w-2 h-0 border-t-2 border-dashed border-rose-600 shrink-0" />
-                          <span className="text-[11px] font-bold text-rose-700 whitespace-nowrap">壓力:</span>
-                          <Input
-                            type="number"
-                            step="any"
-                            placeholder={tab?.currentPrice ? (tab.currentPrice * 1.05).toFixed(2) : "價格"}
-                            className="w-16 h-6 bg-white border border-rose-300 text-rose-950 font-mono font-bold text-center text-xs rounded-lg p-0.5 focus-visible:ring-rose-500/50"
-                            value={resistanceInput}
-                            onChange={(e) => handleResistanceChange(e.target.value)}
-                            title="關鍵壓力價位 (玫瑰粉虛線)"
-                          />
-                        </div>
-
-                        {/* 止盈 (翡翠綠 #059669) */}
-                        <div className="flex items-center gap-1 bg-emerald-50/80 border border-emerald-200/90 rounded-xl px-2 py-1">
-                          <span className="w-2 h-0 border-t-2 border-dashed border-emerald-600 shrink-0" />
-                          <span className="text-[11px] font-bold text-emerald-700 whitespace-nowrap">止盈:</span>
-                          <Input
-                            type="number"
-                            step="any"
-                            placeholder={tab?.currentPrice ? (tab.currentPrice * 1.12).toFixed(2) : "價格"}
-                            className="w-16 h-6 bg-white border border-emerald-300 text-emerald-950 font-mono font-bold text-center text-xs rounded-lg p-0.5 focus-visible:ring-emerald-500/50"
-                            value={takeProfitInput}
-                            onChange={(e) => handleTakeProfitChange(e.target.value)}
-                            title="關鍵止盈價位 (翡翠綠虛線)"
-                          />
-                        </div>
-                      </div>
-
-                      {/* 剩餘預計購買與當前順序提示標籤 (位在輸入欄位下方) */}
-                      {plannedQty > 0 && (
-                        <div className="pt-0.5">
-                          <span className="text-xs font-bold bg-[#B1C28D]/20 text-[#6F7D50] border border-[#B1C28D]/40 px-3 py-1 rounded-full inline-flex flex-wrap items-center gap-2 shadow-2xs">
-                            <span className="w-1.5 h-1.5 rounded-full bg-[#6F7D50] animate-pulse" />
-                            剩餘預計購買: <span className="font-mono font-black">{remainingToBuy}</span> 股
-                            <span className="opacity-40">|</span>
-                            當前順序: <span className="font-semibold text-zinc-800">{currentBatchOrderText}</span> ({currentBatchText}
-                            {currentBatchOrderText !== "無" && currentBatchOrderText !== "已滿批" && (
-                              <span className="ml-1 text-zinc-700">
-                                ‧ 已購: <span className="font-mono font-black">{currentBatchBought}</span> 股 / 餘額: <span className="font-mono font-black">{currentBatchRemaining}</span> 股
+                        {/* 2. 剩餘預計購買與當前順序提示標籤 */}
+                        {plannedQty > 0 && (
+                          <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+                            <span className="text-xs font-bold bg-[#B1C28D]/20 text-[#556336] dark:text-[#c4d69e] border border-[#B1C28D]/50 px-3.5 py-1.5 rounded-full inline-flex flex-wrap items-center gap-2 shadow-2xs">
+                              <span className="w-2 h-2 rounded-full bg-[#6F7D50] animate-pulse" />
+                              <span>剩餘預計購買: <strong className="font-mono font-black">{remainingToBuy}</strong> 股</span>
+                              <span className="opacity-40">|</span>
+                              <span>
+                                當前順序: <strong className="font-semibold text-zinc-900 dark:text-zinc-100">{currentBatchOrderText}</strong> ({currentBatchText}
+                                {currentBatchOrderText !== "無" && currentBatchOrderText !== "已滿批" && (
+                                  <span className="ml-1 text-zinc-700 dark:text-zinc-300">
+                                    ‧ 已購: <strong className="font-mono font-black">{currentBatchBought}</strong> 股 / 餘額: <strong className="font-mono font-black">{currentBatchRemaining}</strong> 股
+                                  </span>
+                                )}
+                                )
                               </span>
-                            )})
-                          </span>
-                        </div>
-                      )}
-                    </div>
+                            </span>
 
-                    {/* Batch Planning Cards (支援拆分子批交易與個別點擊) */}
-                    {plannedQty > 0 && (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 w-full lg:max-w-4xl">
-                        {batchConfigList.map((b) => {
-                          const isFinished = b.remaining === 0;
-                          const isSplit1Finished = b.split1.remaining === 0;
-                          const isSplit2Finished = b.split2.remaining === 0;
+                            <span className="text-xs font-bold text-zinc-500 flex items-center gap-1.5">
+                              <span>全域進度:</span>
+                              <strong className="font-mono font-black text-emerald-700 dark:text-emerald-400">{totalBought}</strong> / {plannedQty} 股
+                              <span className="px-2 py-0.5 rounded-full text-[11px] font-black bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
+                                {Math.min(100, Math.round((totalBought / plannedQty) * 100))}%
+                              </span>
+                            </span>
+                          </div>
+                        )}
 
-                          return (
-                            <div 
-                              key={b.index} 
-                              className={`p-3 border rounded-2xl flex flex-col justify-between relative transition-all duration-200 shadow-2xs ${
-                                isFinished 
-                                  ? 'bg-emerald-50/90 border-emerald-300 text-zinc-900' 
-                                  : 'bg-white border-zinc-200/90 text-zinc-900 hover:border-emerald-300'
-                              }`}
-                            >
-                              {/* Card Header (點擊整批帶入雙系統) */}
-                              <div 
-                                onClick={() => handleBatchClick(b.index, b.name, b.split1.size, b.split2.size)}
-                                className="cursor-pointer group flex flex-col items-center text-center pb-2 border-b border-zinc-100 transition-colors hover:bg-zinc-50/80 -mx-1 -mt-1 p-1 rounded-xl"
-                                title="點擊將此批整組 (拆分一 + 拆分二) 同步帶入雙系統攤平試算"
-                              >
-                                <div className="flex items-center justify-between w-full">
-                                  <span className="text-[11px] font-black text-zinc-700 tracking-tight group-hover:text-emerald-700 transition-colors">
-                                    {b.name}
+                        {/* 3. 互動式動態橫向進度條系統 (滿版全寬呈現，比例平衡) */}
+                        {plannedQty > 0 && (
+                          <div className="w-full space-y-3">
+                            {/* Master Overall Segmented Horizontal Progress Bar (全域 4 批次比例橫向進度軌道) */}
+                            <div className="p-3 sm:p-3.5 rounded-2xl bg-white/95 dark:bg-zinc-900/80 backdrop-blur-md border border-zinc-200/90 shadow-2xs space-y-2.5">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="p-1 rounded-lg bg-emerald-100/90 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300">
+                                    <Layers className="w-3.5 h-3.5" />
                                   </span>
-                                  <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100/80 px-1.5 py-0.2 rounded-md">
-                                    帶入全部 ↵
+                                  <span className="text-xs font-black text-zinc-800 dark:text-zinc-100 tracking-tight">
+                                    分批進場總體進度軌道
+                                  </span>
+                                  <span className="text-[11px] font-bold text-zinc-500 dark:text-zinc-400">
+                                    (15% ➔ 25% ➔ 35% ➔ 25%)
                                   </span>
                                 </div>
-                                <div className="flex items-baseline gap-1 my-1">
-                                  <span className="text-base font-black font-mono text-zinc-900 leading-tight">{b.size}</span>
-                                  <span className="text-[11px] font-bold text-zinc-500">股 (總計)</span>
-                                </div>
-                                <div className="flex items-center justify-center gap-2 text-[10px] font-semibold text-zinc-600 w-full">
-                                  <span>已購: <strong className="font-mono font-bold text-emerald-800">{b.bought}</strong> 股</span>
-                                  <span className="text-zinc-300">|</span>
-                                  <span>餘額: <strong className="font-mono font-bold text-zinc-700">{b.remaining}</strong> 股</span>
+                                <div className="text-[11px] text-zinc-500 font-medium hidden sm:block">
+                                  點擊任一批次區段可快速帶入雙系統試算
                                 </div>
                               </div>
 
-                              {/* 拆分子批按鈕 (可獨立點擊帶入系統一與系統二個別欄位) */}
-                              <div className="grid grid-cols-2 gap-1.5 mt-2.5">
-                                {/* 拆分一 */}
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleBatchClick(b.index, b.split1.name, b.split1.size, b.split2.size, 1);
-                                  }}
-                                  title={`點擊僅將 ${b.split1.name} (${b.split1.size}股) 帶入雙系統第 1 數量`}
-                                  className={`p-1.5 rounded-xl border text-left flex flex-col justify-between transition-all hover:scale-[1.02] active:scale-95 cursor-pointer select-none ${
-                                    isSplit1Finished
-                                      ? 'bg-emerald-100/80 border-emerald-300 text-emerald-950'
-                                      : 'bg-zinc-50 hover:bg-emerald-50/70 border-zinc-200 hover:border-emerald-300 text-zinc-800'
-                                  }`}
-                                >
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-[10px] font-black">{b.split1.shortLabel}</span>
-                                    {isSplit1Finished && <span className="text-[9px] font-bold text-emerald-700">滿</span>}
-                                  </div>
-                                  <span className="text-xs font-black font-mono text-zinc-900 my-0.5">{b.split1.size} 股</span>
-                                  <div className="text-[9px] text-zinc-500 font-medium">
-                                    已購: <span className="font-mono font-bold text-zinc-800">{b.split1.bought}</span>
-                                  </div>
-                                </button>
+                              {/* 4-Segment Connected Master Track */}
+                              <div className="w-full h-4 bg-zinc-100 dark:bg-zinc-800 rounded-full p-0.5 flex gap-1 border border-zinc-200/80 overflow-hidden shadow-inner">
+                                {batchConfigList.map((b) => {
+                                  const bPercent = b.size > 0 ? Math.min(100, Math.round((b.bought / b.size) * 100)) : 0;
+                                  const isFinished = b.remaining === 0;
+                                  const widthStyles = ['w-[15%]', 'w-[25%]', 'w-[35%]', 'w-[25%]'];
 
-                                {/* 拆分二 */}
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleBatchClick(b.index, b.split2.name, b.split1.size, b.split2.size, 2);
-                                  }}
-                                  title={`點擊僅將 ${b.split2.name} (${b.split2.size}股) 帶入雙系統第 2 數量`}
-                                  className={`p-1.5 rounded-xl border text-left flex flex-col justify-between transition-all hover:scale-[1.02] active:scale-95 cursor-pointer select-none ${
-                                    isSplit2Finished
-                                      ? 'bg-emerald-100/80 border-emerald-300 text-emerald-950'
-                                      : 'bg-zinc-50 hover:bg-emerald-50/70 border-zinc-200 hover:border-emerald-300 text-zinc-800'
-                                  }`}
-                                >
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-[10px] font-black">{b.split2.shortLabel}</span>
-                                    {isSplit2Finished && <span className="text-[9px] font-bold text-emerald-700">滿</span>}
-                                  </div>
-                                  <span className="text-xs font-black font-mono text-zinc-900 my-0.5">{b.split2.size} 股</span>
-                                  <div className="text-[9px] text-zinc-500 font-medium">
-                                    已購: <span className="font-mono font-bold text-zinc-800">{b.split2.bought}</span>
-                                  </div>
-                                </button>
+                                  return (
+                                    <div
+                                      key={b.index}
+                                      onClick={() => handleBatchClick(b.index, b.name, b.split1.size, b.split2.size)}
+                                      title={`${b.name}：${b.bought}/${b.size} 股 (${bPercent}%) - 點擊帶入`}
+                                      className={`${widthStyles[b.index]} h-full bg-zinc-200/70 dark:bg-zinc-700/60 rounded-full overflow-hidden relative cursor-pointer group hover:opacity-90 transition-opacity`}
+                                    >
+                                      {/* Animated Fill Bar */}
+                                      <div
+                                        style={{ width: `${bPercent}%` }}
+                                        className={`h-full transition-all duration-700 ease-out rounded-full ${
+                                          isFinished
+                                            ? 'bg-gradient-to-r from-emerald-600 to-teal-500'
+                                            : bPercent > 0
+                                            ? 'bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-400 animate-pulse'
+                                            : 'bg-transparent'
+                                        }`}
+                                      />
+                                      {/* Segment Divider & Completion indicator */}
+                                      {isFinished && (
+                                        <span className="absolute inset-0 flex items-center justify-center text-[9px] font-black text-white drop-shadow-xs">
+                                          ✓
+                                        </span>
+                                      )}
+                                    </div>
+                                  );
+                                })}
                               </div>
-
-                              {isFinished && (
-                                <span className="absolute -top-1.5 -right-1.5 bg-red-600 text-white rounded-full text-[10px] px-1.5 py-0.5 font-bold shadow-md border border-white animate-pulse leading-none">滿</span>
-                              )}
                             </div>
-                          );
-                        })}
+
+                            {/* 4. Detailed Batch Horizontal Progress Cards (四批次橫向動態進度條卡片 - 4欄均勻展開) */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 w-full">
+                              {batchConfigList.map((b) => {
+                                const isFinished = b.remaining === 0;
+                                const percentCompleted = b.size > 0 ? Math.min(100, Math.round((b.bought / b.size) * 100)) : 0;
+                                const isSplit1Finished = b.split1.remaining === 0;
+                                const split1Percent = b.split1.size > 0 ? Math.min(100, Math.round((b.split1.bought / b.split1.size) * 100)) : 0;
+                                const isSplit2Finished = b.split2.remaining === 0;
+                                const split2Percent = b.split2.size > 0 ? Math.min(100, Math.round((b.split2.bought / b.split2.size) * 100)) : 0;
+                                const isCurrentActive = !isFinished && (b.index === 0 || batchConfigList[b.index - 1].remaining === 0);
+
+                                return (
+                                  <div 
+                                    key={b.index} 
+                                    className={`p-3.5 border rounded-2xl flex flex-col justify-between relative transition-all duration-300 shadow-2xs hover:shadow-md ${
+                                      isFinished 
+                                        ? 'bg-emerald-50/90 dark:bg-emerald-950/20 border-emerald-300 dark:border-emerald-800 text-zinc-900 ring-1 ring-emerald-400/30' 
+                                        : isCurrentActive
+                                        ? 'bg-white dark:bg-zinc-900 border-emerald-400/80 text-zinc-900 shadow-sm ring-1 ring-emerald-500/30'
+                                        : 'bg-white dark:bg-zinc-900 border-zinc-200/90 text-zinc-900 hover:border-emerald-300'
+                                    }`}
+                                  >
+                                    {/* Card Header (批次名稱 + 帶入全部按鈕) */}
+                                    <div className="flex flex-col gap-2 pb-2.5 border-b border-zinc-100 dark:border-zinc-800">
+                                      <div className="flex items-center justify-between w-full">
+                                        <div className="flex items-center gap-1.5">
+                                          {isCurrentActive && (
+                                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                                          )}
+                                          <span className="text-xs font-black text-zinc-800 dark:text-zinc-100 tracking-tight">
+                                            {b.name}
+                                          </span>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleBatchClick(b.index, b.name, b.split1.size, b.split2.size)}
+                                          title="點擊將此批整組 (拆分一 + 拆分二) 同步帶入雙系統攤平試算"
+                                          className="text-[10px] font-bold text-emerald-800 dark:text-emerald-300 bg-emerald-100/90 dark:bg-emerald-900/60 hover:bg-emerald-200 border border-emerald-300/80 dark:border-emerald-700 px-2 py-0.5 rounded-md active:scale-95 transition-all cursor-pointer shadow-2xs"
+                                        >
+                                          帶入全部 ↵
+                                        </button>
+                                      </div>
+
+                                      <div className="flex items-baseline justify-between">
+                                        <div className="flex items-baseline gap-1">
+                                          <span className="text-lg font-black font-mono text-zinc-900 dark:text-zinc-50 leading-tight">{b.size}</span>
+                                          <span className="text-[11px] font-bold text-zinc-500">股 (總計)</span>
+                                        </div>
+                                        <span className={`text-[10px] font-mono font-black px-1.5 py-0.5 rounded-md ${
+                                          isFinished
+                                            ? 'bg-emerald-200/80 dark:bg-emerald-900/80 text-emerald-900 dark:text-emerald-200'
+                                            : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300'
+                                        }`}>
+                                          {percentCompleted}%
+                                        </span>
+                                      </div>
+
+                                      {/* Dynamic Horizontal Progress Bar (主要橫向進度條) */}
+                                      <div 
+                                        onClick={() => handleBatchClick(b.index, b.name, b.split1.size, b.split2.size)}
+                                        className="w-full h-2.5 bg-zinc-100 dark:bg-zinc-800 rounded-full border border-zinc-200/80 overflow-hidden relative cursor-pointer group shadow-inner"
+                                        title={`目前已購買 ${b.bought} 股 / 規劃 ${b.size} 股 (${percentCompleted}%) - 點擊帶入`}
+                                      >
+                                        <div
+                                          style={{ width: `${percentCompleted}%` }}
+                                          className={`h-full transition-all duration-700 ease-out rounded-full ${
+                                            isFinished
+                                              ? 'bg-gradient-to-r from-emerald-600 to-teal-500'
+                                              : 'bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-400 group-hover:brightness-110'
+                                          }`}
+                                        />
+                                      </div>
+
+                                      <div className="flex items-center justify-between text-[11px] font-semibold text-zinc-600 dark:text-zinc-400 w-full pt-0.5">
+                                        <span>已購: <strong className="font-mono font-bold text-emerald-800 dark:text-emerald-400">{b.bought}</strong> 股</span>
+                                        <span className="text-zinc-300 dark:text-zinc-700">|</span>
+                                        <span>餘額: <strong className="font-mono font-bold text-zinc-700 dark:text-zinc-300">{b.remaining}</strong> 股</span>
+                                      </div>
+                                    </div>
+
+                                    {/* 拆分子批橫向微進度條按鈕 (可獨立點擊帶入系統一與系統二個別欄位) */}
+                                    <div className="grid grid-cols-2 gap-2 mt-3">
+                                      {/* 拆分一 */}
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleBatchClick(b.index, b.split1.name, b.split1.size, b.split2.size, 1);
+                                        }}
+                                        title={`點擊僅將 ${b.split1.name} (${b.split1.size}股) 帶入雙系統第 1 數量`}
+                                        className={`p-2 rounded-xl border text-left flex flex-col justify-between transition-all hover:scale-[1.02] active:scale-95 cursor-pointer select-none ${
+                                          isSplit1Finished
+                                            ? 'bg-emerald-100/90 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700 text-emerald-950 dark:text-emerald-200'
+                                            : 'bg-zinc-50 dark:bg-zinc-800/80 hover:bg-emerald-50/80 border-zinc-200 dark:border-zinc-700 hover:border-emerald-300 text-zinc-800 dark:text-zinc-200'
+                                        }`}
+                                      >
+                                        <div className="flex items-center justify-between w-full">
+                                          <span className="text-[10px] font-black">{b.split1.shortLabel}</span>
+                                          {isSplit1Finished ? (
+                                            <span className="text-[9px] font-bold text-emerald-700 bg-emerald-200/80 px-1 rounded">滿</span>
+                                          ) : (
+                                            <span className="text-[9px] font-mono font-bold text-zinc-500">{split1Percent}%</span>
+                                          )}
+                                        </div>
+                                        <span className="text-xs font-black font-mono text-zinc-900 dark:text-zinc-100 my-0.5">{b.split1.size} 股</span>
+                                        
+                                        {/* Mini Horizontal Progress Bar for Split 1 */}
+                                        <div className="w-full h-1.5 bg-zinc-200/80 dark:bg-zinc-700 rounded-full overflow-hidden my-1">
+                                          <div
+                                            style={{ width: `${split1Percent}%` }}
+                                            className={`h-full rounded-full transition-all duration-500 ${
+                                              isSplit1Finished ? 'bg-emerald-600' : 'bg-emerald-500'
+                                            }`}
+                                          />
+                                        </div>
+
+                                        <div className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium">
+                                          已購: <span className="font-mono font-bold text-zinc-800 dark:text-zinc-200">{b.split1.bought}</span>
+                                        </div>
+                                      </button>
+
+                                      {/* 拆分二 */}
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleBatchClick(b.index, b.split2.name, b.split1.size, b.split2.size, 2);
+                                        }}
+                                        title={`點擊僅將 ${b.split2.name} (${b.split2.size}股) 帶入雙系統第 2 數量`}
+                                        className={`p-2 rounded-xl border text-left flex flex-col justify-between transition-all hover:scale-[1.02] active:scale-95 cursor-pointer select-none ${
+                                          isSplit2Finished
+                                            ? 'bg-emerald-100/90 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700 text-emerald-950 dark:text-emerald-200'
+                                            : 'bg-zinc-50 dark:bg-zinc-800/80 hover:bg-emerald-50/80 border-zinc-200 dark:border-zinc-700 hover:border-emerald-300 text-zinc-800 dark:text-zinc-200'
+                                        }`}
+                                      >
+                                        <div className="flex items-center justify-between w-full">
+                                          <span className="text-[10px] font-black">{b.split2.shortLabel}</span>
+                                          {isSplit2Finished ? (
+                                            <span className="text-[9px] font-bold text-emerald-700 bg-emerald-200/80 px-1 rounded">滿</span>
+                                          ) : (
+                                            <span className="text-[9px] font-mono font-bold text-zinc-500">{split2Percent}%</span>
+                                          )}
+                                        </div>
+                                        <span className="text-xs font-black font-mono text-zinc-900 dark:text-zinc-100 my-0.5">{b.split2.size} 股</span>
+                                        
+                                        {/* Mini Horizontal Progress Bar for Split 2 */}
+                                        <div className="w-full h-1.5 bg-zinc-200/80 dark:bg-zinc-700 rounded-full overflow-hidden my-1">
+                                          <div
+                                            style={{ width: `${split2Percent}%` }}
+                                            className={`h-full rounded-full transition-all duration-500 ${
+                                              isSplit2Finished ? 'bg-emerald-600' : 'bg-emerald-500'
+                                            }`}
+                                          />
+                                        </div>
+
+                                        <div className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium">
+                                          已購: <span className="font-mono font-bold text-zinc-800 dark:text-zinc-200">{b.split2.bought}</span>
+                                        </div>
+                                      </button>
+                                    </div>
+
+                                    {isFinished && (
+                                      <span className="absolute -top-1.5 -right-1.5 bg-emerald-600 text-white rounded-full text-[10px] px-1.5 py-0.5 font-bold shadow-md border border-white animate-pulse leading-none">滿</span>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
 
                   {/* 股價攤平 (雙系統) / 突破加碼 (雙系統) 與 比例計算工具 */}
                   <div className="mt-6 pt-6 border-t border-zinc-200/80 space-y-6">
@@ -4896,13 +5419,13 @@ export default function StockTabDetail() {
 </ScrollIn>
 </TabsContent>
 
-        <TabsContent value="strategy" className="pt-4">
+        <TabsContent value="strategy" id="main-panel-strategy" className="pt-4">
            {id && <StrategyTab tabId={id} readOnly={false} />}
         </TabsContent>
 
 
 
-        <TabsContent value="chips" className="pt-4">
+        <TabsContent value="chips" id="main-panel-chips" className="pt-4">
            {id && <ChipAnalysisTab tabId={id} symbol={tab?.symbol || ''} />}
         </TabsContent>
         
