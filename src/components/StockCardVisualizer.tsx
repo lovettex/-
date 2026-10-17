@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { PlannedOrder, ChartAnnotation, Trade } from "../types";
-import { MousePointer, Minus, Square, Type, Trash2, Eraser, Undo2, ArrowUpRight, Move, Download, Share2, Camera, Loader2, SeparatorHorizontal, Check, Layers, History, Sparkles } from "lucide-react";
+import { MousePointer, Minus, Square, Type, Trash2, Eraser, Undo2, ArrowUpRight, Move, Download, Share2, Camera, Loader2, SeparatorHorizontal, Check, Layers, History, Crosshair } from "lucide-react";
 import html2canvas from "html2canvas";
 import { toast } from "sonner";
 import { getAxisLetterForColor } from "../utils/visualLinesSync";
@@ -98,15 +98,15 @@ interface Props {
 
 function resolveGlobalLayout<T extends { id: string; price?: number; rawY: number; column: number; isFixed?: boolean }>(
   items: T[],
-  minColumnDisp = 4.3,
+  minColumnDisp = 5.0,
 ): (T & { y: number })[] {
   if (items.length === 0) return [];
-  if (items.length === 1) {
-    return [{ ...items[0], y: items[0].isFixed ? items[0].rawY : Math.max(7, Math.min(93, items[0].rawY)) }];
-  }
+  const minY = 9.5;
+  const maxY = 93.5;
 
-  const minY = 7;
-  const maxY = 93;
+  if (items.length === 1) {
+    return [{ ...items[0], y: items[0].isFixed ? items[0].rawY : Math.max(minY, Math.min(maxY, items[0].rawY)) }];
+  }
 
   // 1. 全域嚴格依照價格由大到小排序（價格最高在最上方，價格相同時依欄位排序）
   const sorted = [...items].sort((a, b) => {
@@ -123,22 +123,22 @@ function resolveGlobalLayout<T extends { id: string; price?: number; rawY: numbe
     y: item.isFixed ? item.rawY : Math.max(minY, Math.min(maxY, item.rawY)),
   }));
 
-  // 同價格的項目初始對齊相同的 rawY
+  // 不同欄位但同價格的項目初始對齊相同的 rawY
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
-      if (Math.abs(result[j].price - result[i].price) < 0.001) {
+      if (Math.abs(result[j].price - result[i].price) < 0.001 && result[j].column !== result[i].column) {
         result[j].rawY = result[i].rawY;
         result[j].y = result[i].y;
       }
     }
   }
 
-  // 2. 迭代彈性調整：兼顧同欄位避碰與全域價格由大到小 (上方至下方) 嚴格單調性
-  for (let iter = 0; iter < 90; iter++) {
+  // 2. 迭代彈性調整：兼顧同欄位避碰與全域價格由大到小單調性
+  for (let iter = 0; iter < 100; iter++) {
     // A. 彈簧回拉至原始比例位置
     for (let i = 0; i < n; i++) {
       if (!result[i].isFixed) {
-        result[i].y += (result[i].rawY - result[i].y) * 0.12;
+        result[i].y += (result[i].rawY - result[i].y) * 0.1;
       }
     }
 
@@ -148,12 +148,17 @@ function resolveGlobalLayout<T extends { id: string; price?: number; rawY: numbe
       for (let i = 0; i < n; i++) {
         if (result[i].column === col) colIndices.push(i);
       }
-      for (let k = 0; k < colIndices.length - 1; k++) {
+      const colCount = colIndices.length;
+      const effectiveGap = colCount > 1
+        ? Math.min(minColumnDisp, (maxY - minY) / Math.max(1, colCount - 1))
+        : minColumnDisp;
+
+      for (let k = 0; k < colCount - 1; k++) {
         const idx1 = colIndices[k];
         const idx2 = colIndices[k + 1];
         const diff = result[idx2].y - result[idx1].y;
-        if (diff < minColumnDisp) {
-          const overlap = minColumnDisp - diff;
+        if (diff < effectiveGap) {
+          const overlap = effectiveGap - diff;
           const i1Fixed = !!result[idx1].isFixed;
           const i2Fixed = !!result[idx2].isFixed;
           if (i1Fixed && !i2Fixed) {
@@ -168,39 +173,20 @@ function resolveGlobalLayout<T extends { id: string; price?: number; rawY: numbe
       }
     }
 
-    // C. 全域單調性約束 (由上而下掃描：高價者不可比低價者更偏下方)
+    // C. 全域單調性約束 (不同欄位間的高低價相對關係)
     for (let i = 0; i < n - 1; i++) {
-      if (result[i + 1].price < result[i].price) {
+      if (result[i + 1].price < result[i].price && result[i + 1].column !== result[i].column) {
         if (result[i + 1].y < result[i].y) {
-          if (!result[i + 1].isFixed) {
-            result[i + 1].y = result[i].y;
-          } else if (!result[i].isFixed) {
-            result[i].y = result[i + 1].y;
-          }
-        }
-      } else if (Math.abs(result[i + 1].price - result[i].price) < 0.001) {
-        if (result[i].column !== result[i + 1].column) {
-          const avgY = (result[i].y + result[i + 1].y) / 2;
-          if (!result[i].isFixed) result[i].y = avgY;
-          if (!result[i + 1].isFixed) result[i + 1].y = avgY;
-        }
-      }
-    }
-
-    // D. 全域單調性約束 (由下而上反向掃描)
-    for (let i = n - 2; i >= 0; i--) {
-      if (result[i + 1].price < result[i].price) {
-        if (result[i].y > result[i + 1].y) {
-          if (!result[i].isFixed) {
-            result[i].y = result[i + 1].y;
-          } else if (!result[i + 1].isFixed) {
-            result[i + 1].y = result[i].y;
+          if (!result[i + 1].isFixed && !result[i].isFixed) {
+            const mid = (result[i].y + result[i + 1].y) * 0.5;
+            result[i].y = mid;
+            result[i + 1].y = mid;
           }
         }
       }
     }
 
-    // E. 邊界約束
+    // D. 邊界約束
     for (let i = 0; i < n; i++) {
       if (!result[i].isFixed) {
         result[i].y = Math.max(minY, Math.min(maxY, result[i].y));
@@ -208,44 +194,62 @@ function resolveGlobalLayout<T extends { id: string; price?: number; rawY: numbe
     }
   }
 
-  // 3. 最終嚴格保證同欄位間距
+  // 3. 最終嚴格保證同欄位間距 (雙向掃描：由上而下 + 由下而上，包含固定現價標籤周圍避碰)
   for (let col = 1; col <= 4; col++) {
     const colIndices: number[] = [];
     for (let i = 0; i < n; i++) {
       if (result[i].column === col) colIndices.push(i);
     }
-    for (let k = 0; k < colIndices.length - 1; k++) {
+    const colCount = colIndices.length;
+    if (colCount <= 1) continue;
+
+    const strictGap = Math.min(minColumnDisp * 0.94, (maxY - minY) / Math.max(1, colCount - 1));
+
+    // Pass 1: 由上而下推開
+    for (let k = 0; k < colCount - 1; k++) {
       const idx1 = colIndices[k];
       const idx2 = colIndices[k + 1];
-      if (result[idx2].y < result[idx1].y + minColumnDisp * 0.9) {
+      if (result[idx2].y < result[idx1].y + strictGap) {
         if (!result[idx2].isFixed) {
-          result[idx2].y = Math.min(maxY, result[idx1].y + minColumnDisp * 0.9);
+          result[idx2].y = result[idx1].y + strictGap;
+        } else if (!result[idx1].isFixed) {
+          result[idx1].y = result[idx2].y - strictGap;
+        }
+      }
+    }
+
+    // Clamp bottom item to maxY
+    const lastIdx = colIndices[colCount - 1];
+    if (!result[lastIdx].isFixed && result[lastIdx].y > maxY) {
+      result[lastIdx].y = maxY;
+    }
+
+    // Pass 2: 由下而上推開 (解決底部溢位或固定現價標籤上方重疊)
+    for (let k = colCount - 2; k >= 0; k--) {
+      const idx1 = colIndices[k];
+      const idx2 = colIndices[k + 1];
+      if (result[idx1].y > result[idx2].y - strictGap) {
+        if (!result[idx1].isFixed) {
+          result[idx1].y = result[idx2].y - strictGap;
+        } else if (!result[idx2].isFixed) {
+          result[idx2].y = result[idx1].y + strictGap;
+        }
+      }
+    }
+
+    // Clamp top item to minY and re-sweep down if needed
+    const firstIdx = colIndices[0];
+    if (!result[firstIdx].isFixed && result[firstIdx].y < minY) {
+      result[firstIdx].y = minY;
+      for (let k = 0; k < colCount - 1; k++) {
+        const idx1 = colIndices[k];
+        const idx2 = colIndices[k + 1];
+        if (result[idx2].y < result[idx1].y + strictGap && !result[idx2].isFixed) {
+          result[idx2].y = Math.min(maxY, result[idx1].y + strictGap);
         }
       }
     }
   }
-
-  // 4. 最終嚴格保證全域價格由大到小順序 (從上到下)
-  for (let i = 0; i < n - 1; i++) {
-    if (result[i + 1].price < result[i].price) {
-      if (result[i + 1].y < result[i].y) {
-        if (!result[i + 1].isFixed) {
-          result[i + 1].y = Math.min(maxY, result[i].y);
-        }
-      }
-    } else if (Math.abs(result[i + 1].price - result[i].price) < 0.001) {
-      if (result[i].column !== result[i + 1].column) {
-        if (!result[i + 1].isFixed) result[i + 1].y = result[i].y;
-      }
-    }
-  }
-
-  // 5. 邊界防溢出
-  result.forEach((item) => {
-    if (!item.isFixed) {
-      item.y = Math.max(minY, Math.min(maxY, item.y));
-    }
-  });
 
   return result;
 }
@@ -2400,8 +2404,8 @@ export const StockCardVisualizer: React.FC<Props> = ({
 
     const uniqueSortedPrices = Array.from(new Set(allPrices)).sort((a, b) => a - b);
 
-    const topY = 7;
-    const bottomY = 93;
+    const topY = 5.5;
+    const bottomY = 94.5;
 
     const getYPct = (p: number) => {
       if (uniqueSortedPrices.length <= 1) return 50;
@@ -2570,7 +2574,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
       ...col4ItemsRaw,
     ];
 
-    const resolvedAll = resolveGlobalLayout(allLabelsToResolve, 4.3);
+    const resolvedAll = resolveGlobalLayout(allLabelsToResolve, 4.8);
 
     const col1Labels = resolvedAll.filter((item) => item.column === 1);
     const col2Labels = resolvedAll.filter((item) => item.column === 2);
@@ -2762,11 +2766,34 @@ export const StockCardVisualizer: React.FC<Props> = ({
       return l.text;
     };
 
+    const categoryName = isCp
+      ? "現價"
+      : l.isAverageCost || l.id === "ac"
+        ? "均本"
+        : isSpecialPos || l.isAveragingSys2
+          ? "攤平"
+          : typeof l.text === "string" && l.text.startsWith("支撐")
+            ? "支撐"
+            : typeof l.text === "string" && l.text.startsWith("壓力")
+              ? "壓力"
+              : typeof l.text === "string" && l.text.startsWith("止損")
+                ? "止損"
+                : typeof l.text === "string" && l.text.startsWith("止盈")
+                  ? "止盈"
+                  : typeof l.text === "string" && l.text.includes("突破")
+                    ? "突破"
+                    : "價位";
+
     return (
       <div
         key={l.id}
+        data-is-cp={isCp ? "true" : undefined}
+        data-price-tag="true"
+        data-label-id={l.id}
+        data-category={categoryName}
+        data-price={typeof l.price === "number" ? l.price : undefined}
         title={isCp ? "現價標籤 - 雙擊開啟動態視覺線定位" : undefined}
-        className={`absolute whitespace-nowrap transition-all duration-150 font-extrabold px-1.5 py-0.5 rounded-md text-[13px] tracking-tight cursor-pointer select-none hover:scale-110 hover:z-40 active:scale-95 shadow-md border border-black/15 leading-tight ${
+        className={`absolute whitespace-nowrap transition-all duration-150 font-extrabold px-1 sm:px-1.5 py-0.5 rounded-md text-[11px] sm:text-[13px] tracking-tight cursor-pointer select-none hover:scale-110 hover:z-40 active:scale-95 shadow-md border border-black/15 leading-tight max-w-[130px] xs:max-w-[160px] sm:max-w-none truncate sm:whitespace-nowrap ${
           isCp ? "hover:ring-2 hover:ring-purple-400" : "hover:ring-2 hover:ring-white/40"
         } ${extraClass} ${blinkClass} ${alertClass}`}
         style={{
@@ -2855,7 +2882,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
 
   return (
     <div
-      className="w-full h-full px-2 py-1.5 relative flex flex-col rounded-xl pointer-events-auto"
+      className="w-full h-full px-2 pt-2.5 pb-0.5 sm:pb-1 relative flex flex-col rounded-xl pointer-events-auto"
       style={{ isolation: "isolate" }}
       onClick={(e) => e.stopPropagation()}
     >
@@ -3629,7 +3656,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
           {/* Column 2: 止盈與壓力標籤 (保持 3px 間距) */}
           <div className={mode === 'cursor' ? "pointer-events-auto" : "pointer-events-none"}>
             {col2Labels.map((l) =>
-              renderLabel(l, "left-[133px]", {
+              renderLabel(l, "left-[84px] xs:left-[96px] sm:left-[112px] md:left-[122px] lg:left-[133px]", {
                 top: `${l.y}%`,
                 transform: "translateY(-50%)",
               }),
@@ -3647,11 +3674,10 @@ export const StockCardVisualizer: React.FC<Props> = ({
                     <div
                       key={`buy-trade-badge-${trade.id || idx}`}
                       style={{
-                        left: "263px",
                         top: `${trade.y}%`,
                         transform: "translateY(-50%)",
                       }}
-                      className={`absolute z-30 transition-all duration-150 cursor-pointer select-none whitespace-nowrap hover:scale-110 hover:z-40 active:scale-95 ${
+                      className={`absolute z-30 transition-all duration-150 cursor-pointer select-none whitespace-nowrap hover:scale-110 hover:z-40 active:scale-95 left-[138px] xs:left-[156px] sm:left-[180px] md:left-[215px] lg:left-[263px] ${
                         isHovered ? "scale-110 ring-2 ring-blue-400 shadow-lg z-40" : ""
                       }`}
                       onMouseEnter={() => {
@@ -3663,10 +3689,10 @@ export const StockCardVisualizer: React.FC<Props> = ({
                         setHoveredLabel(null);
                       }}
                     >
-                      <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-600/95 hover:bg-blue-500 text-white border border-blue-400 text-[13px] font-mono font-bold shadow-xs leading-tight">
+                      <div className="flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2 py-0.5 rounded-md bg-blue-600/95 hover:bg-blue-500 text-white border border-blue-400 text-[10.5px] sm:text-[13px] font-mono font-bold shadow-xs leading-tight">
                         <span>🔷</span>
                         <span>${trade.price.toFixed(1)}</span>
-                        <span className="text-[12px] opacity-95">({trade.quantity}股)</span>
+                        <span className="text-[9.5px] sm:text-[12px] opacity-95">({trade.quantity}股)</span>
                       </div>
                     </div>
                   );
@@ -3704,12 +3730,12 @@ export const StockCardVisualizer: React.FC<Props> = ({
                         setHoveredLabel(null);
                       }}
                     >
-                      <div className={`flex items-center gap-1 px-2 py-0.5 rounded-md border text-[13px] font-bold shadow-xs leading-tight ${item.statusBg}`}>
+                      <div className={`flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2 py-0.5 rounded-md border text-[10.5px] sm:text-[13px] font-bold shadow-xs leading-tight ${item.statusBg}`}>
                         <span className="font-mono">{item.percent}</span>
                         <span className="font-mono text-white">${item.price.toFixed(1)}</span>
-                        <span className="text-[12px] opacity-95 font-mono">({item.bought}/{item.size}股)</span>
-                        {item.isBasePosition && <span className="text-[11px] bg-amber-500/90 px-1.5 py-0.2 rounded text-white font-black">基</span>}
-                        {item.isForceClose && <span className="text-[11px] bg-rose-600 px-1.5 py-0.2 rounded text-white font-black">平</span>}
+                        <span className="text-[9.5px] sm:text-[12px] opacity-95 font-mono">({item.bought}/{item.size}股)</span>
+                        {item.isBasePosition && <span className="text-[9px] sm:text-[11px] bg-amber-500/90 px-1 py-0.2 rounded text-white font-black">基</span>}
+                        {item.isForceClose && <span className="text-[9px] sm:text-[11px] bg-rose-600 px-1 py-0.2 rounded text-white font-black">平</span>}
                       </div>
                     </div>
                   );
@@ -3892,112 +3918,145 @@ export const StockCardVisualizer: React.FC<Props> = ({
         onPointerDown={(e) => e.stopPropagation()}
         onMouseMove={(e) => e.stopPropagation()}
         onTouchMove={(e) => e.stopPropagation()}
-        className="flex flex-col gap-1 mt-0.5 shrink-0 z-50 pointer-events-auto select-none w-full px-1 animate-fadeIn"
+        className="flex flex-col gap-1 mt-auto shrink-0 z-50 pointer-events-auto select-none w-full px-1 pb-0.5 animate-fadeIn"
       >
         {/* Dynamic Detail HUD Panel (卡片正下方動態提示細節, 高對比度清晰顯示) */}
         <div 
-          className="w-full shrink-0 px-2.5 py-1 rounded-md bg-zinc-950 text-white border border-zinc-600 shadow-md flex items-center justify-between min-h-[34px] h-[34px] text-[11px] select-none pointer-events-auto overflow-hidden transition-colors"
+          className="w-full shrink-0 px-3 py-1 rounded-lg bg-gradient-to-r from-zinc-900 via-zinc-900/98 to-zinc-950 text-white border border-zinc-700/80 shadow-[0_2px_10px_rgba(0,0,0,0.12),inset_0_1px_0_rgba(255,255,255,0.08)] flex items-center justify-between min-h-[34px] h-[34px] text-[11px] select-none pointer-events-auto overflow-hidden transition-all"
         >
           {hoveredDetail?.type === 'pyramid' ? (
             <div className="flex items-center justify-between w-full gap-2 animate-fadeIn">
               <div className="flex items-center gap-1.5 shrink-0">
-                <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${hoveredDetail.data.statusBg}`}>
+                <span className={`px-1.5 py-0.5 rounded text-[10px] font-black tracking-tight ${hoveredDetail.data.statusBg}`}>
                   {hoveredDetail.data.statusText}
                 </span>
-                <span className="font-black text-amber-300">
+                <span className="font-black text-amber-300 tracking-tight">
                   {hoveredDetail.data.fullName}
                 </span>
-                <span className="text-zinc-200 text-[10.5px] font-medium">
+                <span className="text-zinc-300 text-[10.5px] font-medium">
                   {hoveredDetail.data.subtitle}
                 </span>
               </div>
               <div className="flex items-center gap-2 truncate text-zinc-100 font-medium">
-                <span>目標價: <strong className="font-mono text-amber-300 font-bold">${hoveredDetail.data.price?.toFixed(2)}</strong> <span className={hoveredDetail.data.addPct ? "text-indigo-300 text-[10px] font-bold" : "text-rose-300 text-[10px] font-bold"}>({hoveredDetail.data.addPct ? `+${hoveredDetail.data.addPct}%` : `-${hoveredDetail.data.dropPct}%`})</span></span>
-                <span className="text-zinc-500 font-bold">|</span>
-                <span>規劃: <strong className="font-mono text-white font-bold">{hoveredDetail.data.size}</strong>股</span>
-                <span className="text-zinc-500 font-bold">|</span>
-                <span>已購: <strong className="font-mono text-emerald-300 font-bold">{hoveredDetail.data.bought}</strong>股 (<span className="text-emerald-300 font-black">{hoveredDetail.data.progressPct}%</span>)</span>
+                <span>目標價 <strong className="font-mono text-amber-300 font-bold tabular-nums">${hoveredDetail.data.price?.toFixed(2)}</strong> <span className={hoveredDetail.data.addPct ? "text-indigo-300 text-[10px] font-bold font-mono" : "text-rose-300 text-[10px] font-bold font-mono"}>({hoveredDetail.data.addPct ? `+${hoveredDetail.data.addPct}%` : `-${hoveredDetail.data.dropPct}%`})</span></span>
+                <span className="w-[1px] h-3 bg-white/15 shrink-0" />
+                <span>規劃 <strong className="font-mono text-white font-bold tabular-nums">{hoveredDetail.data.size}</strong>股</span>
+                <span className="w-[1px] h-3 bg-white/15 shrink-0" />
+                <span>已購 <strong className="font-mono text-emerald-300 font-bold tabular-nums">{hoveredDetail.data.bought}</strong>股 (<span className="text-emerald-300 font-black font-mono">{hoveredDetail.data.progressPct}%</span>)</span>
               </div>
-              <div className="shrink-0 text-[10px] text-zinc-100 bg-zinc-800 px-1.5 py-0.5 rounded border border-zinc-600 font-mono font-bold">
+              <div className="shrink-0 text-[10px] text-zinc-100 bg-white/[0.08] px-2 py-0.5 rounded-md border border-white/15 font-mono font-bold tabular-nums">
                 拆分: {hoveredDetail.data.split1.percent}({hoveredDetail.data.split1.bought}/{hoveredDetail.data.split1.size}) + {hoveredDetail.data.split2.percent}({hoveredDetail.data.split2.bought}/{hoveredDetail.data.split2.size})
               </div>
             </div>
           ) : hoveredDetail?.type === 'trade' ? (
             <div className="flex items-center justify-between w-full gap-2 animate-fadeIn">
               <div className="flex items-center gap-1.5 shrink-0">
-                <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-blue-600 text-white">
-                  🔷 歷史買入
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-blue-600/95 text-white border border-blue-400/40 flex items-center gap-1">
+                  <span>🔷</span>
+                  <span>歷史買入</span>
                 </span>
-                <span className="font-mono text-zinc-100 font-bold">
+                <span className="font-mono text-zinc-100 font-bold tabular-nums">
                   {hoveredDetail.data.dateFormatted}
                 </span>
               </div>
               <div className="flex items-center gap-2 truncate text-zinc-100 font-medium">
-                <span>買入價: <strong className="font-mono text-cyan-300 font-bold">${hoveredDetail.data.price?.toFixed(2)}</strong></span>
-                <span className="text-zinc-500 font-bold">|</span>
-                <span>數量: <strong className="font-mono text-white font-bold">{hoveredDetail.data.quantity}</strong> 股</span>
-                <span className="text-zinc-500 font-bold">|</span>
-                <span>總額: <strong className="font-mono text-emerald-300 font-bold">${(hoveredDetail.data.price * hoveredDetail.data.quantity).toLocaleString(undefined, { maximumFractionDigits: 0 })}</strong></span>
+                <span>買入價 <strong className="font-mono text-cyan-300 font-bold tabular-nums">${hoveredDetail.data.price?.toFixed(2)}</strong></span>
+                <span className="w-[1px] h-3 bg-white/15 shrink-0" />
+                <span>數量 <strong className="font-mono text-white font-bold tabular-nums">{hoveredDetail.data.quantity}</strong> 股</span>
+                <span className="w-[1px] h-3 bg-white/15 shrink-0" />
+                <span>總額 <strong className="font-mono text-emerald-300 font-bold tabular-nums">${(hoveredDetail.data.price * hoveredDetail.data.quantity).toLocaleString(undefined, { maximumFractionDigits: 0 })}</strong></span>
               </div>
-              <div className="shrink-0 text-[10px] text-zinc-100 bg-zinc-800 px-1.5 py-0.5 rounded border border-zinc-600 font-medium">
+              <div className="shrink-0 text-[10px] text-zinc-100 bg-white/[0.08] px-2 py-0.5 rounded-md border border-white/15 font-medium">
                 {hoveredDetail.data.batch || '一般進場'}{hoveredDetail.data.purpose ? ` · ${hoveredDetail.data.purpose}` : ''}
               </div>
             </div>
           ) : hoveredDetail?.type === 'price' || hoveredDetail?.type === 'order' ? (
             <div className="flex items-center justify-between w-full gap-2 animate-fadeIn">
               <div className="flex items-center gap-1.5 shrink-0">
-                <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-purple-600 text-white">
-                  指標價格
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-purple-600/95 text-white border border-purple-400/40 flex items-center gap-1">
+                  <Crosshair className="w-2.5 h-2.5 text-purple-200" />
+                  <span>指標價格</span>
                 </span>
-                <span className="font-bold text-white">
+                <span className="font-bold text-white tracking-tight">
                   {hoveredDetail.data.text || hoveredDetail.data.id}
                 </span>
               </div>
               <div className="flex items-center gap-2 truncate text-zinc-100 font-medium">
-                <span>價格: <strong className="font-mono text-yellow-300 font-bold">${typeof hoveredDetail.data.price === 'number' ? hoveredDetail.data.price.toFixed(2) : hoveredDetail.data.price}</strong></span>
+                <span>價格 <strong className="font-mono text-amber-300 font-bold tabular-nums">${typeof hoveredDetail.data.price === 'number' ? hoveredDetail.data.price.toFixed(2) : hoveredDetail.data.price}</strong></span>
                 {dynamicPrice > 0 && typeof hoveredDetail.data.price === 'number' && (
                   <>
-                    <span className="text-zinc-500 font-bold">|</span>
-                    <span>距現價: <strong className="font-mono text-cyan-300 font-bold">{((hoveredDetail.data.price - dynamicPrice) / dynamicPrice * 100).toFixed(2)}%</strong></span>
+                    <span className="w-[1px] h-3 bg-white/15 shrink-0" />
+                    <span>距現價 <strong className="font-mono text-cyan-300 font-bold tabular-nums">{((hoveredDetail.data.price - dynamicPrice) / dynamicPrice * 100).toFixed(2)}%</strong></span>
                   </>
                 )}
               </div>
-              <div className="shrink-0 text-[10px] text-zinc-200 font-medium">
+              <div className="shrink-0 text-[10px] text-zinc-300 font-medium hidden sm:block">
                 懸停圖表元素檢視即時資訊
               </div>
             </div>
           ) : (
-            <div className="flex items-center justify-between w-full gap-2 text-zinc-100">
-              <div className="flex items-center gap-1.5 font-bold">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block animate-pulse shrink-0 shadow-sm shadow-emerald-500" />
-                <span className="text-white font-bold">分批進場金字塔:</span>
-                <span className="font-mono text-emerald-300 font-extrabold">{planResult?.totalBought || currentHoldingQty}</span>
-                <span className="text-zinc-400 font-bold">/</span>
-                <span className="font-mono text-white font-bold">{planResult?.plannedQty || effPlannedQty} 股</span>
-                <span className="text-emerald-300 font-black font-mono">
-                  ({planResult?.plannedQty && planResult.plannedQty > 0 ? Math.round(((planResult.totalBought || currentHoldingQty) / planResult.plannedQty) * 100) : 0}%)
-                </span>
-              </div>
-              <div className="text-[11px] text-zinc-200 flex items-center gap-2 truncate font-medium">
-                <span>歷史買入: <strong className="text-cyan-300 font-extrabold font-mono">{buyTrades?.length || 0}</strong> 筆</span>
-                <span className="text-zinc-500 font-bold">|</span>
-                <span className="text-zinc-300 hidden sm:inline">(懸停金字塔階梯或買入點檢視詳細細節)</span>
-              </div>
-            </div>
+            (() => {
+              const boughtVal = planResult?.totalBought || currentHoldingQty || 0;
+              const plannedVal = planResult?.plannedQty || effPlannedQty || 0;
+              const progressPct = plannedVal > 0 ? Math.min(100, Math.round((boughtVal / plannedVal) * 100)) : 0;
+              return (
+                <div className="flex items-center justify-between w-full gap-2 text-zinc-100">
+                  <div className="flex items-center gap-1.5 font-bold min-w-0">
+                    <span className="relative flex h-2 w-2 shrink-0">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400 shadow-xs shadow-emerald-500" />
+                    </span>
+                    <Layers className="w-3.5 h-3.5 text-emerald-400 shrink-0 hidden xs:inline-block" />
+                    <span className="text-zinc-100 font-bold tracking-tight shrink-0">分批進場金字塔</span>
+                    <div className="flex items-center gap-1 bg-white/[0.07] border border-white/10 rounded-md px-1.5 py-0.5 font-mono text-[10.5px] tabular-nums shrink-0">
+                      <span className="text-emerald-300 font-extrabold">{boughtVal}</span>
+                      <span className="text-white/35 font-bold">/</span>
+                      <span className="text-white font-bold">{plannedVal}股</span>
+                    </div>
+                    <div className="hidden sm:flex items-center gap-1.5 ml-0.5 shrink-0">
+                      <div className="w-10 md:w-14 h-1.5 bg-white/10 rounded-full overflow-hidden p-[1px]">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-300 transition-all duration-300"
+                          style={{ width: `${Math.max(progressPct > 0 ? 8 : 0, progressPct)}%` }}
+                        />
+                      </div>
+                      <span className="text-emerald-300 font-black font-mono text-[10.5px] tabular-nums">
+                        {progressPct}%
+                      </span>
+                    </div>
+                    <span className="sm:hidden text-emerald-300 font-black font-mono text-[10.5px] tabular-nums">
+                      ({progressPct}%)
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-zinc-200 flex items-center gap-2 truncate font-medium shrink-0">
+                    <div className="flex items-center gap-1 bg-white/[0.06] border border-white/10 rounded-md px-1.5 py-0.5">
+                      <History className="w-3 h-3 text-cyan-400 shrink-0" />
+                      <span className="text-zinc-300 text-[10.5px]">歷史買入</span>
+                      <strong className="text-cyan-300 font-extrabold font-mono tabular-nums">{buyTrades?.length || 0}</strong>
+                      <span className="text-zinc-300 text-[10px]">筆</span>
+                    </div>
+                    <span className="text-zinc-400 text-[10px] hidden lg:inline tracking-tight">
+                      懸停階梯或買入點檢視詳細細節
+                    </span>
+                  </div>
+                </div>
+              );
+            })()
           )}
         </div>
 
         {/* Drawing Toolbar */}
-        <div className="flex justify-start sm:justify-center w-full mt-0.5 overflow-x-auto max-w-full [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] py-0.5 px-0.5">
-          <div className="flex items-center gap-0 sm:gap-0.5 p-[2px] px-1 sm:px-1 bg-white/60 border border-zinc-200/90 backdrop-blur-md rounded-lg sm:rounded-md shadow-none shrink-0">
+        <div className="flex justify-start sm:justify-center w-full overflow-x-auto max-w-full [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] py-0.5 px-0.5">
+          <div className="flex items-center gap-0.5 sm:gap-1 p-0.5 px-1.5 bg-zinc-100/90 hover:bg-zinc-100/95 border border-zinc-200/90 backdrop-blur-md rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.04),inset_0_1px_0_rgba(255,255,255,0.85)] shrink-0 transition-colors">
             {/* Cursor Interactive Mode Button */}
             <button
               type="button"
               title="互動標籤"
               onClick={() => { setMode('cursor'); setInputCoords(null); }}
-              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'cursor' ? 'bg-zinc-900/15 text-zinc-950 font-bold ring-1 ring-zinc-200' : 'text-zinc-700 hover:text-zinc-950 hover:bg-zinc-900/5'}`}
+              style={mode === 'cursor' ? { color: '#ffffff' } : undefined}
+              className={`p-1 sm:p-1 rounded-md transition-all shrink-0 cursor-pointer ${mode === 'cursor' ? 'bg-zinc-900 text-white font-bold shadow-2xs' : 'text-zinc-700 hover:text-zinc-950 hover:bg-white/90'}`}
             >
-              <MousePointer className="w-3 h-3 sm:w-3 sm:h-3" />
+              <MousePointer className="w-3 h-3" />
             </button>
 
             {/* Move Annotation Mode Button */}
@@ -4005,21 +4064,23 @@ export const StockCardVisualizer: React.FC<Props> = ({
               type="button"
               title="拖曳移動標記"
               onClick={() => { setMode('move'); setInputCoords(null); }}
-              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'move' ? 'bg-zinc-900/15 text-zinc-950 font-bold ring-1 ring-zinc-200' : 'text-zinc-700 hover:text-zinc-950 hover:bg-zinc-900/5'}`}
+              style={mode === 'move' ? { color: '#ffffff' } : undefined}
+              className={`p-1 sm:p-1 rounded-md transition-all shrink-0 cursor-pointer ${mode === 'move' ? 'bg-zinc-900 text-white font-bold shadow-2xs' : 'text-zinc-700 hover:text-zinc-950 hover:bg-white/90'}`}
             >
-              <Move className="w-3 h-3 sm:w-3 sm:h-3" />
+              <Move className="w-3 h-3" />
             </button>
             
-            <div className="w-[1px] h-2.5 bg-zinc-300/80 mx-0 sm:mx-0.5 shrink-0" />
+            <div className="w-[1px] h-3 bg-zinc-300/80 mx-0.5 shrink-0" />
             
             {/* Rectangle Mode Button */}
             <button
               type="button"
               title="畫方框"
               onClick={() => { setMode('box'); setInputCoords(null); }}
-              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'box' ? 'bg-zinc-900/15 text-zinc-950 font-bold ring-1 ring-zinc-200' : 'text-zinc-700 hover:text-zinc-950 hover:bg-zinc-900/5'}`}
+              style={mode === 'box' ? { color: '#ffffff' } : undefined}
+              className={`p-1 sm:p-1 rounded-md transition-all shrink-0 cursor-pointer ${mode === 'box' ? 'bg-zinc-900 text-white font-bold shadow-2xs' : 'text-zinc-700 hover:text-zinc-950 hover:bg-white/90'}`}
             >
-              <Square className="w-3 h-3 sm:w-3 sm:h-3" />
+              <Square className="w-3 h-3" />
             </button>
             
             {/* Line Mode Button */}
@@ -4027,9 +4088,10 @@ export const StockCardVisualizer: React.FC<Props> = ({
               type="button"
               title="畫線"
               onClick={() => { setMode('line'); setInputCoords(null); }}
-              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'line' ? 'bg-zinc-900/15 text-zinc-950 font-bold ring-1 ring-zinc-200' : 'text-zinc-700 hover:text-zinc-950 hover:bg-zinc-900/5'}`}
+              style={mode === 'line' ? { color: '#ffffff' } : undefined}
+              className={`p-1 sm:p-1 rounded-md transition-all shrink-0 cursor-pointer ${mode === 'line' ? 'bg-zinc-900 text-white font-bold shadow-2xs' : 'text-zinc-700 hover:text-zinc-950 hover:bg-white/90'}`}
             >
-              <Minus className="w-3 h-3 sm:w-3 sm:h-3" />
+              <Minus className="w-3 h-3" />
             </button>
 
             {/* Divider Horizontal Line Mode Button */}
@@ -4037,9 +4099,10 @@ export const StockCardVisualizer: React.FC<Props> = ({
               type="button"
               title="水平線 Divider (黑色: D軸, 藍色: B軸, 綠色: G軸, 黃色: Y軸, 紅色: R軸)"
               onClick={() => { setMode('divider'); setInputCoords(null); }}
-              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'divider' ? 'bg-zinc-900/15 text-zinc-950 font-bold ring-1 ring-zinc-200' : 'text-zinc-700 hover:text-zinc-950 hover:bg-zinc-900/5'}`}
+              style={mode === 'divider' ? { color: '#ffffff' } : undefined}
+              className={`p-1 sm:p-1 rounded-md transition-all shrink-0 cursor-pointer ${mode === 'divider' ? 'bg-zinc-900 text-white font-bold shadow-2xs' : 'text-zinc-700 hover:text-zinc-950 hover:bg-white/90'}`}
             >
-              <SeparatorHorizontal className="w-3 h-3 sm:w-3 sm:h-3" />
+              <SeparatorHorizontal className="w-3 h-3" />
             </button>
 
             {/* Arrow Mode Button */}
@@ -4047,9 +4110,10 @@ export const StockCardVisualizer: React.FC<Props> = ({
               type="button"
               title="箭頭指向"
               onClick={() => { setMode('arrow'); setInputCoords(null); }}
-              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'arrow' ? 'bg-zinc-900/15 text-zinc-950 font-bold ring-1 ring-zinc-200' : 'text-zinc-700 hover:text-zinc-950 hover:bg-zinc-900/5'}`}
+              style={mode === 'arrow' ? { color: '#ffffff' } : undefined}
+              className={`p-1 sm:p-1 rounded-md transition-all shrink-0 cursor-pointer ${mode === 'arrow' ? 'bg-zinc-900 text-white font-bold shadow-2xs' : 'text-zinc-700 hover:text-zinc-950 hover:bg-white/90'}`}
             >
-              <ArrowUpRight className="w-3 h-3 sm:w-3 sm:h-3" />
+              <ArrowUpRight className="w-3 h-3" />
             </button>
             
             {/* Text Annotation Mode Button */}
@@ -4057,9 +4121,10 @@ export const StockCardVisualizer: React.FC<Props> = ({
               type="button"
               title="打文字"
               onClick={() => { setMode('text'); }}
-              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'text' ? 'bg-zinc-900/15 text-zinc-950 font-bold ring-1 ring-zinc-200' : 'text-zinc-700 hover:text-zinc-950 hover:bg-zinc-900/5'}`}
+              style={mode === 'text' ? { color: '#ffffff' } : undefined}
+              className={`p-1 sm:p-1 rounded-md transition-all shrink-0 cursor-pointer ${mode === 'text' ? 'bg-zinc-900 text-white font-bold shadow-2xs' : 'text-zinc-700 hover:text-zinc-950 hover:bg-white/90'}`}
             >
-              <Type className="w-3 h-3 sm:w-3 sm:h-3" />
+              <Type className="w-3 h-3" />
             </button>
 
             {/* Eraser Mode Button */}
@@ -4067,12 +4132,13 @@ export const StockCardVisualizer: React.FC<Props> = ({
               type="button"
               title="橡皮擦工具"
               onClick={() => { setMode('eraser'); setInputCoords(null); }}
-              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${mode === 'eraser' ? 'bg-rose-500/15 text-rose-800 font-bold' : 'text-zinc-700 hover:text-zinc-950 hover:bg-zinc-900/5'}`}
+              style={mode === 'eraser' ? { color: '#ffffff' } : undefined}
+              className={`p-1 sm:p-1 rounded-md transition-all shrink-0 cursor-pointer ${mode === 'eraser' ? 'bg-rose-600 text-white font-bold shadow-2xs' : 'text-zinc-700 hover:text-zinc-950 hover:bg-white/90'}`}
             >
-              <Eraser className="w-3 h-3 sm:w-3 sm:h-3" />
+              <Eraser className="w-3 h-3" />
             </button>
             
-            <div className="w-[1px] h-2.5 bg-zinc-300/80 mx-0 sm:mx-0.5 shrink-0" />
+            <div className="w-[1px] h-3 bg-zinc-300/80 mx-0.5 shrink-0" />
 
             {/* Undo Button */}
             <button
@@ -4080,25 +4146,25 @@ export const StockCardVisualizer: React.FC<Props> = ({
               title="上一步"
               onClick={handleUndo}
               disabled={history.length === 0}
-              className={`p-1 sm:p-0.5 rounded transition-colors shrink-0 ${history.length > 0 ? 'text-amber-800 hover:text-amber-950 hover:bg-zinc-900/5' : 'text-zinc-400/50 cursor-not-allowed'}`}
+              className={`p-1 sm:p-1 rounded-md transition-all shrink-0 ${history.length > 0 ? 'text-amber-800 hover:text-amber-950 hover:bg-white/90 cursor-pointer' : 'text-zinc-400/50 cursor-not-allowed'}`}
             >
-              <Undo2 className="w-3 h-3 sm:w-3 sm:h-3" />
+              <Undo2 className="w-3 h-3" />
             </button>
             
-            <div className="w-[1px] h-2.5 bg-zinc-300/80 mx-0 sm:mx-0.5 shrink-0" />
+            <div className="w-[1px] h-3 bg-zinc-300/80 mx-0.5 shrink-0" />
 
             {/* Stroke Width Cycle Control */}
             <button
               type="button"
               title={`粗細: ${activeThickness}px`}
               onClick={cycleThickness}
-              className="p-0.5 px-0.5 sm:px-1 rounded hover:bg-zinc-900/5 transition-colors flex items-center gap-0.5 shrink-0"
+              className="py-0.5 px-1 sm:px-1.5 rounded-md hover:bg-white/90 transition-all flex items-center gap-1 shrink-0 cursor-pointer"
             >
-              <span className="text-[8px] font-medium text-zinc-600 tracking-tighter">粗</span>
-              <span className="bg-zinc-900/10 rounded px-1 py-0.25 text-zinc-900 font-bold text-[8px]">{activeThickness}px</span>
+              <span className="text-[9px] font-bold text-zinc-600 tracking-tighter">粗</span>
+              <span className="bg-white border border-zinc-200/90 shadow-2xs rounded px-1 py-0.25 text-zinc-900 font-mono font-extrabold text-[8.5px] tabular-nums">{activeThickness}px</span>
             </button>
             
-            <div className="w-[1px] h-2.5 bg-zinc-300/80 mx-0 sm:mx-0.5 shrink-0" />
+            <div className="w-[1px] h-3 bg-zinc-300/80 mx-0.5 shrink-0" />
 
             {/* Font Size Cycle Control */}
             <button
@@ -4111,13 +4177,13 @@ export const StockCardVisualizer: React.FC<Props> = ({
                   return sizes[(idx + 1) % sizes.length];
                 });
               }}
-              className="p-0.5 px-0.5 sm:px-1 rounded hover:bg-zinc-900/5 transition-colors flex items-center gap-0.5 shrink-0"
+              className="py-0.5 px-1 sm:px-1.5 rounded-md hover:bg-white/90 transition-all flex items-center gap-1 shrink-0 cursor-pointer"
             >
-              <span className="text-[8px] font-medium text-zinc-600 tracking-tighter">字</span>
-              <span className="bg-zinc-900/10 rounded px-1 py-0.25 text-zinc-900 font-bold text-[8px]">{activeFontSize}px</span>
+              <span className="text-[9px] font-bold text-zinc-600 tracking-tighter">字</span>
+              <span className="bg-white border border-zinc-200/90 shadow-2xs rounded px-1 py-0.25 text-zinc-900 font-mono font-extrabold text-[8.5px] tabular-nums">{activeFontSize}px</span>
             </button>
             
-            <div className="w-[1px] h-2.5 bg-zinc-300/80 mx-0 sm:mx-0.5 shrink-0" />
+            <div className="w-[1px] h-3 bg-zinc-300/80 mx-0.5 shrink-0" />
 
             {/* Dynamic Color Selection Popover */}
             <div className="flex items-center relative shrink-0">
@@ -4129,15 +4195,15 @@ export const StockCardVisualizer: React.FC<Props> = ({
                   e.stopPropagation();
                   toggleColorPicker();
                 }}
-                className={`p-0.5 px-1 rounded flex items-center gap-1 hover:bg-zinc-900/5 transition-colors cursor-pointer ${
-                  isColorPickerOpen ? 'bg-zinc-900/15 ring-1 ring-zinc-400 font-bold' : ''
+                className={`py-0.5 px-1.5 rounded-md flex items-center gap-1 hover:bg-white/90 transition-all cursor-pointer ${
+                  isColorPickerOpen ? 'bg-white ring-1 ring-zinc-300 shadow-2xs font-bold' : ''
                 }`}
               >
                 <div
-                  className="w-3.5 h-3.5 rounded-full border border-black/30 shadow-xs shrink-0 transition-transform hover:scale-105"
+                  className="w-3.5 h-3.5 rounded-full border border-black/25 ring-1 ring-white shadow-2xs shrink-0 transition-transform hover:scale-105"
                   style={{ backgroundColor: activeColor }}
                 />
-                <span className="text-[7.5px] text-zinc-500 font-bold leading-none select-none">▾</span>
+                <span className="text-[8px] text-zinc-600 font-bold leading-none select-none">▾</span>
               </button>
 
               {isColorPickerOpen && pickerPos && createPortal(
@@ -4244,7 +4310,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
               )}
             </div>
 
-            <div className="w-[1px] h-2.5 bg-zinc-300/80 mx-0.5 shrink-0" />
+            <div className="w-[1px] h-3 bg-zinc-300/80 mx-0.5 shrink-0" />
             
             {/* 一鍵刪除視覺圖示化的所有繪圖按鈕 */}
             <button
@@ -4258,10 +4324,10 @@ export const StockCardVisualizer: React.FC<Props> = ({
                 return `一鍵刪除所有繪圖 (${localAnnotations.length} 個標記)`;
               })()}
               onClick={handleClearAll}
-              className={`p-1 sm:p-0.5 rounded transition-all shrink-0 flex items-center gap-0.5 cursor-pointer ${
+              className={`p-1 sm:p-1 rounded-md transition-all shrink-0 flex items-center gap-0.5 cursor-pointer ${
                 localAnnotations.length > 0
                   ? 'text-red-600 hover:text-red-800 hover:bg-red-500/15 active:scale-90 font-bold'
-                  : 'text-zinc-400 hover:text-red-500 hover:bg-zinc-100 opacity-60'
+                  : 'text-zinc-400 hover:text-red-500 hover:bg-white/90 opacity-60'
               }`}
             >
               <Trash2 className="w-3 h-3" />

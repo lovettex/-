@@ -30,6 +30,7 @@ import {
 import { db } from "../lib/firebase";
 import { useAuth } from "../lib/AuthContext";
 import { formatTimestamp, getTimestampDate } from "../lib/dateUtils";
+import { whiteNoiseEngine } from "../lib/whiteNoiseEngine";
 import { toast } from "sonner";
 import {
   ScrollIn,
@@ -301,6 +302,31 @@ export default function Dashboard() {
     return saved ? parseFloat(saved) : 1000000;
   });
   const [isBankBalanceRevealed, setIsBankBalanceRevealed] = useState(false);
+
+  // PS5 Dynamic Background active state tracker
+  const [isPs5ModeActive, setIsPs5ModeActive] = useState(() => {
+    if (typeof document !== "undefined" && document.body.classList.contains("ps5-theme-active")) {
+      return true;
+    }
+    const s = whiteNoiseEngine.getState();
+    return !!(s.isPlaying && s.bgEnabled);
+  });
+
+  useEffect(() => {
+    const unsubscribe = whiteNoiseEngine.subscribe((state) => {
+      setIsPs5ModeActive(!!(state.isPlaying && state.bgEnabled));
+    });
+    const observer = new MutationObserver(() => {
+      setIsPs5ModeActive(document.body.classList.contains("ps5-theme-active"));
+    });
+    if (typeof document !== "undefined" && document.body) {
+      observer.observe(document.body, { attributes: true, attributeFilter: ["class"] });
+    }
+    return () => {
+      unsubscribe();
+      observer.disconnect();
+    };
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -5410,32 +5436,44 @@ export default function Dashboard() {
 
   return (
     <div className="w-full pb-12 mt-0 transition-all duration-300">
-      {/* 1. Full-width Green Ribbon Header (Desktop: sm and above) */}
+      {/* 1. Full-width Dynamic High-Contrast Emerald & Obsidian Ribbon Header (Desktop: sm and above) */}
       <ScrollIn className="hidden sm:block">
-        <div className="-mx-2 sm:-mx-4 md:-mx-6 bg-[#085041] text-white pt-[16px] pb-[18px] px-4 sm:px-6 md:px-8 flex flex-col gap-4 text-left border-none rounded-none shadow-none relative z-10 select-none">
-          <div className="w-full max-w-[1600px] mx-auto flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 xl:gap-6">
+        <div className="portfolio-hero-banner -mx-2 sm:-mx-4 md:-mx-6 bg-gradient-to-r from-[#032b22] via-[#064235] to-[#043328] text-white pt-[16px] pb-[18px] px-4 sm:px-6 md:px-8 flex flex-col gap-4 text-left border-b border-emerald-400/30 rounded-none shadow-[0_12px_32px_-8px_rgba(3,43,34,0.55)] relative z-10 select-none overflow-hidden">
+          {/* Subtle animated ambient light flares */}
+          <div className="pointer-events-none absolute -top-24 -left-20 w-96 h-96 rounded-full bg-emerald-400/15 blur-3xl animate-pulse" />
+          <div className="pointer-events-none absolute -bottom-28 right-1/4 w-[28rem] h-64 rounded-full bg-teal-300/10 blur-3xl" />
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-emerald-300/40 to-transparent" />
+
+          <div className="w-full max-w-[1600px] mx-auto flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 xl:gap-5 relative z-10">
             {/* Left section: Portfolio Overview badge & Title */}
             <div className="flex flex-col text-left shrink-0">
               <div className="flex justify-between items-center w-full lg:w-auto gap-3">
-                <span className="portfolio-overview-badge px-2.5 py-1 text-[10px] tracking-[0.07em] font-bold text-[#9FE1CB] bg-white/10 rounded-full uppercase whitespace-nowrap transition-all">
+                <span className="portfolio-overview-badge inline-flex items-center gap-1.5 px-2.5 py-1 text-[10px] tracking-[0.1em] font-extrabold text-emerald-200 bg-emerald-950/70 border border-emerald-400/35 rounded-full uppercase whitespace-nowrap shadow-[inset_0_1px_0_rgba(255,255,255,0.15)] transition-all">
+                  <span className="relative flex h-1.5 w-1.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-400" />
+                  </span>
                   PORTFOLIO OVERVIEW
                 </span>
                 <button
                   onClick={logout}
-                  className="block lg:hidden text-white/60 hover:text-white transition-colors p-1"
+                  className="block lg:hidden text-white/70 hover:text-white transition-colors p-1"
                   title="登出"
                 >
                   <LogOut className="w-4 h-4" />
                 </button>
               </div>
               
-              <div className="flex items-center gap-1.5 mt-1.5">
-                <h1 className="ps5-fluorescent-title text-[20px] sm:text-[22px] md:text-[24px] font-bold text-white leading-none whitespace-nowrap transition-all">
+              <div className="flex items-center gap-2 mt-1.5">
+                <h1
+                  style={{ color: "#ffffff" }}
+                  className="ps5-fluorescent-title text-[22px] sm:text-[24px] md:text-[26px] font-black text-white tracking-tight leading-none whitespace-nowrap drop-shadow-[0_2px_10px_rgba(0,0,0,0.35)] transition-all"
+                >
                   交易總覽
                 </h1>
                 <button
                   onClick={() => setIsHelpOpen(true)}
-                  className="text-white/40 hover:text-white/70 transition-colors p-1"
+                  className="text-emerald-200/60 hover:text-white hover:bg-white/10 rounded-full transition-all p-1 cursor-pointer"
                   title="快捷鍵一覽"
                 >
                   <HelpCircle className="w-4 h-4" />
@@ -5443,28 +5481,29 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* Middle section: Indicators */}
-            <div className="flex-1 bg-black/15 backdrop-blur-md px-4 sm:px-5 py-2.5 rounded-2xl w-full">
-              <div className="flex flex-wrap lg:flex-nowrap items-center justify-between gap-x-4 gap-y-3">
+            {/* Middle section: High-Contrast Telemetry Dock */}
+            <div className="flex-1 bg-black/40 backdrop-blur-xl px-3 sm:px-4 py-2 rounded-2xl w-full border border-white/15 shadow-[0_8px_28px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.12)]">
+              <div className="flex flex-wrap lg:flex-nowrap items-center justify-between gap-x-2 xl:gap-x-3 gap-y-2.5">
                 {/* Metric 0: Bank Account Water Level */}
-                <div className="flex flex-col text-left shrink-0">
-                  <div className="flex items-center gap-1">
-                    <span className="text-[11px] text-[#9FE1CB] font-medium opacity-90 whitespace-nowrap">銀行帳戶水位</span>
+                <div className="flex flex-col text-left shrink-0 px-2.5 py-1 rounded-xl hover:bg-white/[0.06] transition-colors">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0 shadow-[0_0_6px_rgba(52,211,153,0.8)]" />
+                    <span className="text-[11px] text-emerald-200 font-bold tracking-wide whitespace-nowrap">銀行帳戶水位</span>
                     <button
                       onClick={() => setIsBankBalanceRevealed((prev) => !prev)}
-                      className="text-white/40 hover:text-white/80 transition-colors p-0.5"
+                      className="text-white/50 hover:text-white transition-colors p-0.5 cursor-pointer"
                       title={isBankBalanceRevealed ? "隱藏水位" : "雙擊或點擊顯示水位"}
                     >
                       {isBankBalanceRevealed ? (
-                        <Eye className="w-3 h-3 text-[#9FE1CB]" />
+                        <Eye className="w-3 h-3 text-emerald-300" />
                       ) : (
-                        <EyeOff className="w-3 h-3 text-white/50" />
+                        <EyeOff className="w-3 h-3 text-white/60" />
                       )}
                     </button>
                   </div>
                   {isEditingBankBalance ? (
                     <div className="flex items-center gap-0.5 mt-1">
-                      <span className="text-[14px] sm:text-[15px] font-semibold text-white">$</span>
+                      <span className="text-[15px] sm:text-[16px] font-black font-mono text-white">$</span>
                       <input
                         type="number"
                         autoFocus
@@ -5484,7 +5523,7 @@ export default function Dashboard() {
                           }
                         }}
                         onChange={(e) => setEditBankBalanceVal(e.target.value)}
-                        className="bg-transparent text-white font-semibold text-[14px] sm:text-[15px] focus:outline-none w-24 border-none p-0 focus:ring-0 leading-none h-5"
+                        className="bg-white/10 rounded px-1 text-white font-black font-mono text-[15px] sm:text-[16px] focus:outline-none w-24 border border-emerald-400/50 p-0 focus:ring-1 focus:ring-emerald-400 leading-none h-5"
                         style={{ caretColor: 'white' }}
                       />
                     </div>
@@ -5495,35 +5534,38 @@ export default function Dashboard() {
                         setEditBankBalanceVal(bankAccountBalance.toString());
                         setIsEditingBankBalance(true);
                       }}
-                      className="text-[14px] sm:text-[15px] font-semibold text-white cursor-pointer select-none leading-none mt-1 flex items-baseline gap-1 group/bank whitespace-nowrap"
+                      className="text-[15px] sm:text-[16px] font-black font-mono tabular-nums text-white cursor-pointer select-none leading-none mt-1.5 flex items-center gap-1.5 group/bank whitespace-nowrap"
                       title="點擊修改水位，雙擊馬賽克遮罩"
                     >
-                      <span>${bankAccountBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                      <span className="text-[10px] text-white/40 group-hover/bank:text-white/70 transition-colors font-normal whitespace-nowrap">(修改)</span>
+                      <span className="drop-shadow-[0_1px_4px_rgba(0,0,0,0.4)]">${bankAccountBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      <span className="text-[9.5px] font-sans font-bold px-1.5 py-0.5 rounded bg-white/10 text-emerald-200 border border-white/15 group-hover/bank:bg-emerald-400 group-hover/bank:text-emerald-950 transition-all whitespace-nowrap">修改</span>
                     </div>
                   ) : (
                     <div
                       onDoubleClick={() => setIsBankBalanceRevealed(true)}
-                      className="text-[14px] sm:text-[15px] font-semibold text-white cursor-pointer select-none leading-none mt-1 flex items-center gap-1 group/bank-mosaic whitespace-nowrap"
+                      className="text-[15px] sm:text-[16px] font-black font-mono text-white cursor-pointer select-none leading-none mt-1.5 flex items-center gap-1.5 group/bank-mosaic whitespace-nowrap"
                       title="雙擊解鎖顯示水位"
                     >
-                      <span className="tracking-widest font-mono filter blur-[3.5px] select-none text-emerald-100 bg-white/10 px-1.5 py-0.5 rounded transition-all group-hover/bank-mosaic:blur-[2px] whitespace-nowrap">
+                      <span className="tracking-widest font-mono filter blur-[3.5px] select-none text-emerald-200 bg-white/15 px-1.5 py-0.5 rounded transition-all group-hover/bank-mosaic:blur-[2px] whitespace-nowrap">
                         $8,888,888.88
                       </span>
-                      <span className="text-[10px] text-white/40 group-hover/bank-mosaic:text-white/70 transition-colors font-normal whitespace-nowrap">(雙擊)</span>
+                      <span className="text-[9.5px] font-sans font-bold px-1.5 py-0.5 rounded bg-white/10 text-emerald-200/90 border border-white/15 group-hover/bank-mosaic:bg-emerald-400 group-hover/bank-mosaic:text-emerald-950 transition-all whitespace-nowrap">雙擊</span>
                     </div>
                   )}
                 </div>
 
                 {/* Vertical divider */}
-                <div className="hidden lg:block h-6 w-[1px] bg-white/15 shrink-0" />
+                <div className="hidden lg:block h-7 w-[1px] bg-gradient-to-b from-transparent via-white/20 to-transparent shrink-0" />
 
                 {/* Metric 1: Total Capital */}
-                <div className="flex flex-col text-left shrink-0">
-                  <span className="text-[11px] text-[#9FE1CB] font-medium opacity-90 whitespace-nowrap">目前的總資金</span>
+                <div className="flex flex-col text-left shrink-0 px-2.5 py-1 rounded-xl hover:bg-white/[0.06] transition-colors">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-teal-300 shrink-0" />
+                    <span className="text-[11px] text-emerald-200 font-bold tracking-wide whitespace-nowrap">目前的總資金</span>
+                  </div>
                   {isEditingCapital ? (
                     <div className="flex items-center gap-0.5 mt-1">
-                      <span className="text-[14px] sm:text-[15px] font-semibold text-white">$</span>
+                      <span className="text-[15px] sm:text-[16px] font-black font-mono text-white">$</span>
                       <input
                         type="number"
                         autoFocus
@@ -5541,7 +5583,7 @@ export default function Dashboard() {
                           }
                         }}
                         onChange={(e) => setEditCapitalVal(e.target.value)}
-                        className="bg-transparent text-white font-semibold text-[14px] sm:text-[15px] focus:outline-none w-20 border-none p-0 focus:ring-0 leading-none h-5"
+                        className="bg-white/10 rounded px-1 text-white font-black font-mono text-[15px] sm:text-[16px] focus:outline-none w-24 border border-emerald-400/50 p-0 focus:ring-1 focus:ring-emerald-400 leading-none h-5"
                         style={{ caretColor: 'white' }}
                       />
                     </div>
@@ -5551,24 +5593,27 @@ export default function Dashboard() {
                         setEditCapitalVal(totalCapital.toString());
                         setIsEditingCapital(true);
                       }}
-                      className="text-[14px] sm:text-[15px] font-semibold text-white cursor-pointer select-none leading-none mt-1 flex items-baseline gap-1 group/cap whitespace-nowrap"
+                      className="text-[15px] sm:text-[16px] font-black font-mono tabular-nums text-white cursor-pointer select-none leading-none mt-1.5 flex items-center gap-1.5 group/cap whitespace-nowrap"
                       title="點擊修改總資金"
                     >
-                      <span>${totalCapital.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                      <span className="text-[10px] text-white/40 group-hover/cap:text-white/70 transition-colors font-normal whitespace-nowrap">(修改)</span>
+                      <span className="drop-shadow-[0_1px_4px_rgba(0,0,0,0.4)]">${totalCapital.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      <span className="text-[9.5px] font-sans font-bold px-1.5 py-0.5 rounded bg-white/10 text-emerald-200 border border-white/15 group-hover/cap:bg-emerald-400 group-hover/cap:text-emerald-950 transition-all whitespace-nowrap">修改</span>
                     </div>
                   )}
                 </div>
 
                 {/* Vertical divider */}
-                <div className="hidden lg:block h-6 w-[1px] bg-white/15 shrink-0" />
+                <div className="hidden lg:block h-7 w-[1px] bg-gradient-to-b from-transparent via-white/20 to-transparent shrink-0" />
 
                 {/* Metric 1.5: Virtual Total Capital */}
-                <div className="flex flex-col text-left shrink-0">
-                  <span className="text-[11px] text-[#9FE1CB] font-medium opacity-90 whitespace-nowrap">模擬交易總資金</span>
+                <div className="flex flex-col text-left shrink-0 px-2.5 py-1 rounded-xl hover:bg-white/[0.06] transition-colors">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0 shadow-[0_0_6px_rgba(251,191,36,0.7)]" />
+                    <span className="text-[11px] text-amber-200 font-bold tracking-wide whitespace-nowrap">模擬交易總資金</span>
+                  </div>
                   {isEditingVirtualCapital ? (
                     <div className="flex items-center gap-0.5 mt-1">
-                      <span className="text-[14px] sm:text-[15px] font-semibold text-white">$</span>
+                      <span className="text-[15px] sm:text-[16px] font-black font-mono text-amber-300">$</span>
                       <input
                         type="number"
                         autoFocus
@@ -5586,7 +5631,7 @@ export default function Dashboard() {
                           }
                         }}
                         onChange={(e) => setEditVirtualCapitalVal(e.target.value)}
-                        className="bg-transparent text-white font-semibold text-[14px] sm:text-[15px] focus:outline-none w-20 border-none p-0 focus:ring-0 leading-none h-5"
+                        className="bg-white/10 rounded px-1 text-amber-300 font-black font-mono text-[15px] sm:text-[16px] focus:outline-none w-24 border border-amber-400/50 p-0 focus:ring-1 focus:ring-amber-400 leading-none h-5"
                         style={{ caretColor: 'white' }}
                       />
                     </div>
@@ -5596,73 +5641,90 @@ export default function Dashboard() {
                         setEditVirtualCapitalVal(virtualCapital.toString());
                         setIsEditingVirtualCapital(true);
                       }}
-                      className="text-[14px] sm:text-[15px] font-semibold text-white cursor-pointer select-none leading-none mt-1 flex items-baseline gap-1 group/vcap whitespace-nowrap"
+                      className="text-[15px] sm:text-[16px] font-black font-mono tabular-nums text-amber-300 cursor-pointer select-none leading-none mt-1.5 flex items-center gap-1.5 group/vcap whitespace-nowrap"
                       title="點擊修改模擬總資金"
                     >
-                      <span>${virtualCapital.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                      <span className="text-[10px] text-white/40 group-hover/vcap:text-white/70 transition-colors font-normal whitespace-nowrap">(修改)</span>
+                      <span className="drop-shadow-[0_1px_4px_rgba(0,0,0,0.45)]">${virtualCapital.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      <span className="text-[9.5px] font-sans font-bold px-1.5 py-0.5 rounded bg-amber-400/15 text-amber-200 border border-amber-400/30 group-hover/vcap:bg-amber-400 group-hover/vcap:text-amber-950 transition-all whitespace-nowrap">修改</span>
                     </div>
                   )}
                 </div>
 
                 {/* Vertical divider */}
-                <div className="hidden lg:block h-6 w-[1px] bg-white/15 shrink-0" />
+                <div className="hidden lg:block h-7 w-[1px] bg-gradient-to-b from-transparent via-white/20 to-transparent shrink-0" />
 
                 {/* Metric 2: Remaining Balance */}
-                <div className="flex flex-col text-left shrink-0">
-                  <span className="text-[11px] text-[#9FE1CB] font-medium opacity-90 whitespace-nowrap">剩餘額度</span>
-                  <span className="text-[14px] sm:text-[15px] font-semibold font-mono text-white mt-1 leading-none whitespace-nowrap">
+                <div className="flex flex-col text-left shrink-0 px-2.5 py-1 rounded-xl hover:bg-white/[0.06] transition-colors">
+                  <div className="flex items-center gap-1.5">
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${remainingBalance < 0 ? "bg-rose-400 animate-pulse shadow-[0_0_8px_rgba(251,113,133,0.9)]" : "bg-emerald-400"}`} />
+                    <span className="text-[11px] text-emerald-200 font-bold tracking-wide whitespace-nowrap">剩餘額度</span>
+                  </div>
+                  <span
+                    className={`text-[15px] sm:text-[16px] font-black font-mono tabular-nums mt-1.5 leading-none whitespace-nowrap drop-shadow-[0_1px_4px_rgba(0,0,0,0.45)] ${
+                      remainingBalance < 0 ? "text-rose-300" : "text-emerald-300"
+                    }`}
+                  >
                     ${remainingBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 </div>
 
                 {/* Vertical divider */}
-                <div className="hidden lg:block h-6 w-[1px] bg-white/15 shrink-0" />
+                <div className="hidden lg:block h-7 w-[1px] bg-gradient-to-b from-transparent via-white/20 to-transparent shrink-0" />
 
                 {/* Metric 3: Real Cost */}
-                <div className="flex flex-col text-left shrink-0">
-                  <span className="text-[11px] text-[#9FE1CB] font-medium opacity-90 whitespace-nowrap">真實交易總持有成本</span>
-                  <span className="text-[14px] sm:text-[15px] font-semibold font-mono text-white mt-1 leading-none whitespace-nowrap">
+                <div className="flex flex-col text-left shrink-0 px-2.5 py-1 rounded-xl hover:bg-white/[0.06] transition-colors">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-300 shrink-0" />
+                    <span className="text-[11px] text-cyan-200 font-bold tracking-wide whitespace-nowrap">真實交易總持有成本</span>
+                  </div>
+                  <span className="text-[15px] sm:text-[16px] font-black font-mono tabular-nums text-cyan-200 mt-1.5 leading-none whitespace-nowrap drop-shadow-[0_1px_4px_rgba(0,0,0,0.45)]">
                     ${totalRealHoldingCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 </div>
 
                 {/* Vertical divider */}
-                <div className="hidden lg:block h-6 w-[1px] bg-white/15 shrink-0" />
+                <div className="hidden lg:block h-7 w-[1px] bg-gradient-to-b from-transparent via-white/20 to-transparent shrink-0" />
 
                 {/* Metric 3.5: Virtual Cost */}
-                <div className="flex flex-col text-left shrink-0">
-                  <span className="text-[11px] text-[#9FE1CB] font-medium opacity-90 whitespace-nowrap">模擬交易總持有成本</span>
-                  <span className="text-[14px] sm:text-[15px] font-semibold font-mono text-white mt-1 leading-none whitespace-nowrap">
+                <div className="flex flex-col text-left shrink-0 px-2.5 py-1 rounded-xl hover:bg-white/[0.06] transition-colors">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-300 shrink-0" />
+                    <span className="text-[11px] text-indigo-200 font-bold tracking-wide whitespace-nowrap">模擬交易總持有成本</span>
+                  </div>
+                  <span className="text-[15px] sm:text-[16px] font-black font-mono tabular-nums text-indigo-100 mt-1.5 leading-none whitespace-nowrap drop-shadow-[0_1px_4px_rgba(0,0,0,0.45)]">
                     ${totalVirtualHoldingCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 </div>
               </div>
             </div>
 
-            {/* Right section: Actions & Logout */}
+            {/* Right section: High-Contrast Actions & Logout */}
             <div className="flex items-center gap-2.5 shrink-0 w-full lg:w-auto justify-end sm:justify-start">
               <button
                 onClick={() => setIsAddOpen(true)}
-                className="whitespace-nowrap px-3.5 py-2 bg-transparent hover:bg-white/10 text-white border border-white/20 rounded-xl text-[13px] font-medium transition-colors cursor-pointer flex items-center justify-center gap-1"
+                style={{ color: "#022c22" }}
+                className="whitespace-nowrap px-4 py-2.5 bg-gradient-to-b from-emerald-300 to-emerald-400 hover:from-emerald-200 hover:to-emerald-300 text-emerald-950 border border-emerald-200/80 rounded-xl text-[13px] font-black shadow-[0_4px_16px_rgba(52,211,153,0.35),inset_0_1px_0_rgba(255,255,255,0.65)] hover:shadow-[0_6px_22px_rgba(52,211,153,0.5)] hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200 cursor-pointer flex items-center justify-center gap-1.5"
               >
-                <span>＋ 新增股票</span>
+                <span className="text-sm leading-none font-black">＋</span>
+                <span>新增股票</span>
               </button>
 
               <button
                 onClick={handleImportLatestPrices}
                 disabled={isImportingPrices || !user}
-                className="whitespace-nowrap px-3.5 py-2 bg-transparent hover:bg-white/10 text-white border border-white/20 rounded-xl text-[13px] font-medium transition-colors cursor-pointer flex items-center justify-center gap-1 disabled:opacity-50"
+                style={{ color: "#ffffff" }}
+                className="whitespace-nowrap px-4 py-2.5 bg-white/12 hover:bg-white/22 text-white border border-white/30 hover:border-white/50 rounded-xl text-[13px] font-bold shadow-[0_4px_12px_rgba(0,0,0,0.15),inset_0_1px_0_rgba(255,255,255,0.2)] hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200 cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
               >
-                <span>↻ 匯入最新現價</span>
+                <span className={`inline-block transition-transform duration-500 ${isImportingPrices ? "animate-spin" : ""}`}>↻</span>
+                <span>匯入最新現價</span>
               </button>
 
               <button
                 onClick={logout}
-                className="hidden lg:block text-white/60 hover:text-white transition-colors p-2 rounded-lg shrink-0"
+                className="hidden lg:flex items-center justify-center text-white/70 hover:text-white bg-white/5 hover:bg-white/15 border border-white/10 hover:border-white/25 transition-all p-2.5 rounded-xl shrink-0 cursor-pointer"
                 title="登出"
               >
-                <LogOut className="w-5 h-5" />
+                <LogOut className="w-4 h-4" />
               </button>
             </div>
           </div>
@@ -6023,428 +6085,585 @@ export default function Dashboard() {
 
       {/* 2. Main content container, aligned nicely with responsive layout */}
       <div className={`space-y-4 sm:space-y-6 mx-auto mt-4 sm:mt-6 px-2 sm:px-4 ${activeViewTab === "notes" || activeViewTab === "completed" ? "w-full max-w-full lg:max-w-[98%] xl:max-w-[1920px]" : "max-w-[1600px]"}`}>
-      {/* Desktop Metrics Bar Header with Tab Switcher & Collapsible Controller */}
-      <div className="hidden sm:flex items-center justify-between mt-2 mb-1.5">
-        <div className="flex items-center gap-1 bg-black/[0.04] p-1 rounded-xl border border-black/5">
-          <button
-            type="button"
-            onClick={() => {
-              playClickSound();
-              setMetricsTradeTab("simulated");
-              setIsDesktopMetricsOpen(true);
-            }}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer select-none ${
-              metricsTradeTab === "simulated"
-                ? "bg-white text-zinc-900 shadow-xs ring-1 ring-black/5"
-                : "text-[#666661] hover:text-[#2C2C2A] hover:bg-black/[0.02]"
-            }`}
-          >
-            <Gamepad2 className={`w-3.5 h-3.5 ${metricsTradeTab === "simulated" ? "text-amber-600" : "text-zinc-500"}`} />
-            <span>模擬交易</span>
-            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
-              metricsTradeTab === "simulated" ? "bg-amber-100 text-amber-800" : "bg-black/[0.05] text-zinc-500"
-            }`}>
-              {simulatedHoldingCount}
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              playClickSound();
-              setMetricsTradeTab("real");
-              setIsDesktopMetricsOpen(true);
-            }}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer select-none ${
-              metricsTradeTab === "real"
-                ? "bg-white text-zinc-900 shadow-xs ring-1 ring-black/5"
-                : "text-[#666661] hover:text-[#2C2C2A] hover:bg-black/[0.02]"
-            }`}
-          >
-            <ShieldCheck className={`w-3.5 h-3.5 ${metricsTradeTab === "real" ? "text-emerald-600" : "text-zinc-500"}`} />
-            <span>真實交易</span>
-            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
-              metricsTradeTab === "real" ? "bg-emerald-100 text-emerald-800" : "bg-black/[0.05] text-zinc-500"
-            }`}>
-              {realHoldingCount}
-            </span>
-          </button>
+      {/* Desktop & Mobile Unified Financial Telemetry Console */}
+      <div className="chips-summary-panel rounded-2xl bg-white/95 backdrop-blur-xl border border-zinc-200/90 shadow-[0_8px_28px_-6px_rgba(0,0,0,0.08),inset_0_1px_0_rgba(255,255,255,1)] overflow-hidden transition-all duration-300 mb-3 select-none">
+        {/* Top Control Bar: Segmented Mode Switcher + Collapsed Quick Ticker + Collapse Toggle */}
+        <div
+          className={`flex flex-wrap items-center justify-between gap-2 px-3 sm:px-4 py-2.5 bg-gradient-to-r from-zinc-100/90 via-white/95 to-zinc-100/80 transition-colors ${
+            isDesktopMetricsOpen ? "border-b border-zinc-200/80" : ""
+          }`}
+        >
+          {/* Left: Segmented Switcher (Simulated vs Real) */}
+          <div className="chips-subtabs-track flex items-center gap-1.5 bg-zinc-200/85 p-1 rounded-xl border border-zinc-300/80 shadow-inner">
+            <button
+              type="button"
+              onClick={() => {
+                playClickSound();
+                setMetricsTradeTab("simulated");
+                setIsDesktopMetricsOpen(true);
+              }}
+              style={metricsTradeTab === "simulated" ? { color: "#ffffff" } : undefined}
+              className={`relative flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-extrabold transition-all duration-200 cursor-pointer select-none ${
+                metricsTradeTab === "simulated"
+                  ? "bg-gradient-to-b from-zinc-800 to-zinc-950 text-white shadow-[0_3px_10px_rgba(0,0,0,0.22)] ring-1 ring-black/20 scale-[1.01]"
+                  : "text-zinc-700 hover:text-zinc-950 hover:bg-white/70"
+              }`}
+            >
+              <Gamepad2
+                className={`w-3.5 h-3.5 transition-colors ${
+                  metricsTradeTab === "simulated" ? "text-amber-400 drop-shadow-[0_0_6px_rgba(251,191,36,0.5)]" : "text-amber-600"
+                }`}
+              />
+              <span className="tracking-tight">模擬交易</span>
+              <span
+                className={`text-[11px] font-mono tabular-nums font-black ml-0.5 px-1.5 py-0.2 rounded-md transition-colors ${
+                  metricsTradeTab === "simulated"
+                    ? "bg-amber-400/20 text-amber-300 border border-amber-400/35"
+                    : "bg-zinc-300/70 text-zinc-700"
+                }`}
+              >
+                {simulatedHoldingCount}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                playClickSound();
+                setMetricsTradeTab("real");
+                setIsDesktopMetricsOpen(true);
+              }}
+              style={metricsTradeTab === "real" ? { color: "#ffffff" } : undefined}
+              className={`relative flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-extrabold transition-all duration-200 cursor-pointer select-none ${
+                metricsTradeTab === "real"
+                  ? "bg-gradient-to-b from-[#065f46] to-[#044633] text-white shadow-[0_3px_10px_rgba(6,95,70,0.3)] ring-1 ring-emerald-900/30 scale-[1.01]"
+                  : "text-zinc-700 hover:text-zinc-950 hover:bg-white/70"
+              }`}
+            >
+              <ShieldCheck
+                className={`w-3.5 h-3.5 transition-colors ${
+                  metricsTradeTab === "real" ? "text-emerald-300 drop-shadow-[0_0_6px_rgba(52,211,153,0.5)]" : "text-emerald-600"
+                }`}
+              />
+              <span className="tracking-tight">真實交易</span>
+              <span
+                className={`text-[11px] font-mono tabular-nums font-black ml-0.5 px-1.5 py-0.2 rounded-md transition-colors ${
+                  metricsTradeTab === "real"
+                    ? "bg-emerald-400/20 text-emerald-200 border border-emerald-300/35"
+                    : "bg-zinc-300/70 text-zinc-700"
+                }`}
+              >
+                {realHoldingCount}
+              </span>
+            </button>
+          </div>
+
+          {/* Right: Inline Quick Summary when collapsed + Collapse Toggle Button */}
+          <div className="flex items-center gap-2.5 sm:gap-3 ml-auto">
+            {!isDesktopMetricsOpen && (() => {
+              const activeCompletedPnL = metricsTradeTab === "real" ? totalCompletedPnL : simulatedCompletedPnL;
+              const activeUnrealizedPnL = metricsTradeTab === "real" ? realUnrealizedPnL : simulatedUnrealizedPnL;
+              const activeWinRate = metricsTradeTab === "real" ? realWinRate : simulatedWinRate;
+              return (
+                <div className="hidden md:flex items-center gap-3 text-xs font-bold text-zinc-700 pr-3 border-r border-zinc-300/80 animate-fadeIn">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-zinc-600 font-extrabold tracking-tight">實現損益</span>
+                    <span
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg font-mono tabular-nums font-black text-[12.5px] border shadow-2xs ${
+                        activeCompletedPnL >= 0
+                          ? "bg-emerald-500/12 border-emerald-500/30 text-[#047857]"
+                          : "bg-rose-500/12 border-rose-500/30 text-rose-700"
+                      }`}
+                    >
+                      <AnimatedNumber value={activeCompletedPnL} prefix="$" suffix="" decimals={2} showPlus={true} />
+                    </span>
+                  </div>
+
+                  <span className="w-[1px] h-3.5 bg-zinc-300/80" />
+
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-zinc-600 font-extrabold tracking-tight">未實現</span>
+                    <span
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg font-mono tabular-nums font-black text-[12.5px] border shadow-2xs ${
+                        activeUnrealizedPnL >= 0
+                          ? "bg-emerald-500/12 border-emerald-500/30 text-[#047857]"
+                          : "bg-rose-500/12 border-rose-500/30 text-rose-700"
+                      }`}
+                    >
+                      <AnimatedNumber value={activeUnrealizedPnL} prefix="$" suffix="" decimals={2} showPlus={true} />
+                    </span>
+                  </div>
+
+                  <span className="w-[1px] h-3.5 bg-zinc-300/80" />
+
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-zinc-600 font-extrabold tracking-tight">勝率</span>
+                    <span
+                      style={{ color: "#ffffff" }}
+                      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-zinc-900 text-white font-mono tabular-nums font-black text-[12.5px] shadow-2xs"
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      <span>{activeWinRate}%</span>
+                    </span>
+                  </div>
+                </div>
+              );
+            })()}
+
+            <button
+              type="button"
+              onClick={() => {
+                playClickSound();
+                setIsDesktopMetricsOpen(!isDesktopMetricsOpen);
+              }}
+              style={isDesktopMetricsOpen ? { color: "#ffffff" } : undefined}
+              className={`hidden sm:flex items-center gap-1.5 text-xs font-extrabold transition-all duration-200 py-1.5 px-3.5 rounded-xl border shadow-xs cursor-pointer active:scale-95 ${
+                isDesktopMetricsOpen
+                  ? "bg-zinc-900 hover:bg-zinc-800 text-white border-zinc-900"
+                  : "bg-white hover:bg-zinc-100 text-zinc-800 border-zinc-300/90 hover:border-zinc-400"
+              }`}
+              title="快捷鍵 Alt + Q 切換顯示/隱藏"
+            >
+              <span>{isDesktopMetricsOpen ? "隱藏數據統計" : "顯示數據統計"}</span>
+              <ChevronDown
+                className={`w-3.5 h-3.5 transition-transform duration-300 ${
+                  isDesktopMetricsOpen ? "rotate-180 text-emerald-400" : "text-zinc-600"
+                }`}
+              />
+            </button>
+          </div>
         </div>
 
-        <button
-          onClick={() => {
-            playClickSound();
-            setIsDesktopMetricsOpen(!isDesktopMetricsOpen);
-          }}
-          className="flex items-center gap-1.5 text-xs font-medium text-[#666661] hover:text-[#2C2C2A] transition-colors py-1.5 px-3 rounded-lg bg-black/[0.03] hover:bg-black/[0.06] cursor-pointer"
-        >
-          <span>{isDesktopMetricsOpen ? "隱藏數據統計" : "顯示數據統計"}</span>
-          <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-300 ${isDesktopMetricsOpen ? "rotate-180" : ""}`} />
-        </button>
-      </div>
-
-      <AnimatePresence initial={false}>
-        {isDesktopMetricsOpen && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.25, ease: "easeInOut" }}
-            className="hidden sm:block overflow-hidden"
-          >
-            <div className="bg-white/80 backdrop-blur-sm border border-black/5 shadow-xs rounded-2xl p-4 sm:p-5 select-none mb-3">
-              <div className={`grid grid-cols-2 sm:grid-cols-4 ${metricsTradeTab === "real" ? "lg:grid-cols-8" : "lg:grid-cols-6"} gap-y-4 gap-x-0 divide-x-0 lg:divide-x divide-black/[0.06]`}>
-                {(metricsTradeTab === "real"
-                  ? [
-                      {
-                        title: "真實持股數",
-                        rawValue: realHoldingCount,
-                        prefix: "",
-                        suffix: "",
-                        decimals: 0,
-                        pnl: undefined,
-                        showPlus: false,
-                      },
-                      {
-                        title: "真實實現損益",
-                        rawValue: totalCompletedPnL,
-                        prefix: "$",
-                        suffix: "",
-                        decimals: 2,
-                        pnl: totalCompletedPnL,
-                        showPlus: true,
-                      },
-                      {
-                        title: "真實未實現損益",
-                        rawValue: realUnrealizedPnL,
-                        prefix: "$",
-                        suffix: "",
-                        decimals: 2,
-                        pnl: realUnrealizedPnL,
-                        showPlus: true,
-                      },
-                      {
-                        title: "真實交易勝率",
-                        rawValue: Number(realWinRate),
-                        prefix: "",
-                        suffix: "%",
-                        decimals: 0,
-                        pnl: undefined,
-                        showPlus: false,
-                      },
-                      {
-                        title: "目前總資金",
-                        rawValue: totalCapital,
-                        prefix: "$",
-                        suffix: "",
-                        decimals: 2,
-                        pnl: undefined,
-                        showPlus: false,
-                      },
-                      {
-                        title: "最大策略風險池(60%)",
-                        rawValue: maxStrategyRiskPool60,
-                        prefix: "$",
-                        suffix: "",
-                        decimals: 2,
-                        pnl: undefined,
-                        showPlus: false,
-                        isRiskPool: true,
-                      },
-                      {
-                        title: "目前已使用額度",
-                        rawValue: totalRealHoldingCost,
-                        prefix: "$",
-                        suffix: "",
-                        decimals: 2,
-                        pnl: undefined,
-                        showPlus: false,
-                      },
-                      {
-                        title: "剩餘可運用金額",
-                        rawValue: remainingStrategyRiskPool,
-                        prefix: "$",
-                        suffix: "",
-                        decimals: 2,
-                        pnl: undefined,
-                        showPlus: false,
-                        isRiskPool: true,
-                      },
-                    ]
-                  : [
-                      {
-                        title: "模擬持股數",
-                        rawValue: simulatedHoldingCount,
-                        prefix: "",
-                        suffix: "",
-                        decimals: 0,
-                        pnl: undefined,
-                        showPlus: false,
-                      },
-                      {
-                        title: "模擬持倉成本",
-                        rawValue: totalVirtualHoldingCost,
-                        prefix: "$",
-                        suffix: "",
-                        decimals: 2,
-                        pnl: undefined,
-                        showPlus: false,
-                      },
-                      {
-                        title: "模擬實現損益",
-                        rawValue: simulatedCompletedPnL,
-                        prefix: "$",
-                        suffix: "",
-                        decimals: 2,
-                        pnl: simulatedCompletedPnL,
-                        showPlus: true,
-                      },
-                      {
-                        title: "模擬未實現總損益",
-                        rawValue: simulatedUnrealizedPnL,
-                        prefix: "$",
-                        suffix: "",
-                        decimals: 2,
-                        pnl: simulatedUnrealizedPnL,
-                        showPlus: true,
-                      },
-                      {
-                        title: "模擬交易勝率",
-                        rawValue: Number(simulatedWinRate),
-                        prefix: "",
-                        suffix: "%",
-                        decimals: 0,
-                        pnl: undefined,
-                        showPlus: false,
-                      },
-                      {
-                        title: "模擬已完成數",
-                        rawValue: simulatedCompletedTabs.length,
-                        prefix: "",
-                        suffix: "",
-                        decimals: 0,
-                        pnl: undefined,
-                        showPlus: false,
-                      },
-                    ]
-                ).map((metric: any, i) => {
-                  const isPnl = metric.pnl !== undefined;
-                  const isPositive = metric.rawValue >= 0;
-                  const valueColor = isPnl
-                    ? (isPositive ? "text-[#085041]" : "text-rose-700")
-                    : metric.isRiskPool
-                    ? (metric.rawValue >= 0 ? "text-[#085041]" : "text-rose-700")
-                    : "text-[#2C2C2A]";
-                  return (
-                    <div
-                      key={i}
-                      className="flex flex-col items-center justify-center text-center py-1.5 px-2 sm:px-3 lg:px-4"
-                    >
-                      <span className="text-[11px] sm:text-[12px] font-semibold text-[#666661] tracking-wide uppercase whitespace-nowrap">
-                        {metric.title}
+        {/* Desktop Expandable Metrics Grid */}
+        <AnimatePresence initial={false}>
+          {isDesktopMetricsOpen && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.25, ease: "easeInOut" }}
+              className="hidden sm:block overflow-hidden"
+            >
+              {metricsTradeTab === "simulated" ? (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 divide-y md:divide-y-0 divide-x divide-zinc-200/70">
+                  {/* 1. 模擬持股數 */}
+                  <div className="group/card flex flex-col justify-between p-4 lg:px-5 lg:py-4 hover:bg-zinc-50/70 transition-colors">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-zinc-500 tracking-wide">模擬持股數</span>
+                      <span className="w-2 h-2 rounded-full bg-amber-500/80 shrink-0" />
+                    </div>
+                    <div className="my-2 flex items-baseline gap-1.5">
+                      <span className="text-2xl lg:text-[26px] font-extrabold tracking-tight text-zinc-900 font-mono tabular-nums leading-none">
+                        <AnimatedNumber value={simulatedHoldingCount} prefix="" suffix="" decimals={0} showPlus={false} />
                       </span>
-                      <div className={`text-[19px] sm:text-[21px] lg:text-[23px] font-bold tracking-tight mt-1 font-mono whitespace-nowrap ${valueColor}`}>
-                        <AnimatedNumber
-                          value={metric.rawValue}
-                          prefix={metric.prefix}
-                          suffix={metric.suffix}
-                          decimals={metric.decimals}
-                          showPlus={metric.showPlus}
-                        />
+                      <span className="text-xs font-semibold text-zinc-400">檔</span>
+                    </div>
+                    <div className="text-[11px] font-medium text-zinc-400 truncate">
+                      進行中模擬部位
+                    </div>
+                  </div>
+
+                  {/* 2. 模擬持倉成本 */}
+                  <div className="group/card flex flex-col justify-between p-4 lg:px-5 lg:py-4 hover:bg-zinc-50/70 transition-colors">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-zinc-500 tracking-wide">模擬持倉成本</span>
+                      <Layers className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                    </div>
+                    <div className="my-2">
+                      <div className="text-xl lg:text-[22px] font-extrabold tracking-tight text-zinc-900 font-mono tabular-nums leading-none">
+                        <AnimatedNumber value={totalVirtualHoldingCost} prefix="$" suffix="" decimals={2} showPlus={false} />
                       </div>
                     </div>
-                  );
-                })}
+                    <div className="text-[11px] font-medium text-zinc-400 font-mono tabular-nums truncate">
+                      {simulatedHoldingCount > 0
+                        ? `均部位 $${Math.round(totalVirtualHoldingCost / simulatedHoldingCount).toLocaleString()}`
+                        : "尚無持倉成本"}
+                    </div>
+                  </div>
+
+                  {/* 3. 模擬實現損益 */}
+                  <div className="group/card flex flex-col justify-between p-4 lg:px-5 lg:py-4 hover:bg-zinc-50/70 transition-colors">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-zinc-500 tracking-wide">模擬實現損益</span>
+                      {simulatedCompletedPnL >= 0 ? (
+                        <TrendingUp className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      ) : (
+                        <TrendingDown className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                      )}
+                    </div>
+                    <div className="my-2">
+                      <div
+                        className={`text-xl lg:text-[22px] font-extrabold tracking-tight font-mono tabular-nums leading-none ${
+                          simulatedCompletedPnL >= 0 ? "text-[#065f46]" : "text-rose-700"
+                        }`}
+                      >
+                        <AnimatedNumber value={simulatedCompletedPnL} prefix="$" suffix="" decimals={2} showPlus={true} />
+                      </div>
+                    </div>
+                    <div className="text-[11px] font-medium text-zinc-400 truncate">
+                      已結算 {simulatedWinningTrades.length} 勝 · {simulatedLosingTrades.length} 敗
+                    </div>
+                  </div>
+
+                  {/* 4. 模擬未實現總損益 */}
+                  <div className="group/card flex flex-col justify-between p-4 lg:px-5 lg:py-4 hover:bg-zinc-50/70 transition-colors">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-zinc-500 tracking-wide">模擬未實現總損益</span>
+                      {simulatedUnrealizedPnL >= 0 ? (
+                        <ArrowUp className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      ) : (
+                        <ArrowDown className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                      )}
+                    </div>
+                    <div className="my-2">
+                      <div
+                        className={`text-xl lg:text-[22px] font-extrabold tracking-tight font-mono tabular-nums leading-none ${
+                          simulatedUnrealizedPnL >= 0 ? "text-[#065f46]" : "text-rose-700"
+                        }`}
+                      >
+                        <AnimatedNumber value={simulatedUnrealizedPnL} prefix="$" suffix="" decimals={2} showPlus={true} />
+                      </div>
+                    </div>
+                    <div className="text-[11px] font-medium font-mono tabular-nums truncate">
+                      {totalVirtualHoldingCost > 0 ? (
+                        <span className={simulatedUnrealizedPnL >= 0 ? "text-emerald-700" : "text-rose-600"}>
+                          浮動報酬率 {simulatedUnrealizedPnL >= 0 ? "+" : ""}
+                          {((simulatedUnrealizedPnL / totalVirtualHoldingCost) * 100).toFixed(2)}%
+                        </span>
+                      ) : (
+                        <span className="text-zinc-400">帳面浮動損益</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 5. 模擬交易勝率 */}
+                  <div className="group/card flex flex-col justify-between p-4 lg:px-5 lg:py-4 hover:bg-zinc-50/70 transition-colors">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-zinc-500 tracking-wide">模擬交易勝率</span>
+                      <span className="text-[11px] font-mono tabular-nums font-bold text-zinc-400">
+                        {simulatedWinningTrades.length}/{simulatedCompletedTabs.length}
+                      </span>
+                    </div>
+                    <div className="my-2">
+                      <div className="text-2xl lg:text-[26px] font-extrabold tracking-tight text-zinc-900 font-mono tabular-nums leading-none">
+                        <AnimatedNumber value={Number(simulatedWinRate)} prefix="" suffix="%" decimals={0} showPlus={false} />
+                      </div>
+                    </div>
+                    <div className="w-full h-1.5 bg-zinc-200/80 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-emerald-600 rounded-full transition-all duration-500"
+                        style={{ width: `${Math.min(100, Math.max(0, Number(simulatedWinRate)))}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* 6. 模擬已完成數 */}
+                  <div className="group/card flex flex-col justify-between p-4 lg:px-5 lg:py-4 hover:bg-zinc-50/70 transition-colors">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-zinc-500 tracking-wide">模擬已完成數</span>
+                      <CheckCircle2 className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                    </div>
+                    <div className="my-2 flex items-baseline gap-1.5">
+                      <span className="text-2xl lg:text-[26px] font-extrabold tracking-tight text-zinc-900 font-mono tabular-nums leading-none">
+                        <AnimatedNumber value={simulatedCompletedTabs.length} prefix="" suffix="" decimals={0} showPlus={false} />
+                      </span>
+                      <span className="text-xs font-semibold text-zinc-400">筆</span>
+                    </div>
+                    <div className="text-[11px] font-medium text-zinc-400 truncate">
+                      歷史已平倉結算紀錄
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 divide-y xl:divide-y-0 divide-x divide-zinc-200/70">
+                  {/* 1. 真實持股數 */}
+                  <div className="group/card flex flex-col justify-between p-3.5 lg:p-4 hover:bg-zinc-50/70 transition-colors">
+                    <div className="flex items-center justify-between gap-1.5">
+                      <span className="text-[11px] font-bold text-zinc-500 tracking-wide">真實持股數</span>
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                    </div>
+                    <div className="my-1.5 flex items-baseline gap-1">
+                      <span className="text-xl lg:text-2xl font-extrabold tracking-tight text-zinc-900 font-mono tabular-nums leading-none">
+                        <AnimatedNumber value={realHoldingCount} prefix="" suffix="" decimals={0} showPlus={false} />
+                      </span>
+                      <span className="text-[11px] font-semibold text-zinc-400">檔</span>
+                    </div>
+                    <div className="text-[10.5px] font-medium text-zinc-400 truncate">實盤持倉部位</div>
+                  </div>
+
+                  {/* 2. 真實實現損益 */}
+                  <div className="group/card flex flex-col justify-between p-3.5 lg:p-4 hover:bg-zinc-50/70 transition-colors">
+                    <div className="flex items-center justify-between gap-1.5">
+                      <span className="text-[11px] font-bold text-zinc-500 tracking-wide">真實實現損益</span>
+                      {totalCompletedPnL >= 0 ? (
+                        <TrendingUp className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      ) : (
+                        <TrendingDown className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                      )}
+                    </div>
+                    <div className="my-1.5">
+                      <div
+                        className={`text-lg lg:text-xl font-extrabold tracking-tight font-mono tabular-nums leading-none ${
+                          totalCompletedPnL >= 0 ? "text-[#065f46]" : "text-rose-700"
+                        }`}
+                      >
+                        <AnimatedNumber value={totalCompletedPnL} prefix="$" suffix="" decimals={2} showPlus={true} />
+                      </div>
+                    </div>
+                    <div className="text-[10.5px] font-medium text-zinc-400 truncate">
+                      {realWinningTrades.length} 勝 · {realLosingTrades.length} 敗
+                    </div>
+                  </div>
+
+                  {/* 3. 真實未實現損益 */}
+                  <div className="group/card flex flex-col justify-between p-3.5 lg:p-4 hover:bg-zinc-50/70 transition-colors">
+                    <div className="flex items-center justify-between gap-1.5">
+                      <span className="text-[11px] font-bold text-zinc-500 tracking-wide">真實未實現損益</span>
+                      {realUnrealizedPnL >= 0 ? (
+                        <ArrowUp className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      ) : (
+                        <ArrowDown className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                      )}
+                    </div>
+                    <div className="my-1.5">
+                      <div
+                        className={`text-lg lg:text-xl font-extrabold tracking-tight font-mono tabular-nums leading-none ${
+                          realUnrealizedPnL >= 0 ? "text-[#065f46]" : "text-rose-700"
+                        }`}
+                      >
+                        <AnimatedNumber value={realUnrealizedPnL} prefix="$" suffix="" decimals={2} showPlus={true} />
+                      </div>
+                    </div>
+                    <div className="text-[10.5px] font-medium font-mono tabular-nums truncate">
+                      {totalRealHoldingCost > 0 ? (
+                        <span className={realUnrealizedPnL >= 0 ? "text-emerald-700" : "text-rose-600"}>
+                          報酬率 {realUnrealizedPnL >= 0 ? "+" : ""}
+                          {((realUnrealizedPnL / totalRealHoldingCost) * 100).toFixed(2)}%
+                        </span>
+                      ) : (
+                        <span className="text-zinc-400">帳面浮動損益</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 4. 真實交易勝率 */}
+                  <div className="group/card flex flex-col justify-between p-3.5 lg:p-4 hover:bg-zinc-50/70 transition-colors">
+                    <div className="flex items-center justify-between gap-1.5">
+                      <span className="text-[11px] font-bold text-zinc-500 tracking-wide">真實交易勝率</span>
+                      <span className="text-[10px] font-mono tabular-nums font-bold text-zinc-400">
+                        {realWinningTrades.length}/{realCompletedTabs.length}
+                      </span>
+                    </div>
+                    <div className="my-1.5">
+                      <div className="text-xl lg:text-2xl font-extrabold tracking-tight text-zinc-900 font-mono tabular-nums leading-none">
+                        <AnimatedNumber value={Number(realWinRate)} prefix="" suffix="%" decimals={0} showPlus={false} />
+                      </div>
+                    </div>
+                    <div className="w-full h-1.5 bg-zinc-200/80 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-emerald-600 rounded-full transition-all duration-500"
+                        style={{ width: `${Math.min(100, Math.max(0, Number(realWinRate)))}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* 5. 目前總資金 */}
+                  <div className="group/card flex flex-col justify-between p-3.5 lg:p-4 hover:bg-zinc-50/70 transition-colors">
+                    <div className="flex items-center justify-between gap-1.5">
+                      <span className="text-[11px] font-bold text-zinc-500 tracking-wide">目前總資金</span>
+                    </div>
+                    <div className="my-1.5">
+                      <div className="text-lg lg:text-xl font-extrabold tracking-tight text-zinc-900 font-mono tabular-nums leading-none">
+                        <AnimatedNumber value={totalCapital} prefix="$" suffix="" decimals={2} showPlus={false} />
+                      </div>
+                    </div>
+                    <div className="text-[10.5px] font-medium text-zinc-400 truncate">帳戶資本總規模</div>
+                  </div>
+
+                  {/* 6. 最大策略風險池(60%) */}
+                  <div className="group/card flex flex-col justify-between p-3.5 lg:p-4 hover:bg-zinc-50/70 transition-colors">
+                    <div className="flex items-center justify-between gap-1.5">
+                      <span className="text-[11px] font-bold text-emerald-800 tracking-wide">最大策略風險池(60%)</span>
+                    </div>
+                    <div className="my-1.5">
+                      <div className="text-lg lg:text-xl font-extrabold tracking-tight text-[#065f46] font-mono tabular-nums leading-none">
+                        <AnimatedNumber value={maxStrategyRiskPool60} prefix="$" suffix="" decimals={2} showPlus={false} />
+                      </div>
+                    </div>
+                    <div className="text-[10.5px] font-medium text-zinc-400 truncate">風控配置上限</div>
+                  </div>
+
+                  {/* 7. 目前已使用額度 */}
+                  <div className="group/card flex flex-col justify-between p-3.5 lg:p-4 hover:bg-zinc-50/70 transition-colors">
+                    <div className="flex items-center justify-between gap-1.5">
+                      <span className="text-[11px] font-bold text-zinc-500 tracking-wide">目前已使用額度</span>
+                      <span className="text-[10px] font-mono tabular-nums font-bold text-zinc-400">
+                        {maxStrategyRiskPool60 > 0
+                          ? `${Math.round((totalRealHoldingCost / maxStrategyRiskPool60) * 100)}%`
+                          : "0%"}
+                      </span>
+                    </div>
+                    <div className="my-1.5">
+                      <div className="text-lg lg:text-xl font-extrabold tracking-tight text-zinc-900 font-mono tabular-nums leading-none">
+                        <AnimatedNumber value={totalRealHoldingCost} prefix="$" suffix="" decimals={2} showPlus={false} />
+                      </div>
+                    </div>
+                    <div className="w-full h-1.5 bg-zinc-200/80 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ${
+                          maxStrategyRiskPool60 > 0 && totalRealHoldingCost > maxStrategyRiskPool60
+                            ? "bg-rose-600"
+                            : "bg-zinc-800"
+                        }`}
+                        style={{
+                          width: `${
+                            maxStrategyRiskPool60 > 0
+                              ? Math.min(100, Math.max(0, (totalRealHoldingCost / maxStrategyRiskPool60) * 100))
+                              : 0
+                          }%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* 8. 剩餘可運用金額 */}
+                  <div className="group/card flex flex-col justify-between p-3.5 lg:p-4 hover:bg-zinc-50/70 transition-colors">
+                    <div className="flex items-center justify-between gap-1.5">
+                      <span className="text-[11px] font-bold text-emerald-800 tracking-wide">剩餘可運用金額</span>
+                    </div>
+                    <div className="my-1.5">
+                      <div
+                        className={`text-lg lg:text-xl font-extrabold tracking-tight font-mono tabular-nums leading-none ${
+                          remainingStrategyRiskPool >= 0 ? "text-[#065f46]" : "text-rose-700"
+                        }`}
+                      >
+                        <AnimatedNumber value={remainingStrategyRiskPool} prefix="$" suffix="" decimals={2} showPlus={false} />
+                      </div>
+                    </div>
+                    <div className="text-[10.5px] font-medium text-zinc-400 truncate">
+                      {remainingStrategyRiskPool >= 0 ? "可投入安全餘額" : "已超出風險池上限"}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Mobile View Metrics Grid (Always visible inside the unified console on <sm screens) */}
+        <div className="block sm:hidden border-t border-zinc-200/70">
+          {metricsTradeTab === "real" ? (
+            <div className="grid grid-cols-2 divide-x divide-y divide-zinc-200/70">
+              <div className="p-3 flex flex-col justify-between">
+                <span className="text-[11px] text-zinc-500 font-bold">真實持股數</span>
+                <div className="text-lg font-extrabold tracking-tight mt-1 text-zinc-900 font-mono tabular-nums">
+                  <AnimatedNumber value={realHoldingCount} prefix="" suffix=" 檔" decimals={0} showPlus={false} />
+                </div>
+              </div>
+              <div className="p-3 flex flex-col justify-between">
+                <span className="text-[11px] text-zinc-500 font-bold">真實交易勝率</span>
+                <div className="text-lg font-extrabold tracking-tight mt-1 text-zinc-900 font-mono tabular-nums">
+                  <AnimatedNumber value={Number(realWinRate)} prefix="" suffix="%" decimals={0} showPlus={false} />
+                </div>
+              </div>
+              <div className="p-3 flex flex-col justify-between">
+                <span className="text-[11px] text-zinc-500 font-bold">真實實現損益</span>
+                <div
+                  className={`text-lg font-extrabold tracking-tight mt-1 font-mono tabular-nums ${
+                    totalCompletedPnL >= 0 ? "text-[#065f46]" : "text-rose-700"
+                  }`}
+                >
+                  <AnimatedNumber value={totalCompletedPnL} prefix="$" suffix="" decimals={2} showPlus={true} />
+                </div>
+              </div>
+              <div className="p-3 flex flex-col justify-between">
+                <span className="text-[11px] text-zinc-500 font-bold">真實未實現損益</span>
+                <div
+                  className={`text-lg font-extrabold tracking-tight mt-1 font-mono tabular-nums ${
+                    realUnrealizedPnL >= 0 ? "text-[#065f46]" : "text-rose-700"
+                  }`}
+                >
+                  <AnimatedNumber value={realUnrealizedPnL} prefix="$" suffix="" decimals={2} showPlus={true} />
+                </div>
+              </div>
+              <div className="p-3 flex flex-col justify-between">
+                <span className="text-[11px] text-zinc-500 font-bold">目前總資金</span>
+                <div className="text-base font-extrabold tracking-tight mt-1 text-zinc-900 font-mono tabular-nums">
+                  <AnimatedNumber value={totalCapital} prefix="$" suffix="" decimals={2} showPlus={false} />
+                </div>
+              </div>
+              <div className="p-3 flex flex-col justify-between">
+                <span className="text-[11px] text-emerald-800 font-bold">最大策略風險池(60%)</span>
+                <div className="text-base font-extrabold tracking-tight mt-1 text-[#065f46] font-mono tabular-nums">
+                  <AnimatedNumber value={maxStrategyRiskPool60} prefix="$" suffix="" decimals={2} showPlus={false} />
+                </div>
+              </div>
+              <div className="p-3 flex flex-col justify-between">
+                <span className="text-[11px] text-zinc-500 font-bold">目前已使用額度</span>
+                <div className="text-base font-extrabold tracking-tight mt-1 text-zinc-900 font-mono tabular-nums">
+                  <AnimatedNumber value={totalRealHoldingCost} prefix="$" suffix="" decimals={2} showPlus={false} />
+                </div>
+              </div>
+              <div className="p-3 flex flex-col justify-between">
+                <span className="text-[11px] text-emerald-800 font-bold">剩餘可運用金額</span>
+                <div
+                  className={`text-base font-extrabold tracking-tight mt-1 font-mono tabular-nums ${
+                    remainingStrategyRiskPool >= 0 ? "text-[#065f46]" : "text-rose-700"
+                  }`}
+                >
+                  <AnimatedNumber value={remainingStrategyRiskPool} prefix="$" suffix="" decimals={2} showPlus={false} />
+                </div>
               </div>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Floating Metrics Section - Mobile Only (Ultra-Compact & Designed for Mobile Reading proportions) */}
-      <div className="block sm:hidden select-none px-4 py-4 mb-3 bg-transparent">
-        {/* Mobile Tab Switcher */}
-        <div className="flex items-center justify-center gap-1 bg-black/[0.04] p-1 rounded-xl border border-black/5 mb-3 w-fit mx-auto">
-          <button
-            type="button"
-            onClick={() => {
-              playClickSound();
-              setMetricsTradeTab("simulated");
-            }}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              metricsTradeTab === "simulated"
-                ? "bg-white text-zinc-900 shadow-xs ring-1 ring-black/5"
-                : "text-[#666661]"
-            }`}
-          >
-            <Gamepad2 className="w-3.5 h-3.5 text-amber-600" />
-            <span>模擬交易</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold bg-amber-100 text-amber-800">
-              {simulatedHoldingCount}
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              playClickSound();
-              setMetricsTradeTab("real");
-            }}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              metricsTradeTab === "real"
-                ? "bg-white text-zinc-900 shadow-xs ring-1 ring-black/5"
-                : "text-[#666661]"
-            }`}
-          >
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-            <span>真實交易</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold bg-emerald-100 text-emerald-800">
-              {realHoldingCount}
-            </span>
-          </button>
+          ) : (
+            <div className="grid grid-cols-2 divide-x divide-y divide-zinc-200/70">
+              <div className="p-3 flex flex-col justify-between">
+                <span className="text-[11px] text-zinc-500 font-bold">模擬持股數</span>
+                <div className="text-lg font-extrabold tracking-tight mt-1 text-zinc-900 font-mono tabular-nums">
+                  <AnimatedNumber value={simulatedHoldingCount} prefix="" suffix=" 檔" decimals={0} showPlus={false} />
+                </div>
+              </div>
+              <div className="p-3 flex flex-col justify-between">
+                <span className="text-[11px] text-zinc-500 font-bold">模擬持倉成本</span>
+                <div className="text-lg font-extrabold tracking-tight mt-1 text-zinc-900 font-mono tabular-nums">
+                  <AnimatedNumber value={totalVirtualHoldingCost} prefix="$" suffix="" decimals={2} showPlus={false} />
+                </div>
+              </div>
+              <div className="p-3 flex flex-col justify-between">
+                <span className="text-[11px] text-zinc-500 font-bold">模擬實現損益</span>
+                <div
+                  className={`text-lg font-extrabold tracking-tight mt-1 font-mono tabular-nums ${
+                    simulatedCompletedPnL >= 0 ? "text-[#065f46]" : "text-rose-700"
+                  }`}
+                >
+                  <AnimatedNumber value={simulatedCompletedPnL} prefix="$" suffix="" decimals={2} showPlus={true} />
+                </div>
+              </div>
+              <div className="p-3 flex flex-col justify-between">
+                <span className="text-[11px] text-zinc-500 font-bold">模擬未實現總損益</span>
+                <div
+                  className={`text-lg font-extrabold tracking-tight mt-1 font-mono tabular-nums ${
+                    simulatedUnrealizedPnL >= 0 ? "text-[#065f46]" : "text-rose-700"
+                  }`}
+                >
+                  <AnimatedNumber value={simulatedUnrealizedPnL} prefix="$" suffix="" decimals={2} showPlus={true} />
+                </div>
+              </div>
+              <div className="p-3 flex flex-col justify-between">
+                <span className="text-[11px] text-zinc-500 font-bold">模擬交易勝率</span>
+                <div className="text-lg font-extrabold tracking-tight mt-1 text-zinc-900 font-mono tabular-nums">
+                  <AnimatedNumber value={Number(simulatedWinRate)} prefix="" suffix="%" decimals={0} showPlus={false} />
+                </div>
+              </div>
+              <div className="p-3 flex flex-col justify-between">
+                <span className="text-[11px] text-zinc-500 font-bold">模擬已完成數</span>
+                <div className="text-lg font-extrabold tracking-tight mt-1 text-zinc-900 font-mono tabular-nums">
+                  <AnimatedNumber value={simulatedCompletedTabs.length} prefix="" suffix=" 筆" decimals={0} showPlus={false} />
+                </div>
+              </div>
+            </div>
+          )}
         </div>
-
-        {metricsTradeTab === "real" ? (
-          <div className="grid grid-cols-2 gap-y-3.5 gap-x-0 text-center bg-white/70 backdrop-blur-sm border border-black/5 rounded-2xl p-3 shadow-xs">
-            {/* Row 1, Col 1: 真實持股數 */}
-            <div className="flex flex-col items-center justify-center border-r border-black/[0.06] py-1">
-              <span className="text-[11px] text-[#888780] font-medium tracking-wide">
-                真實持股數
-              </span>
-              <div className="text-[19px] font-bold tracking-tight mt-0.5 text-[#2C2C2A] font-mono leading-none">
-                <AnimatedNumber value={realHoldingCount} prefix="" suffix="" decimals={0} showPlus={false} />
-              </div>
-            </div>
-            {/* Row 1, Col 2: 真實交易勝率 */}
-            <div className="flex flex-col items-center justify-center py-1">
-              <span className="text-[11px] text-[#888780] font-medium tracking-wide">
-                真實交易勝率
-              </span>
-              <div className="text-[19px] font-bold tracking-tight mt-0.5 text-[#2C2C2A] font-mono leading-none">
-                <AnimatedNumber value={Number(realWinRate)} prefix="" suffix="%" decimals={0} showPlus={false} />
-              </div>
-            </div>
-            {/* Divider 1 */}
-            <div className="col-span-2 h-[0.5px] bg-black/[0.06] mx-2" />
-            {/* Row 2, Col 1: 真實實現損益 */}
-            <div className="flex flex-col items-center justify-center border-r border-black/[0.06] py-1">
-              <span className="text-[11px] text-[#888780] font-medium tracking-wide">
-                真實實現損益
-              </span>
-              <div className={`text-[19px] font-bold tracking-tight mt-0.5 font-mono leading-none ${totalCompletedPnL >= 0 ? "text-[#085041]" : "text-rose-700"}`}>
-                <AnimatedNumber value={totalCompletedPnL} prefix="$" suffix="" decimals={2} showPlus={true} />
-              </div>
-            </div>
-            {/* Row 2, Col 2: 真實未實現損益 */}
-            <div className="flex flex-col items-center justify-center py-1">
-              <span className="text-[11px] text-[#888780] font-medium tracking-wide">
-                真實未實現損益
-              </span>
-              <div className={`text-[19px] font-bold tracking-tight mt-0.5 font-mono leading-none ${realUnrealizedPnL >= 0 ? "text-[#085041]" : "text-rose-700"}`}>
-                <AnimatedNumber value={realUnrealizedPnL} prefix="$" suffix="" decimals={2} showPlus={true} />
-              </div>
-            </div>
-            {/* Divider 2 */}
-            <div className="col-span-2 h-[0.5px] bg-black/[0.06] mx-2" />
-            {/* Row 3, Col 1: 目前總資金 */}
-            <div className="flex flex-col items-center justify-center border-r border-black/[0.06] py-1">
-              <span className="text-[11px] text-[#888780] font-medium tracking-wide">
-                目前總資金
-              </span>
-              <div className="text-[17px] font-bold tracking-tight mt-0.5 text-[#2C2C2A] font-mono leading-none">
-                <AnimatedNumber value={totalCapital} prefix="$" suffix="" decimals={2} showPlus={false} />
-              </div>
-            </div>
-            {/* Row 3, Col 2: 最大策略風險池(60%) */}
-            <div className="flex flex-col items-center justify-center py-1">
-              <span className="text-[11px] text-emerald-800 font-semibold tracking-wide">
-                最大策略風險池(60%)
-              </span>
-              <div className="text-[17px] font-bold tracking-tight mt-0.5 text-[#085041] font-mono leading-none">
-                <AnimatedNumber value={maxStrategyRiskPool60} prefix="$" suffix="" decimals={2} showPlus={false} />
-              </div>
-            </div>
-            {/* Divider 3 */}
-            <div className="col-span-2 h-[0.5px] bg-black/[0.06] mx-2" />
-            {/* Row 4, Col 1: 目前已使用額度 */}
-            <div className="flex flex-col items-center justify-center border-r border-black/[0.06] py-1">
-              <span className="text-[11px] text-[#888780] font-medium tracking-wide">
-                目前已使用額度
-              </span>
-              <div className="text-[17px] font-bold tracking-tight mt-0.5 text-[#2C2C2A] font-mono leading-none">
-                <AnimatedNumber value={totalRealHoldingCost} prefix="$" suffix="" decimals={2} showPlus={false} />
-              </div>
-            </div>
-            {/* Row 4, Col 2: 剩餘可運用金額 */}
-            <div className="flex flex-col items-center justify-center py-1">
-              <span className="text-[11px] text-emerald-800 font-semibold tracking-wide">
-                剩餘可運用金額
-              </span>
-              <div className={`text-[17px] font-bold tracking-tight mt-0.5 font-mono leading-none ${remainingStrategyRiskPool >= 0 ? "text-[#085041]" : "text-rose-700"}`}>
-                <AnimatedNumber value={remainingStrategyRiskPool} prefix="$" suffix="" decimals={2} showPlus={false} />
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 gap-y-3.5 gap-x-0 text-center bg-white/70 backdrop-blur-sm border border-black/5 rounded-2xl p-3 shadow-xs">
-            {/* Row 1, Col 1: 模擬持股數 */}
-            <div className="flex flex-col items-center justify-center border-r border-black/[0.06] py-1">
-              <span className="text-[11px] text-[#888780] font-medium tracking-wide">
-                模擬持股數
-              </span>
-              <div className="text-[19px] font-bold tracking-tight mt-0.5 text-[#2C2C2A] font-mono leading-none">
-                <AnimatedNumber value={simulatedHoldingCount} prefix="" suffix="" decimals={0} showPlus={false} />
-              </div>
-            </div>
-            {/* Row 1, Col 2: 模擬持倉成本 */}
-            <div className="flex flex-col items-center justify-center py-1">
-              <span className="text-[11px] text-[#888780] font-medium tracking-wide">
-                模擬持倉成本
-              </span>
-              <div className="text-[19px] font-bold tracking-tight mt-0.5 text-[#2C2C2A] font-mono leading-none">
-                <AnimatedNumber value={totalVirtualHoldingCost} prefix="$" suffix="" decimals={2} showPlus={false} />
-              </div>
-            </div>
-            {/* Divider 1 */}
-            <div className="col-span-2 h-[0.5px] bg-black/[0.06] mx-2" />
-            {/* Row 2, Col 1: 模擬實現損益 */}
-            <div className="flex flex-col items-center justify-center border-r border-black/[0.06] py-1">
-              <span className="text-[11px] text-[#888780] font-medium tracking-wide">
-                模擬實現損益
-              </span>
-              <div className={`text-[19px] font-bold tracking-tight mt-0.5 font-mono leading-none ${simulatedCompletedPnL >= 0 ? "text-[#085041]" : "text-rose-700"}`}>
-                <AnimatedNumber value={simulatedCompletedPnL} prefix="$" suffix="" decimals={2} showPlus={true} />
-              </div>
-            </div>
-            {/* Row 2, Col 2: 模擬未實現總損益 */}
-            <div className="flex flex-col items-center justify-center py-1">
-              <span className="text-[11px] text-[#888780] font-medium tracking-wide">
-                模擬未實現總損益
-              </span>
-              <div className={`text-[19px] font-bold tracking-tight mt-0.5 font-mono leading-none ${simulatedUnrealizedPnL >= 0 ? "text-[#085041]" : "text-rose-700"}`}>
-                <AnimatedNumber value={simulatedUnrealizedPnL} prefix="$" suffix="" decimals={2} showPlus={true} />
-              </div>
-            </div>
-            {/* Divider 2 */}
-            <div className="col-span-2 h-[0.5px] bg-black/[0.06] mx-2" />
-            {/* Row 3, Col 1: 模擬交易勝率 */}
-            <div className="flex flex-col items-center justify-center border-r border-black/[0.06] py-1">
-              <span className="text-[11px] text-[#888780] font-medium tracking-wide">
-                模擬交易勝率
-              </span>
-              <div className="text-[19px] font-bold tracking-tight mt-0.5 text-[#2C2C2A] font-mono leading-none">
-                <AnimatedNumber value={Number(simulatedWinRate)} prefix="" suffix="%" decimals={0} showPlus={false} />
-              </div>
-            </div>
-            {/* Row 3, Col 2: 模擬已完成數 */}
-            <div className="flex flex-col items-center justify-center py-1">
-              <span className="text-[11px] text-[#888780] font-medium tracking-wide">
-                模擬已完成數
-              </span>
-              <div className="text-[19px] font-bold tracking-tight mt-0.5 text-[#2C2C2A] font-mono leading-none">
-                <AnimatedNumber value={simulatedCompletedTabs.length} prefix="" suffix="" decimals={0} showPlus={false} />
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
 {/* Tab Row (No bottom border, pill styling for selected tab with Lenis smooth scroll and motion layout transition) */}
@@ -8118,7 +8337,7 @@ export default function Dashboard() {
                                     <div
                                       key={tab.id}
                                       id={`stock-card-${tab.id}`}
-                                      className={`card-wrapper w-[calc(100vw-24px)] ${isHoldingActive ? "sm:w-[617px] md:w-[617px] lg:w-[617px] xl:w-[617px] 2xl:w-[617px]" : "sm:w-[480px] md:w-[480px] lg:w-[480px] xl:w-[480px] 2xl:w-[480px]"} shrink-0 flex flex-col transition-all duration-300 ${isCardExpanded ? "h-[626px] min-h-[546px] sm:min-h-[626px] max-h-[calc(100dvh-56px)] sm:max-h-none select-none" : "min-h-[135px] h-[135px]"}`}
+                                      className={`card-wrapper w-[calc(100vw-24px)] ${isHoldingActive ? "sm:w-[617px] md:w-[617px] lg:w-[617px] xl:w-[617px] 2xl:w-[617px]" : "sm:w-[480px] md:w-[480px] lg:w-[480px] xl:w-[480px] 2xl:w-[480px]"} shrink-0 flex flex-col transition-all duration-300 ${isCardExpanded ? "h-[646px] min-h-[566px] sm:min-h-[646px] max-h-[calc(100dvh-56px)] sm:max-h-none select-none" : "min-h-[135px] h-[135px]"}`}
                                       onContextMenu={(e) => {
                                         e.preventDefault();
                                         setSelectedActionTab(tab);
@@ -8154,7 +8373,7 @@ export default function Dashboard() {
                                       }}
                                     >
                                       <div
-                                        className={`card-inner-parallax w-full h-full flex flex-col transition-all duration-300 ${isCardExpanded ? "h-[626px] min-h-[546px] sm:min-h-[626px] max-h-[calc(100dvh-56px)] sm:max-h-none" : "min-h-[135px] h-[135px]"}`}
+                                        className={`card-inner-parallax w-full h-full flex flex-col transition-all duration-300 ${isCardExpanded ? "h-[646px] min-h-[566px] sm:min-h-[646px] max-h-[calc(100dvh-56px)] sm:max-h-none" : "min-h-[135px] h-[135px]"}`}
                                         style={{ perspective: "1200px" }}
                                       >
                                         <motion.div
@@ -8172,7 +8391,7 @@ export default function Dashboard() {
                                             delay: idx * 0.05,
                                           }}
                                           key={tab.id}
-                                          className={`relative w-full h-full flex-1 flex flex-col cursor-pointer slide-drawer-container transition-all duration-300 ${isCardExpanded ? "h-[626px] min-h-[546px] sm:min-h-[626px] max-h-[calc(100dvh-56px)] sm:max-h-none" : "min-h-[135px] h-[135px]"} ${
+                                          className={`relative w-full h-full flex-1 flex flex-col cursor-pointer slide-drawer-container transition-all duration-300 ${isCardExpanded ? "h-[646px] min-h-[566px] sm:min-h-[646px] max-h-[calc(100dvh-56px)] sm:max-h-none" : "min-h-[135px] h-[135px]"} ${
                                             ((flippedCards[tab.id] !== false) && isCardExpanded) ? "show-back" : ""
                                           } ${activeTabStrategies[tab.id]?.observeChecked ? "card-breathe-observe" : activeTabStrategies[tab.id]?.closeChecked ? "card-breathe-close" : activeTabStrategies[tab.id]?.slChecked ? "card-breathe-sl" : activeTabStrategies[tab.id]?.addChecked ? "card-breathe-add" : activeTabStrategies[tab.id]?.tpChecked ? "card-breathe-tp" : ""}`}
                                         >
@@ -8222,19 +8441,19 @@ export default function Dashboard() {
                                             })()}
                                           </div>
 
-                                          {/* Top Center Edge Badge: Stock's Unrealized PnL (未實現損益) - 支援 PS5 動態背景高對比顯示，字體放大 3px */}
-                                          <div className="absolute -top-5 left-1/2 -translate-x-1/2 z-40 pointer-events-none flex items-center justify-center stock-card-top-unrealized-badge">
+                                          {/* Top Center Edge Badge: Stock's Unrealized PnL (未實現損益) - 支援 PS5 動態背景高對比顯示，手機/平板適應字體 */}
+                                          <div className="absolute -top-3.5 sm:-top-4 left-1/2 -translate-x-1/2 z-40 pointer-events-none flex items-center justify-center stock-card-top-unrealized-badge">
                                             <div
-                                              className={`flex items-center gap-1.5 text-[21px] font-black whitespace-nowrap select-none font-mono px-2.5 py-0.5 rounded-full transition-all duration-300 ${
+                                              className={`flex items-center gap-1.5 text-[13px] sm:text-[16px] font-black whitespace-nowrap select-none font-mono px-3 sm:px-3.5 py-0.5 rounded-full bg-white/95 backdrop-blur-md border border-zinc-200/90 shadow-[0_2px_10px_-2px_rgba(0,0,0,0.12)] transition-all duration-300 ${
                                                 unrealizedPnL > 0
-                                                  ? "text-emerald-500 stock-pnl-pos"
+                                                  ? "text-[#065f46] stock-pnl-pos"
                                                   : unrealizedPnL < 0
-                                                    ? "text-rose-500 stock-pnl-neg"
-                                                    : "text-zinc-400 stock-pnl-zero"
+                                                    ? "text-rose-600 stock-pnl-neg"
+                                                    : "text-zinc-500 stock-pnl-zero"
                                               }`}
                                             >
-                                              <span className="text-[20px] font-bold opacity-90 stock-pnl-label">未實現:</span>
-                                              <span className="tabular-nums font-black stock-pnl-val">
+                                              <span className="text-[11px] sm:text-[13px] font-bold text-zinc-500 stock-pnl-label">未實現</span>
+                                              <span className="tabular-nums font-extrabold tracking-tight stock-pnl-val">
                                                 {unrealizedPnL > 0 ? "+" : ""}
                                                 ${unrealizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                               </span>
@@ -8369,9 +8588,9 @@ export default function Dashboard() {
                                             >
                                               <div className="flex flex-col w-full min-w-0">
                                                 {/* Top row: Checkbox, Symbol, Price, Unrealized Pill, SIM/LIVE, Toggle */}
-                                                <div className="flex items-center justify-between w-full relative z-10 gap-2 mb-2">
+                                                <div className="flex flex-wrap sm:flex-nowrap items-center justify-between w-full relative z-10 gap-1.5 sm:gap-2 mb-2">
                                                   {/* Left part: Circular Tickbox, Symbol & Price */}
-                                                  <div className="flex items-center gap-2.5 min-w-0">
+                                                  <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0">
                                                     <label
                                                       className="flex items-center justify-center cursor-pointer select-none p-1 rounded-full hover:bg-zinc-200/80 transition-colors z-30 shrink-0"
                                                       onClick={(e) => e.stopPropagation()}
@@ -8394,9 +8613,9 @@ export default function Dashboard() {
                                                         )}
                                                       </div>
                                                     </label>
-                                                    <div className="flex items-baseline gap-2 min-w-0">
+                                                    <div className="flex items-baseline gap-1.5 sm:gap-2 min-w-0">
                                                       <span 
-                                                        className="stock-symbol-title font-black text-2xl tracking-tighter leading-none text-black shrink-0 cursor-pointer hover:opacity-80 transition-all select-none"
+                                                        className="stock-symbol-title font-black text-xl sm:text-2xl tracking-tighter leading-none text-black shrink-0 cursor-pointer hover:opacity-80 transition-all select-none"
                                                         onTouchStart={(e) => e.stopPropagation()}
                                                         onDoubleClick={(e) => {
                                                           e.stopPropagation();
@@ -8409,13 +8628,13 @@ export default function Dashboard() {
                                                         {tab.symbol}
                                                       </span>
                                                       {(!tab.plannedBuyPercent || tab.plannedBuyPercent <= 0) && (
-                                                        <span className="text-xs font-semibold text-zinc-400 select-none tracking-normal font-sans">
+                                                        <span className="text-[10px] sm:text-xs font-semibold text-zinc-400 select-none tracking-normal font-sans">
                                                           (Not ready)
                                                         </span>
                                                       )}
                                                       {typeof tab.currentPrice === "number" && (
-                                                        <div className="flex items-baseline gap-1.5 shrink-0">
-                                                          <span className="text-xl font-black tabular-nums text-zinc-900 leading-none">
+                                                        <div data-is-cp="true" data-price-tag="true" data-category="現價" data-price={tab.currentPrice} title="現價" className="flex items-baseline gap-1 sm:gap-1.5 shrink-0 cursor-pointer">
+                                                          <span className="text-base sm:text-xl font-black tabular-nums text-zinc-900 leading-none">
                                                             ${tab.currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                           </span>
                                                         </div>
@@ -8424,14 +8643,14 @@ export default function Dashboard() {
                                                   </div>
 
                                                   {/* Right part: Unrealized PnL Pill, SIM/LIVE, Toggle */}
-                                                  <div className="flex items-center gap-2 shrink-0 ml-auto">
+                                                  <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-auto">
                                                     {/* Unrealized PnL Capsule (Pill) */}
                                                     {unrealizedPnL !== 0 && (
-                                                      <div className="flex flex-col items-center justify-center border border-zinc-200/60 bg-zinc-50 rounded-xl px-2.5 py-0.5 leading-none h-[38px] select-none">
-                                                        <span className="text-[9px] font-medium text-zinc-500 mb-0.5">
+                                                      <div className="flex flex-col items-center justify-center border border-zinc-200/60 bg-zinc-50 rounded-xl px-1.5 sm:px-2.5 py-0.5 leading-none h-[34px] sm:h-[38px] select-none">
+                                                        <span className="text-[8px] sm:text-[9px] font-medium text-zinc-500 mb-0.5">
                                                           未實現:
                                                         </span>
-                                                        <span className={`text-xs font-black tabular-nums ${unrealizedPnL > 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                                                        <span className={`text-[10px] sm:text-xs font-black tabular-nums ${unrealizedPnL > 0 ? "text-emerald-600" : "text-rose-600"}`}>
                                                           {unrealizedPnL > 0 ? "+" : ""}{unrealizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                         </span>
                                                       </div>
@@ -8439,16 +8658,16 @@ export default function Dashboard() {
 
                                                     {/* SIM / LIVE Badge */}
                                                     <div
-                                                      className={`flex items-center gap-1.5 text-[9px] font-black px-2 py-1.5 rounded-full border uppercase tracking-widest h-7 ${
+                                                      className={`flex items-center gap-1 sm:gap-1.5 text-[8.5px] sm:text-[9px] font-black px-1.5 sm:px-2 py-1 sm:py-1.5 rounded-full border uppercase tracking-widest h-6 sm:h-7 ${
                                                         tab.tradeType === "simulated"
                                                           ? "bg-amber-50 text-amber-800 border-amber-200/80"
                                                           : "bg-emerald-50 text-emerald-800 border-emerald-200/80"
                                                       }`}
                                                     >
                                                       {tab.tradeType === "simulated" ? (
-                                                        <Gamepad2 className="h-3 w-3 text-amber-600" />
+                                                        <Gamepad2 className="h-2.5 w-2.5 sm:h-3 sm:w-3 text-amber-600" />
                                                       ) : (
-                                                        <ShieldCheck className="h-3 w-3 text-emerald-600" />
+                                                        <ShieldCheck className="h-2.5 w-2.5 sm:h-3 sm:w-3 text-emerald-600" />
                                                       )}
                                                       {tab.tradeType === "simulated" ? "SIM" : "LIVE"}
                                                     </div>
@@ -8575,6 +8794,9 @@ export default function Dashboard() {
                                                                 return (
                                                                   <div
                                                                     key={order.id}
+                                                                    data-price-tag="true"
+                                                                    data-category={directionLabel || "價位"}
+                                                                    data-price={order.price}
                                                                     title={order.notes || order.conditions || ""}
                                                                     className={`rounded-lg ${borderStyle} py-1 px-2.5 flex items-center gap-1.5 backdrop-blur-sm transition-all duration-300 cursor-pointer select-none ${styleClass}`}
                                                                     onClick={(e) => e.stopPropagation()}
@@ -8735,7 +8957,7 @@ export default function Dashboard() {
                                             );
                                           })()}
 
-                                          <div className="flex-1 flex flex-col p-2.5 pt-1.5 w-full min-h-0 relative overflow-hidden">
+                                          <div className="flex-1 flex flex-col p-2.5 pt-3 pb-1 sm:pb-1.5 w-full min-h-0 relative overflow-hidden">
                                             <StockCardVisualizer
                                               plannedOrders={plannedOrders}
                                               currentPrice={tab.currentPrice}
@@ -8901,10 +9123,10 @@ export default function Dashboard() {
 
                             {/* Sliding tab indicator navigation bar underneath stock cards */}
                             {orderedFilteredSubTabVisibleTabs.length > 0 && (
-                              <div className="hidden sm:block mt-6 px-4 md:px-8 w-full">
+                              <div className="block mt-4 sm:mt-6 px-4 md:px-8 w-full stock-card-bottom-nav">
                                 <div className="flex justify-center w-full">
                                   <div className="relative max-w-4xl pb-2">
-                                    <div className="flex flex-row items-center justify-center gap-6 overflow-x-auto scrollbar-hide relative pb-1.5">
+                                    <div className="flex flex-row items-center justify-center gap-6 overflow-x-auto scrollbar-hide relative pb-1.5 stock-card-bottom-nav-inner">
                                       {orderedFilteredSubTabVisibleTabs.map((tab) => {
                                         const isSelected = (activeCardTabId || orderedFilteredSubTabVisibleTabs[0].id) === tab.id;
                                         return (
@@ -8914,29 +9136,48 @@ export default function Dashboard() {
                                               tabRefs.current[tab.id] = el;
                                             }}
                                             onClick={() => handleTabIndicatorClick(tab.id)}
-                                            className="px-2 py-1 text-sm font-medium transition-colors duration-200 cursor-pointer outline-none shrink-0"
-                                            style={{
-                                              color: isSelected ? "#1a1a1a" : "#999999",
-                                              fontWeight: isSelected ? 500 : 400,
-                                            }}
+                                            className={`stock-card-indicator-btn px-2 py-1 text-sm font-medium transition-all duration-200 cursor-pointer outline-none shrink-0 ${isSelected ? "is-selected font-bold" : "font-normal"}`}
+                                            style={
+                                              isPs5ModeActive
+                                                ? {
+                                                    color: "#ffffff",
+                                                    WebkitTextFillColor: "#ffffff",
+                                                    WebkitTextStroke: "1px #000000",
+                                                    textShadow:
+                                                      "-1px -1px 0 #000000, 1px -1px 0 #000000, -1px 1px 0 #000000, 1px 1px 0 #000000, 0 1px 2px rgba(0,0,0,0.9)",
+                                                    fontWeight: isSelected ? 800 : 600,
+                                                    opacity: isSelected ? 1 : 0.85,
+                                                  }
+                                                : {
+                                                    color: isSelected ? "#1a1a1a" : "#999999",
+                                                    fontWeight: isSelected ? 500 : 400,
+                                                  }
+                                            }
                                           >
                                             {tab.symbol}
                                           </button>
                                         );
                                       })}
                                       <div
-                                        className="absolute bottom-0 left-0 right-0"
-                                        style={{ height: "1.5px", backgroundColor: "#e0e0e0" }}
+                                        className="bottom-nav-track absolute bottom-0 left-0 right-0"
+                                        style={{
+                                          height: "1.5px",
+                                          backgroundColor: isPs5ModeActive ? "rgba(255, 255, 255, 0.4)" : "#e0e0e0",
+                                        }}
                                       />
                                       <div
-                                        className="absolute bottom-0"
+                                        className="bottom-nav-indicator absolute bottom-0"
                                         style={{
                                           height: "2px",
-                                          backgroundColor: "#1a1a1a",
+                                          backgroundColor: isPs5ModeActive ? "#ffffff" : "#1a1a1a",
+                                          boxShadow: isPs5ModeActive
+                                            ? "0 0 6px rgba(0,0,0,0.9), 0 0 10px rgba(255,255,255,0.7)"
+                                            : "none",
                                           borderRadius: "2px",
                                           left: `${indicatorStyle.left}px`,
                                           width: `${indicatorStyle.width}px`,
-                                          transition: "left 0.3s cubic-bezier(0.16, 1, 0.3, 1), width 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
+                                          transition:
+                                            "left 0.3s cubic-bezier(0.16, 1, 0.3, 1), width 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
                                         }}
                                       />
                                     </div>
@@ -9406,7 +9647,7 @@ export default function Dashboard() {
                                           </span>
                                         </div>
                                       </div>
-                                      <div className="text-right flex flex-col items-end">
+                                      <div data-is-cp="true" data-price-tag="true" data-category="現價" data-price={tab.currentPrice} title="現價" className="text-right flex flex-col items-end cursor-pointer">
                                         <span className="text-sm font-mono text-zinc-900 font-extrabold">
                                           {tab.currentPrice !== undefined && tab.currentPrice > 0 ? tab.currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "-"}
                                         </span>

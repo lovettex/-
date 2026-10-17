@@ -171,8 +171,8 @@ export function classifyLineColor(
  */
 export type AxisLetter = "D" | "B" | "G" | "Y" | "R";
 
-export const CARD_TOP_Y = 7; // 個股卡片頂部價格邊界 (最高價 7%)
-export const CARD_BOTTOM_Y = 93; // 個股卡片底部價格邊界 (最低價 93%)
+export const CARD_TOP_Y = 3.6; // 個股卡片頂部價格邊界 (最高價 3.6%)
+export const CARD_BOTTOM_Y = 96.4; // 個股卡片底部價格邊界 (最低價 96.4%)
 
 export const CANVAS_TOP_YELLOW_Y = 12; // 頂黃 (Y軸 - 頂部獲利)
 export const CANVAS_RED_Y = 28; // 紅 (R軸 - 停損警戒)
@@ -411,7 +411,7 @@ export function extractCardPricePoints(
 }
 
 /**
- * 精確還原 StockCardVisualizer 內「現價標籤」在卡片畫布上的 SVG Y 軸百分比 (CARD_TOP_Y 7% ~ CARD_BOTTOM_Y 93%)
+ * 精確還原 StockCardVisualizer 內「現價標籤」在卡片畫布上的 SVG Y 軸百分比 (CARD_TOP_Y 3.6% ~ CARD_BOTTOM_Y 96.4%)
  */
 export function calculateCardPriceY(
   tab: StockTab,
@@ -429,8 +429,8 @@ export function calculateCardPriceY(
   if (uniqueSortedPrices.length === 0) return 50;
   if (uniqueSortedPrices.length <= 1) return 50;
 
-  const topY = CARD_TOP_Y; // 7%
-  const bottomY = CARD_BOTTOM_Y; // 93%
+  const topY = CARD_TOP_Y; // 3.6%
+  const bottomY = CARD_BOTTOM_Y; // 96.4%
   const n = uniqueSortedPrices.length;
   const targetP = dynamicPrice > 0 ? dynamicPrice : uniqueSortedPrices[Math.floor(n / 2)];
 

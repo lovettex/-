@@ -353,7 +353,7 @@ body.ps5-theme-active .card-back:hover {
 }
 
 /* 2. Deep Crisp Black & Charcoal Text (High Contrast, No Blurry White Glows) */
-body.ps5-theme-active h1,
+body.ps5-theme-active h1:not(.ps5-fluorescent-title),
 body.ps5-theme-active h2,
 body.ps5-theme-active h3,
 body.ps5-theme-active h4,
@@ -365,6 +365,20 @@ body.ps5-theme-active .stock-symbol-text {
   font-weight: 800 !important;
   text-shadow: none !important;
   -webkit-text-stroke: 0 !important;
+}
+
+body.ps5-theme-active .portfolio-hero-banner {
+  background: linear-gradient(135deg, rgba(3, 43, 34, 0.88) 0%, rgba(6, 66, 53, 0.84) 50%, rgba(4, 51, 40, 0.90) 100%) !important;
+  backdrop-filter: blur(24px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+  border-bottom: 1px solid rgba(52, 211, 153, 0.45) !important;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.22) !important;
+}
+
+body.ps5-theme-active .portfolio-hero-banner .ps5-fluorescent-title {
+  color: #ffffff !important;
+  font-weight: 900 !important;
+  text-shadow: 0 2px 12px rgba(16, 185, 129, 0.35), 0 1px 3px rgba(0, 0, 0, 0.6) !important;
 }
 
 body.ps5-theme-active .text-zinc-900,
@@ -595,6 +609,44 @@ body.ps5-theme-active .main-tabs-track button[aria-selected="false"] .main-tab-b
   background-color: rgba(0, 0, 0, 0.30) !important;
   color: rgba(255, 255, 255, 0.90) !important;
 }
+
+/* =========================================================
+   9. Stock Cards Bottom Navigation Bar in PS5 Mode (卡片下方導覽列)
+   ========================================================= */
+body.ps5-theme-active .stock-card-bottom-nav button,
+body.ps5-theme-active .stock-card-indicator-btn {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  -webkit-text-stroke: 1px #000000 !important;
+  text-stroke: 1px #000000 !important;
+  text-shadow: 
+    -1px -1px 0 #000000,
+     1px -1px 0 #000000,
+    -1px  1px 0 #000000,
+     1px  1px 0 #000000,
+     0px -1px 0 #000000,
+     0px  1px 0 #000000,
+    -1px  0px 0 #000000,
+     1px  0px 0 #000000,
+     0px  1px 2px rgba(0, 0, 0, 0.9) !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.02em;
+}
+
+body.ps5-theme-active .stock-card-indicator-btn.is-selected {
+  font-weight: 900 !important;
+  opacity: 1 !important;
+}
+
+body.ps5-theme-active .stock-card-bottom-nav .bottom-nav-track {
+  background-color: rgba(255, 255, 255, 0.4) !important;
+}
+
+body.ps5-theme-active .stock-card-bottom-nav .bottom-nav-indicator {
+  background-color: #ffffff !important;
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.9), 0 0 10px rgba(255, 255, 255, 0.7) !important;
+}
+
 
 
 

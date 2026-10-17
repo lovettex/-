@@ -563,7 +563,7 @@ export function WhiteNoisePlayer() {
                   }`}
                 >
                   <Tv className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>PS5 背景 (15種)</span>
+                  <span>PS5 背景 ({PS5_THEMES.length}種)</span>
                 </button>
               </div>
 
@@ -705,10 +705,10 @@ export function WhiteNoisePlayer() {
                     </div>
                     <div className="flex flex-col">
                       <span className="font-black text-xs text-zinc-950">
-                        PS5 動態背景 (共 15 款主題)
+                        PS5 動態背景 (共 {PS5_THEMES.length} 款主題)
                       </span>
                       <span className="text-[10.5px] text-zinc-700 font-bold">
-                        5 款 GLSL 宇宙物理模擬 + 10 款經典流光
+                        {PS5_THEMES.filter((t) => t.category === 'tokyo').length} 款動感急速東京 + {PS5_THEMES.filter((t) => t.category === 'galaxy').length} 款 GLSL 宇宙物理 + {PS5_THEMES.filter((t) => t.category === 'classic').length} 款經典流光
                       </span>
                     </div>
                   </div>
@@ -811,12 +811,96 @@ export function WhiteNoisePlayer() {
                   onMouseLeave={handleDragEnd}
                   className="overflow-y-auto scrollbar-hide no-scrollbar [scrollbar-width:none] [&::-webkit-scrollbar]:hidden space-y-2 pr-0.5 max-h-[360px] cursor-grab active:cursor-grabbing select-none"
                 >
+                  {/* Tokyo Dynamic Speed Series Group Heading */}
+                  {PS5_THEMES.filter((t) => t.category === 'tokyo').length > 0 && (
+                    <>
+                      <div className="flex items-center justify-between pt-1 pb-0.5 px-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm">🏎️</span>
+                          <span className="text-xs font-black text-rose-950 uppercase tracking-wider">
+                            動感急速東京系列 ({PS5_THEMES.filter((t) => t.category === 'tokyo').length}款)
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-rose-200 text-rose-950 border border-rose-300">
+                          寫真景深倒影
+                        </span>
+                      </div>
+
+                      {PS5_THEMES.filter((t) => t.category === 'tokyo').map((th) => {
+                        const isSelected = th.id === state.bgThemeId;
+                        return (
+                          <button
+                            key={th.id}
+                            type="button"
+                            onClick={() => handleSelectTheme(th.id)}
+                            className={`w-full p-2.5 rounded-2xl border-2 text-left transition-all flex items-center justify-between gap-3 group cursor-pointer ${
+                              isSelected
+                                ? 'border-rose-600 bg-rose-50/95 ring-2 ring-rose-400/40 shadow-sm'
+                                : 'border-zinc-300 bg-white hover:bg-zinc-50 hover:border-zinc-400'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              {/* Theme Color Preview Swatch */}
+                              <div
+                                className="w-10 h-10 rounded-xl shadow-xs flex items-center justify-center relative overflow-hidden border-2 border-white/60 shrink-0 ring-1 ring-zinc-400/30"
+                                style={{
+                                  background: `linear-gradient(135deg, ${th.bgGradient[1]} 0%, ${th.bgGradient[0]} 100%)`,
+                                }}
+                              >
+                                <div
+                                  className="w-4 h-4 rounded-full blur-[2px] opacity-90 ring-1 ring-white"
+                                  style={{ backgroundColor: th.iconColor }}
+                                />
+                                {isSelected && (
+                                  <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
+                                    <Check className="w-5 h-5 text-white stroke-[3.5] drop-shadow-md" />
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="flex flex-col min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  <span
+                                    className={`text-[12.5px] font-black truncate ${
+                                      isSelected ? 'text-rose-950' : 'text-zinc-950'
+                                    }`}
+                                  >
+                                    {th.name}
+                                  </span>
+                                  <span className="text-[10px] text-zinc-600 font-mono font-bold hidden sm:inline truncate">
+                                    {th.nameEn}
+                                  </span>
+                                </div>
+
+                                {/* Sci Concept & Formula Pill */}
+                                <div className="flex flex-col mt-0.5 gap-0.5">
+                                  <span className="text-[10.5px] text-rose-900 font-black truncate">
+                                    ✦ {th.sciConcept}
+                                  </span>
+                                  <span className="text-[9.5px] text-zinc-800 font-mono font-black truncate bg-zinc-100/90 border border-zinc-250 px-1.5 py-0.2 rounded inline-block w-fit">
+                                    {th.sciFormula}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {isSelected && (
+                              <span className="shrink-0 text-[10.5px] font-black text-rose-950 bg-rose-200 border border-rose-300 px-2 py-0.5 rounded-md">
+                                目前套用
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </>
+                  )}
+
                   {/* Galaxy Series Group Heading */}
                   <div className="flex items-center justify-between pt-1 pb-0.5 px-1">
                     <div className="flex items-center gap-1.5">
                       <Sparkles className="w-4 h-4 text-indigo-700 stroke-[2.5]" />
                       <span className="text-xs font-black text-indigo-950 uppercase tracking-wider">
-                        🌌 Galaxy GLSL 科學天文 (5款)
+                        🌌 Galaxy GLSL 科學天文與光影 ({PS5_THEMES.filter((t) => t.category === 'galaxy').length}款)
                       </span>
                     </div>
                     <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-indigo-200 text-indigo-950 border border-indigo-300">

@@ -5,6 +5,7 @@ import { LogOut, ActivitySquare, ExternalLink, HelpCircle } from 'lucide-react';
 import { Premium3DGrid } from './components/Premium3DGrid';
 import { WhiteNoisePlayer } from './components/WhiteNoisePlayer';
 import { PS5DynamicBackground } from './components/PS5DynamicBackground';
+import { CrawlerSpider } from './components/CrawlerSpider';
 import { whiteNoiseEngine, WhiteNoiseState } from './lib/whiteNoiseEngine';
 
 export default function Layout() {
@@ -15,6 +16,7 @@ export default function Layout() {
 
   const [loadingTimeout, setLoadingTimeout] = useState(false);
   const [ambientState, setAmbientState] = useState<WhiteNoiseState>(whiteNoiseEngine.getState());
+  const [isCrawlerActive, setIsCrawlerActive] = useState(false);
 
   useEffect(() => {
     const unsubscribe = whiteNoiseEngine.subscribe((s) => {
@@ -163,7 +165,15 @@ export default function Layout() {
         themeId={ambientState.bgThemeId}
         speedMultiplier={ambientState.bgSpeed}
       />
-      
+
+      {/* Top Right Floating Toolbar for 3D Crawler Spider */}
+      <div className="fixed top-3 right-3 sm:top-4 sm:right-6 z-[995] flex items-center gap-2">
+        <CrawlerSpider
+          isActive={isCrawlerActive}
+          onToggle={() => setIsCrawlerActive((prev) => !prev)}
+        />
+      </div>
+
       {/* Bottom Right WhiteNoise Floating Player & PS5 Dynamic Background Controls */}
       <div className="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 z-[990]">
         <WhiteNoisePlayer />
