@@ -1826,6 +1826,19 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
 
   // 分批進場金字塔圖表之卡片分隔線 (Alt+D)、支撐 (Alt+R)、壓力 (Alt+P)、攤平與突破價位 (Alt+T / Alt+B) 狀態控制
   const [pyramidShowCardDividers, setPyramidShowCardDividers] = useState<boolean>(false);
+  // 行權價開關狀態 (預設關閉，點擊後開啟顯示期權黑色虛線/行權價/合約金額/當前損益)
+  const [pyramidShowStrikePrices, setPyramidShowStrikePrices] = useState<boolean>(false);
+  const handleTogglePyramidStrikePrices = useCallback(() => {
+    playClickSound();
+    setPyramidShowStrikePrices((prev) => {
+      const next = !prev;
+      toast.info(next ? "已開啟「行權價」黑色虛線與合約金額" : "已關閉「行權價」顯示", {
+        id: "pyramid-strike-toggle",
+        duration: 1500,
+      });
+      return next;
+    });
+  }, [playClickSound]);
   const [pyramidCalcMode, setPyramidCalcMode] = useState<"averaging" | "breakout">("averaging");
   const [pyramidLevelTypes, setPyramidLevelTypes] = useState<{
     support: boolean;
@@ -6752,6 +6765,26 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
 
             {/* 右側：防線/分隔線快捷開關 + 攤平/突破價位 + 全部展開/收合 + 關閉 */}
             <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+              {/* 行權價 (新增) - 預設關閉 */}
+              <button
+                type="button"
+                onClick={handleTogglePyramidStrikePrices}
+                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-black transition-all cursor-pointer border active:scale-95 shrink-0 select-none ${
+                  pyramidShowStrikePrices
+                    ? "bg-zinc-950 text-white border-zinc-400 shadow-[0_0_8px_rgba(255,255,255,0.25)] ring-1 ring-zinc-400"
+                    : "bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white border-zinc-700/60"
+                }`}
+                title="開啟/關閉期權行權價與合約金額黑色虛線 (預設關閉)"
+              >
+                <span className="w-2.5 h-0 border-t-2 border-dashed border-zinc-300 shrink-0" />
+                <span>行權價</span>
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    pyramidShowStrikePrices ? "bg-white shadow-[0_0_6px_#ffffff]" : "bg-zinc-500"
+                  }`}
+                />
+              </button>
+
               {/* 攤平 | 突破價位 (快捷按鍵: Alt+T / Alt+B) */}
               <div className="flex items-center bg-zinc-900/90 border border-zinc-700/80 rounded-full p-0.5 shadow-xs shrink-0 select-none">
                 <button
@@ -6926,9 +6959,12 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
                         usableCapital={pData.usableCapital}
                         plannedQty={pData.plannedQty}
                         trades={pData.trades}
+                        optionsCalcData={pData.tab?.optionsCalcData}
                         visualLevels={pData.visualLevels}
                         showCardDividers={pyramidShowCardDividers}
                         onToggleCardDividers={handleTogglePyramidCardDividers}
+                        showStrikePrices={pyramidShowStrikePrices}
+                        onToggleStrikePrices={handleTogglePyramidStrikePrices}
                         selectedLevelTypes={pyramidLevelTypes}
                         onToggleLevelType={(type) => {
                           setPyramidLevelTypes((prev) => ({

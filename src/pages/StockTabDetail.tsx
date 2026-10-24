@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useStockTabs } from '../hooks/useStockTabs';
 import { playClickSound, playSuccessSound, playPriceImportSound } from '../lib/audio';
 import { useTrades } from '../hooks/useTrades';
-import { calculateStats, generateAveragingDownRows, generatePyramidUpRows, shouldUpdateAveragingRows, calculateBatchPlanning } from '../lib/calculations';
+import { calculateStats, generateAveragingDownRows, generatePyramidUpRows, shouldUpdateAveragingRows, calculateBatchPlanning, calculateOptionPortfolioSummary, calculateLiveOptionTradeMetrics } from '../lib/calculations';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -15,10 +15,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
 import { format } from 'date-fns';
 import { Timestamp, collection, writeBatch, doc, serverTimestamp, addDoc, getDocs, deleteDoc, getDoc, getDocFromCache, setDoc, updateDoc } from 'firebase/firestore';
-import { Trash2, BarChart3, ChevronDown, ChevronUp, Gamepad2, ShieldCheck, Upload, Download, ChevronLeft, CheckCircle2, RotateCcw, Loader2, HelpCircle, AlertTriangle, Save, Calculator, History, RefreshCw, Layers, TrendingDown, TrendingUp, Split, ShieldAlert, DollarSign, Wallet, Coins, Target, Activity, Compass, LineChart } from 'lucide-react';
+import { Trash2, BarChart3, ChevronDown, ChevronUp, Gamepad2, ShieldCheck, Upload, Download, ChevronLeft, CheckCircle2, RotateCcw, Loader2, HelpCircle, AlertTriangle, Save, Calculator, History, RefreshCw, Layers, TrendingDown, TrendingUp, Split, ShieldAlert, DollarSign, Wallet, Coins, Target, Activity, Compass, LineChart, ArrowRightLeft } from 'lucide-react';
 import { toast } from "sonner";
 import { motion, AnimatePresence } from 'motion/react';
-import { db } from '../lib/firebase';
+import { db, auth } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
 import { safeSessionStorage, safeLocalStorage, cn } from '../lib/utils';
 import { ScrollIn, InteractiveButton, Magnetic } from '../components/MotionWrappers';
@@ -30,11 +30,61 @@ import { System2PlanningChart, VisualPriceLevel } from '../components/System2Pla
 import { usePlannedOrders } from '../hooks/usePlannedOrders';
 import { useStrategy } from '../hooks/useStrategy';
 import { getVisualPriceLevels } from '../lib/visualLevels';
+import { OptionsCalculatorTab } from '../components/OptionsCalculatorTab';
+
+function AnimatedNumber({
+  value,
+  duration = 1000,
+  replayKey = 0,
+  disabled = false,
+  formatter = (n: number) => n.toLocaleString(),
+}: {
+  value: number;
+  duration?: number;
+  replayKey?: number;
+  disabled?: boolean;
+  formatter?: (n: number) => string;
+}) {
+  const [displayVal, setDisplayVal] = useState(disabled ? value : 0);
+
+  useEffect(() => {
+    if (disabled) {
+      setDisplayVal(value);
+      return;
+    }
+    let startTimestamp: number | null = null;
+    const startVal = 0;
+    const targetVal = value;
+    let rafId: number;
+
+    const step = (timestamp: number) => {
+      if (!startTimestamp) startTimestamp = timestamp;
+      const elapsed = timestamp - startTimestamp;
+      const progress = Math.min(elapsed / duration, 1);
+      // easeOutCubic: 1 - Math.pow(1 - progress, 3)
+      const easeProgress = 1 - Math.pow(1 - progress, 3);
+      const current = Math.round(startVal + (targetVal - startVal) * easeProgress);
+      setDisplayVal(current);
+
+      if (progress < 1) {
+        rafId = requestAnimationFrame(step);
+      } else {
+        setDisplayVal(targetVal);
+      }
+    };
+
+    setDisplayVal(0);
+    rafId = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(rafId);
+  }, [value, duration, replayKey, disabled]);
+
+  return <>{formatter(displayVal)}</>;
+}
 
 export default function StockTabDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { tabs, updateTabStatus, updateCurrentPrice, updateTradeType, updateTab, deleteTab } = useStockTabs();
+  const { tabs, loading: tabsLoading, updateTabStatus, updateCurrentPrice, updateTradeType, updateTab, deleteTab } = useStockTabs();
   const { trades, addTrade, updateTrade, deleteTrade } = useTrades(id);
   const { orders: plannedOrders } = usePlannedOrders(id);
   const { strategy } = useStrategy(id);
@@ -213,7 +263,7 @@ export default function StockTabDetail() {
           !errMsg.includes("network") &&
           !errMsg.includes("timed out")
         ) {
-          console.error("Failed to fetch userSettings in StockTabDetail:", error);
+          console.warn("Failed to fetch userSettings in StockTabDetail:", error);
         } else {
           console.info("[StockTabDetail] Using cached userSettings.");
         }
@@ -222,8 +272,8 @@ export default function StockTabDetail() {
     fetchSettings();
   }, [user]);
 
-  // Tab state for Dual System Calculation (Down Averaging vs Up Breakout Pyramiding)
-  const [calcComparisonTab, setCalcComparisonTab] = useState<'down' | 'up'>('down');
+  // Tab state for Dual System Calculation & Options Calculator (Down Averaging, Up Pyramiding, American Options Calculator)
+  const [calcComparisonTab, setCalcComparisonTab] = useState<'down' | 'up' | 'options'>('down');
 
   // 4 rows for stock averaging down (System 1: -2%, -4%, -6%, -8%)
   const [averagingRows, setAveragingRows] = useState<{ price: string; quantity: string; quantity2?: string; bought?: boolean; riskFlag?: boolean }[]>([
@@ -264,6 +314,23 @@ export default function StockTabDetail() {
   // Primial 分批進場金字塔動態圖表頂部功能按鈕控制狀態 (完全對齊 Primial 頁面)
   const [pyramidCalcMode, setPyramidCalcMode] = useState<'averaging' | 'breakout'>('averaging');
   const [pyramidShowCardDividers, setPyramidShowCardDividers] = useState<boolean>(false);
+  // 行權價開關狀態 (預設關閉，點擊後才開啟顯示黑色垂直虛線、合約金額與當前損益)
+  const [pyramidShowStrikePrices, setPyramidShowStrikePrices] = useState<boolean>(false);
+  const handleTogglePyramidStrikePrices = useCallback(() => {
+    playClickSound();
+    setPyramidShowStrikePrices((prev) => {
+      const next = !prev;
+      toast.info(next ? "已開啟「行權價」黑色虛線與合約金額" : "已關閉「行權價」顯示", {
+        id: "pyramid-strike-toggle",
+        duration: 1500,
+      });
+      return next;
+    });
+  }, [playClickSound]);
+
+  // 籌碼管理 未實現損益是否含期權開關 (Toggle 開關，預設開啟)
+  const [includeOptionsInPnL, setIncludeOptionsInPnL] = useState<boolean>(true);
+
   const [pyramidLevelTypes, setPyramidLevelTypes] = useState<{
     support: boolean;
     stopLoss: boolean;
@@ -275,6 +342,45 @@ export default function StockTabDetail() {
     resistance: false,
     takeProfit: false,
   });
+
+  // 批次進場動畫系統狀態 (載入動畫、重播動畫、卡片外圈光暈、減少動態偏好)
+  const [batchAnimKey, setBatchAnimKey] = useState(0);
+  const [isBatchAnimActive, setIsBatchAnimActive] = useState(false);
+  const [glowingBatchCardIndex, setGlowingBatchCardIndex] = useState<number | null>(null);
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(() => {
+    if (typeof window !== 'undefined' && window.matchMedia) {
+      return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const handler = (e: MediaQueryListEvent) => setPrefersReducedMotion(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+
+  useEffect(() => {
+    setIsBatchAnimActive(false);
+    const timer = setTimeout(() => {
+      setIsBatchAnimActive(true);
+    }, 40);
+    return () => clearTimeout(timer);
+  }, [batchAnimKey]);
+
+  const handleReplayBatchAnimation = useCallback(() => {
+    playClickSound();
+    setBatchAnimKey(k => k + 1);
+  }, []);
+
+  const triggerCardGlow = useCallback((batchIdx: number) => {
+    setGlowingBatchCardIndex(batchIdx);
+    setTimeout(() => {
+      setGlowingBatchCardIndex(prev => (prev === batchIdx ? null : prev));
+    }, 700);
+  }, []);
 
   // 快捷切換金字塔圖表卡片分隔線 (Alt + D)
   const handleTogglePyramidCardDividers = useCallback(() => {
@@ -821,6 +927,86 @@ export default function StockTabDetail() {
   }, [navigate, id]);
 
   const stats = calculateStats(trades, tab?.currentPrice);
+  const optionPortfolio = React.useMemo(
+    () => calculateOptionPortfolioSummary(trades, tab?.currentPrice, tab?.optionsCalcData),
+    [trades, tab?.currentPrice, tab?.optionsCalcData]
+  );
+
+  // 尋找同股票代號的虛擬交易對應分頁 (若當前為真實交易，可用於一鍵移轉期權紀錄)
+  const simulatedSiblingTab = React.useMemo(() => {
+    if (!tab || tab.tradeType !== 'real') return null;
+    return tabs.find(t => 
+      t.id !== tab.id && 
+      t.symbol?.trim().toUpperCase() === tab.symbol?.trim().toUpperCase() && 
+      t.tradeType === 'simulated'
+    ) || null;
+  }, [tabs, tab]);
+
+  const [isClearingRealOptions, setIsClearingRealOptions] = useState(false);
+  const [isTransferringOptions, setIsTransferringOptions] = useState(false);
+
+  // 清除此真實交易股票中的期權交易紀錄與期權試算設定
+  const handleClearRealOptions = async () => {
+    if (!tab) return;
+    setIsClearingRealOptions(true);
+    try {
+      const optionTradesList = trades.filter(t => t.isOptionTrade);
+      for (const ot of optionTradesList) {
+        await deleteTrade(ot.id);
+      }
+      await updateTab(tab.id, { optionsCalcData: null });
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.removeItem(`options_calc_${tab.id}`);
+          localStorage.removeItem(`options_calc_${tab.symbol}_real`);
+          localStorage.removeItem(`options_calc_${tab.symbol}`);
+        } catch (e) {}
+      }
+      toast.success(`已成功清除 ${tab.symbol} 真實交易中的期權交易紀錄與試算！`);
+    } catch (err) {
+      toast.error('清除期權紀錄失敗，請稍後再試');
+    } finally {
+      setIsClearingRealOptions(false);
+    }
+  };
+
+  // 一鍵將期權紀錄與試算轉移至對應的虛擬交易個股分頁
+  const handleTransferOptionsToSimulated = async () => {
+    if (!tab || !simulatedSiblingTab) return;
+    setIsTransferringOptions(true);
+    try {
+      const optionTradesList = trades.filter(t => t.isOptionTrade);
+      for (const ot of optionTradesList) {
+        const sanitized: any = { ...ot };
+        delete sanitized.id;
+        Object.keys(sanitized).forEach(k => {
+          if (sanitized[k] === undefined) delete sanitized[k];
+        });
+        await addDoc(collection(db, `stockTabs/${simulatedSiblingTab.id}/trades`), {
+          ...sanitized,
+          createdAt: serverTimestamp()
+        });
+        await deleteTrade(ot.id);
+      }
+      if (tab.optionsCalcData) {
+        await updateTab(simulatedSiblingTab.id, { optionsCalcData: tab.optionsCalcData });
+      }
+      await updateTab(tab.id, { optionsCalcData: null });
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.removeItem(`options_calc_${tab.id}`);
+          localStorage.removeItem(`options_calc_${tab.symbol}_real`);
+          localStorage.removeItem(`options_calc_${tab.symbol}`);
+        } catch (e) {}
+      }
+      toast.success(`已將 ${optionTradesList.length} 筆期權紀錄與試算完整轉移至虛擬交易 (${simulatedSiblingTab.symbol})！`);
+    } catch (err) {
+      toast.error('轉移期權紀錄失敗，請稍後再試');
+    } finally {
+      setIsTransferringOptions(false);
+    }
+  };
+
   const prevTabIdRef = React.useRef<string | null>(null);
   const userHasModifiedCalcBasePriceRef = React.useRef<boolean>(false);
 
@@ -1030,7 +1216,28 @@ export default function StockTabDetail() {
     }
   }, [parsedCalc.success, parsedCalc.result, stats?.totalQuantity, stats?.averagePrice]);
 
-  if (!tab) return <div className="text-slate-500">找不到該股票分頁，或已被刪除。</div>;
+  if (tabsLoading && !tab) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[50vh] text-slate-500 gap-3">
+        <Loader2 className="w-8 h-8 animate-spin text-emerald-500" />
+        <p className="text-sm font-medium text-slate-600">載入個股資料中...</p>
+      </div>
+    );
+  }
+
+  if (!tab) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[50vh] text-slate-500 gap-3">
+        <p className="text-base font-semibold text-slate-700">找不到該股票分頁，或已被刪除。</p>
+        <button
+          onClick={() => navigate('/')}
+          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-medium transition-colors"
+        >
+          返回儀表板
+        </button>
+      </div>
+    );
+  }
 
   const handlePresetClick = (p: string) => {
     const hasHolding = (stats?.totalQuantity ?? 0) !== 0 && (stats?.averagePrice ?? 0) > 0;
@@ -1914,12 +2121,35 @@ export default function StockTabDetail() {
       const tradesToExport = trades.map(t => ({
         type: t.type,
         purpose: t.purpose,
+        batch: t.batch || '',
         operator: t.operator || '人',
         price: t.price,
         quantity: t.quantity,
         tradeDate: getTimestampDate(t.tradeDate)?.toISOString() || new Date().toISOString(),
         fees: t.fees || 0,
-        notes: t.notes || ''
+        notes: t.notes || '',
+        ...(t.isOptionTrade ? {
+          isOptionTrade: true,
+          optionType: t.optionType,
+          positionSide: t.positionSide,
+          strikePrice: t.strikePrice,
+          dte: t.dte,
+          entryOptionPrice: t.entryOptionPrice,
+          entryStockPrice: t.entryStockPrice,
+          targetStockPrice: t.targetStockPrice,
+          contractAmount: t.contractAmount,
+          totalHoldingCost: t.totalHoldingCost,
+          contractsCount: t.contractsCount,
+          contractMultiplier: t.contractMultiplier,
+          delta: t.delta,
+          theta: t.theta,
+          gamma: t.gamma,
+          vega: t.vega,
+          ivPercent: t.ivPercent,
+          interestRate: t.interestRate,
+          purchaseDate: t.purchaseDate,
+          manualCurrentOptionPrice: t.manualCurrentOptionPrice,
+        } : {})
       }));
 
       const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(
@@ -1983,7 +2213,7 @@ export default function StockTabDetail() {
             dateVal = new Date();
           }
 
-          batch.set(newDocRef, {
+          const payload: any = {
             type: item.type as 'BUY' | 'SELL',
             purpose: (item.purpose || '加碼') as '加碼' | '平倉',
             batch: item.batch || '',
@@ -1994,7 +2224,32 @@ export default function StockTabDetail() {
             fees: Number(item.fees) || 0,
             notes: item.notes || '',
             createdAt: serverTimestamp()
-          });
+          };
+
+          if (item.isOptionTrade) {
+            payload.isOptionTrade = true;
+            if (item.optionType) payload.optionType = item.optionType;
+            if (item.positionSide) payload.positionSide = item.positionSide;
+            if (item.strikePrice !== undefined) payload.strikePrice = Number(item.strikePrice);
+            if (item.dte !== undefined) payload.dte = Number(item.dte);
+            if (item.entryOptionPrice !== undefined) payload.entryOptionPrice = Number(item.entryOptionPrice);
+            if (item.entryStockPrice !== undefined) payload.entryStockPrice = Number(item.entryStockPrice);
+            if (item.targetStockPrice !== undefined) payload.targetStockPrice = Number(item.targetStockPrice);
+            if (item.contractAmount !== undefined) payload.contractAmount = Number(item.contractAmount);
+            if (item.totalHoldingCost !== undefined) payload.totalHoldingCost = Number(item.totalHoldingCost);
+            if (item.contractsCount !== undefined) payload.contractsCount = Number(item.contractsCount);
+            if (item.contractMultiplier !== undefined) payload.contractMultiplier = Number(item.contractMultiplier);
+            if (item.delta !== undefined) payload.delta = Number(item.delta);
+            if (item.theta !== undefined) payload.theta = Number(item.theta);
+            if (item.gamma !== undefined) payload.gamma = Number(item.gamma);
+            if (item.vega !== undefined) payload.vega = Number(item.vega);
+            if (item.ivPercent !== undefined) payload.ivPercent = Number(item.ivPercent);
+            if (item.interestRate !== undefined) payload.interestRate = Number(item.interestRate);
+            if (item.purchaseDate) payload.purchaseDate = String(item.purchaseDate);
+            if (item.manualCurrentOptionPrice !== undefined) payload.manualCurrentOptionPrice = Number(item.manualCurrentOptionPrice);
+          }
+
+          batch.set(newDocRef, payload);
         });
 
         await batch.commit();
@@ -2199,423 +2454,448 @@ export default function StockTabDetail() {
         <span className="text-[12px] font-bold text-zinc-800">{tab.symbol}</span>
       </div>
       <ScrollIn>
-        <div className="glass-panel border border-zinc-200 bg-white/90 p-3 sm:py-2.5 sm:px-4 rounded-xl shadow-xs flex flex-col xl:flex-row xl:items-center justify-between gap-3 md:gap-4 overflow-visible relative">
-          <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-5 w-full xl:w-auto relative z-10">
-            <div className="w-full md:w-auto flex justify-between items-center">
-              <div className="flex items-baseline gap-2 flex-wrap">
+        <div className="space-y-2.5">
+          {/* 正上方 區塊: AI 評分矩陣與核心操作工具列 (Rating Matrix & Action Controls) */}
+          <div className="glass-panel border border-zinc-200/90 dark:border-zinc-800 bg-white/95 dark:bg-zinc-900/95 p-2.5 sm:px-4 sm:py-2 rounded-xl sm:rounded-2xl shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 lg:gap-4 overflow-visible relative">
+            
+            {/* 左側: AI 多維評分與多空動能模組 (評分, Quality, Value, Crash Sim, Buy Rate, Sell Rate, 波動性, POS/NEG VALUE) */}
+            <div className="flex items-center gap-1.5 sm:gap-2 flex-nowrap overflow-x-auto scrollbar-hide py-0.5 shrink-0">
+              {/* 核心 6 項分析評分 */}
+              <div className="flex items-center gap-1.5 shrink-0">
+                {/* 評分 */}
+                <div className="flex flex-col items-center gap-0.5">
+                  <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider leading-none">評分</span>
+                  <Select value={String(tab.rating || 5)} onValueChange={(val) => updateTab(tab.id, { rating: Number(val) })}>
+                    <SelectTrigger className="h-7 w-11 bg-white border border-zinc-200 text-zinc-800 font-extrabold text-xs ring-0 focus:ring-emerald-500/50 rounded-lg p-1 text-center justify-center shadow-2xs hover:border-zinc-300 transition-colors">
+                      <SelectValue placeholder="-" />
+                    </SelectTrigger>
+                    <SelectContent className="glass-panel border-zinc-200 text-zinc-800 bg-white min-w-[50px]">
+                      {[...Array(10)].map((_, i) => (
+                        <SelectItem key={i+1} value={String(i+1)} className="text-xs text-zinc-700 focus:bg-zinc-100">{i+1}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Quality */}
+                <div className="flex flex-col items-center gap-0.5">
+                  <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider leading-none">Quality</span>
+                  <Select value={String(tab.qualityScore || 5)} onValueChange={(val) => updateTab(tab.id, { qualityScore: Number(val) })}>
+                    <SelectTrigger className="h-7 w-11 bg-white border border-zinc-200 text-zinc-800 font-extrabold text-xs ring-0 focus:ring-purple-500/50 rounded-lg p-1 text-center justify-center shadow-2xs hover:border-zinc-300 transition-colors">
+                      <SelectValue placeholder="-" />
+                    </SelectTrigger>
+                    <SelectContent className="glass-panel border-zinc-200 text-zinc-800 bg-white min-w-[50px]">
+                      {[...Array(10)].map((_, i) => (
+                        <SelectItem key={i+1} value={String(i+1)} className="text-xs text-zinc-700 focus:bg-zinc-100">{i+1}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Value */}
+                <div className="flex flex-col items-center gap-0.5">
+                  <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider leading-none">Value</span>
+                  <Select value={String(tab.valueScore || 5)} onValueChange={(val) => updateTab(tab.id, { valueScore: Number(val) })}>
+                    <SelectTrigger className="h-7 w-11 bg-white border border-zinc-200 text-zinc-800 font-extrabold text-xs ring-0 focus:ring-amber-500/50 rounded-lg p-1 text-center justify-center shadow-2xs hover:border-zinc-300 transition-colors">
+                      <SelectValue placeholder="-" />
+                    </SelectTrigger>
+                    <SelectContent className="glass-panel border-zinc-200 text-zinc-800 bg-white min-w-[50px]">
+                      {[...Array(10)].map((_, i) => (
+                        <SelectItem key={i+1} value={String(i+1)} className="text-xs text-zinc-700 focus:bg-zinc-100">{i+1}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Crash Sim */}
+                <div className="flex flex-col items-center gap-0.5">
+                  <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider leading-none whitespace-nowrap">Crash Sim</span>
+                  <Select value={String(tab.crashSimilarity || 5)} onValueChange={(val) => updateTab(tab.id, { crashSimilarity: Number(val) })}>
+                    <SelectTrigger className="h-7 w-11 bg-white border border-zinc-200 text-zinc-800 font-extrabold text-xs ring-0 focus:ring-rose-500/50 rounded-lg p-1 text-center justify-center shadow-2xs hover:border-zinc-300 transition-colors">
+                      <SelectValue placeholder="-" />
+                    </SelectTrigger>
+                    <SelectContent className="glass-panel border-zinc-200 text-zinc-800 bg-white min-w-[50px]">
+                      {[...Array(10)].map((_, i) => (
+                        <SelectItem key={i+1} value={String(i+1)} className="text-xs text-zinc-700 focus:bg-zinc-100">{i+1}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Buy Rate */}
+                <div className="flex flex-col items-center gap-0.5">
+                  <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider leading-none whitespace-nowrap">Buy Rate</span>
+                  <Select value={String(tab.buyRate || 5)} onValueChange={(val) => updateTab(tab.id, { buyRate: Number(val) })}>
+                    <SelectTrigger className="h-7 w-11 bg-white border border-zinc-200 text-zinc-800 font-extrabold text-xs ring-0 focus:ring-emerald-500/50 rounded-lg p-1 text-center justify-center shadow-2xs hover:border-zinc-300 transition-colors">
+                      <SelectValue placeholder="-" />
+                    </SelectTrigger>
+                    <SelectContent className="glass-panel border-zinc-200 text-zinc-800 bg-white min-w-[50px]">
+                      {[...Array(10)].map((_, i) => (
+                        <SelectItem key={i+1} value={String(i+1)} className="text-xs text-zinc-700 focus:bg-zinc-100">{i+1}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Sell Rate */}
+                <div className="flex flex-col items-center gap-0.5">
+                  <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider leading-none whitespace-nowrap">Sell Rate</span>
+                  <Select value={String(tab.sellRate || 5)} onValueChange={(val) => updateTab(tab.id, { sellRate: Number(val) })}>
+                    <SelectTrigger className="h-7 w-11 bg-white border border-zinc-200 text-zinc-800 font-extrabold text-xs ring-0 focus:ring-red-500/50 rounded-lg p-1 text-center justify-center shadow-2xs hover:border-zinc-300 transition-colors">
+                      <SelectValue placeholder="-" />
+                    </SelectTrigger>
+                    <SelectContent className="glass-panel border-zinc-200 text-zinc-800 bg-white min-w-[50px]">
+                      {[...Array(10)].map((_, i) => (
+                        <SelectItem key={i+1} value={String(i+1)} className="text-xs text-zinc-700 focus:bg-zinc-100">{i+1}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* Micro divider */}
+              <div className="h-6 w-px bg-zinc-200/80 dark:bg-zinc-700 shrink-0 mx-0.5" />
+
+              {/* 波動性與多空力道加總 */}
+              <div className="flex items-center gap-1.5 shrink-0">
+                {/* 波動性 */}
+                <div className="flex flex-col items-center gap-0.5">
+                  <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider leading-none">波動性</span>
+                  <Select value={tab.volatility || '中等'} onValueChange={(val: any) => updateTab(tab.id, { volatility: val })}>
+                    <SelectTrigger className="h-7 min-w-[66px] px-2 bg-white border border-zinc-200 text-zinc-800 font-bold text-xs ring-0 focus:ring-emerald-500/50 rounded-lg shadow-2xs hover:border-zinc-300 transition-colors">
+                      <SelectValue placeholder="-" />
+                    </SelectTrigger>
+                    <SelectContent className="glass-panel border-zinc-200 text-zinc-800 bg-white">
+                      <SelectItem value="低" className="text-xs text-blue-600 focus:bg-zinc-100 font-medium">低</SelectItem>
+                      <SelectItem value="中等" className="text-xs text-amber-600 focus:bg-zinc-100 font-medium">中等</SelectItem>
+                      <SelectItem value="高" className="text-xs text-rose-600 focus:bg-zinc-100 font-medium">高</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Pos Value */}
+                <div className="flex flex-col items-center gap-0.5" title="Positive Score (多頭力道加總)">
+                  <span className="text-[9px] font-bold text-emerald-700 uppercase tracking-wider leading-none">POS VALUE</span>
+                  <div className="h-7 min-w-[36px] px-2 bg-emerald-50 border border-emerald-500/25 text-emerald-700 font-black font-mono text-xs rounded-lg flex items-center justify-center tabular-nums shadow-2xs">
+                    {Math.max(0, Number(tab.rating||5) - 5) + Math.max(0, Number(tab.qualityScore||5) - 5) + Math.max(0, Number(tab.valueScore||5) - 5) + Number(tab.buyRate||5)}
+                  </div>
+                </div>
+
+                {/* Neg Value */}
+                <div className="flex flex-col items-center gap-0.5" title="Negative Score (空頭力道加總)">
+                  <span className="text-[9px] font-bold text-rose-600 uppercase tracking-wider leading-none">NEG VALUE</span>
+                  <div className="h-7 min-w-[36px] px-2 bg-rose-50 border border-rose-500/25 text-rose-600 font-black font-mono text-xs rounded-lg flex items-center justify-center tabular-nums shadow-2xs">
+                    {Math.max(0, 5 - Number(tab.rating||5)) + Math.max(0, 5 - Number(tab.qualityScore||5)) + Math.max(0, 5 - Number(tab.valueScore||5)) + Number(tab.sellRate||5)}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 右側: 匯出 JSON、匯入 JSON 及操作按鈕群 */}
+            <div className="flex items-center gap-2 shrink-0 overflow-x-auto scrollbar-hide py-0.5">
+              <input
+                type="file"
+                accept=".json"
+                className="hidden"
+                ref={fileInputRef}
+                onChange={handleJsonUpload}
+              />
+              <button 
+                type="button"
+                onClick={handleExportRatingJson}
+                title="匯出此個股評分與設定 JSON"
+                className="h-7 sm:h-8 px-2.5 sm:px-3 rounded-lg flex items-center gap-1.5 border border-zinc-200 hover:border-zinc-300 bg-white hover:bg-zinc-50 text-zinc-700 hover:text-zinc-900 transition-all text-xs font-semibold whitespace-nowrap shadow-2xs cursor-pointer group shrink-0"
+              >
+                <Download className="w-3.5 h-3.5 group-hover:-translate-y-0.5 transition-transform text-zinc-500" />
+                <span>匯出 JSON</span>
+              </button>
+              <button 
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                title="匯入個股評分與設定 JSON"
+                className="h-7 sm:h-8 px-2.5 sm:px-3 rounded-lg flex items-center gap-1.5 border border-zinc-200 hover:border-zinc-300 bg-white hover:bg-zinc-50 text-zinc-700 hover:text-zinc-900 transition-all text-xs font-semibold whitespace-nowrap shadow-2xs cursor-pointer group shrink-0"
+              >
+                <Upload className="w-3.5 h-3.5 group-hover:-translate-y-0.5 transition-transform text-zinc-500" />
+                <span>匯入 JSON</span>
+              </button>
+
+              {/* 交易模式切換器 (simulated / real) */}
+              <Select value={tab.tradeType} onValueChange={(val: any) => updateTradeType(tab.id, val)}>
+                <SelectTrigger className="h-7 sm:h-8 px-2.5 bg-white border border-zinc-200 text-zinc-800 text-xs font-bold focus:ring-emerald-500/50 rounded-lg shadow-2xs hover:border-zinc-300 transition-colors shrink-0">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="glass-panel border-zinc-200 text-zinc-800 bg-white min-w-[110px]">
+                  <SelectItem value="simulated" className="text-xs font-semibold focus:bg-zinc-100">
+                    <div className="flex items-center gap-1.5">
+                      <Gamepad2 className="h-3.5 w-3.5 text-amber-600" />
+                      <span>simulated</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="real" className="text-xs font-semibold focus:bg-zinc-100">
+                    <div className="flex items-center gap-1.5">
+                      <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
+                      <span>real</span>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+
+              {/* 完成交易 Dialog 按鈕 */}
+              {tab.status === 'ACTIVE' ? (
+                <Dialog open={isCompleteOpen} onOpenChange={setIsCompleteOpen}>
+                  <DialogTrigger 
+                    render={
+                      <button className="h-7 sm:h-8 bg-sky-50 text-sky-700 border border-sky-200/90 hover:bg-sky-100 px-3 text-xs font-black rounded-lg whitespace-nowrap transition-colors flex items-center justify-center shrink-0 shadow-2xs cursor-pointer">
+                        完成交易
+                      </button>
+                    } 
+                  />
+                  <DialogContent className="glass-panel border-zinc-250 shadow-2xl bg-white text-zinc-800 w-[92vw] sm:max-w-md max-h-[90vh] overflow-y-auto p-5 sm:p-6 rounded-2xl sm:rounded-3xl">
+                    <DialogHeader className="mb-1">
+                      <DialogTitle className="font-extrabold text-xl text-zinc-900 flex items-center gap-2">
+                        <span className="text-xl">🏆</span>
+                        <span>結束交易並記錄最終損益</span>
+                      </DialogTitle>
+                    </DialogHeader>
+                    <form onSubmit={(e) => e.preventDefault()} className="space-y-5 pt-1">
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-zinc-700 font-bold text-xs">最終獲利或虧損金額 ($)</Label>
+                          {stats && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const calcPnL = (stats.realizedPnL + stats.unrealizedPnL);
+                                setFinalPnLInput(calcPnL.toFixed(2));
+                              }}
+                              className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer"
+                            >
+                              自動填入預估損益 (${(stats.realizedPnL + stats.unrealizedPnL).toFixed(2)})
+                            </button>
+                          )}
+                        </div>
+                        <Input 
+                          type="number" 
+                          step="0.01"
+                          value={finalPnLInput}
+                          onChange={e => setFinalPnLInput(e.target.value)}
+                          placeholder="例如：500 或 -200"
+                          className="bg-zinc-50/80 border-zinc-200 text-zinc-900 placeholder-zinc-400 focus-visible:ring-emerald-500/50 font-mono font-black text-sm h-11 rounded-xl"
+                          required 
+                        />
+                      </div>
+
+                      <div className="space-y-2 pt-2">
+                        <button
+                          type="button"
+                          onClick={handleCompleteAndClose}
+                          disabled={isSubmittingComplete}
+                          className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-extrabold text-xs sm:text-sm rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 shadow-md shadow-emerald-600/20 disabled:opacity-50"
+                        >
+                          {isSubmittingComplete ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="w-4 h-4 shrink-0" />
+                          )}
+                          <span>1. 輸入金額並關掉交易結算 (移至已完成)</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={handleCompleteAndContinue}
+                          disabled={isSubmittingComplete}
+                          className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] text-white font-extrabold text-xs sm:text-sm rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 shadow-md shadow-indigo-600/20 disabled:opacity-50"
+                        >
+                          {isSubmittingComplete ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <RotateCcw className="w-4 h-4 shrink-0" />
+                          )}
+                          <span>2. 輸入金額做交易結算並繼續交易 (保留卡片)</span>
+                        </button>
+                      </div>
+                    </form>
+                  </DialogContent>
+                </Dialog>
+              ) : (
+                <button onClick={handleReactivate} className="h-7 sm:h-8 bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 px-3 sm:px-4 text-[11px] sm:text-xs font-bold rounded-lg whitespace-nowrap transition-all flex items-center justify-center shrink-0">
+                  重新啟用
+                </button>
+              )}
+
+              <button 
+                onClick={handleDelete}
+                className="h-7 sm:h-8 w-7 sm:w-8 flex items-center justify-center rounded-lg text-zinc-400 hover:text-red-650 hover:bg-red-50 border border-zinc-200 hover:border-red-200 transition-all shrink-0 shadow-2xs"
+                title="刪除"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* 下方 區塊: 個股識別與行情成本看板 (Symbol, Price, Average Cost, Shares, Option Portfolio) */}
+          <div className="glass-panel border border-zinc-200/90 dark:border-zinc-800 bg-white/95 dark:bg-zinc-900/95 p-3 sm:py-2.5 sm:px-4 rounded-xl sm:rounded-2xl shadow-xs flex flex-wrap items-center justify-between gap-3.5 sm:gap-5 overflow-visible relative">
+            
+            {/* Zone 1: 個股識別與行情成本 (股票代號、公司名稱、即時現價、平均成本、持股數、期權金額與當前損益) */}
+            <div className="flex flex-wrap items-center gap-3.5 sm:gap-4 shrink-0">
+            {/* Symbol & Company Name */}
+            <div className="flex flex-col min-w-0">
+              <div className="flex items-center gap-2">
                 <motion.h1 
                   layoutId="tab-title"
                   className="stock-symbol-title ps5-fluorescent-title text-2xl sm:text-2xl font-black tracking-tight text-black font-mono leading-none transition-all"
                 >
                   {tab.symbol}
                 </motion.h1>
-                {tab.companyName && (
-                  <span className="text-zinc-500 text-xs font-semibold tracking-wider truncate max-w-[180px] sm:max-w-[280px]">
-                    {tab.companyName}
-                  </span>
-                )}
                 {tab.status === 'COMPLETED' && (
-                  <Badge variant="outline" className="bg-blue-500/10 text-blue-700 border-blue-500/20 font-bold text-[10px] px-2 py-0 rounded-full">COMPLETED</Badge>
+                  <Badge variant="outline" className="bg-blue-500/10 text-blue-700 border-blue-500/20 font-bold text-[10px] px-2 py-0 rounded-full">
+                    COMPLETED
+                  </Badge>
                 )}
               </div>
-
-              {/* Mobile Only: Current Price, Avg Cost & Total Shares */}
-              <div className="flex sm:hidden flex-row gap-3.5 shrink-0 text-right mt-0.5">
-                {isEditingPrice ? (
-                  <div className="flex flex-col items-end">
-                    <span className="text-[9px] font-semibold text-zinc-400 uppercase tracking-widest leading-tight">現在價格</span>
-                    <Input
-                      type="number"
-                      step="any"
-                      autoFocus
-                      className="h-6 w-20 text-xs font-bold text-zinc-800 bg-white border-emerald-500 p-1 mt-0.5 text-right"
-                      value={tempPrice}
-                      onChange={(e) => setTempPrice(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          const val = parseFloat(tempPrice);
-                          if (!isNaN(val) && val >= 0) {
-                            updateCurrentPrice(tab.id, val);
-                          }
-                          setIsEditingPrice(false);
-                        } else if (e.key === 'Escape') {
-                          setIsEditingPrice(false);
-                        }
-                      }}
-                      onBlur={() => {
-                        const val = parseFloat(tempPrice);
-                        if (!isNaN(val) && val >= 0) {
-                          updateCurrentPrice(tab.id, val);
-                        }
-                        setIsEditingPrice(false);
-                      }}
-                    />
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-1">
-                    <div 
-                      className="flex flex-col cursor-pointer text-right"
-                      onClick={() => {
-                        setTempPrice(tab.currentPrice?.toString() || '');
-                        setIsEditingPrice(true);
-                      }}
-                    >
-                      <span className="text-[9px] font-semibold text-zinc-400 uppercase tracking-widest leading-tight">現在價格</span>
-                      <span className="text-base font-bold text-emerald-700 tracking-tight leading-none mt-0.5">${(tab.currentPrice || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleFetchLivePrice}
-                      disabled={isFetchingPrice}
-                      title="抓取最新即時現價"
-                      className="p-1 text-zinc-400 hover:text-emerald-600 hover:bg-emerald-50 rounded transition-colors disabled:opacity-50 mt-2"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${isFetchingPrice ? 'animate-spin text-emerald-600' : ''}`} />
-                    </button>
-                  </div>
-                )}
-                <div className="flex flex-col">
-                  <span className="text-[9px] font-semibold text-zinc-400 uppercase tracking-widest leading-tight">Avg Cost</span>
-                  <span className="text-base font-bold text-zinc-800 tracking-tight leading-none mt-0.5">${stats.averagePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-[9px] font-semibold text-zinc-400 uppercase tracking-widest leading-tight">Total Shares</span>
-                  <span className="text-base font-bold text-zinc-800 tracking-tight leading-none mt-0.5">{stats.totalQuantity} <span className="text-[10px] text-zinc-500 font-normal ml-0.5">股</span></span>
-                </div>
-              </div>
+              {tab.companyName && (
+                <span className="text-zinc-500 text-xs font-semibold tracking-wider truncate max-w-[170px] sm:max-w-[220px]" title={tab.companyName}>
+                  {tab.companyName}
+                </span>
+              )}
             </div>
 
-            <div className="h-8 w-px bg-zinc-200 hidden md:block" />
+            {/* Hairline Divider */}
+            <div className="h-7 w-px bg-zinc-200/80 hidden sm:block shrink-0" />
 
-            <div className="flex flex-col md:flex-row md:items-center gap-5 sm:gap-4 lg:gap-5 w-full md:w-auto mt-2 md:mt-0">
-              <div className="hidden sm:flex flex-row gap-6 sm:gap-4 shrink-0 items-center">
-                {isEditingPrice ? (
-                  <div className="flex flex-col">
-                    <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-widest leading-tight">現在價格</span>
-                    <Input
-                      type="number"
-                      step="any"
-                      autoFocus
-                      className="h-6 w-20 text-xs font-bold text-zinc-800 bg-white border-emerald-500 p-1 mt-0.5"
-                      value={tempPrice}
-                      onChange={(e) => setTempPrice(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          const val = parseFloat(tempPrice);
-                          if (!isNaN(val) && val >= 0) {
-                            updateCurrentPrice(tab.id, val);
-                          }
-                          setIsEditingPrice(false);
-                        } else if (e.key === 'Escape') {
-                          setIsEditingPrice(false);
-                        }
-                      }}
-                      onBlur={() => {
+            {/* Price & Position Metrics Row */}
+            <div className="flex items-center gap-3 sm:gap-4 flex-wrap">
+              {/* 現在價格 (可點擊修改，支援即時抓取更新) */}
+              {isEditingPrice ? (
+                <div className="flex flex-col">
+                  <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest leading-tight">現在價格</span>
+                  <Input
+                    type="number"
+                    step="any"
+                    autoFocus
+                    className="h-6 w-20 text-xs font-bold text-zinc-800 bg-white border-emerald-500 p-1 mt-0.5"
+                    value={tempPrice}
+                    onChange={(e) => setTempPrice(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
                         const val = parseFloat(tempPrice);
                         if (!isNaN(val) && val >= 0) {
                           updateCurrentPrice(tab.id, val);
                         }
                         setIsEditingPrice(false);
-                      }}
-                    />
+                      } else if (e.key === 'Escape') {
+                        setIsEditingPrice(false);
+                      }
+                    }}
+                    onBlur={() => {
+                      const val = parseFloat(tempPrice);
+                      if (!isNaN(val) && val >= 0) {
+                        updateCurrentPrice(tab.id, val);
+                      }
+                      setIsEditingPrice(false);
+                    }}
+                  />
+                </div>
+              ) : (
+                <div className="flex items-center gap-1">
+                  <div 
+                    className="flex flex-col group cursor-pointer"
+                    onClick={() => {
+                      setTempPrice(tab.currentPrice?.toString() || '');
+                      setIsEditingPrice(true);
+                    }}
+                    title="點擊手動修改現在價格"
+                  >
+                    <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest leading-tight flex items-center gap-1">
+                      現在價格 <span className="opacity-0 group-hover:opacity-100 text-[8px] text-emerald-600 transition-opacity">✏️</span>
+                    </span>
+                    <span className="text-base sm:text-lg font-black text-emerald-700 tracking-tight leading-none mt-0.5 tabular-nums">
+                      ${(tab.currentPrice || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
                   </div>
-                ) : (
-                  <div className="flex items-center gap-1.5">
-                    <div 
-                      className="flex flex-col group cursor-pointer"
-                      onClick={() => {
-                        setTempPrice(tab.currentPrice?.toString() || '');
-                        setIsEditingPrice(true);
-                      }}
-                      title="點擊修改現在價格"
-                    >
-                      <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-widest leading-tight flex items-center gap-1">
-                        現在價格 <span className="opacity-0 group-hover:opacity-100 text-[9px] text-emerald-600 transition-opacity">✏️</span>
+                  <button
+                    type="button"
+                    onClick={handleFetchLivePrice}
+                    disabled={isFetchingPrice}
+                    title="抓取最新即時現價"
+                    className="p-1 text-zinc-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-md transition-colors disabled:opacity-50 mt-1 cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isFetchingPrice ? 'animate-spin text-emerald-600' : ''}`} />
+                  </button>
+                </div>
+              )}
+
+              {/* Avg Cost */}
+              <div className="flex flex-col">
+                <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest leading-tight">AVG COST</span>
+                <span className="text-base sm:text-lg font-black text-zinc-800 tracking-tight leading-none mt-0.5 tabular-nums">
+                  ${stats.averagePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+
+              {/* Total Shares */}
+              <div className="flex flex-col">
+                <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest leading-tight">TOTAL SHARES</span>
+                <span className="text-base sm:text-lg font-black text-zinc-800 tracking-tight leading-none mt-0.5 tabular-nums">
+                  {stats.totalQuantity} <span className="text-[10px] text-zinc-400 font-normal">股</span>
+                </span>
+              </div>
+
+              {/* 期權合約與當前損益 (如有期權紀錄) */}
+              {optionPortfolio.hasOptionRecords && (
+                <>
+                  <div
+                    className="flex flex-col cursor-pointer group/opt"
+                    onClick={() => {
+                      setActiveTab('trades');
+                      setChipsSubTab('calc');
+                      setCalcComparisonTab('options');
+                    }}
+                    title="點擊查看期權計算器與期權交易紀錄"
+                  >
+                    <span className="text-[9px] font-bold text-emerald-700 uppercase tracking-widest leading-tight">
+                      期權合約金額
+                    </span>
+                    <span className="text-base sm:text-lg font-black font-mono text-emerald-800 tracking-tight leading-none mt-0.5 tabular-nums">
+                      ${optionPortfolio.totalHoldingCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      <span className="text-[10px] font-bold text-emerald-600 ml-1">
+                        ({optionPortfolio.totalContracts}張)
                       </span>
-                      <span className="text-lg font-bold text-emerald-700 tracking-tight leading-none mt-0.5">${(tab.currentPrice || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleFetchLivePrice}
-                      disabled={isFetchingPrice}
-                      title="抓取最新即時現價"
-                      className="p-1.5 text-zinc-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors disabled:opacity-50 mt-1"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${isFetchingPrice ? 'animate-spin text-emerald-600' : ''}`} />
-                    </button>
+                    </span>
                   </div>
-                )}
-                <div className="flex flex-col">
-                  <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-widest leading-tight">Avg Cost</span>
-                  <span className="text-lg font-bold text-zinc-800 tracking-tight leading-none mt-0.5">${stats.averagePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-widest leading-tight">Total Shares</span>
-                  <span className="text-lg font-bold text-zinc-800 tracking-tight leading-none mt-0.5">{stats.totalQuantity} <span className="text-[10px] text-zinc-400 font-normal ml-0.5">股</span></span>
-                </div>
-              </div>
-              <div className="h-6 w-px bg-zinc-200 hidden md:block shrink-0" />
-              <div className="grid grid-cols-3 sm:flex sm:flex-wrap sm:items-center gap-x-2 gap-y-2.5 sm:gap-x-2 sm:gap-y-1.5 w-full sm:w-auto">
-              <div className="flex flex-col gap-0.5">
-                <span className="text-[9px] font-semibold text-zinc-500 uppercase tracking-widest pl-0.5 text-center sm:text-left">評分</span>
-                <Select value={String(tab.rating || 5)} onValueChange={(val) => updateTab(tab.id, { rating: Number(val) })}>
-                  <SelectTrigger className="h-8 sm:h-6 w-full sm:w-11 bg-white border border-zinc-200 text-zinc-800 font-bold text-[12px] sm:text-[11px] ring-0 focus:ring-emerald-500/55 rounded p-1 mx-auto sm:mx-0">
-                    <SelectValue placeholder="-" />
-                  </SelectTrigger>
-                  <SelectContent className="glass-panel border-zinc-200 text-zinc-800 bg-white min-w-[50px]">
-                    {[...Array(10)].map((_, i) => (
-                      <SelectItem key={i+1} value={String(i+1)} className="text-xs text-zinc-700 focus:bg-zinc-100">{i+1}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="flex flex-col gap-0.5">
-                <span className="text-[9px] font-semibold text-zinc-500 uppercase tracking-widest pl-0.5 text-center sm:text-left">Quality</span>
-                <Select value={String(tab.qualityScore || 5)} onValueChange={(val) => updateTab(tab.id, { qualityScore: Number(val) })}>
-                  <SelectTrigger className="h-8 sm:h-6 w-full sm:w-11 bg-white border-zinc-200 text-zinc-800 font-bold text-[12px] sm:text-[11px] ring-0 focus:ring-purple-500/50 rounded p-1 mx-auto sm:mx-0">
-                    <SelectValue placeholder="-" />
-                  </SelectTrigger>
-                  <SelectContent className="glass-panel border-zinc-200 text-zinc-800 bg-white min-w-[50px]">
-                    {[...Array(10)].map((_, i) => (
-                      <SelectItem key={i+1} value={String(i+1)} className="text-xs text-zinc-700 focus:bg-zinc-100">{i+1}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="flex flex-col gap-0.5">
-                <span className="text-[9px] font-semibold text-zinc-500 uppercase tracking-widest pl-0.5 text-center sm:text-left">Value</span>
-                <Select value={String(tab.valueScore || 5)} onValueChange={(val) => updateTab(tab.id, { valueScore: Number(val) })}>
-                  <SelectTrigger className="h-8 sm:h-6 w-full sm:w-11 bg-white border border-zinc-200 text-zinc-800 font-bold text-[12px] sm:text-[11px] ring-0 focus:ring-amber-500/50 rounded p-1 mx-auto sm:mx-0">
-                    <SelectValue placeholder="-" />
-                  </SelectTrigger>
-                  <SelectContent className="glass-panel border-zinc-200 text-zinc-800 bg-white min-w-[50px]">
-                    {[...Array(10)].map((_, i) => (
-                      <SelectItem key={i+1} value={String(i+1)} className="text-xs text-zinc-700 focus:bg-zinc-100">{i+1}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="flex flex-col gap-0.5">
-                <span className="text-[9px] font-semibold text-zinc-500 uppercase tracking-widest pl-0.5 whitespace-nowrap text-center sm:text-left">Crash Sim</span>
-                <Select value={String(tab.crashSimilarity || 5)} onValueChange={(val) => updateTab(tab.id, { crashSimilarity: Number(val) })}>
-                  <SelectTrigger className="h-8 sm:h-6 w-full sm:w-11 bg-white border-zinc-200 text-zinc-800 font-bold text-[12px] sm:text-[11px] ring-0 focus:ring-rose-500/50 rounded p-1 mx-auto sm:mx-0">
-                    <SelectValue placeholder="-" />
-                  </SelectTrigger>
-                  <SelectContent className="glass-panel border-zinc-200 text-zinc-800 bg-white min-w-[50px]">
-                    {[...Array(10)].map((_, i) => (
-                      <SelectItem key={i+1} value={String(i+1)} className="text-xs text-zinc-700 focus:bg-zinc-100">{i+1}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="flex flex-col gap-0.5">
-                <span className="text-[9px] font-semibold text-zinc-500 uppercase tracking-widest pl-0.5 text-center sm:text-left">Buy Rate</span>
-                <Select value={String(tab.buyRate || 5)} onValueChange={(val) => updateTab(tab.id, { buyRate: Number(val) })}>
-                  <SelectTrigger className="h-8 sm:h-6 w-full sm:w-11 bg-white border-zinc-200 text-zinc-800 font-bold text-[12px] sm:text-[11px] ring-0 focus:ring-emerald-500/50 rounded p-1 mx-auto sm:mx-0">
-                    <SelectValue placeholder="-" />
-                  </SelectTrigger>
-                  <SelectContent className="glass-panel border-zinc-200 text-zinc-800 bg-white min-w-[50px]">
-                    {[...Array(10)].map((_, i) => (
-                      <SelectItem key={i+1} value={String(i+1)} className="text-xs text-zinc-700 focus:bg-zinc-100">{i+1}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="flex flex-col gap-0.5">
-                <span className="text-[9px] font-semibold text-zinc-500 uppercase tracking-widest pl-0.5 text-center sm:text-left">Sell Rate</span>
-                <Select value={String(tab.sellRate || 5)} onValueChange={(val) => updateTab(tab.id, { sellRate: Number(val) })}>
-                  <SelectTrigger className="h-8 sm:h-6 w-full sm:w-11 bg-white border-zinc-200 text-zinc-800 font-bold text-[12px] sm:text-[11px] ring-0 focus:ring-red-500/50 rounded p-1 mx-auto sm:mx-0">
-                    <SelectValue placeholder="-" />
-                  </SelectTrigger>
-                  <SelectContent className="glass-panel border-zinc-200 text-zinc-800 bg-white min-w-[50px]">
-                    {[...Array(10)].map((_, i) => (
-                      <SelectItem key={i+1} value={String(i+1)} className="text-xs text-zinc-700 focus:bg-zinc-100">{i+1}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="flex flex-col gap-0.5">
-                <span className="text-[9px] font-semibold text-zinc-500 uppercase tracking-widest pl-0.5 text-center sm:text-left">波動性</span>
-                <Select value={tab.volatility || '中等'} onValueChange={(val: any) => updateTab(tab.id, { volatility: val })}>
-                  <SelectTrigger className="h-8 sm:h-6 w-full sm:w-12 bg-white border-zinc-200 text-zinc-800 font-bold text-[12px] sm:text-[10px] ring-0 focus:ring-emerald-500/50 rounded p-1 mx-auto sm:mx-0">
-                    <SelectValue placeholder="-" />
-                  </SelectTrigger>
-                  <SelectContent className="glass-panel border-zinc-200 text-zinc-800 bg-white">
-                    <SelectItem value="低" className="text-xs text-blue-600 focus:bg-zinc-100">低</SelectItem>
-                    <SelectItem value="中等" className="text-xs text-amber-600 focus:bg-zinc-100">中等</SelectItem>
-                    <SelectItem value="高" className="text-xs text-rose-600 focus:bg-zinc-100">高</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="flex flex-col gap-0.5 ml-0 sm:ml-1">
-                <span className="text-[9px] font-bold text-emerald-650 uppercase tracking-widest text-center">Pos Value</span>
-                <div className="h-8 sm:h-6 w-full sm:w-11 bg-emerald-50 border border-emerald-500/20 text-emerald-700 font-bold text-[12px] sm:text-[11px] rounded flex items-center justify-center mx-auto sm:mx-0">
-                  {Math.max(0, Number(tab.rating||5) - 5) + Math.max(0, Number(tab.qualityScore||5) - 5) + Math.max(0, Number(tab.valueScore||5) - 5) + Number(tab.buyRate||5)}
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-0.5">
-                <span className="text-[9px] font-bold text-rose-650 uppercase tracking-widest text-center">Neg Value</span>
-                <div className="h-8 sm:h-6 w-full sm:w-11 bg-rose-50 border border-red-500/20 text-red-500 font-bold text-[12px] sm:text-[11px] rounded flex items-center justify-center mx-auto sm:mx-0">
-                  {Math.max(0, 5 - Number(tab.rating||5)) + Math.max(0, 5 - Number(tab.qualityScore||5)) + Math.max(0, 5 - Number(tab.valueScore||5)) + Number(tab.sellRate||5)}
-                </div>
-              </div>
-
-
+                  <div
+                    className="flex flex-col cursor-pointer"
+                    onClick={() => {
+                      setActiveTab('trades');
+                      setChipsSubTab('trades');
+                    }}
+                    title="隨現在股價與購買日經過天數自動計算之期權當前損益"
+                  >
+                    <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest leading-tight">
+                      期權當前損益
+                    </span>
+                    <span
+                      className={`text-base sm:text-lg font-black font-mono tracking-tight leading-none mt-0.5 tabular-nums ${
+                        optionPortfolio.totalCurrentPnL >= 0 ? 'text-emerald-600' : 'text-rose-600'
+                      }`}
+                    >
+                      {optionPortfolio.totalCurrentPnL >= 0 ? '+' : '-'}$
+                      {Math.abs(optionPortfolio.totalCurrentPnL).toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2
+                      })}
+                    </span>
+                  </div>
+                </>
+              )}
             </div>
           </div>
+
+
+
         </div>
-
-        <div className="flex flex-row items-center justify-start sm:justify-start gap-1.5 sm:gap-3 w-full xl:w-auto relative z-20 pt-3 sm:pt-0 border-t border-zinc-100 xl:border-t-0 mt-3 sm:mt-1 xl:mt-0 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] py-1 sm:py-0">
-            <div className="flex flex-row items-center gap-1.5 shrink-0">
-                <input
-                  type="file"
-                  accept=".json"
-                  className="hidden"
-                  ref={fileInputRef}
-                  onChange={handleJsonUpload}
-                />
-                <button 
-                  onClick={handleExportRatingJson}
-                  className="h-8 px-3 rounded-full sm:rounded-lg flex items-center gap-1.5 border border-zinc-200 hover:border-zinc-300 bg-white hover:bg-zinc-50 text-zinc-700 hover:text-zinc-900 transition-all text-[11px] sm:text-xs tracking-wider font-semibold whitespace-nowrap group shrink-0 shadow-sm"
-                >
-                  <Download className="w-3.5 h-3.5 sm:w-3 sm:h-3 group-hover:-translate-y-0.5 transition-transform text-zinc-500" />
-                  <span className="hidden sm:inline">匯出 JSON</span>
-                  <span className="inline sm:hidden">匯出</span>
-                </button>
-                <button 
-                  onClick={() => fileInputRef.current?.click()}
-                  className="h-8 px-3 rounded-full sm:rounded-lg flex items-center gap-1.5 border border-zinc-200 hover:border-zinc-300 bg-white hover:bg-zinc-50 text-zinc-700 hover:text-zinc-900 transition-all text-[11px] sm:text-xs tracking-wider font-semibold whitespace-nowrap group shrink-0 shadow-sm"
-                >
-                  <Upload className="w-3.5 h-3.5 sm:w-3 sm:h-3 group-hover:-translate-y-0.5 transition-transform text-zinc-500" />
-                  <span className="hidden sm:inline">匯入 JSON</span>
-                  <span className="inline sm:hidden">匯入</span>
-                </button>
-            </div>
-
-            <div className="shrink-0">
-              <Select value={tab.tradeType} onValueChange={(val: any) => updateTradeType(tab.id, val)}>
-                <SelectTrigger className="h-8 px-2.5 sm:px-3 bg-white border border-zinc-200 text-zinc-800 text-[11px] font-medium focus:ring-emerald-500/50 rounded-full sm:rounded-lg shadow-sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="glass-panel border-zinc-200 text-zinc-800 bg-white min-w-[100px]">
-                  <SelectItem value="simulated" className="text-xs font-medium focus:bg-zinc-150">
-                    <div className="flex items-center gap-1.5">
-                      <Gamepad2 className="h-3 w-3 text-amber-650" />
-                      <span className="hidden sm:inline">模擬交易</span>
-                      <span className="inline sm:hidden">模擬</span>
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="real" className="text-xs font-medium focus:bg-zinc-150">
-                    <div className="flex items-center gap-1.5">
-                      <ShieldCheck className="h-3 w-3 text-emerald-650" />
-                      <span className="hidden sm:inline">真實交易</span>
-                      <span className="inline sm:hidden">真實</span>
-                    </div>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {tab.status === 'ACTIVE' ? (
-              <Dialog open={isCompleteOpen} onOpenChange={setIsCompleteOpen}>
-                <DialogTrigger 
-                  render={
-                    <button className="h-8 bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100 px-3 sm:px-4 text-[11px] sm:text-xs font-bold rounded-full sm:rounded-lg whitespace-nowrap transition-all flex items-center justify-center shrink-0">
-                      完成交易
-                    </button>
-                  } 
-                />
-                <DialogContent className="glass-panel border-zinc-250 shadow-2xl bg-white text-zinc-800 w-[92vw] sm:max-w-md max-h-[90vh] overflow-y-auto p-5 sm:p-6 rounded-2xl sm:rounded-3xl">
-                  <DialogHeader className="mb-1">
-                    <DialogTitle className="font-extrabold text-xl text-zinc-900 flex items-center gap-2">
-                      <span className="text-xl">🏆</span>
-                      <span>結束交易並記錄最終損益</span>
-                    </DialogTitle>
-                  </DialogHeader>
-                  <form onSubmit={(e) => e.preventDefault()} className="space-y-5 pt-1">
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <Label className="text-zinc-700 font-bold text-xs">最終獲利或虧損金額 ($)</Label>
-                        {stats && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const calcPnL = (stats.realizedPnL + stats.unrealizedPnL);
-                              setFinalPnLInput(calcPnL.toFixed(2));
-                            }}
-                            className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer"
-                          >
-                            自動填入預估損益 (${(stats.realizedPnL + stats.unrealizedPnL).toFixed(2)})
-                          </button>
-                        )}
-                      </div>
-                      <Input 
-                        type="number" 
-                        step="0.01"
-                        value={finalPnLInput}
-                        onChange={e => setFinalPnLInput(e.target.value)}
-                        placeholder="例如：500 或 -200"
-                        className="bg-zinc-50/80 border-zinc-200 text-zinc-900 placeholder-zinc-400 focus-visible:ring-emerald-500/50 font-mono font-black text-sm h-11 rounded-xl"
-                        required 
-                      />
-                    </div>
-
-                    <div className="flex flex-col gap-3 pt-3 border-t border-zinc-200">
-                      <button
-                        type="button"
-                        onClick={handleCompleteAndClose}
-                        disabled={isSubmittingComplete}
-                        className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-extrabold text-xs sm:text-sm rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 shadow-md shadow-emerald-600/20 disabled:opacity-50"
-                      >
-                        {isSubmittingComplete ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <CheckCircle2 className="w-4 h-4 shrink-0" />
-                        )}
-                        <span>1. 輸入金額並關掉交易結算 (移至已完成)</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={handleCompleteAndContinue}
-                        disabled={isSubmittingComplete}
-                        className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] text-white font-extrabold text-xs sm:text-sm rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 shadow-md shadow-indigo-600/20 disabled:opacity-50"
-                      >
-                        {isSubmittingComplete ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <RotateCcw className="w-4 h-4 shrink-0" />
-                        )}
-                        <span>2. 輸入金額做交易結算並繼續交易 (保留卡片)</span>
-                      </button>
-                    </div>
-                  </form>
-                </DialogContent>
-              </Dialog>
-            ) : (
-              <button onClick={handleReactivate} className="h-8 bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 px-3 sm:px-4 text-[11px] sm:text-xs font-bold rounded-full sm:rounded-lg whitespace-nowrap transition-all flex items-center justify-center shrink-0">
-                重新啟用
-              </button>
-            )}
-
-            <button 
-              onClick={handleDelete}
-              className="h-8 w-8 flex items-center justify-center rounded-full sm:rounded-lg text-zinc-400 hover:text-red-650 hover:bg-red-50 border border-zinc-200 hover:border-red-200 transition-all shrink-0 ml-auto sm:ml-0 shadow-sm"
-              title="刪除"
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-      </ScrollIn>
+      </div>
+    </ScrollIn>
 
       {/* Main Tabs Container */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
@@ -2809,15 +3089,31 @@ export default function StockTabDetail() {
                 className="overflow-hidden"
               >
                 <div className="pt-3 pb-1 border-t border-zinc-200/80 dark:border-zinc-800 mt-2">
-                  {/* 6 大核心指標卡片區 (精緻比例與卡片化視覺) */}
+                  {/* 6~7 大核心指標卡片區 (精緻比例與卡片化視覺，方案 B 獨立期權未實現損益卡片 ＋ 含期權 Toggle 開關) */}
                   {(() => {
-                    const totalHoldingCost = (stats?.averagePrice || 0) * (stats?.totalQuantity || 0);
-                    const unrealizedReturnPct = totalHoldingCost > 0 ? ((stats?.unrealizedPnL || 0) / totalHoldingCost) * 100 : 0;
-                    const buyTradesCount = trades.filter(t => t.type === 'BUY').length;
-                    const sellTradesCount = trades.filter(t => t.type === 'SELL').length;
-                    
+                    const stockHoldingCost = (stats?.averagePrice || 0) * (stats?.totalQuantity || 0);
+                    const optionHoldingCost = optionPortfolio.hasOptionRecords ? optionPortfolio.totalHoldingCost : 0;
+                    const totalHoldingCost = includeOptionsInPnL && optionPortfolio.hasOptionRecords
+                      ? stockHoldingCost + optionHoldingCost
+                      : stockHoldingCost;
+
+                    const stockUnrealizedPnL = stats?.unrealizedPnL || 0;
+                    const optionCurrentPnL = optionPortfolio.hasOptionRecords ? optionPortfolio.totalCurrentPnL : 0;
+                    const effectiveUnrealizedPnL = includeOptionsInPnL && optionPortfolio.hasOptionRecords
+                      ? stockUnrealizedPnL + optionCurrentPnL
+                      : stockUnrealizedPnL;
+
+                    const unrealizedReturnPct = totalHoldingCost > 0
+                      ? (effectiveUnrealizedPnL / totalHoldingCost) * 100
+                      : 0;
+
+                    const buyTradesCount = trades.filter((t) => t.type === 'BUY').length;
+                    const sellTradesCount = trades.filter((t) => t.type === 'SELL').length;
+
                     return (
-                      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2.5 sm:gap-3.5 pt-1">
+                      <div className={`grid grid-cols-2 sm:grid-cols-3 ${
+                        optionPortfolio.hasOptionRecords ? 'lg:grid-cols-4 xl:grid-cols-7' : 'xl:grid-cols-6'
+                      } gap-2.5 sm:gap-3.5 pt-1`}>
                         {/* 1. 持有數量 */}
                         <div className="flex flex-col justify-between bg-zinc-50/90 dark:bg-zinc-900/60 hover:bg-zinc-100/70 dark:hover:bg-zinc-850/70 border border-zinc-200/80 dark:border-zinc-800 p-3 sm:p-3.5 rounded-xl transition-all shadow-2xs group/card">
                           <div className="flex items-center justify-between gap-1 mb-1.5">
@@ -2863,7 +3159,9 @@ export default function StockTabDetail() {
                         {/* 3. 持有總成本 */}
                         <div className="flex flex-col justify-between bg-zinc-50/90 dark:bg-zinc-900/60 hover:bg-zinc-100/70 dark:hover:bg-zinc-850/70 border border-zinc-200/80 dark:border-zinc-800 p-3 sm:p-3.5 rounded-xl transition-all shadow-2xs group/card">
                           <div className="flex items-center justify-between gap-1 mb-1.5">
-                            <span className="text-[10px] sm:text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">持有總成本</span>
+                            <span className="text-[10px] sm:text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+                              {includeOptionsInPnL && optionPortfolio.hasOptionRecords ? '綜合總成本' : '持有總成本'}
+                            </span>
                             <div className="p-1 rounded-md bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
                               <Wallet className="h-3.5 w-3.5" />
                             </div>
@@ -2873,7 +3171,11 @@ export default function StockTabDetail() {
                               ${totalHoldingCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </div>
                             <div className="text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 mt-0.5 truncate">
-                              累計投入總資金
+                              {includeOptionsInPnL && optionPortfolio.hasOptionRecords ? (
+                                <span>現股 ${stockHoldingCost.toLocaleString(undefined, { maximumFractionDigits: 0 })} + 期權 ${optionHoldingCost.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                              ) : (
+                                '累計投入現股資金'
+                              )}
                             </div>
                           </div>
                         </div>
@@ -2896,21 +3198,53 @@ export default function StockTabDetail() {
                           </div>
                         </div>
 
-                        {/* 5. 未實現損益 / 最終損益 (核心重點卡) */}
+                        {/* 5. 未實現損益 / 最終損益 (核心重點卡，附「含期權」Toggle 開關) */}
                         <div className={`flex flex-col justify-between ${
-                          (tab?.status === 'COMPLETED' ? (tab.finalPnL || 0) : stats.unrealizedPnL) >= 0
+                          (tab?.status === 'COMPLETED' ? (tab.finalPnL || 0) : effectiveUnrealizedPnL) >= 0
                             ? 'bg-emerald-500/6 dark:bg-emerald-500/12 border-emerald-500/35 shadow-[0_2px_12px_rgba(16,185,129,0.08)]'
                             : 'bg-rose-500/6 dark:bg-rose-500/12 border-rose-500/35 shadow-[0_2px_12px_rgba(244,63,94,0.08)]'
                         } p-3 sm:p-3.5 rounded-xl transition-all border group/card`}>
-                          <div className="flex items-center justify-between gap-1 mb-1.5">
+                          <div className="flex items-center justify-between gap-1 mb-1.5 flex-wrap">
                             <span className="text-[10px] sm:text-[11px] font-black text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">
-                              {tab?.status === 'COMPLETED' ? '最終損益' : '未實現損益'}
+                              {tab?.status === 'COMPLETED'
+                                ? '最終損益'
+                                : includeOptionsInPnL && optionPortfolio.hasOptionRecords
+                                ? '綜合未實現損益'
+                                : '現股未實現損益'}
                             </span>
-                            {tab?.status !== 'COMPLETED' && tab?.currentPrice ? (
-                              <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-md bg-white/80 dark:bg-zinc-800 border border-zinc-200/80 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 shadow-2xs">
-                                現價 ${tab.currentPrice}
-                              </span>
-                            ) : null}
+                            <div className="flex items-center gap-1.5">
+                              {/* 方案 B 也提供「含期權」Toggle 開關 */}
+                              {optionPortfolio.hasOptionRecords && tab?.status !== 'COMPLETED' && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    playClickSound();
+                                    setIncludeOptionsInPnL((prev) => {
+                                      const next = !prev;
+                                      toast.info(next ? '未實現損益：已切換為「含期權綜合損益」' : '未實現損益：已切換為「純現股損益」', {
+                                        id: 'include-options-pnl-toggle',
+                                        duration: 1500,
+                                      });
+                                      return next;
+                                    });
+                                  }}
+                                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-bold transition-all cursor-pointer border select-none active:scale-95 ${
+                                    includeOptionsInPnL
+                                      ? 'bg-emerald-600 text-white border-emerald-500 shadow-2xs'
+                                      : 'bg-zinc-200/90 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border-zinc-300 dark:border-zinc-700 hover:bg-zinc-300'
+                                  }`}
+                                  title="切換未實現損益是否合併計入期權當前損益與合約成本"
+                                >
+                                  <span>含期權</span>
+                                  <span className={`w-1.5 h-1.5 rounded-full ${includeOptionsInPnL ? 'bg-white shadow-[0_0_4px_#fff]' : 'bg-zinc-400'}`} />
+                                </button>
+                              )}
+                              {tab?.status !== 'COMPLETED' && tab?.currentPrice ? (
+                                <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-md bg-white/80 dark:bg-zinc-800 border border-zinc-200/80 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 shadow-2xs">
+                                  現價 ${tab.currentPrice}
+                                </span>
+                              ) : null}
+                            </div>
                           </div>
                           <div>
                             {tab?.status === 'COMPLETED' ? (
@@ -2918,28 +3252,85 @@ export default function StockTabDetail() {
                                 {(tab.finalPnL || 0) >= 0 ? '+' : ''}${tab.finalPnL?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
                               </div>
                             ) : (
-                              <div className="flex items-baseline gap-1.5 flex-wrap">
-                                <span className={`text-lg sm:text-xl font-black font-mono tracking-tight ${stats.unrealizedPnL >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
-                                  {stats.unrealizedPnL >= 0 ? '+' : ''}${stats.unrealizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </span>
-                                {totalHoldingCost > 0 && (
-                                  <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-md ${
-                                    stats.unrealizedPnL >= 0 
-                                      ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300' 
-                                      : 'bg-rose-500/20 text-rose-700 dark:text-rose-300'
-                                  }`}>
-                                    {unrealizedReturnPct >= 0 ? '+' : ''}{unrealizedReturnPct.toFixed(2)}%
+                              <div>
+                                <div className="flex items-baseline gap-1.5 flex-wrap">
+                                  <span className={`text-lg sm:text-xl font-black font-mono tracking-tight ${effectiveUnrealizedPnL >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                                    {effectiveUnrealizedPnL >= 0 ? '+' : ''}${effectiveUnrealizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                   </span>
+                                  {totalHoldingCost > 0 && (
+                                    <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-md ${
+                                      effectiveUnrealizedPnL >= 0 
+                                        ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300' 
+                                        : 'bg-rose-500/20 text-rose-700 dark:text-rose-300'
+                                    }`}>
+                                      {unrealizedReturnPct >= 0 ? '+' : ''}{unrealizedReturnPct.toFixed(2)}%
+                                    </span>
+                                  )}
+                                </div>
+                                {includeOptionsInPnL && optionPortfolio.hasOptionRecords ? (
+                                  <div className="flex items-center gap-1 mt-1 text-[9px] font-mono font-bold flex-wrap">
+                                    <span className="px-1 py-0.2 rounded bg-zinc-200/70 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300">
+                                      現股: {stockUnrealizedPnL >= 0 ? '+' : ''}${stockUnrealizedPnL.toFixed(1)}
+                                    </span>
+                                    <span className={`px-1 py-0.2 rounded ${
+                                      optionCurrentPnL >= 0 
+                                        ? 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-200' 
+                                        : 'bg-rose-100 dark:bg-rose-950/80 text-rose-800 dark:text-rose-200'
+                                    }`}>
+                                      期權: {optionCurrentPnL >= 0 ? '+' : ''}${optionCurrentPnL.toFixed(1)}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <div className="text-[10px] font-semibold text-zinc-500 dark:text-zinc-400 mt-0.5 truncate">
+                                    現貨浮動部位即時試算
+                                  </div>
                                 )}
                               </div>
                             )}
-                            <div className="text-[10px] font-semibold text-zinc-500 dark:text-zinc-400 mt-0.5 truncate">
-                              {tab?.status === 'COMPLETED' ? '交易結束最終結果' : '浮動部位即時試算'}
-                            </div>
                           </div>
                         </div>
 
-                        {/* 6. 交易次數 */}
+                        {/* 6. 方案 B: 期權未實現損益 (獨立並列卡片) */}
+                        {optionPortfolio.hasOptionRecords && (
+                          <div className={`flex flex-col justify-between ${
+                            optionPortfolio.totalCurrentPnL >= 0
+                              ? 'bg-emerald-500/6 dark:bg-emerald-500/12 border-emerald-500/35 shadow-[0_2px_12px_rgba(16,185,129,0.08)]'
+                              : 'bg-rose-500/6 dark:bg-rose-500/12 border-rose-500/35 shadow-[0_2px_12px_rgba(244,63,94,0.08)]'
+                          } p-3 sm:p-3.5 rounded-xl transition-all border group/card`}>
+                            <div className="flex items-center justify-between gap-1 mb-1.5">
+                              <span className="text-[10px] sm:text-[11px] font-black text-emerald-900 dark:text-emerald-200 uppercase tracking-wider flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                期權未實現損益
+                              </span>
+                              <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-md bg-white/90 dark:bg-zinc-800 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 shadow-2xs">
+                                {optionPortfolio.totalContracts} 張
+                              </span>
+                            </div>
+                            <div>
+                              <div className="flex items-baseline gap-1.5 flex-wrap">
+                                <span className={`text-lg sm:text-xl font-black font-mono tracking-tight ${
+                                  optionPortfolio.totalCurrentPnL >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
+                                }`}>
+                                  {optionPortfolio.totalCurrentPnL >= 0 ? '+' : ''}${optionPortfolio.totalCurrentPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                                {optionPortfolio.totalHoldingCost > 0 && (
+                                  <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-md ${
+                                    optionPortfolio.totalCurrentPnL >= 0 
+                                      ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300' 
+                                      : 'bg-rose-500/20 text-rose-700 dark:text-rose-300'
+                                  }`}>
+                                    {optionPortfolio.totalRoiPct >= 0 ? '+' : ''}{optionPortfolio.totalRoiPct.toFixed(2)}%
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 mt-0.5 truncate">
+                                成本 ${optionPortfolio.totalHoldingCost.toLocaleString(undefined, { maximumFractionDigits: 0 })} · 市值 ${optionPortfolio.totalCurrentMarketValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 7. 交易次數 */}
                         <div className="flex flex-col justify-between bg-zinc-50/90 dark:bg-zinc-900/60 hover:bg-zinc-100/70 dark:hover:bg-zinc-850/70 border border-zinc-200/80 dark:border-zinc-800 p-3 sm:p-3.5 rounded-xl transition-all shadow-2xs group/card">
                           <div className="flex items-center justify-between gap-1 mb-1.5">
                             <span className="text-[10px] sm:text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">交易筆數</span>
@@ -2953,12 +3344,206 @@ export default function StockTabDetail() {
                             </div>
                             <div className="text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 mt-0.5 truncate">
                               買進 {buyTradesCount} · 賣出 {sellTradesCount}
+                              {optionPortfolio.optionTradesCount > 0 ? ` · 期權 ${optionPortfolio.optionTradesCount} 筆` : ''}
                             </div>
                           </div>
                         </div>
                       </div>
                     );
                   })()}
+
+                  {/* 期權交易紀錄 Dashboard 指標面板 (顯示合約金額、總持倉成本、Delta 與隨現價自動計算之期權當前損益) */}
+                  {optionPortfolio.hasOptionRecords && (
+                    <div className="mt-3 bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-300/80 dark:border-emerald-800/60 rounded-xl p-3.5 sm:p-4 shadow-2xs">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 mb-2.5 border-b border-emerald-200/70 dark:border-emerald-800/50">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="px-2 py-0.5 text-[10px] font-extrabold bg-emerald-800 text-white rounded-md">
+                            期權 Dashboard
+                          </span>
+                          <span className="text-xs font-black text-emerald-950 dark:text-emerald-100">
+                            {optionPortfolio.source === 'trades'
+                              ? `期權交易紀錄持倉總覽 (${optionPortfolio.optionTradesCount} 筆紀錄 · 共 ${optionPortfolio.totalContracts} 張合約)`
+                              : `已儲存期權試算持倉 (${optionPortfolio.totalContracts} 張合約)`}
+                          </span>
+                          {optionPortfolio.latestMetrics && (
+                            <span className="text-[11px] font-mono font-bold text-emerald-800 bg-white/90 px-2 py-0.5 rounded border border-emerald-200">
+                              {optionPortfolio.latestMetrics.positionSide === 'buy' ? '買入 Long' : '賣出 Short'}{' '}
+                              {optionPortfolio.latestMetrics.optionType.toUpperCase()} @ $
+                              {optionPortfolio.latestMetrics.strikePrice} · 購買日{' '}
+                              {optionPortfolio.latestMetrics.purchaseDate || '今日'} (經過{' '}
+                              {optionPortfolio.latestMetrics.daysElapsed} 天)
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setChipsSubTab('calc');
+                              setCalcComparisonTab('options');
+                            }}
+                            className="text-[11px] font-bold text-emerald-900 bg-white hover:bg-emerald-100 border border-emerald-300 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+                          >
+                            開啟期權計算器
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setChipsSubTab('trades')}
+                            className="text-[11px] font-bold text-white bg-emerald-800 hover:bg-emerald-900 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+                          >
+                            查看交易紀錄 ({optionPortfolio.optionTradesCount})
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3">
+                        {/* 1. 期權合約金額 (單張 × 100 股) */}
+                        <div className="bg-white dark:bg-zinc-900 p-3 rounded-xl border border-emerald-200/90 shadow-2xs">
+                          <span className="text-[10px] sm:text-[11px] font-bold text-zinc-500 block">
+                            期權合約金額 (×100股)
+                          </span>
+                          <div className="text-base sm:text-lg font-black font-mono text-zinc-900 dark:text-zinc-100 mt-0.5 tabular-nums">
+                            $
+                            {optionPortfolio.latestContractAmount.toLocaleString(undefined, {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2
+                            })}
+                            <span className="text-[11px] font-semibold text-zinc-400 ml-1">/ 張</span>
+                          </div>
+                          <span className="text-[10px] font-mono text-zinc-400 block mt-0.5">
+                            開倉單價 ${optionPortfolio.latestMetrics?.entryOptionPrice.toFixed(2) || '0.00'}/股
+                          </span>
+                        </div>
+
+                        {/* 2. 期權總持倉成本 */}
+                        <div className="bg-white dark:bg-zinc-900 p-3 rounded-xl border border-emerald-200/90 shadow-2xs">
+                          <span className="text-[10px] sm:text-[11px] font-bold text-zinc-500 block">
+                            期權總持倉成本 ({optionPortfolio.totalContracts}張)
+                          </span>
+                          <div className="text-base sm:text-lg font-black font-mono text-emerald-900 dark:text-emerald-300 mt-0.5 tabular-nums">
+                            $
+                            {optionPortfolio.totalHoldingCost.toLocaleString(undefined, {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2
+                            })}
+                          </div>
+                          <span className="text-[10px] font-mono text-zinc-400 block mt-0.5">
+                            當前總市值: $
+                            {optionPortfolio.totalCurrentMarketValue.toLocaleString(undefined, {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2
+                            })}
+                          </span>
+                        </div>
+
+                        {/* 3. 期權 Delta 與持有經過天數 */}
+                        <div className="bg-white dark:bg-zinc-900 p-3 rounded-xl border border-emerald-200/90 shadow-2xs">
+                          <span className="text-[10px] sm:text-[11px] font-bold text-zinc-500 block">
+                            部位 Delta (Δ) 與經過天數
+                          </span>
+                          <div className="text-base sm:text-lg font-black font-mono text-zinc-900 dark:text-zinc-100 mt-0.5 tabular-nums">
+                            Δ {optionPortfolio.netPositionDelta >= 0 ? '+' : ''}
+                            {optionPortfolio.netPositionDelta.toFixed(4)}
+                          </div>
+                          <span className="text-[10px] font-mono text-amber-800 block mt-0.5">
+                            持有經過 {optionPortfolio.latestMetrics?.daysElapsed ?? 0} 天 (Theta 衰減)
+                          </span>
+                        </div>
+
+                        {/* 4. 期權當前損益 (隨現在股價自動計算) */}
+                        <div
+                          className={`p-3 rounded-xl border shadow-2xs ${
+                            optionPortfolio.totalCurrentPnL >= 0
+                              ? 'bg-emerald-500/10 border-emerald-400 text-emerald-950'
+                              : 'bg-rose-500/10 border-rose-400 text-rose-950'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] sm:text-[11px] font-extrabold block">
+                              期權當前損益 (隨現價)
+                            </span>
+                            <span className="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded bg-white/80">
+                              {optionPortfolio.totalRoiPct >= 0 ? '+' : ''}
+                              {optionPortfolio.totalRoiPct.toFixed(2)}%
+                            </span>
+                          </div>
+                          <div
+                            className={`text-base sm:text-lg font-black font-mono mt-0.5 tabular-nums ${
+                              optionPortfolio.totalCurrentPnL >= 0 ? 'text-emerald-700' : 'text-rose-700'
+                            }`}
+                          >
+                            {optionPortfolio.totalCurrentPnL >= 0 ? '+' : '-'}$
+                            {Math.abs(optionPortfolio.totalCurrentPnL).toLocaleString(undefined, {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2
+                            })}
+                          </div>
+                          <span className="text-[10px] font-mono opacity-80 block mt-0.5">
+                            自動平倉價 ${optionPortfolio.latestMetrics?.autoCurrentOptionPrice.toFixed(2) || '0.00'} (現價 $
+                            {(tab?.currentPrice || 0).toFixed(2)})
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 若此個股為「真實交易」，但包含期權紀錄或試算，顯示一鍵移轉或清除提示橫幅 */}
+                  {tab?.tradeType === 'real' && (optionPortfolio.hasOptionRecords || trades.some(t => t.isOptionTrade)) && (
+                    <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 rounded-2xl p-4 mt-4 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-3.5">
+                      <div className="flex items-start gap-3">
+                        <div className="p-2 rounded-xl bg-amber-500/15 text-amber-800 dark:text-amber-300 shrink-0 mt-0.5">
+                          <AlertTriangle className="w-5 h-5" />
+                        </div>
+                        <div className="space-y-0.5">
+                          <div className="text-sm font-black text-amber-950 dark:text-amber-100 flex items-center gap-2 flex-wrap">
+                            <span>真實交易個股頁面出現期權紀錄</span>
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-200/80 dark:bg-amber-900/80 text-amber-900 dark:text-amber-200">
+                              {trades.filter(t => t.isOptionTrade).length > 0
+                                ? `${trades.filter(t => t.isOptionTrade).length} 筆期權紀錄`
+                                : '含有期權試算設定'}
+                            </span>
+                          </div>
+                          <p className="text-xs text-amber-800 dark:text-amber-300/90 leading-relaxed">
+                            此頁面為「真實交易」，若您的期權交易僅在「虛擬交易」操作，可一鍵將此期權紀錄轉移至對應的虛擬交易個股，或直接從此處完全清除。
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 self-end md:self-center shrink-0 flex-wrap">
+                        {simulatedSiblingTab && (
+                          <button
+                            type="button"
+                            onClick={handleTransferOptionsToSimulated}
+                            disabled={isTransferringOptions || isClearingRealOptions}
+                            className="px-3.5 py-2 text-xs font-bold bg-amber-600 hover:bg-amber-700 active:scale-95 text-white rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                            title={`將期權紀錄移轉至虛擬交易分頁 (${simulatedSiblingTab.symbol})`}
+                          >
+                            {isTransferringOptions ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <ArrowRightLeft className="w-3.5 h-3.5" />
+                            )}
+                            <span>移轉至虛擬交易 ({simulatedSiblingTab.symbol})</span>
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={handleClearRealOptions}
+                          disabled={isClearingRealOptions || isTransferringOptions}
+                          className="px-3.5 py-2 text-xs font-bold bg-white dark:bg-zinc-900 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-700 dark:text-rose-400 border border-rose-300 dark:border-rose-800 rounded-xl shadow-2xs transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 disabled:opacity-50"
+                          title="一鍵清除真實個股中的期權交易紀錄與期權試算"
+                        >
+                          {isClearingRealOptions ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                          )}
+                          <span>清除此處期權紀錄</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   {/* iOS 風格 Segmented Control 子分頁 (籌碼與攤平試算 vs 交易紀錄) */}
                   <Tabs value={chipsSubTab} onValueChange={(v) => setChipsSubTab(v as 'calc' | 'trades')} className="w-full mt-4">
@@ -3044,6 +3629,26 @@ export default function StockTabDetail() {
 
                         {/* 右側：防線/分隔線快捷開關 + 攤平/突破價位 (同 Primial 頂部按鈕) */}
                         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-wrap">
+                          {/* 行權價 (新增) - 預設關閉 */}
+                          <button
+                            type="button"
+                            onClick={handleTogglePyramidStrikePrices}
+                            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-black transition-all cursor-pointer border active:scale-95 shrink-0 select-none ${
+                              pyramidShowStrikePrices
+                                ? "bg-zinc-950 text-white border-zinc-400 shadow-[0_0_8px_rgba(255,255,255,0.25)] ring-1 ring-zinc-400"
+                                : "bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white border-zinc-700/60"
+                            }`}
+                            title="開啟/關閉期權行權價與合約金額黑色虛線 (預設關閉)"
+                          >
+                            <span className="w-2.5 h-0 border-t-2 border-dashed border-zinc-300 shrink-0" />
+                            <span>行權價</span>
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full ${
+                                pyramidShowStrikePrices ? "bg-white shadow-[0_0_6px_#ffffff]" : "bg-zinc-500"
+                              }`}
+                            />
+                          </button>
+
                           {/* 攤平 | 突破價位 (快捷按鍵: Alt+T / Alt+B) */}
                           <div className="flex items-center bg-zinc-900/90 border border-zinc-700/80 rounded-full p-0.5 shadow-xs shrink-0 select-none">
                             <button
@@ -3170,9 +3775,12 @@ export default function StockTabDetail() {
                         usableCapital={usableCapital}
                         plannedQty={plannedQty}
                         trades={trades}
+                        optionsCalcData={tab?.optionsCalcData}
                         visualLevels={visualLevels}
                         showCardDividers={pyramidShowCardDividers}
                         onToggleCardDividers={handleTogglePyramidCardDividers}
+                        showStrikePrices={pyramidShowStrikePrices}
+                        onToggleStrikePrices={handleTogglePyramidStrikePrices}
                         selectedLevelTypes={pyramidLevelTypes}
                         onToggleLevelType={(type) => {
                           setPyramidLevelTypes((prev) => ({
@@ -3302,39 +3910,63 @@ export default function StockTabDetail() {
                           </div>
                         </div>
 
-                        {/* 2. 剩餘預計購買與當前順序提示標籤 */}
+                        {/* 2 & 3 & 4. 統一戰情容器：分批進場總體進度軌道與四批次詳細進度卡片 (支援完整動態載入、數字計數與互動回饋) */}
                         {plannedQty > 0 && (
-                          <div className="flex flex-wrap items-center justify-between gap-2 px-1">
-                            <span className="text-xs font-bold bg-[#B1C28D]/20 text-[#556336] dark:text-[#c4d69e] border border-[#B1C28D]/50 px-3.5 py-1.5 rounded-full inline-flex flex-wrap items-center gap-2 shadow-2xs">
-                              <span className="w-2 h-2 rounded-full bg-[#6F7D50] animate-pulse" />
-                              <span>剩餘預計購買: <strong className="font-mono font-black">{remainingToBuy}</strong> 股</span>
-                              <span className="opacity-40">|</span>
-                              <span>
-                                當前順序: <strong className="font-semibold text-zinc-900 dark:text-zinc-100">{currentBatchOrderText}</strong> ({currentBatchText}
-                                {currentBatchOrderText !== "無" && currentBatchOrderText !== "已滿批" && (
-                                  <span className="ml-1 text-zinc-700 dark:text-zinc-300">
-                                    ‧ 已購: <strong className="font-mono font-black">{currentBatchBought}</strong> 股 / 餘額: <strong className="font-mono font-black">{currentBatchRemaining}</strong> 股
+                          <div className="w-full rounded-2xl bg-white/95 dark:bg-zinc-900/90 backdrop-blur-md border border-zinc-200/90 dark:border-zinc-800 p-4 sm:p-5 shadow-xs space-y-4">
+                            {/* 頂部整合狀態條：當前進度狀態、全域進度統計與「重播動畫」按鈕 */}
+                            <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-zinc-100 dark:border-zinc-800/80">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-xs font-bold bg-[#B1C28D]/25 dark:bg-[#556336]/30 text-[#49562c] dark:text-[#cde0a5] border border-[#B1C28D]/50 px-3 py-1.5 rounded-xl inline-flex flex-wrap items-center gap-2 shadow-2xs">
+                                  <span 
+                                    className="w-1.5 h-1.5 rounded-full bg-[#6F7D50] inline-block shrink-0" 
+                                    style={{
+                                      animation: prefersReducedMotion ? 'none' : 'batchPulseBreathe 1.6s ease-in-out infinite'
+                                    }}
+                                  />
+                                  <span>
+                                    剩餘預計購買: <strong className="font-mono font-black"><AnimatedNumber value={remainingToBuy} replayKey={batchAnimKey} disabled={prefersReducedMotion} /></strong> 股
                                   </span>
-                                )}
-                                )
-                              </span>
-                            </span>
+                                  <span className="opacity-30">|</span>
+                                  <span>
+                                    當前順序: <strong className="font-black text-zinc-900 dark:text-zinc-50">{currentBatchOrderText}</strong> ({currentBatchText}
+                                    {currentBatchOrderText !== "無" && currentBatchOrderText !== "已滿批" && (
+                                      <span className="ml-1 text-zinc-700 dark:text-zinc-300 font-medium">
+                                        ‧ 已購: <strong className="font-mono font-black text-emerald-700 dark:text-emerald-400"><AnimatedNumber value={currentBatchBought} replayKey={batchAnimKey} disabled={prefersReducedMotion} /></strong> 股 / 餘額: <strong className="font-mono font-black text-zinc-800 dark:text-zinc-200"><AnimatedNumber value={currentBatchRemaining} replayKey={batchAnimKey} disabled={prefersReducedMotion} /></strong> 股
+                                      </span>
+                                    )}
+                                    )
+                                  </span>
+                                </span>
+                              </div>
 
-                            <span className="text-xs font-bold text-zinc-500 flex items-center gap-1.5">
-                              <span>全域進度:</span>
-                              <strong className="font-mono font-black text-emerald-700 dark:text-emerald-400">{totalBought}</strong> / {plannedQty} 股
-                              <span className="px-2 py-0.5 rounded-full text-[11px] font-black bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
-                                {Math.min(100, Math.round((totalBought / plannedQty) * 100))}%
-                              </span>
-                            </span>
-                          </div>
-                        )}
+                              <div className="flex items-center gap-3">
+                                <div className="flex items-center gap-2 text-xs font-bold text-zinc-500 dark:text-zinc-400">
+                                  <span>全域進度:</span>
+                                  <span className="font-mono text-sm font-black text-emerald-700 dark:text-emerald-400">
+                                    <AnimatedNumber value={totalBought} replayKey={batchAnimKey} disabled={prefersReducedMotion} />
+                                  </span>
+                                  <span className="text-zinc-400">/</span>
+                                  <span className="font-mono font-semibold text-zinc-700 dark:text-zinc-300">{plannedQty.toLocaleString()} 股</span>
+                                  <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 tabular-nums">
+                                    <AnimatedNumber value={Math.min(100, Math.round((totalBought / plannedQty) * 100))} replayKey={batchAnimKey} disabled={prefersReducedMotion} formatter={n => `${n}%`} />
+                                  </span>
+                                </div>
 
-                        {/* 3. 互動式動態橫向進度條系統 (滿版全寬呈現，比例平衡) */}
-                        {plannedQty > 0 && (
-                          <div className="w-full space-y-3">
-                            {/* Master Overall Segmented Horizontal Progress Bar (全域 4 批次比例橫向進度軌道) */}
-                            <div className="p-3 sm:p-3.5 rounded-2xl bg-white/95 dark:bg-zinc-900/80 backdrop-blur-md border border-zinc-200/90 shadow-2xs space-y-2.5">
+                                {/* 「重播動畫」按鈕 */}
+                                <button
+                                  type="button"
+                                  onClick={handleReplayBatchAnimation}
+                                  title="重新播放載入填滿與數字計數動畫"
+                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold text-zinc-600 dark:text-zinc-300 hover:text-emerald-700 dark:hover:text-emerald-400 bg-zinc-100 hover:bg-emerald-50 dark:bg-zinc-800 dark:hover:bg-zinc-700/80 border border-zinc-200 dark:border-zinc-700 rounded-lg transition-all duration-200 active:scale-95 cursor-pointer shadow-2xs select-none"
+                                >
+                                  <RotateCcw className="w-3.5 h-3.5" />
+                                  <span>重播動畫</span>
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* 中部：分批進場總體進度軌道 (15% ➔ 25% ➔ 35% ➔ 25%) */}
+                            <div className="space-y-2">
                               <div className="flex flex-wrap items-center justify-between gap-2">
                                 <div className="flex items-center gap-2">
                                   <span className="p-1 rounded-lg bg-emerald-100/90 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300">
@@ -3347,39 +3979,64 @@ export default function StockTabDetail() {
                                     (15% ➔ 25% ➔ 35% ➔ 25%)
                                   </span>
                                 </div>
-                                <div className="text-[11px] text-zinc-500 font-medium hidden sm:block">
+                                <div className="text-[11px] text-zinc-500 dark:text-zinc-400 font-medium hidden sm:block">
                                   點擊任一批次區段可快速帶入雙系統試算
                                 </div>
                               </div>
 
                               {/* 4-Segment Connected Master Track */}
-                              <div className="w-full h-4 bg-zinc-100 dark:bg-zinc-800 rounded-full p-0.5 flex gap-1 border border-zinc-200/80 overflow-hidden shadow-inner">
+                              <div className="w-full h-4 bg-zinc-100 dark:bg-zinc-800 rounded-full p-0.5 flex gap-1 border border-zinc-200/80 dark:border-zinc-700 overflow-hidden shadow-inner">
                                 {batchConfigList.map((b) => {
                                   const bPercent = b.size > 0 ? Math.min(100, Math.round((b.bought / b.size) * 100)) : 0;
                                   const isFinished = b.remaining === 0;
+                                  const isCurrentActive = !isFinished && (b.index === 0 || batchConfigList[b.index - 1].remaining === 0);
                                   const widthStyles = ['w-[15%]', 'w-[25%]', 'w-[35%]', 'w-[25%]'];
 
                                   return (
                                     <div
                                       key={b.index}
-                                      onClick={() => handleBatchClick(b.index, b.name, b.split1.size, b.split2.size)}
+                                      onClick={() => {
+                                        triggerCardGlow(b.index);
+                                        handleBatchClick(b.index, b.name, b.split1.size, b.split2.size);
+                                      }}
                                       title={`${b.name}：${b.bought}/${b.size} 股 (${bPercent}%) - 點擊帶入`}
-                                      className={`${widthStyles[b.index]} h-full bg-zinc-200/70 dark:bg-zinc-700/60 rounded-full overflow-hidden relative cursor-pointer group hover:opacity-90 transition-opacity`}
+                                      className={`${widthStyles[b.index]} h-full bg-zinc-200/70 dark:bg-zinc-700/60 rounded-full overflow-hidden relative cursor-pointer group hover:opacity-90 transition-opacity ${
+                                        isCurrentActive ? 'ring-1 ring-[#1BD0F7]/70' : ''
+                                      }`}
                                     >
-                                      {/* Animated Fill Bar */}
+                                      {/* Animated Fill Bar with Staggered Delay (1s duration, cubic-bezier(.2,.7,.2,1)) */}
                                       <div
-                                        style={{ width: `${bPercent}%` }}
-                                        className={`h-full transition-all duration-700 ease-out rounded-full ${
+                                        style={{
+                                          width: isBatchAnimActive || prefersReducedMotion ? `${bPercent}%` : '0%',
+                                          transition: prefersReducedMotion ? 'none' : `width 1s cubic-bezier(0.2, 0.7, 0.2, 1) ${b.index * 0.15}s`,
+                                          animation: isCurrentActive && !prefersReducedMotion ? 'cyanElectricPulse 1.8s ease-in-out infinite' : undefined
+                                        }}
+                                        className={`h-full relative overflow-hidden rounded-full ${
                                           isFinished
                                             ? 'bg-gradient-to-r from-emerald-600 to-teal-500'
+                                            : isCurrentActive
+                                            ? 'bg-gradient-to-r from-[#1BD0F7] via-[#38BDF8] to-[#0EA5E9] shadow-[0_0_12px_rgba(27,208,247,0.85)]'
                                             : bPercent > 0
                                             ? 'bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-400 animate-pulse'
                                             : 'bg-transparent'
                                         }`}
-                                      />
+                                      >
+                                        {/* Shimmer sweep for in-progress unfilled track (after fill finishes, 1.9s cycle) */}
+                                        {!isFinished && bPercent > 0 && !prefersReducedMotion && (
+                                          <div
+                                            className={`absolute inset-y-0 w-1/2 bg-gradient-to-r pointer-events-none ${
+                                              isCurrentActive ? 'from-transparent via-white/85 to-transparent' : 'from-transparent via-white/50 to-transparent'
+                                            }`}
+                                            style={{
+                                              animation: isCurrentActive ? 'batchShimmerSweep 1.4s infinite ease-in-out' : 'batchShimmerSweep 1.9s infinite ease-in-out',
+                                              animationDelay: `${b.index * 0.15 + 1}s`
+                                            }}
+                                          />
+                                        )}
+                                      </div>
                                       {/* Segment Divider & Completion indicator */}
                                       {isFinished && (
-                                        <span className="absolute inset-0 flex items-center justify-center text-[9px] font-black text-white drop-shadow-xs">
+                                        <span className="absolute inset-0 flex items-center justify-center text-[10px] font-black text-white drop-shadow-xs pointer-events-none">
                                           ✓
                                         </span>
                                       )}
@@ -3389,8 +4046,8 @@ export default function StockTabDetail() {
                               </div>
                             </div>
 
-                            {/* 4. Detailed Batch Horizontal Progress Cards (四批次橫向動態進度條卡片 - 4欄均勻展開) */}
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 w-full">
+                            {/* 下部：四批次橫向動態進度條卡片 (4欄均勻展開，支援 Hover 上浮 2px、光暈與數字計數) */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-3.5 w-full pt-1">
                               {batchConfigList.map((b) => {
                                 const isFinished = b.remaining === 0;
                                 const percentCompleted = b.size > 0 ? Math.min(100, Math.round((b.bought / b.size) * 100)) : 0;
@@ -3399,34 +4056,57 @@ export default function StockTabDetail() {
                                 const isSplit2Finished = b.split2.remaining === 0;
                                 const split2Percent = b.split2.size > 0 ? Math.min(100, Math.round((b.split2.bought / b.split2.size) * 100)) : 0;
                                 const isCurrentActive = !isFinished && (b.index === 0 || batchConfigList[b.index - 1].remaining === 0);
+                                const isSplit1Active = isCurrentActive && !isSplit1Finished;
+                                const isSplit2Active = isCurrentActive && isSplit1Finished && !isSplit2Finished;
 
                                 return (
                                   <div 
                                     key={b.index} 
-                                    className={`p-3.5 border rounded-2xl flex flex-col justify-between relative transition-all duration-300 shadow-2xs hover:shadow-md ${
+                                    style={{
+                                      animation: glowingBatchCardIndex === b.index && !prefersReducedMotion 
+                                        ? (isCurrentActive ? 'cyanHaloGlow 0.7s ease-out forwards' : 'batchHaloGlow 0.7s ease-out forwards')
+                                        : undefined
+                                    }}
+                                    className={`p-3.5 border rounded-xl flex flex-col justify-between relative shadow-2xs hover:shadow-md transition-all duration-200 ${
+                                      prefersReducedMotion ? '' : 'hover:-translate-y-[2px]'
+                                    } ${
                                       isFinished 
-                                        ? 'bg-emerald-50/90 dark:bg-emerald-950/20 border-emerald-300 dark:border-emerald-800 text-zinc-900 ring-1 ring-emerald-400/30' 
+                                        ? 'bg-emerald-50/70 dark:bg-emerald-950/20 border-emerald-300 dark:border-emerald-800 ring-1 ring-emerald-400/30' 
                                         : isCurrentActive
-                                        ? 'bg-white dark:bg-zinc-900 border-emerald-400/80 text-zinc-900 shadow-sm ring-1 ring-emerald-500/30'
-                                        : 'bg-white dark:bg-zinc-900 border-zinc-200/90 text-zinc-900 hover:border-emerald-300'
+                                        ? 'bg-white dark:bg-zinc-900 border-[#1BD0F7] shadow-[0_0_20px_rgba(27,208,247,0.18)] ring-2 ring-[#1BD0F7]/40'
+                                        : 'bg-white dark:bg-zinc-900 border-zinc-200/90 dark:border-zinc-800 hover:border-emerald-300'
                                     }`}
                                   >
-                                    {/* Card Header (批次名稱 + 帶入全部按鈕) */}
+                                    {/* Card Header (批次名稱 + 進行中霓虹呼吸燈 + 帶入全部按鈕) */}
                                     <div className="flex flex-col gap-2 pb-2.5 border-b border-zinc-100 dark:border-zinc-800">
                                       <div className="flex items-center justify-between w-full">
                                         <div className="flex items-center gap-1.5">
                                           {isCurrentActive && (
-                                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                                            <span 
+                                              className="w-2 h-2 rounded-full bg-[#1BD0F7] inline-block shrink-0 shadow-[0_0_8px_#1BD0F7]" 
+                                              style={{
+                                                animation: prefersReducedMotion ? 'none' : 'batchPulseBreathe 1.4s ease-in-out infinite'
+                                              }}
+                                            />
                                           )}
-                                          <span className="text-xs font-black text-zinc-800 dark:text-zinc-100 tracking-tight">
+                                          <span className={`text-xs font-black tracking-tight ${
+                                            isCurrentActive ? 'text-zinc-900 dark:text-zinc-50' : 'text-zinc-800 dark:text-zinc-100'
+                                          }`}>
                                             {b.name}
                                           </span>
                                         </div>
                                         <button
                                           type="button"
-                                          onClick={() => handleBatchClick(b.index, b.name, b.split1.size, b.split2.size)}
+                                          onClick={() => {
+                                            triggerCardGlow(b.index);
+                                            handleBatchClick(b.index, b.name, b.split1.size, b.split2.size);
+                                          }}
                                           title="點擊將此批整組 (拆分一 + 拆分二) 同步帶入雙系統攤平試算"
-                                          className="text-[10px] font-bold text-emerald-800 dark:text-emerald-300 bg-emerald-100/90 dark:bg-emerald-900/60 hover:bg-emerald-200 border border-emerald-300/80 dark:border-emerald-700 px-2 py-0.5 rounded-md active:scale-95 transition-all cursor-pointer shadow-2xs"
+                                          className={`text-[10px] font-bold px-2 py-0.5 rounded-md active:scale-[0.96] transition-all duration-150 cursor-pointer shadow-2xs select-none ${
+                                            isCurrentActive
+                                              ? 'text-cyan-950 dark:text-cyan-100 bg-[#1BD0F7]/25 hover:bg-[#1BD0F7]/40 border border-[#1BD0F7]/70 shadow-[0_0_10px_rgba(27,208,247,0.35)]'
+                                              : 'text-emerald-800 dark:text-emerald-300 bg-emerald-100/90 dark:bg-emerald-900/60 hover:bg-emerald-200 dark:hover:bg-emerald-900 border border-emerald-300/80 dark:border-emerald-700'
+                                          }`}
                                         >
                                           帶入全部 ↵
                                         </button>
@@ -3434,124 +4114,225 @@ export default function StockTabDetail() {
 
                                       <div className="flex items-baseline justify-between">
                                         <div className="flex items-baseline gap-1">
-                                          <span className="text-lg font-black font-mono text-zinc-900 dark:text-zinc-50 leading-tight">{b.size}</span>
+                                          <span className="text-xl font-black font-mono text-zinc-900 dark:text-zinc-50 leading-tight">{b.size.toLocaleString()}</span>
                                           <span className="text-[11px] font-bold text-zinc-500">股 (總計)</span>
                                         </div>
-                                        <span className={`text-[10px] font-mono font-black px-1.5 py-0.5 rounded-md ${
+                                        <span className={`text-[10px] font-mono font-black px-1.5 py-0.5 rounded-md tabular-nums transition-colors ${
                                           isFinished
                                             ? 'bg-emerald-200/80 dark:bg-emerald-900/80 text-emerald-900 dark:text-emerald-200'
-                                            : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300'
+                                            : isCurrentActive
+                                              ? 'bg-[#1BD0F7]/20 text-cyan-950 dark:text-[#1BD0F7] border border-[#1BD0F7]/40 shadow-[0_0_8px_rgba(27,208,247,0.25)]'
+                                              : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300'
                                         }`}>
-                                          {percentCompleted}%
+                                          <AnimatedNumber value={percentCompleted} replayKey={batchAnimKey} disabled={prefersReducedMotion} formatter={n => `${n}%`} />
                                         </span>
                                       </div>
 
-                                      {/* Dynamic Horizontal Progress Bar (主要橫向進度條) */}
+                                      {/* Dynamic Horizontal Progress Bar with Staggered Animation & Shimmer */}
                                       <div 
-                                        onClick={() => handleBatchClick(b.index, b.name, b.split1.size, b.split2.size)}
-                                        className="w-full h-2.5 bg-zinc-100 dark:bg-zinc-800 rounded-full border border-zinc-200/80 overflow-hidden relative cursor-pointer group shadow-inner"
+                                        onClick={() => {
+                                          triggerCardGlow(b.index);
+                                          handleBatchClick(b.index, b.name, b.split1.size, b.split2.size);
+                                        }}
+                                        className={`w-full h-3 rounded-full overflow-hidden relative cursor-pointer group shadow-inner transition-all ${
+                                          isCurrentActive
+                                            ? 'bg-cyan-950/20 dark:bg-cyan-950/40 border border-[#1BD0F7]/40 ring-1 ring-[#1BD0F7]/30'
+                                            : 'bg-zinc-100 dark:bg-zinc-800 border border-zinc-200/80 dark:border-zinc-700'
+                                        }`}
                                         title={`目前已購買 ${b.bought} 股 / 規劃 ${b.size} 股 (${percentCompleted}%) - 點擊帶入`}
                                       >
                                         <div
-                                          style={{ width: `${percentCompleted}%` }}
-                                          className={`h-full transition-all duration-700 ease-out rounded-full ${
+                                          style={{
+                                            width: isBatchAnimActive || prefersReducedMotion ? `${percentCompleted}%` : '0%',
+                                            transition: prefersReducedMotion ? 'none' : `width 1s cubic-bezier(0.2, 0.7, 0.2, 1) ${b.index * 0.15}s`,
+                                            animation: isCurrentActive && !isFinished && !prefersReducedMotion ? 'cyanElectricPulse 1.8s ease-in-out infinite' : undefined
+                                          }}
+                                          className={`h-full relative overflow-hidden rounded-full ${
                                             isFinished
                                               ? 'bg-gradient-to-r from-emerald-600 to-teal-500'
-                                              : 'bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-400 group-hover:brightness-110'
+                                              : isCurrentActive
+                                                ? 'bg-gradient-to-r from-[#1BD0F7] via-[#38BDF8] to-[#0EA5E9] shadow-[0_0_12px_rgba(27,208,247,0.85)]'
+                                                : 'bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-400 group-hover:brightness-110'
                                           }`}
-                                        />
+                                        >
+                                          {/* Shimmer sweep for in-progress batch bar */}
+                                          {!isFinished && percentCompleted > 0 && !prefersReducedMotion && (
+                                            <div
+                                              className="absolute inset-y-0 w-1/2 bg-gradient-to-r from-transparent via-white/70 to-transparent pointer-events-none"
+                                              style={{
+                                                animation: isCurrentActive ? 'batchShimmerSweep 1.4s infinite ease-in-out' : 'batchShimmerSweep 1.9s infinite ease-in-out',
+                                                animationDelay: `${b.index * 0.15 + 1}s`
+                                              }}
+                                            />
+                                          )}
+                                        </div>
                                       </div>
 
-                                      <div className="flex items-center justify-between text-[11px] font-semibold text-zinc-600 dark:text-zinc-400 w-full pt-0.5">
-                                        <span>已購: <strong className="font-mono font-bold text-emerald-800 dark:text-emerald-400">{b.bought}</strong> 股</span>
+                                      {/* High-contrast Share Balance Metrics with Count-up */}
+                                      <div className="flex items-center justify-between text-[11px] font-semibold w-full pt-0.5">
+                                        <span className="text-zinc-600 dark:text-zinc-400">
+                                          已購: <strong className={`font-mono font-black text-xs ${
+                                            isFinished
+                                              ? 'text-emerald-700 dark:text-emerald-400'
+                                              : isCurrentActive
+                                                ? 'text-cyan-700 dark:text-[#1BD0F7] drop-shadow-[0_0_4px_rgba(27,208,247,0.4)]'
+                                                : 'text-zinc-700 dark:text-zinc-300'
+                                          }`}><AnimatedNumber value={b.bought} replayKey={batchAnimKey} disabled={prefersReducedMotion} /></strong> 股
+                                        </span>
                                         <span className="text-zinc-300 dark:text-zinc-700">|</span>
-                                        <span>餘額: <strong className="font-mono font-bold text-zinc-700 dark:text-zinc-300">{b.remaining}</strong> 股</span>
+                                        <span className="text-zinc-500 dark:text-zinc-400">
+                                          餘額: <strong className={`font-mono font-bold text-xs ${
+                                            isCurrentActive
+                                              ? 'text-zinc-900 dark:text-cyan-100 font-black'
+                                              : 'text-zinc-800 dark:text-zinc-200'
+                                          }`}><AnimatedNumber value={b.remaining} replayKey={batchAnimKey} disabled={prefersReducedMotion} /></strong> 股
+                                        </span>
                                       </div>
                                     </div>
 
-                                    {/* 拆分子批橫向微進度條按鈕 (可獨立點擊帶入系統一與系統二個別欄位) */}
-                                    <div className="grid grid-cols-2 gap-2 mt-3">
-                                      {/* 拆分一 */}
+                                    {/* 扁平無框微型指標列 (消除卡中卡厚重感，保留獨立點擊帶入雙系統) */}
+                                    <div className="grid grid-cols-2 gap-1.5 mt-2.5">
+                                      {/* 拆分一 (延遲 = 0.3s + 批次序號*0.15s + 拆分序號0*0.1s) */}
                                       <button
                                         type="button"
                                         onClick={(e) => {
                                           e.stopPropagation();
+                                          triggerCardGlow(b.index);
                                           handleBatchClick(b.index, b.split1.name, b.split1.size, b.split2.size, 1);
                                         }}
                                         title={`點擊僅將 ${b.split1.name} (${b.split1.size}股) 帶入雙系統第 1 數量`}
-                                        className={`p-2 rounded-xl border text-left flex flex-col justify-between transition-all hover:scale-[1.02] active:scale-95 cursor-pointer select-none ${
+                                        className={`px-2 py-1.5 rounded-lg text-left flex flex-col justify-between transition-all active:scale-[0.96] cursor-pointer select-none group/split ${
                                           isSplit1Finished
-                                            ? 'bg-emerald-100/90 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700 text-emerald-950 dark:text-emerald-200'
-                                            : 'bg-zinc-50 dark:bg-zinc-800/80 hover:bg-emerald-50/80 border-zinc-200 dark:border-zinc-700 hover:border-emerald-300 text-zinc-800 dark:text-zinc-200'
+                                            ? 'bg-emerald-100/50 dark:bg-emerald-950/30'
+                                            : isSplit1Active
+                                              ? 'bg-cyan-500/10 dark:bg-cyan-950/40 border border-[#1BD0F7]/40 shadow-[0_0_8px_rgba(27,208,247,0.15)] hover:bg-[#1BD0F7]/15'
+                                              : 'bg-zinc-50/80 dark:bg-zinc-800/50 hover:bg-zinc-100 dark:hover:bg-zinc-800'
                                         }`}
                                       >
                                         <div className="flex items-center justify-between w-full">
-                                          <span className="text-[10px] font-black">{b.split1.shortLabel}</span>
+                                          <span className={`text-[10px] font-black group-hover/split:text-[#1BD0F7] transition-colors ${
+                                            isSplit1Active ? 'text-cyan-950 dark:text-[#1BD0F7]' : 'text-zinc-700 dark:text-zinc-300'
+                                          }`}>{b.split1.shortLabel}</span>
                                           {isSplit1Finished ? (
                                             <span className="text-[9px] font-bold text-emerald-700 bg-emerald-200/80 px-1 rounded">滿</span>
                                           ) : (
-                                            <span className="text-[9px] font-mono font-bold text-zinc-500">{split1Percent}%</span>
+                                            <span className={`text-[9px] font-mono font-bold tabular-nums px-1 rounded ${
+                                              isSplit1Active ? 'bg-[#1BD0F7]/20 text-cyan-900 dark:text-[#1BD0F7]' : 'text-zinc-500'
+                                            }`}>
+                                              <AnimatedNumber value={split1Percent} replayKey={batchAnimKey} disabled={prefersReducedMotion} formatter={n => `${n}%`} />
+                                            </span>
                                           )}
                                         </div>
-                                        <span className="text-xs font-black font-mono text-zinc-900 dark:text-zinc-100 my-0.5">{b.split1.size} 股</span>
-                                        
-                                        {/* Mini Horizontal Progress Bar for Split 1 */}
-                                        <div className="w-full h-1.5 bg-zinc-200/80 dark:bg-zinc-700 rounded-full overflow-hidden my-1">
-                                          <div
-                                            style={{ width: `${split1Percent}%` }}
-                                            className={`h-full rounded-full transition-all duration-500 ${
-                                              isSplit1Finished ? 'bg-emerald-600' : 'bg-emerald-500'
-                                            }`}
-                                          />
+                                        <div className="flex items-baseline justify-between w-full my-0.5">
+                                          <span className="text-xs font-black font-mono text-zinc-900 dark:text-zinc-100">{b.split1.size.toLocaleString()} 股</span>
+                                          <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium font-mono">
+                                            已 <AnimatedNumber value={b.split1.bought} replayKey={batchAnimKey} disabled={prefersReducedMotion} />
+                                          </span>
                                         </div>
-
-                                        <div className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium">
-                                          已購: <span className="font-mono font-bold text-zinc-800 dark:text-zinc-200">{b.split1.bought}</span>
+                                        
+                                        {/* Micro Progress Bar for Split 1 */}
+                                        <div className={`w-full h-1.5 rounded-full overflow-hidden mt-0.5 relative ${
+                                          isSplit1Active ? 'bg-cyan-950/30 border border-[#1BD0F7]/30' : 'bg-zinc-200/80 dark:bg-zinc-700'
+                                        }`}>
+                                          <div
+                                            style={{
+                                              width: isBatchAnimActive || prefersReducedMotion ? `${split1Percent}%` : '0%',
+                                              transition: prefersReducedMotion ? 'none' : `width 1s cubic-bezier(0.2, 0.7, 0.2, 1) ${0.3 + b.index * 0.15 + 0 * 0.1}s`,
+                                              animation: isSplit1Active && !isSplit1Finished && !prefersReducedMotion ? 'cyanElectricPulse 1.8s ease-in-out infinite' : undefined
+                                            }}
+                                            className={`h-full rounded-full relative overflow-hidden ${
+                                              isSplit1Finished 
+                                                ? 'bg-emerald-600' 
+                                                : isSplit1Active
+                                                  ? 'bg-gradient-to-r from-[#1BD0F7] to-[#0EA5E9] shadow-[0_0_8px_rgba(27,208,247,0.8)]'
+                                                  : 'bg-emerald-500'
+                                            }`}
+                                          >
+                                            {!isSplit1Finished && split1Percent > 0 && !prefersReducedMotion && (
+                                              <div
+                                                className="absolute inset-y-0 w-1/2 bg-gradient-to-r from-transparent via-white/80 to-transparent pointer-events-none"
+                                                style={{
+                                                  animation: isSplit1Active ? 'batchShimmerSweep 1.4s infinite ease-in-out' : 'batchShimmerSweep 1.9s infinite ease-in-out',
+                                                  animationDelay: `${0.3 + b.index * 0.15 + 0 * 0.1 + 1}s`
+                                                }}
+                                              />
+                                            )}
+                                          </div>
                                         </div>
                                       </button>
 
-                                      {/* 拆分二 */}
+                                      {/* 拆分二 (延遲 = 0.3s + 批次序號*0.15s + 拆分序號1*0.1s) */}
                                       <button
                                         type="button"
                                         onClick={(e) => {
                                           e.stopPropagation();
+                                          triggerCardGlow(b.index);
                                           handleBatchClick(b.index, b.split2.name, b.split1.size, b.split2.size, 2);
                                         }}
                                         title={`點擊僅將 ${b.split2.name} (${b.split2.size}股) 帶入雙系統第 2 數量`}
-                                        className={`p-2 rounded-xl border text-left flex flex-col justify-between transition-all hover:scale-[1.02] active:scale-95 cursor-pointer select-none ${
+                                        className={`px-2 py-1.5 rounded-lg text-left flex flex-col justify-between transition-all active:scale-[0.96] cursor-pointer select-none group/split ${
                                           isSplit2Finished
-                                            ? 'bg-emerald-100/90 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700 text-emerald-950 dark:text-emerald-200'
-                                            : 'bg-zinc-50 dark:bg-zinc-800/80 hover:bg-emerald-50/80 border-zinc-200 dark:border-zinc-700 hover:border-emerald-300 text-zinc-800 dark:text-zinc-200'
+                                            ? 'bg-emerald-100/50 dark:bg-emerald-950/30'
+                                            : isSplit2Active
+                                              ? 'bg-cyan-500/10 dark:bg-cyan-950/40 border border-[#1BD0F7]/40 shadow-[0_0_8px_rgba(27,208,247,0.15)] hover:bg-[#1BD0F7]/15'
+                                              : 'bg-zinc-50/80 dark:bg-zinc-800/50 hover:bg-zinc-100 dark:hover:bg-zinc-800'
                                         }`}
                                       >
                                         <div className="flex items-center justify-between w-full">
-                                          <span className="text-[10px] font-black">{b.split2.shortLabel}</span>
+                                          <span className={`text-[10px] font-black group-hover/split:text-[#1BD0F7] transition-colors ${
+                                            isSplit2Active ? 'text-cyan-950 dark:text-[#1BD0F7]' : 'text-zinc-700 dark:text-zinc-300'
+                                          }`}>{b.split2.shortLabel}</span>
                                           {isSplit2Finished ? (
                                             <span className="text-[9px] font-bold text-emerald-700 bg-emerald-200/80 px-1 rounded">滿</span>
                                           ) : (
-                                            <span className="text-[9px] font-mono font-bold text-zinc-500">{split2Percent}%</span>
+                                            <span className={`text-[9px] font-mono font-bold tabular-nums px-1 rounded ${
+                                              isSplit2Active ? 'bg-[#1BD0F7]/20 text-cyan-900 dark:text-[#1BD0F7]' : 'text-zinc-500'
+                                            }`}>
+                                              <AnimatedNumber value={split2Percent} replayKey={batchAnimKey} disabled={prefersReducedMotion} formatter={n => `${n}%`} />
+                                            </span>
                                           )}
                                         </div>
-                                        <span className="text-xs font-black font-mono text-zinc-900 dark:text-zinc-100 my-0.5">{b.split2.size} 股</span>
-                                        
-                                        {/* Mini Horizontal Progress Bar for Split 2 */}
-                                        <div className="w-full h-1.5 bg-zinc-200/80 dark:bg-zinc-700 rounded-full overflow-hidden my-1">
-                                          <div
-                                            style={{ width: `${split2Percent}%` }}
-                                            className={`h-full rounded-full transition-all duration-500 ${
-                                              isSplit2Finished ? 'bg-emerald-600' : 'bg-emerald-500'
-                                            }`}
-                                          />
+                                        <div className="flex items-baseline justify-between w-full my-0.5">
+                                          <span className="text-xs font-black font-mono text-zinc-900 dark:text-zinc-100">{b.split2.size.toLocaleString()} 股</span>
+                                          <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium font-mono">
+                                            已 <AnimatedNumber value={b.split2.bought} replayKey={batchAnimKey} disabled={prefersReducedMotion} />
+                                          </span>
                                         </div>
-
-                                        <div className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium">
-                                          已購: <span className="font-mono font-bold text-zinc-800 dark:text-zinc-200">{b.split2.bought}</span>
+                                        
+                                        {/* Micro Progress Bar for Split 2 */}
+                                        <div className={`w-full h-1.5 rounded-full overflow-hidden mt-0.5 relative ${
+                                          isSplit2Active ? 'bg-cyan-950/30 border border-[#1BD0F7]/30' : 'bg-zinc-200/80 dark:bg-zinc-700'
+                                        }`}>
+                                          <div
+                                            style={{
+                                              width: isBatchAnimActive || prefersReducedMotion ? `${split2Percent}%` : '0%',
+                                              transition: prefersReducedMotion ? 'none' : `width 1s cubic-bezier(0.2, 0.7, 0.2, 1) ${0.3 + b.index * 0.15 + 1 * 0.1}s`,
+                                              animation: isSplit2Active && !isSplit2Finished && !prefersReducedMotion ? 'cyanElectricPulse 1.8s ease-in-out infinite' : undefined
+                                            }}
+                                            className={`h-full rounded-full relative overflow-hidden ${
+                                              isSplit2Finished 
+                                                ? 'bg-emerald-600' 
+                                                : isSplit2Active
+                                                  ? 'bg-gradient-to-r from-[#1BD0F7] to-[#0EA5E9] shadow-[0_0_8px_rgba(27,208,247,0.8)]'
+                                                  : 'bg-emerald-500'
+                                            }`}
+                                          >
+                                            {!isSplit2Finished && split2Percent > 0 && !prefersReducedMotion && (
+                                              <div
+                                                className="absolute inset-y-0 w-1/2 bg-gradient-to-r from-transparent via-white/80 to-transparent pointer-events-none"
+                                                style={{
+                                                  animation: isSplit2Active ? 'batchShimmerSweep 1.4s infinite ease-in-out' : 'batchShimmerSweep 1.9s infinite ease-in-out',
+                                                  animationDelay: `${0.3 + b.index * 0.15 + 1 * 0.1 + 1}s`
+                                                }}
+                                              />
+                                            )}
+                                          </div>
                                         </div>
                                       </button>
                                     </div>
 
                                     {isFinished && (
-                                      <span className="absolute -top-1.5 -right-1.5 bg-emerald-600 text-white rounded-full text-[10px] px-1.5 py-0.5 font-bold shadow-md border border-white animate-pulse leading-none">滿</span>
+                                      <span className="absolute -top-1.5 -right-1.5 bg-emerald-600 text-white rounded-full text-[10px] px-1.5 py-0.5 font-bold shadow-md border border-white animate-pulse leading-none pointer-events-none">滿</span>
                                     )}
                                   </div>
                                 );
@@ -3563,23 +4344,23 @@ export default function StockTabDetail() {
 
                   {/* 股價攤平 (雙系統) / 突破加碼 (雙系統) 與 比例計算工具 */}
                   <div className="mt-6 pt-6 border-t border-zinc-200/80 space-y-6">
-                    {/* 頂部 Tab 切換列：股價向下攤平試算 (雙系統對比) | 股價向上突破加碼試算 (雙系統對比) */}
-                    <div className="flex items-center gap-2 p-1.5 bg-zinc-100/90 dark:bg-zinc-800/80 rounded-2xl border border-zinc-200/80 shadow-2xs">
+                    {/* 頂部 Tab 切換列：股價向下攤平試算 (雙系統對比) | 股價向上突破加碼試算 (雙系統對比) | 期權計算器 (美式期權) */}
+                    <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2 p-1.5 bg-zinc-100/90 dark:bg-zinc-800/80 rounded-2xl border border-zinc-200/80 shadow-2xs">
                       <button
                         type="button"
                         onClick={() => {
                           playClickSound();
                           setCalcComparisonTab('down');
                         }}
-                        className={`flex-1 py-2.5 px-4 rounded-xl text-xs sm:text-sm font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                        className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
                           calcComparisonTab === 'down'
                             ? 'bg-emerald-800 text-white shadow-sm ring-1 ring-emerald-700/50'
                             : 'bg-transparent text-zinc-600 hover:text-zinc-900 hover:bg-zinc-200/50'
                         }`}
                       >
-                        <TrendingDown className="w-4 h-4" />
-                        <span>股價向下攤平試算 (雙系統對比)</span>
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-mono font-bold ${
+                        <TrendingDown className="w-4 h-4 shrink-0" />
+                        <span className="truncate">股價向下攤平試算 (雙系統對比)</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-mono font-bold shrink-0 ${
                           calcComparisonTab === 'down' ? 'bg-emerald-700/80 text-emerald-100' : 'bg-zinc-200/80 text-zinc-500'
                         }`}>
                           -2% ~ -12%
@@ -3592,18 +4373,39 @@ export default function StockTabDetail() {
                           playClickSound();
                           setCalcComparisonTab('up');
                         }}
-                        className={`flex-1 py-2.5 px-4 rounded-xl text-xs sm:text-sm font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                        className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
                           calcComparisonTab === 'up'
                             ? 'bg-emerald-800 text-white shadow-sm ring-1 ring-emerald-700/50'
                             : 'bg-transparent text-zinc-600 hover:text-zinc-900 hover:bg-zinc-200/50'
                         }`}
                       >
-                        <TrendingUp className="w-4 h-4" />
-                        <span>股價向上突破加碼試算 (雙系統對比)</span>
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-mono font-bold ${
+                        <TrendingUp className="w-4 h-4 shrink-0" />
+                        <span className="truncate">股價向上突破加碼試算 (雙系統對比)</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-mono font-bold shrink-0 ${
                           calcComparisonTab === 'up' ? 'bg-emerald-700/80 text-emerald-100' : 'bg-zinc-200/80 text-zinc-500'
                         }`}>
                           +2% ~ +12%
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          playClickSound();
+                          setCalcComparisonTab('options');
+                        }}
+                        className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                          calcComparisonTab === 'options'
+                            ? 'bg-amber-600 text-white shadow-sm ring-1 ring-amber-500/50'
+                            : 'bg-transparent text-zinc-600 hover:text-zinc-900 hover:bg-zinc-200/50'
+                        }`}
+                      >
+                        <Calculator className="w-4 h-4 shrink-0" />
+                        <span className="truncate">期權計算器</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-mono font-bold shrink-0 ${
+                          calcComparisonTab === 'options' ? 'bg-amber-700/80 text-amber-100' : 'bg-zinc-200/80 text-zinc-500'
+                        }`}>
+                          美式期權
                         </span>
                       </button>
                     </div>
@@ -4895,7 +5697,8 @@ export default function StockTabDetail() {
                     )}
 
                     {/* Full-width Section: 比例股價變動計算器 */}
-                    <div className="pt-4 border-t border-zinc-200/80 space-y-4 bg-zinc-50/70 p-4 sm:p-5 rounded-2xl border border-zinc-200/70 shadow-2xs">
+                    {(calcComparisonTab === 'down' || calcComparisonTab === 'up') && (
+                      <div className="pt-4 border-t border-zinc-200/80 space-y-4 bg-zinc-50/70 p-4 sm:p-5 rounded-2xl border border-zinc-200/70 shadow-2xs">
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-zinc-200/60">
                         <div className="flex items-center space-x-2">
                           <div className="p-1.5 bg-emerald-100 text-emerald-800 rounded-lg">
@@ -5138,32 +5941,87 @@ export default function StockTabDetail() {
                         </div>
                       </div>
                     </div>
+                  )}
 
-                    {/* Bottom Save Action Bar */}
-                    <div className="pt-4 border-t border-zinc-200/80 flex flex-col sm:flex-row items-center justify-between gap-3 bg-zinc-50/60 p-3.5 rounded-xl border border-zinc-200/60 mt-2">
-                      <div className="flex items-center gap-2 text-xs text-zinc-500">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
-                        <span>儲存試算內容將會將本次設定（包含預計購入股價、數量與倉位狀態）記錄至雲端</span>
+                    {/* Tab 3: 期權計算器 (美式期權 Moomoo Style) */}
+                    {calcComparisonTab === 'options' && (
+                      <OptionsCalculatorTab
+                        currentStockPrice={tab?.currentPrice && tab.currentPrice > 0 ? tab.currentPrice : (stats?.averagePrice && stats.averagePrice > 0 ? stats.averagePrice : 150)}
+                        stockSymbol={tab?.symbol || 'STOCK'}
+                        stockName={tab?.companyName || tab?.symbol || '標的股票'}
+                        tabId={tab?.id}
+                        tabTradeType={tab?.tradeType}
+                        initialOptionsData={tab?.optionsCalcData}
+                        onSaveOptionsData={async (data) => {
+                          if (tab) {
+                            await updateTab(tab.id, { optionsCalcData: data });
+                          }
+                        }}
+                        onClearOptionsData={async () => {
+                          if (tab) {
+                            await updateTab(tab.id, { optionsCalcData: null });
+                            if (typeof window !== 'undefined') {
+                              try {
+                                localStorage.removeItem(`options_calc_${tab.id}`);
+                                localStorage.removeItem(`options_calc_${tab.symbol}_${tab.tradeType}`);
+                                if (tab.tradeType === 'real') {
+                                  localStorage.removeItem(`options_calc_${tab.symbol}`);
+                                }
+                              } catch (e) {}
+                            }
+                          }
+                        }}
+                        optionTrades={trades.filter(t => t.isOptionTrade)}
+                        onAddOptionToTrades={async (tradePayload, savedData) => {
+                          if (tab) {
+                            await updateTab(tab.id, { optionsCalcData: savedData });
+                          }
+                          let pDate = new Date();
+                          if (tradePayload.purchaseDate && /^\d{4}-\d{2}-\d{2}$/.test(tradePayload.purchaseDate)) {
+                            const [y, m, d] = tradePayload.purchaseDate.split('-').map(Number);
+                            pDate = new Date(y, m - 1, d, 12, 0, 0);
+                          }
+                          await addTrade({
+                            ...tradePayload,
+                            tradeDate: Timestamp.fromDate(pDate)
+                          });
+                        }}
+                        onDeleteOptionTrade={async (tradeId) => {
+                          await deleteTrade(tradeId);
+                        }}
+                        onNavigateToTradesTab={() => {
+                          setChipsSubTab('trades');
+                        }}
+                      />
+                    )}
+
+                    {/* Bottom Save Action Bar (For stock averaging tabs) */}
+                    {calcComparisonTab !== 'options' && (
+                      <div className="pt-4 border-t border-zinc-200/80 flex flex-col sm:flex-row items-center justify-between gap-3 bg-zinc-50/60 p-3.5 rounded-xl border border-zinc-200/60 mt-2">
+                        <div className="flex items-center gap-2 text-xs text-zinc-500">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                          <span>儲存試算內容將會將本次設定（包含預計購入股價、數量與倉位狀態）記錄至雲端</span>
+                        </div>
+                        <Button
+                          type="button"
+                          onClick={handleSaveAveraging}
+                          disabled={isSavingAveraging}
+                          className="w-full sm:w-auto bg-[#0F6E56] hover:bg-[#0B5240] active:scale-95 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-sm hover:shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer shrink-0"
+                        >
+                          {isSavingAveraging ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              <span>儲存中...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Save className="w-3.5 h-3.5" />
+                              <span>儲存攤平試算設定</span>
+                            </>
+                          )}
+                        </Button>
                       </div>
-                      <Button
-                        type="button"
-                        onClick={handleSaveAveraging}
-                        disabled={isSavingAveraging}
-                        className="w-full sm:w-auto bg-[#0F6E56] hover:bg-[#0B5240] active:scale-95 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-sm hover:shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer shrink-0"
-                      >
-                        {isSavingAveraging ? (
-                          <>
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            <span>儲存中...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Save className="w-3.5 h-3.5" />
-                            <span>儲存攤平試算設定</span>
-                          </>
-                        )}
-                      </Button>
-                    </div>
+                    )}
                   </div>
                 </TabsContent>
 
@@ -5178,6 +6036,17 @@ export default function StockTabDetail() {
                         <span>股</span>
                       </span>
                       <Badge className="bg-emerald-50 text-emerald-700 border border-zinc-150 text-[10px] py-1 px-2.5 font-bold whitespace-nowrap shadow-sm">{trades.length} 筆</Badge>
+                      {optionPortfolio.optionTradesCount > 0 && (
+                        <span className="text-xs font-bold bg-indigo-50 text-indigo-900 border border-indigo-200 px-2.5 py-1 rounded-full flex items-center gap-1.5 whitespace-nowrap">
+                          <span>期權紀錄: {optionPortfolio.optionTradesCount} 筆</span>
+                          <span>·</span>
+                          <span className="font-mono">總持倉成本 ${optionPortfolio.totalHoldingCost.toFixed(2)}</span>
+                          <span>·</span>
+                          <span className={`font-mono font-black ${optionPortfolio.totalCurrentPnL >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
+                            當前損益 {optionPortfolio.totalCurrentPnL >= 0 ? `+$${optionPortfolio.totalCurrentPnL.toFixed(2)}` : `-$${Math.abs(optionPortfolio.totalCurrentPnL).toFixed(2)}`}
+                          </span>
+                        </span>
+                      )}
                       
                       <input
                         type="file"
@@ -5333,12 +6202,12 @@ export default function StockTabDetail() {
                        <table className="w-full text-sm text-left">
                           <thead className="text-[11px] sm:text-xs text-zinc-500 bg-zinc-100 uppercase tracking-wider sm:tracking-widest border-b border-zinc-200 font-bold">
                             <tr>
-                              <th className="px-3 sm:px-6 py-3 sm:py-4 font-semibold">日期</th>
-                              <th className="px-3 sm:px-6 py-3 sm:py-4 font-semibold">方向</th>
-                              <th className="px-3 sm:px-6 py-3 sm:py-4 font-semibold">交易批次</th>
-                              <th className="px-3 sm:px-6 py-3 sm:py-4 font-semibold">價格</th>
-                              <th className="px-3 sm:px-6 py-3 sm:py-4 font-semibold">數量</th>
-                              <th className="px-3 sm:px-6 py-3 sm:py-4 font-semibold">總計</th>
+                              <th className="px-3 sm:px-6 py-3 sm:py-4 font-semibold">日期 / 經過天數</th>
+                              <th className="px-3 sm:px-6 py-3 sm:py-4 font-semibold">方向 / 期權規格</th>
+                              <th className="px-3 sm:px-6 py-3 sm:py-4 font-semibold">交易批次 / Delta</th>
+                              <th className="px-3 sm:px-6 py-3 sm:py-4 font-semibold">價格 / 合約金額</th>
+                              <th className="px-3 sm:px-6 py-3 sm:py-4 font-semibold">數量 / 張數</th>
+                              <th className="px-3 sm:px-6 py-3 sm:py-4 font-semibold">總計 / 總持倉成本與損益</th>
                               <th className="px-3 sm:px-6 py-3 sm:py-4 text-right font-semibold">操作</th>
                             </tr>
                           </thead>
@@ -5346,60 +6215,142 @@ export default function StockTabDetail() {
                             {trades.length === 0 ? (
                               <tr><td colSpan={7} className="px-6 py-12 text-center text-zinc-400 font-medium bg-white">暫無交易紀錄</td></tr>
                             ) : (
-                              trades.map(t => (
-                                <motion.tr 
-                                  key={t.id} 
-                                  layout
-                                  initial={{ opacity: 0 }}
-                                  animate={{ opacity: 1 }}
-                                  exit={{ opacity: 0 }}
-                                  className="border-b border-zinc-150 last:border-0 hover:bg-zinc-50/50 transition-colors text-zinc-800 font-semibold bg-white"
-                                >
-                                  <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">{formatTimestamp(t.tradeDate, 'yyyy/MM/dd')}</td>
-                                  <td className="px-3 sm:px-6 py-3 sm:py-4">
-                                    <div className="flex flex-col gap-1.5 items-start">
-                                      <div className="flex items-center gap-1.5 flex-wrap">
-                                        <span className={`px-2 py-0.5 text-[10px] tracking-wider rounded-md font-bold ${t.type === 'BUY' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30'}`}>
-                                          {t.type}
-                                        </span>
-                                        {t.operator === '機器' && (
-                                          <span className="text-[10px] font-bold text-red-500 px-1 py-0.5 rounded border border-red-500/20 bg-red-500/10">機器</span>
-                                        )}
-                                        {t.operator === '人' && (
-                                          <span className="text-[10px] font-bold text-zinc-500 px-1 py-0.5 rounded border border-zinc-200 bg-zinc-50">人</span>
-                                        )}
-                                      </div>
-                                      {t.purpose && (
-                                        <span className="text-[10px] text-center font-semibold text-zinc-650 bg-zinc-50 border border-zinc-200 px-1.5 py-0.5 rounded-sm">
-                                          {t.purpose}
+                              trades.map(t => {
+                                const isOpt = Boolean(t.isOptionTrade);
+                                const optMetrics = isOpt
+                                  ? calculateLiveOptionTradeMetrics(t, tab?.currentPrice)
+                                  : null;
+
+                                return (
+                                  <motion.tr 
+                                    key={t.id} 
+                                    layout
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={{ opacity: 0 }}
+                                    className={`border-b border-zinc-150 last:border-0 transition-colors text-zinc-800 font-semibold ${
+                                      isOpt ? 'bg-emerald-50/35 hover:bg-emerald-50/70' : 'bg-white hover:bg-zinc-50/50'
+                                    }`}
+                                  >
+                                    <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">
+                                      <div>{t.purchaseDate ? t.purchaseDate.replace(/-/g, '/') : formatTimestamp(t.tradeDate, 'yyyy/MM/dd')}</div>
+                                      {isOpt && optMetrics && (
+                                        <span className="inline-block mt-1 text-[10px] font-mono font-bold bg-amber-100 text-amber-900 border border-amber-300 px-1.5 py-0.5 rounded">
+                                          已過 {optMetrics.daysElapsed} 天 (Theta)
                                         </span>
                                       )}
-                                    </div>
-                                  </td>
-                                  <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">
-                                     <BatchMultiSelect
-                                       variant="table"
-                                       value={t.batch}
-                                       onChange={(newBatch) => {
-                                         updateTrade(t.id, { batch: newBatch });
-                                         toast.success(newBatch ? `交易批次已更新為「${newBatch}」` : '已清除交易批次');
-                                       }}
-                                       placeholder="選擇批次"
-                                     />
-                                   </td>
-                                  <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">${t.price}</td>
-                                  <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">{t.quantity}</td>
-                                  <td className="px-6 py-4 whitespace-nowrap text-zinc-700">${(t.price * t.quantity).toFixed(2)}</td>
-                                  <td className="px-3 sm:px-6 py-3 sm:py-4 text-right">
-                                    <button 
-                                       onClick={() => deleteTrade(t.id)} 
-                                       className="text-rose-650 hover:text-rose-700 py-1.5 px-3 font-semibold rounded-lg hover:bg-rose-500/10 transition-colors"
-                                     >
-                                      刪除
-                                    </button>
-                                  </td>
-                                </motion.tr>
-                              ))
+                                    </td>
+                                    <td className="px-3 sm:px-6 py-3 sm:py-4">
+                                      <div className="flex flex-col gap-1.5 items-start">
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                          <span className={`px-2 py-0.5 text-[10px] tracking-wider rounded-md font-bold ${t.type === 'BUY' ? 'bg-blue-500/20 text-blue-600 border border-blue-500/30' : 'bg-red-500/20 text-red-600 border border-red-500/30'}`}>
+                                            {t.type}
+                                          </span>
+                                          {isOpt && optMetrics ? (
+                                            <span className={`px-2 py-0.5 text-[10px] font-mono font-black rounded-md border ${
+                                              optMetrics.optionType === 'call'
+                                                ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                                                : 'bg-rose-100 text-rose-900 border-rose-300'
+                                            }`}>
+                                              期權 {optMetrics.optionType.toUpperCase()} @ ${optMetrics.strikePrice}
+                                            </span>
+                                          ) : null}
+                                          {t.operator === '機器' && (
+                                            <span className="text-[10px] font-bold text-red-500 px-1 py-0.5 rounded border border-red-500/20 bg-red-500/10">機器</span>
+                                          )}
+                                          {t.operator === '人' && (
+                                            <span className="text-[10px] font-bold text-zinc-500 px-1 py-0.5 rounded border border-zinc-200 bg-zinc-50">人</span>
+                                          )}
+                                        </div>
+                                        {isOpt && optMetrics ? (
+                                          <span className="text-[10px] font-mono text-zinc-600">
+                                            DTE {optMetrics.dte}天 · 開倉單價 ${optMetrics.entryOptionPrice.toFixed(2)}/股
+                                          </span>
+                                        ) : t.purpose ? (
+                                          <span className="text-[10px] text-center font-semibold text-zinc-650 bg-zinc-50 border border-zinc-200 px-1.5 py-0.5 rounded-sm">
+                                            {t.purpose}
+                                          </span>
+                                        ) : null}
+                                      </div>
+                                    </td>
+                                    <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">
+                                      {isOpt && optMetrics ? (
+                                        <div className="space-y-1">
+                                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-100/90 border border-emerald-300 text-emerald-950 font-mono text-xs font-black">
+                                            <span>Delta (Δ):</span>
+                                            <span>{optMetrics.delta >= 0 ? '+' : ''}{optMetrics.delta.toFixed(4)}</span>
+                                          </div>
+                                          <div className="text-[10px] font-mono text-zinc-500">
+                                            Θ {optMetrics.theta.toFixed(4)} · IV {optMetrics.ivPercent.toFixed(1)}%
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <BatchMultiSelect
+                                          variant="table"
+                                          value={t.batch}
+                                          onChange={(newBatch) => {
+                                            updateTrade(t.id, { batch: newBatch });
+                                            toast.success(newBatch ? `交易批次已更新為「${newBatch}」` : '已清除交易批次');
+                                          }}
+                                          placeholder="選擇批次"
+                                        />
+                                      )}
+                                    </td>
+                                    <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap font-mono">
+                                      {isOpt && optMetrics ? (
+                                        <div>
+                                          <div className="font-black text-emerald-900">
+                                            合約金額 ${optMetrics.contractAmount.toFixed(2)}
+                                            <span className="text-[10px] font-normal text-zinc-500 ml-1">/張</span>
+                                          </div>
+                                          <div className="text-[10px] text-zinc-500">
+                                            (${optMetrics.entryOptionPrice.toFixed(2)} × 100股)
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <span>${t.price}</span>
+                                      )}
+                                    </td>
+                                    <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap font-mono">
+                                      {isOpt && optMetrics ? (
+                                        <div>
+                                          <span className="font-black text-zinc-900">{optMetrics.contractsCount} 張</span>
+                                          <span className="text-[10px] text-zinc-500 block">
+                                            ({optMetrics.contractsCount * optMetrics.contractMultiplier} 股)
+                                          </span>
+                                        </div>
+                                      ) : (
+                                        <span>{t.quantity}</span>
+                                      )}
+                                    </td>
+                                    <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap font-mono">
+                                      {isOpt && optMetrics ? (
+                                        <div className="space-y-0.5">
+                                          <div className="font-black text-zinc-900">
+                                            總持倉成本: ${optMetrics.totalHoldingCost.toFixed(2)}
+                                          </div>
+                                          <div className={`text-xs font-black ${optMetrics.currentPnL >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
+                                            當前損益: {optMetrics.currentPnL >= 0 ? `+$${optMetrics.currentPnL.toFixed(2)}` : `-$${Math.abs(optMetrics.currentPnL).toFixed(2)}`} ({optMetrics.currentRoiPct >= 0 ? '+' : ''}{optMetrics.currentRoiPct.toFixed(1)}%)
+                                          </div>
+                                          <div className="text-[10px] text-zinc-500">
+                                            隨現價自動平倉價: ${optMetrics.autoCurrentOptionPrice.toFixed(2)}/股
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <span className="text-zinc-700">${(t.price * t.quantity).toFixed(2)}</span>
+                                      )}
+                                    </td>
+                                    <td className="px-3 sm:px-6 py-3 sm:py-4 text-right">
+                                      <button 
+                                         onClick={() => deleteTrade(t.id)} 
+                                         className="text-rose-650 hover:text-rose-700 py-1.5 px-3 font-semibold rounded-lg hover:bg-rose-500/10 transition-colors cursor-pointer"
+                                       >
+                                        刪除
+                                      </button>
+                                    </td>
+                                  </motion.tr>
+                                );
+                              })
                             )}
                           </motion.tbody>
                         </table>

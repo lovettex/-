@@ -89,7 +89,7 @@ export default function ChipAnalysisTab({ tabId, symbol }: { tabId: string; symb
           }
         }
       } catch (error) {
-        console.error('Error loading card chip analysis:', error);
+        console.warn('Error loading card chip analysis:', error);
         handleFirestoreError(error, OperationType.GET, pathForGet);
       } finally {
         setLoading(false);

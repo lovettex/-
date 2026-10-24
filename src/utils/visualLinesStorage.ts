@@ -1,4 +1,4 @@
-import { db, handleFirestoreError, OperationType } from "../lib/firebase";
+import { db, auth } from "../lib/firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { PositionMap } from "../components/DynamicVisualLinesModal";
 

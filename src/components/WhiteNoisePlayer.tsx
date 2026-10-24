@@ -5,7 +5,7 @@ import {
   WhiteNoiseState,
   AmbientTrack,
 } from '../lib/whiteNoiseEngine';
-import { PS5_THEMES, PS5Theme } from './PS5DynamicBackground';
+import { PS5_THEMES, PS5Theme } from '../types/ps5Themes';
 import { playClickSound } from '../lib/audio';
 import {
   Volume2,

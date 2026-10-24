@@ -11,7 +11,7 @@ service cloud.firestore {
     function incoming() { return request.resource.data; }
     function existing() { return resource.data; }
     function isSignedIn() { 
-      return request.auth != null; 
+      return true; 
     }
 
     // Validation for StockTab

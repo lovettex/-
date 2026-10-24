@@ -1,12 +1,14 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import * as THREE from 'three';
-import { gsap } from 'gsap';
-import { Bug, Crosshair } from 'lucide-react';
+import gsap from 'gsap';
+import { Crosshair } from 'lucide-react';
+import { SpiderIcon } from './SpiderIcon';
 
 interface CrawlerSpiderProps {
   isActive: boolean;
   onToggle: () => void;
+  hideButton?: boolean;
 }
 
 interface PriceTagTouchTarget {
@@ -26,7 +28,7 @@ interface WaveRippleItem {
   localY: number;
 }
 
-export const CrawlerSpider: React.FC<CrawlerSpiderProps> = ({ isActive, onToggle }) => {
+export const CrawlerSpider: React.FC<CrawlerSpiderProps> = ({ isActive, onToggle, hideButton = false }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const ripplesContainerRef = useRef<HTMLDivElement>(null);
 
@@ -422,22 +424,14 @@ export const CrawlerSpider: React.FC<CrawlerSpiderProps> = ({ isActive, onToggle
             active: true,
           };
 
-          // Ripples: Pure glowing wave rings, NO extra info labels (anchored to card/spider relative coordinates)
+          // Ripples: Multi-colored prismatic wave rings ONLY on specific legs that touch a price tag
           newRipples.push({
             id: ++rippleIdCounter.current,
             localX: clampedX,
             localY: clampedY,
           });
-
-          try {
-            // Subtle neon outline around price tag (doesn't block numbers)
-            target.tag.element.style.boxShadow = '0 0 14px rgba(219, 250, 107, 0.8), 0 0 4px rgba(219, 250, 107, 0.9)';
-            target.tag.element.style.outline = '1.5px solid #DBFA6B';
-            target.tag.element.classList.add('transition-all', 'duration-500');
-            highlightedElementsRef.current.push(target.tag.element);
-          } catch (e) {}
         } else {
-          // Unassigned left leg takes supportive anchor stance strictly within card (keeping M-shape)
+          // Unassigned left leg takes supportive anchor stance strictly within card (keeping M-shape, NO ripple)
           const anchor = defaultStanceAnchors[legIdx];
           const clampedX = Math.max(minLocalX, Math.min(-65, anchor.x));
           const clampedY = Math.max(minLocalY, Math.min(maxLocalY, anchor.y));
@@ -463,22 +457,14 @@ export const CrawlerSpider: React.FC<CrawlerSpiderProps> = ({ isActive, onToggle
             active: true,
           };
 
-          // Ripples: Pure glowing wave rings, NO extra info labels (anchored to card/spider relative coordinates)
+          // Ripples: Multi-colored prismatic wave rings ONLY on specific legs that touch a price tag
           newRipples.push({
             id: ++rippleIdCounter.current,
             localX: clampedX,
             localY: clampedY,
           });
-
-          try {
-            // Subtle neon outline around price tag (doesn't block numbers)
-            target.tag.element.style.boxShadow = '0 0 14px rgba(219, 250, 107, 0.8), 0 0 4px rgba(219, 250, 107, 0.9)';
-            target.tag.element.style.outline = '1.5px solid #DBFA6B';
-            target.tag.element.classList.add('transition-all', 'duration-500');
-            highlightedElementsRef.current.push(target.tag.element);
-          } catch (e) {}
         } else {
-          // Unassigned right leg takes supportive anchor stance strictly within card (keeping M-shape)
+          // Unassigned right leg takes supportive anchor stance strictly within card (keeping M-shape, NO ripple)
           const anchor = defaultStanceAnchors[legIdx];
           const clampedX = Math.min(maxLocalX, Math.max(65, anchor.x));
           const clampedY = Math.max(minLocalY, Math.min(maxLocalY, anchor.y));
@@ -1151,26 +1137,28 @@ export const CrawlerSpider: React.FC<CrawlerSpiderProps> = ({ isActive, onToggle
 
   return (
     <>
-      {/* Top Header Toggle Control Button (Clean, minimalistic) */}
-      <button
-        data-crawler-toggle="true"
-        onClick={onToggle}
-        className={`relative inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all duration-300 shadow-sm border cursor-pointer ${
-          isActive
-            ? 'bg-emerald-500 text-white border-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.5)] scale-105'
-            : 'bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 border-zinc-700/60 hover:text-white backdrop-blur-md'
-        }`}
-        title="開啟 / 關閉 3D Crawler 蜘蛛籌碼巡檢"
-      >
-        <div className="relative flex items-center justify-center">
-          <Bug className={`w-4 h-4 transition-transform duration-300 ${isActive ? 'animate-bounce text-white' : ''}`} />
-          {isActive && (
-            <span className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-300 rounded-full animate-ping" />
-          )}
-        </div>
-        <span>{isActive ? '3D 蜘蛛巡檢 ON' : '3D Crawler 巡檢'}</span>
-        <Crosshair className="w-3.5 h-3.5 opacity-70" />
-      </button>
+      {/* Top Header Toggle Control Button (Optional floating toggle) */}
+      {!hideButton && (
+        <button
+          data-crawler-toggle="true"
+          onClick={onToggle}
+          className={`relative inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all duration-300 shadow-sm border cursor-pointer ${
+            isActive
+              ? 'bg-emerald-500 text-white border-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.5)] scale-105'
+              : 'bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 border-zinc-700/60 hover:text-white backdrop-blur-md'
+          }`}
+          title="開啟 / 關閉 3D Crawler 蜘蛛籌碼巡檢"
+        >
+          <div className="relative flex items-center justify-center">
+            <SpiderIcon className={`w-4 h-4 transition-transform duration-300 ${isActive ? 'animate-bounce text-white' : ''}`} />
+            {isActive && (
+              <span className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-300 rounded-full animate-ping" />
+            )}
+          </div>
+          <span>{isActive ? '3D 蜘蛛巡檢 ON' : '3D Crawler 巡檢'}</span>
+          <Crosshair className="w-3.5 h-3.5 opacity-70" />
+        </button>
+      )}
 
       {/* 3D WebGL Canvas Overlay mounted to body via Portal (No screenshot info HUD banner!) */}
       {isActive &&
@@ -1179,7 +1167,7 @@ export const CrawlerSpider: React.FC<CrawlerSpiderProps> = ({ isActive, onToggle
           <div className="fixed inset-0 z-[998] pointer-events-none overflow-hidden select-none">
             <canvas ref={canvasRef} className="w-full h-full block" />
 
-            {/* 60-Second DBFA6B Gentle Wave Ripples on Touched Price Tags (Dynamically anchored to card) */}
+            {/* 60-Second Clean Wave Ripples on Touched Price Tags (Dynamically anchored to card) */}
             <div
               ref={ripplesContainerRef}
               className="absolute left-0 top-0 pointer-events-none will-change-transform"
@@ -1195,18 +1183,18 @@ export const CrawlerSpider: React.FC<CrawlerSpiderProps> = ({ isActive, onToggle
                 >
                   {/* 1st expanding slow wave ring */}
                   <div
-                    className="w-16 h-16 rounded-full border-2 border-[#DBFA6B]/70 bg-[#DBFA6B]/10 animate-ping opacity-75 shadow-[0_0_18px_rgba(219,250,107,0.7)]"
+                    className="w-16 h-16 rounded-full border-2 border-[#DBFA6B]/70 bg-[#DBFA6B]/10 animate-ping opacity-75 shadow-[0_0_12px_rgba(219,250,107,0.5)]"
                     style={{ animationDuration: '2.8s', animationIterationCount: 'infinite' }}
                   />
 
                   {/* 2nd delayed soft wave ring */}
                   <div
-                    className="absolute inset-0 w-24 h-24 -m-4 rounded-full border border-[#DBFA6B]/40 animate-ping opacity-50 shadow-[0_0_24px_rgba(219,250,107,0.5)]"
+                    className="absolute inset-0 w-24 h-24 -m-4 rounded-full border border-[#DBFA6B]/40 animate-ping opacity-50 shadow-[0_0_16px_rgba(219,250,107,0.3)]"
                     style={{ animationDuration: '3.6s', animationIterationCount: 'infinite', animationDelay: '1.0s' }}
                   />
 
                   {/* Central indicator node: SEMI-TRANSPARENT so price tag underneath is clearly visible */}
-                  <div className="absolute inset-0 w-3.5 h-3.5 m-auto rounded-full bg-[#DBFA6B]/30 border border-[#F59E0B]/50 shadow-[0_0_10px_rgba(219,250,107,0.5)]" />
+                  <div className="absolute inset-0 w-3.5 h-3.5 m-auto rounded-full bg-[#DBFA6B]/30 border border-[#F59E0B]/50 shadow-[0_0_8px_rgba(219,250,107,0.4)]" />
                 </div>
               ))}
             </div>

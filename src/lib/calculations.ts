@@ -18,7 +18,7 @@ export function calculateStats(trades: Trade[] = [], currentPrice?: number) {
     };
   }
 
-  const validTrades = trades.filter((t) => t && typeof t === 'object');
+  const validTrades = trades.filter((t) => t && typeof t === 'object' && !t.isOptionTrade);
   if (validTrades.length === 0) {
     return {
       totalQuantity: 0,
@@ -452,6 +452,7 @@ export function calculateBatchPlanning(params: BatchPlanningParams): {
 
   if (Array.isArray(trades)) {
     trades.forEach((t) => {
+      if ((t as any).isOptionTrade) return;
       if (t.type === 'BUY') {
         const q = typeof t.quantity === 'number' ? t.quantity : parseFloat(String(t.quantity)) || 0;
         if (q > 0) {
@@ -644,3 +645,246 @@ export function calculateBatchPlanning(params: BatchPlanningParams): {
     totalRemaining: Math.max(0, effPlanned - totalBought),
   };
 }
+
+/**
+ * 依據購買日 (YYYY-MM-DD 或日期字串) 自動計算持有/經過天數 (Theta 衰減天數)
+ */
+export function calculateElapsedDaysFromDate(dateStr?: string | null): number {
+  if (!dateStr) return 0;
+  try {
+    const cleanStr = String(dateStr).trim();
+    let purchaseDate: Date;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(cleanStr)) {
+      const [y, m, d] = cleanStr.split('-').map(Number);
+      purchaseDate = new Date(y, m - 1, d, 0, 0, 0, 0);
+    } else if (/^\d{4}\/\d{2}\/\d{2}/.test(cleanStr)) {
+      const [y, m, d] = cleanStr.slice(0, 10).split('/').map(Number);
+      purchaseDate = new Date(y, m - 1, d, 0, 0, 0, 0);
+    } else {
+      const parsed = new Date(cleanStr);
+      if (isNaN(parsed.getTime())) return 0;
+      purchaseDate = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate(), 0, 0, 0, 0);
+    }
+    const now = new Date();
+    const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const diffMs = todayMidnight.getTime() - purchaseDate.getTime();
+    return Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+  } catch {
+    return 0;
+  }
+}
+
+function stdNormalPdfHelper(x: number): number {
+  return (1.0 / Math.sqrt(2 * Math.PI)) * Math.exp(-0.5 * x * x);
+}
+
+function cumulativeStdNormalHelper(x: number): number {
+  const a1 = 0.254829592;
+  const a2 = -0.284496736;
+  const a3 = 1.421413741;
+  const a4 = -1.453152027;
+  const a5 = 1.061405429;
+  const p = 0.3275911;
+  const sign = x < 0 ? -1 : 1;
+  const absX = Math.abs(x) / Math.sqrt(2.0);
+  const t = 1.0 / (1.0 + p * absX);
+  const y = 1.0 - ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * Math.exp(-absX * absX);
+  return 0.5 * (1.0 + sign * y);
+}
+
+/**
+ * 計算單筆期權交易或期權儲存紀錄之即時合約金額、總持倉成本、Delta、隨現在股價自動推算之當前期權價與當前損益
+ */
+export function calculateLiveOptionTradeMetrics(
+  item: any,
+  currentStockPrice?: number
+) {
+  const optionType: 'call' | 'put' = item?.optionType === 'put' ? 'put' : 'call';
+  const positionSide: 'buy' | 'sell' =
+    item?.positionSide === 'sell' || item?.type === 'SELL' ? 'sell' : 'buy';
+
+  const P_entry = Math.max(
+    0.001,
+    Number(
+      item?.entryOptionPrice ??
+        (item?.contractAmount ? Number(item.contractAmount) / 100 : item?.price) ??
+        5.0
+    )
+  );
+  const mult = Math.max(1, Number(item?.contractMultiplier || 100));
+  const N = Math.max(1, Number(item?.contractsCount ?? item?.quantity ?? 1));
+  const contractAmount = Number(item?.contractAmount ?? item?.costPerContract100 ?? P_entry * 100);
+  const totalHoldingCost = Number(item?.totalHoldingCost ?? item?.totalCost ?? P_entry * mult * N);
+
+  const S_now = currentStockPrice && currentStockPrice > 0 ? currentStockPrice : Number(item?.entryStockPrice || 150);
+  const S_entry = Number(item?.entryStockPrice) > 0 ? Number(item.entryStockPrice) : S_now;
+  const K = Number(item?.strikePrice) > 0 ? Number(item.strikePrice) : S_entry;
+  const totalDte = Math.max(1, Number(item?.dte || 30));
+
+  // 依據購買日自動計算經過天數
+  let purchaseDateStr = item?.purchaseDate || '';
+  if (!purchaseDateStr && item?.tradeDate) {
+    const ms = getTimestampMillis(item.tradeDate);
+    if (ms > 0) {
+      const d = new Date(ms);
+      purchaseDateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+  }
+  const daysElapsed = purchaseDateStr
+    ? calculateElapsedDaysFromDate(purchaseDateStr)
+    : Math.max(0, Number(item?.holdingDays || 0));
+
+  // 若無儲存之 Greeks，依 BSM 即時補算
+  let delta = Number(item?.delta);
+  let gamma = Number(item?.gamma);
+  let theta = Number(item?.theta);
+  let vega = Number(item?.vega);
+  const ivPct = Number(item?.ivPercent || 35);
+  const rPct = Number(item?.interestRate || 4.35);
+
+  if (isNaN(delta) || isNaN(theta) || (delta === 0 && theta === 0)) {
+    const T = Math.max(0.0001, totalDte / 365.0);
+    const sigma = Math.max(0.05, ivPct / 100);
+    const r = Math.max(0, rPct / 100);
+    const d1 = (Math.log(S_entry / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * Math.sqrt(T));
+    const d2 = d1 - sigma * Math.sqrt(T);
+    delta = optionType === 'call' ? cumulativeStdNormalHelper(d1) : cumulativeStdNormalHelper(d1) - 1;
+    gamma = stdNormalPdfHelper(d1) / (S_entry * sigma * Math.sqrt(T));
+    const thetaYearly =
+      optionType === 'call'
+        ? -(S_entry * stdNormalPdfHelper(d1) * sigma) / (2 * Math.sqrt(T)) -
+          r * K * Math.exp(-r * T) * cumulativeStdNormalHelper(d2)
+        : -(S_entry * stdNormalPdfHelper(d1) * sigma) / (2 * Math.sqrt(T)) +
+          r * K * Math.exp(-r * T) * cumulativeStdNormalHelper(-d2);
+    theta = thetaYearly / 365.0;
+    vega = S_entry * Math.sqrt(T) * stdNormalPdfHelper(d1) * 0.01;
+  }
+
+  // 隨現在股價與經過天數自動計算當前/平倉期權價
+  const dS_now = S_now - S_entry;
+  const estOptionChangePerShare =
+    delta * dS_now + 0.5 * (gamma || 0) * dS_now * dS_now + (theta || 0) * daysElapsed;
+  const autoCurrentOptionPrice = Math.max(0, P_entry + estOptionChangePerShare);
+
+  const diffPerShare =
+    positionSide === 'buy'
+      ? autoCurrentOptionPrice - P_entry
+      : P_entry - autoCurrentOptionPrice;
+  const currentPnL = diffPerShare * mult * N;
+  const currentRoiPct = totalHoldingCost > 0 ? (currentPnL / totalHoldingCost) * 100 : 0;
+  const currentMarketValue = autoCurrentOptionPrice * mult * N;
+
+  return {
+    optionType,
+    positionSide,
+    strikePrice: K,
+    dte: totalDte,
+    entryOptionPrice: P_entry,
+    entryStockPrice: S_entry,
+    currentStockPrice: S_now,
+    autoCurrentOptionPrice,
+    contractAmount,
+    totalHoldingCost,
+    contractsCount: N,
+    contractMultiplier: mult,
+    delta,
+    gamma: gamma || 0,
+    theta: theta || 0,
+    vega: vega || 0,
+    ivPercent: ivPct,
+    interestRate: rPct,
+    purchaseDate: purchaseDateStr,
+    daysElapsed,
+    currentPnL,
+    currentRoiPct,
+    currentMarketValue,
+  };
+}
+
+/**
+ * 彙整該個股所有期權交易紀錄 (或已儲存期權試算) 之總合約金額、總持倉成本、總 Delta 與當前總損益
+ */
+export function calculateOptionPortfolioSummary(
+  trades: Trade[] = [],
+  currentStockPrice?: number,
+  fallbackOptionsData?: any
+) {
+  const optionTrades = Array.isArray(trades)
+    ? trades.filter((t) => t && t.isOptionTrade)
+    : [];
+
+  if (optionTrades.length > 0) {
+    let totalContractAmountSingleSum = 0;
+    let totalHoldingCost = 0;
+    let totalContracts = 0;
+    let totalCurrentPnL = 0;
+    let totalCurrentMarketValue = 0;
+    let netPositionDelta = 0;
+
+    const detailedTrades = optionTrades.map((t) => {
+      const m = calculateLiveOptionTradeMetrics(t, currentStockPrice);
+      totalContractAmountSingleSum += m.contractAmount;
+      totalHoldingCost += m.totalHoldingCost;
+      totalContracts += m.contractsCount;
+      totalCurrentPnL += m.currentPnL;
+      totalCurrentMarketValue += m.currentMarketValue;
+      const sign = m.positionSide === 'buy' ? 1 : -1;
+      netPositionDelta += sign * m.delta * m.contractsCount;
+      return { trade: t, metrics: m };
+    });
+
+    const totalRoiPct = totalHoldingCost > 0 ? (totalCurrentPnL / totalHoldingCost) * 100 : 0;
+    return {
+      hasOptionRecords: true,
+      source: 'trades' as const,
+      optionTradesCount: optionTrades.length,
+      totalContracts,
+      latestContractAmount: detailedTrades[0]?.metrics.contractAmount || 0,
+      totalContractAmountSingleSum,
+      totalHoldingCost,
+      totalCurrentPnL,
+      totalRoiPct,
+      totalCurrentMarketValue,
+      netPositionDelta,
+      latestMetrics: detailedTrades[0]?.metrics || null,
+      detailedTrades,
+    };
+  }
+
+  if (fallbackOptionsData && fallbackOptionsData.entryOptionPrice) {
+    const m = calculateLiveOptionTradeMetrics(fallbackOptionsData, currentStockPrice);
+    const sign = m.positionSide === 'buy' ? 1 : -1;
+    return {
+      hasOptionRecords: true,
+      source: 'savedCalc' as const,
+      optionTradesCount: 0,
+      totalContracts: m.contractsCount,
+      latestContractAmount: m.contractAmount,
+      totalContractAmountSingleSum: m.contractAmount,
+      totalHoldingCost: m.totalHoldingCost,
+      totalCurrentPnL: m.currentPnL,
+      totalRoiPct: m.currentRoiPct,
+      totalCurrentMarketValue: m.currentMarketValue,
+      netPositionDelta: sign * m.delta * m.contractsCount,
+      latestMetrics: m,
+      detailedTrades: [],
+    };
+  }
+
+  return {
+    hasOptionRecords: false,
+    source: 'none' as const,
+    optionTradesCount: 0,
+    totalContracts: 0,
+    latestContractAmount: 0,
+    totalContractAmountSingleSum: 0,
+    totalHoldingCost: 0,
+    totalCurrentPnL: 0,
+    totalRoiPct: 0,
+    totalCurrentMarketValue: 0,
+    netPositionDelta: 0,
+    latestMetrics: null,
+    detailedTrades: [],
+  };
+}
+

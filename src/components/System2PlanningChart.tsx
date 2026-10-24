@@ -16,8 +16,10 @@ import {
   Sparkles,
   Layers,
   Split,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
-import { calculateBatchPlanning } from '../lib/calculations';
+import { calculateBatchPlanning, calculateLiveOptionTradeMetrics } from '../lib/calculations';
 
 // Register all Chart.js components and controllers
 ChartJS.register(...registerables);
@@ -77,6 +79,7 @@ interface System2PlanningChartProps {
   usableCapital?: number;
   plannedQty?: number;
   trades?: Trade[];
+  optionsCalcData?: any;
   visualLevels?: VisualPriceLevel[];
   compact?: boolean;
   symbol?: string;
@@ -85,6 +88,8 @@ interface System2PlanningChartProps {
   onToggleExpand?: () => void;
   showCardDividers?: boolean;
   onToggleCardDividers?: () => void;
+  showStrikePrices?: boolean;
+  onToggleStrikePrices?: () => void;
   selectedLevelTypes?: {
     support: boolean;
     stopLoss: boolean;
@@ -101,6 +106,8 @@ interface System2PlanningChartProps {
     split2Qty: number,
     targetSplit?: 1 | 2
   ) => void;
+  isFullscreen?: boolean;
+  onToggleFullscreen?: () => void;
 }
 
 export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
@@ -115,6 +122,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
   usableCapital = 0,
   plannedQty = 0,
   trades = [],
+  optionsCalcData,
   visualLevels = [],
   compact = false,
   symbol,
@@ -123,11 +131,15 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
   onToggleExpand,
   showCardDividers: propShowCardDividers,
   onToggleCardDividers,
+  showStrikePrices: propShowStrikePrices,
+  onToggleStrikePrices,
   selectedLevelTypes: propSelectedLevelTypes,
   onToggleLevelType,
   onSelectAllLevelTypes,
   onDeselectAllLevelTypes,
   onBatchClick,
+  isFullscreen = false,
+  onToggleFullscreen,
 }) => {
   const [internalExpanded, setInternalExpanded] = useState<boolean>(true);
   const isExpanded = propIsExpanded !== undefined ? propIsExpanded : internalExpanded;
@@ -148,6 +160,17 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
       onToggleCardDividers();
     } else {
       setShowCardDividersLocal((prev) => !prev);
+    }
+  };
+
+  // 行權價開關狀態 (預設關閉，點擊後才開啟黑色垂直虛線、合約金額與當前損益)
+  const [showStrikePricesLocal, setShowStrikePricesLocal] = useState<boolean>(false);
+  const showStrikePrices = propShowStrikePrices !== undefined ? propShowStrikePrices : showStrikePricesLocal;
+  const handleToggleStrikePrices = () => {
+    if (onToggleStrikePrices) {
+      onToggleStrikePrices();
+    } else {
+      setShowStrikePricesLocal((prev) => !prev);
     }
   };
 
@@ -242,12 +265,12 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
 
   const [yAxisMode, setYAxisMode] = useState<'shares' | 'percent'>('shares');
   const [hoveredItem, setHoveredItem] = useState<{
-    type: 'step' | 'trade' | 'visualLevel' | 'avgCost' | 'currentPrice';
+    type: 'step' | 'trade' | 'visualLevel' | 'avgCost' | 'currentPrice' | 'optionTrade';
     data: any;
   } | null>(null);
   const lastHoverKeyRef = useRef<string>('');
   const [selectedItem, setSelectedItem] = useState<{
-    type: 'step' | 'trade' | 'visualLevel' | 'avgCost' | 'currentPrice';
+    type: 'step' | 'trade' | 'visualLevel' | 'avgCost' | 'currentPrice' | 'optionTrade';
     data: any;
   } | null>(null);
   const [showAllSplits, setShowAllSplits] = useState<boolean>(false);
@@ -283,6 +306,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
   const effectiveHoldingShares = useMemo(() => {
     const numHolding = typeof holdingQty === 'number' ? holdingQty : parseFloat(String(holdingQty)) || 0;
     const netTradeShares = (trades || []).reduce((sum, t) => {
+      if (t?.isOptionTrade) return sum;
       const q = typeof t.quantity === 'number' ? t.quantity : parseFloat(String(t.quantity)) || 0;
       if (t.type === 'BUY') return sum + q;
       if (t.type === 'SELL') return sum - q;
@@ -433,15 +457,59 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
     });
   }, [stepConfigs, averagingRowsSys2, pyramidRows, calcMode, batches, currentPrice, currentPriceNum, holdingAvgPrice, plannedQty, effectiveHoldingShares, trades, usableCapital]);
 
-  // Filter & sort past trades (valid prices and positive quantities)
+  // Filter & sort past stock trades (exclude option purchase records so options ONLY display as black dashed lines)
   const validTrades = useMemo(() => {
     return (trades || [])
-      .filter((t) => typeof t.price === 'number' && t.price > 0 && typeof t.quantity === 'number' && t.quantity > 0)
+      .filter((t) => !t?.isOptionTrade && typeof t.price === 'number' && t.price > 0 && typeof t.quantity === 'number' && t.quantity > 0)
       .map((t) => ({
         ...t,
         dateFormatted: formatTimestamp(t.tradeDate, 'yyyy-MM-dd') || '未知日期',
       }));
   }, [trades]);
+
+  // 期權購買紀錄：優先讀取交易紀錄中的期權部位 (isOptionTrade)，若無則讀取已儲存之期權計算器紀錄 (optionsCalcData)
+  // 在金字塔圖表上只顯示黑色虛線，上方標籤依序為：行權價 -> 正上方顯示合約金額 (×100股) -> 正上方顯示當前損益金額
+  const optionPurchaseRecords = useMemo(() => {
+    const rawOptionTrades = (trades || []).filter((t) => Boolean(t && t.isOptionTrade));
+    if (rawOptionTrades.length > 0) {
+      return rawOptionTrades
+        .map((t, idx) => {
+          const metrics = calculateLiveOptionTradeMetrics(t, currentPriceNum);
+          return {
+            id: t.id || `opt-trade-${idx}`,
+            rawTrade: t,
+            ...metrics,
+            dateFormatted: t.purchaseDate
+              ? String(t.purchaseDate).replace(/-/g, '/')
+              : formatTimestamp(t.tradeDate, 'yyyy-MM-dd') || '未知日期',
+          };
+        })
+        .filter((item) => item.strikePrice > 0 && isFinite(item.strikePrice));
+    }
+
+    if (
+      optionsCalcData &&
+      optionsCalcData.strikePrice &&
+      Number(optionsCalcData.strikePrice) > 0 &&
+      optionsCalcData.entryOptionPrice
+    ) {
+      const metrics = calculateLiveOptionTradeMetrics(optionsCalcData, currentPriceNum);
+      if (metrics.strikePrice > 0 && isFinite(metrics.strikePrice)) {
+        return [
+          {
+            id: 'opt-saved-calc',
+            rawTrade: optionsCalcData,
+            ...metrics,
+            dateFormatted: optionsCalcData.purchaseDate
+              ? String(optionsCalcData.purchaseDate).replace(/-/g, '/')
+              : '已儲存期權紀錄',
+          },
+        ];
+      }
+    }
+
+    return [];
+  }, [trades, optionsCalcData, currentPriceNum]);
 
   const buyTrades = useMemo(() => validTrades.filter((t) => t.type === 'BUY'), [validTrades]);
   const sellTrades = useMemo(() => validTrades.filter((t) => t.type === 'SELL'), [validTrades]);
@@ -449,7 +517,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
   // Overall statistics
   const totalPlannedShares = useMemo(() => stepItems.reduce((acc, s) => acc + s.size, 0), [stepItems]);
   const totalBoughtShares = useMemo(() => stepItems.reduce((acc, s) => acc + s.bought, 0), [stepItems]);
-  const totalTradesCount = validTrades.length;
+  const totalTradesCount = validTrades.length + optionPurchaseRecords.length;
 
   // 視覺關鍵防線（琥珀黃:支撐、警示紅:止損、玫瑰粉:壓力、翡翠綠:止盈）
   // 優先採用用戶/策略自訂防線；若未設定任何或部分防線，則智慧補充預設參考防線，保證按鈕打開時完整視覺化呈現
@@ -628,6 +696,13 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
     if (showTrades) {
       validTrades.forEach((t) => allPrices.push(t.price));
     }
+    if (showStrikePrices && optionPurchaseRecords && optionPurchaseRecords.length > 0) {
+      optionPurchaseRecords.forEach((opt) => {
+        if (opt.strikePrice > 0 && isFinite(opt.strikePrice)) {
+          allPrices.push(opt.strikePrice);
+        }
+      });
+    }
     if (displayedVisualLevels.length > 0) {
       displayedVisualLevels.forEach((vl) => {
         const p = typeof vl.price === 'number' ? vl.price : parseFloat(String(vl.price));
@@ -643,8 +718,12 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
     const safeMin = isFinite(min) ? min : 60;
     const safeMax = isFinite(max) ? max : 100;
     const span = safeMax - safeMin || 10;
-    // 全選防線狀態下給予更加平衡的邊界比例，避免圖表被壓縮
-    const padding = isAllLevelsSelected ? span * 0.09 + 1.2 : span * 0.12 + 1.5;
+    // 當啟用行權價顯示時，適度優化左右邊界比例，預留充足空間防止多行標籤貼邊
+    const padding = isAllLevelsSelected
+      ? span * 0.09 + 1.2
+      : showStrikePrices && optionPurchaseRecords.length > 0
+      ? span * 0.13 + 1.8
+      : span * 0.12 + 1.5;
     const calculatedMin = Math.max(0, Math.floor((safeMin - padding) * 10) / 10);
     const calculatedMax = Math.max(calculatedMin + 2, Math.ceil((safeMax + padding) * 10) / 10);
 
@@ -652,7 +731,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
       minX: calculatedMin,
       maxX: calculatedMax,
     };
-  }, [currentPriceNum, holdingAvgPriceNum, showAvgCost, stepItems, validTrades, showTrades, displayedVisualLevels, isAllLevelsSelected]);
+  }, [currentPriceNum, holdingAvgPriceNum, showAvgCost, stepItems, validTrades, optionPurchaseRecords, showTrades, showStrikePrices, displayedVisualLevels, isAllLevelsSelected]);
 
   // Sorted step items by price ascending
   const sortedStepItems = useMemo(() => {
@@ -681,7 +760,6 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
     const stepPoints = sortedStepItems.map((s) => ({
       x: s.price,
       y: yAxisMode === 'shares' ? s.size : s.percent,
-      raw: s,
     }));
 
     const datasets: any[] = [
@@ -722,7 +800,6 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
         data: buyTrades.map((t) => ({
           x: t.price,
           y: yAxisMode === 'shares' ? t.quantity : 15,
-          raw: t,
         })),
         showLine: false,
         pointStyle: 'circle' as const, // 圓形藍點
@@ -746,7 +823,6 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
         data: sellTrades.map((t) => ({
           x: t.price,
           y: yAxisMode === 'shares' ? t.quantity : 15,
-          raw: t,
         })),
         showLine: false,
         pointStyle: 'circle' as const,
@@ -768,6 +844,24 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
   }, [sortedStepItems, yAxisMode, showTrades, buyTrades, sellTrades, displayedVisualLevels, totalPlannedShares, totalBoughtShares]);
 
   const chartRef = useRef<any>(null);
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+  const [chartContainerHeight, setChartContainerHeight] = useState<number>(compact ? 285 : 390);
+
+  useEffect(() => {
+    const el = chartContainerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const h = Math.round(entry.contentRect.height);
+        if (h > 50) {
+          setChartContainerHeight((prev) => (Math.abs(prev - h) > 3 ? h : prev));
+        }
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const renderedLinesRef = useRef<{ id: string; type: string; renderX: number; data: any }[]>([]);
 
   const drawDataRef = useRef({
@@ -779,8 +873,10 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
     sortedStepItems,
     yAxisMode,
     showTrades,
+    showStrikePrices,
     buyTrades,
     sellTrades,
+    optionPurchaseRecords,
     isAllLevelsSelected,
     hoveredItem,
   });
@@ -794,16 +890,28 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
     sortedStepItems,
     yAxisMode,
     showTrades,
+    showStrikePrices,
     buyTrades,
     sellTrades,
+    optionPurchaseRecords,
     isAllLevelsSelected,
     hoveredItem,
   };
 
   useEffect(() => {
+    return () => {
+      if (chartRef.current) {
+        try {
+          chartRef.current.destroy?.();
+        } catch {}
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     if (chartRef.current && typeof chartRef.current.update === 'function') {
       try {
-        chartRef.current.update();
+        chartRef.current.update('none');
       } catch {
         // Safe fallback if chart is mid-lifecycle
       }
@@ -815,10 +923,11 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
     showAvgCost,
     yAxisMode,
     showTrades,
+    showStrikePrices,
     buyTrades,
     sellTrades,
+    optionPurchaseRecords,
     isAllLevelsSelected,
-    hoveredItem,
   ]);
 
   // Custom Chart.js annotation plugin:
@@ -848,8 +957,10 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
           sortedStepItems,
           yAxisMode,
           showTrades,
+          showStrikePrices,
           buyTrades,
           sellTrades,
+          optionPurchaseRecords,
           isAllLevelsSelected,
         } = drawDataRef.current;
 
@@ -860,6 +971,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
           xPos: number;
           price: number;
           fullText: string;
+          extraLinesAbove?: { text: string; textColor: string }[];
           lineColor: string;
           textColor: string;
           priority: number;
@@ -961,6 +1073,53 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
           });
         }
 
+        // 4. 期權購買紀錄 - 只需要顯示黑色虛線，上面標籤是交易的行權價，正上方顯示合約金額 (×100股)，在其合約價格正上方也顯示當前損益金額
+        if (showStrikePrices && optionPurchaseRecords && optionPurchaseRecords.length > 0) {
+          optionPurchaseRecords.forEach((opt, idx) => {
+            const strikePrice = Number(opt.strikePrice);
+            if (isNaN(strikePrice) || strikePrice <= 0) return;
+            const xPos = xScale.getPixelForValue(strikePrice);
+            if (xPos >= chartArea.left - 5 && xPos <= chartArea.right + 5) {
+              const isTriggered =
+                currentPriceNum > 0 &&
+                (opt.optionType === 'put' ? currentPriceNum <= strikePrice : currentPriceNum >= strikePrice);
+              const pnlSign = opt.currentPnL >= 0 ? '+' : '-';
+              const pnlText = `當前損益 ${pnlSign}$${Math.abs(opt.currentPnL).toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}`;
+              const contractText = `合約金額 (×100股) $${opt.contractAmount.toLocaleString(undefined, {
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 2,
+              })}`;
+              const strikeText = `行權價 $${strikePrice.toFixed(2)}`;
+
+              lineConfigs.push({
+                id: `opt-${opt.id || idx}`,
+                type: 'optionTrade',
+                xPos,
+                price: strikePrice,
+                fullText: strikeText,
+                extraLinesAbove: [
+                  {
+                    text: contractText,
+                    textColor: '#09090b', // 合約金額 (×100股) 在行權價正上方
+                  },
+                  {
+                    text: pnlText,
+                    textColor: opt.currentPnL > 0 ? '#047857' : opt.currentPnL < 0 ? '#b91c1c' : '#09090b', // 當前損益金額 在合約價格正上方
+                  },
+                ],
+                lineColor: '#09090b', // 黑色虛線
+                textColor: '#09090b', // 黑色標籤
+                priority: -1, // 優先配置於該價位虛線正上方最底層基準，使三層標籤緊貼黑色虛線正上方
+                isTriggered,
+                rawItem: opt,
+              });
+            }
+          });
+        }
+
         // Sort items by price ascending; if identical price, sort by priority
         lineConfigs.sort((a, b) => {
           if (Math.abs(a.price - b.price) > 0.001) {
@@ -1009,39 +1168,52 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
         }
         const placedTags: PlacedTag[] = [];
 
-        ctx.font = 'bold 10.5px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+        ctx.font = 'bold 10px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
 
+        const multiLineGap = 13;
         const positionedItems = lineConfigs.map((item, idx) => {
           const renderX = renderXList[idx];
-          const textMetrics = ctx.measureText(item.fullText);
-          const textWidth = textMetrics.width;
+          const extraLines = item.extraLinesAbove || [];
+          const allTexts = [item.fullText, ...extraLines.map((l) => l.text)];
+          const textWidth = Math.max(...allTexts.map((t) => ctx.measureText(t).width));
           const safeX = Math.max(
             chartArea.left + textWidth / 2 + 4,
             Math.min(chartArea.right - textWidth / 2 - 4, renderX)
           );
 
-          // 第一層 (Layer 0) 位於圖表頂端正上方
-          const baseY = chartArea.top - 8;
-          const rowStep = 16;
+          // 第一層 (Layer 0) 位於 X 軸下方 (虛線加長向下延伸至標籤)
+          const baseY = chartArea.bottom + 48;
+          const rowStep = 18;
+          const totalRows = 1 + extraLines.length;
           let currentY = baseY;
           let hasOverlap = true;
           let safety = 0;
 
-          // 若太近，則往上重疊堆疊顯示 (currentY 往上遞減)
-          while (hasOverlap && safety < 8) {
-            hasOverlap = placedTags.some((placed) => {
-              const yOverlap = Math.abs(placed.y - currentY) < 12;
-              const xOverlap = Math.abs(placed.x - safeX) < (placed.width + textWidth) / 2 + 6;
-              return yOverlap && xOverlap;
-            });
+          // 下方區自動避讓：若相鄰價位線標籤太近，則往下遞增堆疊排開 (currentY 往下遞增)，每一層均做碰撞檢測
+          while (hasOverlap && safety < 10) {
+            hasOverlap = false;
+            for (let r = 0; r < totalRows; r++) {
+              const checkY = currentY + r * multiLineGap;
+              const rowCollision = placedTags.some((placed) => {
+                const yOverlap = Math.abs(placed.y - checkY) < 13;
+                const xOverlap = Math.abs(placed.x - safeX) < (placed.width + textWidth) / 2 + 6;
+                return yOverlap && xOverlap;
+              });
+              if (rowCollision) {
+                hasOverlap = true;
+                break;
+              }
+            }
 
             if (hasOverlap) {
-              currentY -= rowStep; // 往上移動一層
+              currentY += rowStep; // 往下避讓移動一層
             }
             safety++;
           }
 
-          placedTags.push({ x: safeX, width: textWidth, y: currentY });
+          for (let r = 0; r < totalRows; r++) {
+            placedTags.push({ x: safeX, width: textWidth, y: currentY + r * multiLineGap });
+          }
 
           return {
             ...item,
@@ -1060,94 +1232,122 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
           data: item.rawItem,
         }));
 
-        // 繪製各虛線 (從最底層標籤下方連接至圖表底部)
-        // 找出每個 X 座標最底層 (最接近圖表) 的標籤 Y 位置
-        const lowestYByX = new Map<number, number>();
-        positionedItems.forEach((item) => {
-          const cur = lowestYByX.get(item.renderX);
-          if (cur === undefined || item.tagY > cur) {
-            lowestYByX.set(item.renderX, item.tagY);
-          }
-        });
-
+        // 繪製各價位線 (虛線移到 X 軸下方，由 X 軸向下延伸連到標籤，尾部帶無填色小圓點)
         const drawnLines = new Set<string>();
         positionedItems.forEach((item) => {
           const key = `${Math.round(item.renderX * 2) / 2}-${item.lineColor}`;
           if (drawnLines.has(key)) return;
           drawnLines.add(key);
 
-          const lowestTagY = lowestYByX.get(item.renderX) ?? (chartArea.top - 8);
-          const lineTopY = Math.min(chartArea.top, lowestTagY + 7);
-
-          // 平均成本虛線加粗 0.6px (3.0px -> 3.6px)，現價虛線加粗 1px (3.0px)，卡片分隔線改為實體線並加粗 1.5px (2.0px -> 3.5px)，防線保持 2.0px
+          // 判斷線寬與線條樣式
           let lineWidth = 2.0;
-          let isSolidLine = false;
+          let isCardDivider = item.type === 'divider' || item.rawItem?.isCardDivider;
           if (item.type === 'avgCost') {
-            lineWidth = 3.6; // 平均成本虛線加粗 0.6px
+            lineWidth = 2.5; // 平均成本虛線
           } else if (item.type === 'currentPrice') {
-            lineWidth = 3.0; // 現價加粗 1px
-          } else if (item.type === 'divider' || item.rawItem?.isCardDivider) {
-            lineWidth = 3.5; // 卡片分隔線加粗 1.5px
-            isSolidLine = true; // 改為實體線
+            lineWidth = 2.4; // 現價虛線
+          } else if (item.type === 'optionTrade') {
+            lineWidth = 2.2; // 期權購買紀錄：黑色虛線
+          } else if (isCardDivider) {
+            lineWidth = 3.0;
           }
 
-          ctx.save();
-          ctx.beginPath();
-          if (isSolidLine) {
-            ctx.setLineDash([]); // 卡片分隔線：實體線
-          } else {
-            ctx.setLineDash([5, 4]); // 其他輔助線：虛線
-          }
-          ctx.strokeStyle = item.lineColor;
-          ctx.lineWidth = lineWidth;
-          ctx.moveTo(item.renderX, lineTopY);
-          ctx.lineTo(item.renderX, chartArea.bottom);
-          ctx.stroke();
-          ctx.restore();
-
-          // 每個虛線底部加入狀態小圓點 (若觸發則顯示綠色，尚未觸發則顯示白底圓點)
-          const dotRadius = 4.5;
-          ctx.save();
-          ctx.beginPath();
-          ctx.arc(item.renderX, chartArea.bottom, dotRadius, 0, Math.PI * 2);
-          if (item.isTriggered) {
-            // 已觸發：實心綠點
-            ctx.fillStyle = '#10b981';
-            ctx.fill();
-            ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
-          } else {
-            // 尚未觸發：白底圓點帶防線虛線顏色外框
-            ctx.fillStyle = '#ffffff';
-            ctx.fill();
+          // 1. 若為卡片分隔線，保留圖表內部垂直分隔
+          if (isCardDivider) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.setLineDash([]);
             ctx.strokeStyle = item.lineColor;
-            ctx.lineWidth = 2.0;
+            ctx.lineWidth = lineWidth;
+            ctx.moveTo(item.renderX, chartArea.top);
+            ctx.lineTo(item.renderX, chartArea.bottom);
             ctx.stroke();
+            ctx.restore();
           }
+
+          // 2. 價位線(虛線)移到軸下方，由 X 軸向下延伸連到標籤，尾部帶無填色小圓點
+          const circleRadius = 2.8;
+          const circleY = item.tagY - 10.5;
+          const lineEndY = circleY - circleRadius;
+
+          ctx.save();
+          ctx.beginPath();
+          ctx.setLineDash([4, 3]);
+          ctx.strokeStyle = item.lineColor;
+          ctx.lineWidth = Math.min(lineWidth, 2.2);
+          ctx.moveTo(item.renderX, chartArea.bottom);
+          if (Math.abs(item.safeX - item.renderX) > 2) {
+            const midY = (chartArea.bottom + lineEndY) / 2;
+            ctx.lineTo(item.renderX, midY);
+            ctx.lineTo(item.safeX, midY);
+            ctx.lineTo(item.safeX, lineEndY);
+          } else {
+            ctx.lineTo(item.renderX, lineEndY);
+          }
+          ctx.stroke();
+
+          // 虛線尾部添加一個小圓點 (無填滿任何顏色，純線條空心圓)
+          ctx.beginPath();
+          ctx.setLineDash([]); // 實線外框圓
+          ctx.strokeStyle = item.lineColor;
+          ctx.lineWidth = 1.6;
+          ctx.arc(item.safeX, circleY, circleRadius, 0, Math.PI * 2);
+          // 嚴格無填滿任何顏色 (不調用 ctx.fill())
+          ctx.stroke();
           ctx.restore();
         });
 
-        // 繪製純文字標籤 (取消所有外框，純文字既可)
+        // 繪製純文字標籤 (移至 X 軸下方，無外框純文字，帶微白柔和光暈保護文字)
         positionedItems.forEach((item) => {
           ctx.save();
-          ctx.font = 'bold 10.5px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+          ctx.font = 'bold 10px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
 
-          // 微光暈防重疊干擾 (純文字無外框)
+          // 微光暈防重疊干擾
           ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
           ctx.lineWidth = 3.5;
           ctx.lineJoin = 'round';
           ctx.strokeText(item.fullText, item.safeX, item.tagY);
 
-          // 純文字本體
+          // 純文字本體 (例如 目前價格 $71.70, 平均成本 $71.88, 支撐 $75.00, 行權價 $70.00)
           ctx.fillStyle = item.textColor;
           ctx.fillText(item.fullText, item.safeX, item.tagY);
+
+          // 若有額外多層標籤 (期權：第2行 合約金額 (×100股)，第3行 當前損益)
+          if (item.extraLinesAbove && item.extraLinesAbove.length > 0) {
+            item.extraLinesAbove.forEach((extra, extraIdx) => {
+              const extraY = item.tagY + (extraIdx + 1) * multiLineGap;
+              ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+              ctx.lineWidth = 3.5;
+              ctx.lineJoin = 'round';
+              ctx.strokeText(extra.text, item.safeX, extraY);
+
+              ctx.fillStyle = extra.textColor;
+              ctx.fillText(extra.text, item.safeX, extraY);
+            });
+          }
+
           ctx.restore();
         });
 
-        // 3. Draw Pyramid Step Direct Annotations: "$價格 -跌幅%" & "已購買 X / 預購入 Y 股"
+        // 繪製 X 軸置底居中「股價」標題
+        ctx.save();
+        ctx.font = 'bold 11px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillStyle = '#64748b';
+        ctx.fillText('股價', (chartArea.left + chartArea.right) / 2, chart.height - 4);
+        ctx.restore();
+
+        // 3. 上方區：買入點資訊 (Pyramid Step Direct Annotations) - 保留於 X 軸上方，自動避讓防重疊
+        interface PlacedStepTag {
+          x: number;
+          width: number;
+          y: number;
+        }
+        const placedStepTags: PlacedStepTag[] = [];
+
         ctx.save();
         stepItems.forEach((step) => {
           const px = xScale.getPixelForValue(step.price);
@@ -1155,42 +1355,90 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
           const py = yScale.getPixelForValue(yVal);
 
           if (px >= chartArea.left - 20 && px <= chartArea.right + 20) {
-            // Subtle vertical drop line to bottom
-            ctx.save();
-            ctx.setLineDash([2, 3]);
-            ctx.strokeStyle = step.bought > 0 ? 'rgba(16, 185, 129, 0.45)' : (step.isReached ? 'rgba(16, 185, 129, 0.35)' : 'rgba(148, 163, 184, 0.35)');
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(px, py + 8);
-            ctx.lineTo(px, chartArea.bottom);
-            ctx.stroke();
-            ctx.restore();
-
             // Text Line 1: "$80.93 -3% (15%)" or "$80.93 +2% (15%)"
             const pctSign = step.addPct !== undefined ? `+${step.addPct}%` : `-${step.dropPct}%`;
             const line1 = `$${step.price.toFixed(2)}  ${pctSign} (${step.percent}%)`;
-            // Text Line 2: "已購買 X / 預購 Y 股 (進度%)"
+            // Text Line 2: "已購 X / 預購 Y 股 (進度%)"
             const pctText = step.size > 0 ? ` (${Math.round((step.bought / step.size) * 100)}%)` : '';
-            const line2 = `已購買: ${step.bought} / 預購: ${step.size} 股${pctText}`;
+            const line2 = `已購 ${step.bought} / 預購 ${step.size} 股${pctText}`;
 
+            ctx.font = 'bold 12px monospace, system-ui, sans-serif';
+            const w1 = ctx.measureText(line1).width;
+            ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
+            const w2 = ctx.measureText(line2).width;
+            const tagW = Math.max(w1, w2);
+
+            // 上方區自動避讓計算 (若相鄰階梯太近，自動向上調整高低層次，絕不重疊)
+            const baseTagY = py - 7;
+            const rowStepUp = 26;
+            let currentTagY = baseTagY;
+            let stepOverlap = true;
+            let stepSafety = 0;
+
+            while (stepOverlap && stepSafety < 6) {
+              stepOverlap = placedStepTags.some((placed) => {
+                const xOverlap = Math.abs(placed.x - px) < (placed.width + tagW) / 2 + 8;
+                const yOverlap = Math.abs(placed.y - currentTagY) < 22;
+                return xOverlap && yOverlap;
+              });
+
+              if (stepOverlap) {
+                currentTagY -= rowStepUp; // 向上避讓堆疊
+              }
+              stepSafety++;
+            }
+
+            // 防止超出頂部邊界
+            if (currentTagY - 18 < chartArea.top - 16) {
+              currentTagY = Math.max(chartArea.top + 4, currentTagY);
+            }
+
+            placedStepTags.push({ x: px, width: tagW, y: currentTagY });
+
+            // 若有向上避讓，繪製細緻引導導線連接至節點
+            if (currentTagY < baseTagY) {
+              ctx.save();
+              ctx.setLineDash([2, 2]);
+              ctx.strokeStyle = step.bought > 0 ? 'rgba(16, 185, 129, 0.45)' : 'rgba(148, 163, 184, 0.45)';
+              ctx.lineWidth = 1;
+              ctx.beginPath();
+              ctx.moveTo(px, py - 3);
+              ctx.lineTo(px, currentTagY + 2);
+              ctx.stroke();
+              ctx.restore();
+            }
+
+            // 若節點明顯高於 X 軸，向下連至 X 軸的垂直引線
+            if (chartArea.bottom - py > 14) {
+              ctx.save();
+              ctx.setLineDash([2, 3]);
+              ctx.strokeStyle = step.bought > 0 ? 'rgba(16, 185, 129, 0.45)' : (step.isReached ? 'rgba(16, 185, 129, 0.35)' : 'rgba(148, 163, 184, 0.35)');
+              ctx.lineWidth = 1;
+              ctx.beginPath();
+              ctx.moveTo(px, py + 8);
+              ctx.lineTo(px, chartArea.bottom);
+              ctx.stroke();
+              ctx.restore();
+            }
+
+            // 繪製文字 Line 2 (靠近節點)
             ctx.save();
             ctx.textAlign = 'center';
             ctx.textBaseline = 'bottom';
 
-            // Line 2 (closer to the point)
             ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
             ctx.lineWidth = 3.5;
             ctx.lineJoin = 'round';
-            ctx.strokeText(line2, px, py - 6);
+            ctx.strokeText(line2, px, currentTagY);
             ctx.fillStyle = step.bought > 0 ? '#047857' : (step.isReached ? '#059669' : '#475569');
-            ctx.fillText(line2, px, py - 6);
+            ctx.fillText(line2, px, currentTagY);
 
-            // Line 1 (top line)
+            // 繪製文字 Line 1 (頂行)
             ctx.font = 'bold 12px monospace, system-ui, sans-serif';
-            ctx.strokeText(line1, px, py - 20);
+            ctx.strokeText(line1, px, currentTagY - 14);
             ctx.fillStyle = step.isReached ? '#047857' : '#64748b';
-            ctx.fillText(line1, px, py - 20);
+            ctx.fillText(line1, px, currentTagY - 14);
 
             ctx.restore();
           }
@@ -1276,7 +1524,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
       }
     },
   };
-}, [currentPriceNum, holdingAvgPriceNum, showAvgCost, stepItems, yAxisMode, showTrades, validTrades, displayedVisualLevels, isAllLevelsSelected, hoveredItem]);
+}, [symbol]);
 
   // Chart options with disabled in-canvas tooltip and onHover handler to update fixed top HUD
   const chartOptions: ChartOptions<'line'> = useMemo(() => {
@@ -1292,8 +1540,11 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
       responsiveAnimationDuration: 0,
       layout: {
         padding: {
-          top: 95, // 調整上方空間比例，預留充裕空間供多層向上堆疊之純文字標籤顯示
-          bottom: 8,
+          top: 24, // 上方預留買入點標籤避讓空間
+          // X 軸上方與下方空間平分 (50% / 50%)
+          // 畫布總高度為 chartContainerHeight，令 chartArea.bottom 位於 chartContainerHeight * 0.5
+          // bottom padding = chartContainerHeight * 0.5 - estimatedXScaleHeight(22)
+          bottom: Math.max(50, Math.round(chartContainerHeight * 0.5 - 22)),
           left: 16,
           right: 16,
         },
@@ -1305,7 +1556,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
       onHover: (event, elements, chart) => {
         try {
           let nextHover: {
-            type: 'step' | 'trade' | 'visualLevel' | 'avgCost' | 'currentPrice';
+            type: 'step' | 'trade' | 'visualLevel' | 'avgCost' | 'currentPrice' | 'optionTrade';
             data: any;
           } | null = null;
           let hoverKey = '';
@@ -1367,6 +1618,12 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
                     },
                   };
                   hoverKey = `avg_${holdingAvgPriceNum}_${holdingQty}_${currentPriceNum}`;
+                } else if (hitLine.type === 'optionTrade') {
+                  nextHover = {
+                    type: 'optionTrade',
+                    data: hitLine.data,
+                  };
+                  hoverKey = `opt_${hitLine.data.id}_${hitLine.data.strikePrice}_${hitLine.data.currentPnL}`;
                 } else {
                   nextHover = { type: 'visualLevel', data: hitLine.data };
                   hoverKey = `lvl_${hitLine.data.label}_${hitLine.data.price}`;
@@ -1475,14 +1732,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
           min: minX,
           max: maxX,
           title: {
-            display: true,
-            text: '股價',
-            color: '#475569',
-            font: {
-              size: 11,
-              weight: 'bold',
-            },
-            padding: { top: 8 },
+            display: false, // 由 custom plugin 於最底部居中平滑繪製，避免 Chart.js title 與避讓標籤碰撞
           },
           grid: {
             color: 'rgba(241, 245, 249, 0.95)',
@@ -1490,8 +1740,9 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
           },
           ticks: {
             color: '#064e3b',
-            font: { size: 11, weight: 'bold' as const },
+            font: { size: 10.5, weight: 'bold' as const },
             callback: (value) => `$${Number(value).toFixed(2)}`,
+            padding: 3,
           },
         },
         y: {
@@ -1505,20 +1756,22 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
         },
       },
     };
-  }, [sortedStepItems, buyTrades, sellTrades, minX, maxX, maxYValue, displayedVisualLevels, showAvgCost, holdingAvgPriceNum, currentPriceNum, holdingQty]);
+  }, [sortedStepItems, buyTrades, sellTrades, minX, maxX, maxYValue, displayedVisualLevels, showAvgCost, holdingAvgPriceNum, currentPriceNum, holdingQty, showStrikePrices, optionPurchaseRecords, chartContainerHeight]);
 
   return (
     <div
       className={`w-full bg-white transition-shadow duration-200 ${
-        compact
+        isFullscreen
+          ? "h-full flex flex-col justify-between p-2.5 sm:p-3 rounded-none overflow-hidden"
+          : compact
           ? "p-2.5 sm:p-3 rounded-xl"
           : "border border-zinc-200/90 rounded-2xl p-5 sm:p-6 shadow-xs mb-4"
       }`}
     >
       {/* 1. Header (Title, Purple Current Price, Orange Avg Price) */}
       <div
-        className={`flex flex-col sm:flex-row sm:items-center justify-between border-b border-zinc-100 ${
-          compact ? "gap-1.5 pb-2" : "gap-4 pb-4"
+        className={`flex flex-col sm:flex-row sm:items-center justify-between border-b border-zinc-100 shrink-0 ${
+          isFullscreen ? "gap-1 pb-1" : compact ? "gap-1.5 pb-2" : "gap-4 pb-4"
         }`}
       >
         <div>
@@ -1526,7 +1779,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
             <div className="flex items-baseline gap-2 flex-wrap">
               <h3
                 className={`font-black tracking-tight text-zinc-950 font-mono leading-none ${
-                  compact ? "text-xl sm:text-2xl" : "text-2xl sm:text-3xl"
+                  isFullscreen || compact ? "text-xl sm:text-2xl" : "text-2xl sm:text-3xl"
                 }`}
               >
                 {symbol}
@@ -1544,7 +1797,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
             <div className="flex items-center gap-2">
               <h3
                 className={`font-black tracking-tight text-zinc-900 ${
-                  compact ? "text-base sm:text-lg" : "text-xl sm:text-2xl"
+                  isFullscreen || compact ? "text-base sm:text-lg" : "text-xl sm:text-2xl"
                 }`}
               >
                 分批進場金字塔
@@ -1554,7 +1807,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
               </span>
             </div>
           )}
-          {!compact && (
+          {!compact && !isFullscreen && (
             <p className="text-xs sm:text-sm text-zinc-500 mt-1">
               以目前價格 ${currentPrice > 0 ? currentPrice.toFixed(2) : '--'} 為基準，沿價格下跌階梯逐批增加配置
             </p>
@@ -1566,18 +1819,18 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
           {/* 目前價格 Card (Purple) */}
           <div
             className={`bg-purple-50/70 border border-purple-200/80 text-right flex flex-col justify-center items-end shadow-2xs ${
-              compact
+              isFullscreen || compact
                 ? "px-2 py-0.5 sm:px-2.5 sm:py-1 min-w-[76px] sm:min-w-[84px] rounded-lg"
                 : "px-4 py-2 min-w-[120px] rounded-2xl"
             }`}
           >
-            <span className={`font-bold text-purple-700 flex items-center gap-1 ${compact ? "text-[9px]" : "text-[10px]"}`}>
+            <span className={`font-bold text-purple-700 flex items-center gap-1 ${isFullscreen || compact ? "text-[9px]" : "text-[10px]"}`}>
               <span className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse" />
               目前價格
             </span>
             <span
               className={`font-black font-mono text-purple-700 leading-tight ${
-                compact ? "text-base sm:text-lg" : "text-2xl sm:text-3xl"
+                isFullscreen || compact ? "text-base sm:text-lg" : "text-2xl sm:text-3xl"
               }`}
             >
               ${currentPriceNum > 0 ? currentPriceNum.toFixed(2) : '--'}
@@ -1588,23 +1841,35 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
           {holdingAvgPriceNum > 0 && (
             <div
               className={`bg-orange-50/70 border border-orange-200/80 text-right flex flex-col justify-center items-end shadow-2xs ${
-                compact
+                isFullscreen || compact
                   ? "px-2 py-0.5 sm:px-2.5 sm:py-1 min-w-[76px] sm:min-w-[84px] rounded-lg"
                   : "px-4 py-2 min-w-[120px] rounded-2xl"
               }`}
             >
-              <span className={`font-bold text-orange-700 flex items-center gap-1 ${compact ? "text-[9px]" : "text-[10px]"}`}>
+              <span className={`font-bold text-orange-700 flex items-center gap-1 ${isFullscreen || compact ? "text-[9px]" : "text-[10px]"}`}>
                 <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />
                 平均成本
               </span>
               <span
                 className={`font-black font-mono text-orange-600 leading-tight ${
-                  compact ? "text-base sm:text-lg" : "text-2xl sm:text-3xl"
+                  isFullscreen || compact ? "text-base sm:text-lg" : "text-2xl sm:text-3xl"
                 }`}
               >
                 ${holdingAvgPriceNum.toFixed(2)}
               </span>
             </div>
+          )}
+
+          {/* Fullscreen Toggle */}
+          {onToggleFullscreen && (
+            <button
+              type="button"
+              onClick={onToggleFullscreen}
+              className="p-1.5 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-lg transition-colors cursor-pointer border border-zinc-200/80 shrink-0"
+              title={isFullscreen ? '縮小退出全螢幕 (Esc)' : '放大全螢幕顯示'}
+            >
+              {isFullscreen ? <Minimize2 className="w-4 h-4 text-amber-500" /> : <Maximize2 className="w-4 h-4" />}
+            </button>
           )}
 
           {/* Collapse / Expand Toggle */}
@@ -1620,14 +1885,32 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
       </div>
 
       {isExpanded && (
-        <div className={compact ? "space-y-2 pt-1.5" : "space-y-3.5 pt-3"}>
+        <div className={isFullscreen ? "flex-1 flex flex-col min-h-0 space-y-1.5 pt-1 overflow-hidden" : compact ? "space-y-2 pt-1.5" : "space-y-3.5 pt-3"}>
           {/* Controls Bar: Toggle past trades, toggle Y-axis, summary metrics */}
           <div
-            className={`flex flex-wrap items-center justify-between pt-0.5 ${
-              compact ? "gap-1.5" : "gap-2.5"
+            className={`flex flex-wrap items-center justify-between pt-0.5 shrink-0 ${
+              isFullscreen || compact ? "gap-1.5 text-xs" : "gap-2.5"
             }`}
           >
             <div className="flex items-center gap-2 flex-wrap">
+              {/* 行權價 (新增) - 預設關閉 */}
+              <button
+                type="button"
+                onClick={handleToggleStrikePrices}
+                className={`inline-flex items-center gap-1.5 rounded-lg font-bold transition-all cursor-pointer border ${
+                  compact ? "px-2 sm:px-2.5 py-1 text-[11px]" : "px-3 py-1.5 rounded-xl text-xs"
+                } ${
+                  showStrikePrices
+                    ? 'bg-zinc-900 border-zinc-950 text-white shadow-2xs'
+                    : 'bg-emerald-50/60 border-emerald-200 text-emerald-950 hover:text-emerald-700'
+                }`}
+                title="開啟/關閉期權行權價與合約金額黑色虛線 (預設關閉)"
+              >
+                <span className="w-2.5 h-0 border-t-2 border-dashed border-zinc-400 shrink-0" />
+                <span>行權價{optionPurchaseRecords.length > 0 ? ` (${optionPurchaseRecords.length} 筆)` : ''}</span>
+                <span className={`${compact ? "w-1.5 h-1.5" : "w-2 h-2"} rounded-full ${showStrikePrices ? 'bg-white' : 'bg-emerald-300'}`} />
+              </button>
+
               {/* Toggle Past Trades Button */}
               <button
                 type="button"
@@ -1829,7 +2112,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
           {/* 2. 固定即時情報視窗 (深綠色高對比背景，字體明亮高對比，完全避免暗灰色，固定高度杜絕震盪) */}
           <div
             className={`bg-[#032e20] text-white shadow-xs border border-[#0b5338] flex items-center justify-between overflow-hidden shrink-0 select-none ${
-              compact ? "h-[38px] sm:h-[40px] rounded-lg px-2.5 py-1 text-[11px]" : "h-[48px] sm:h-[52px] rounded-xl px-3.5 py-2 text-xs"
+              isFullscreen ? "h-[36px] sm:h-[38px] rounded-lg px-2.5 py-1 text-[11px]" : compact ? "h-[38px] sm:h-[40px] rounded-lg px-2.5 py-1 text-[11px]" : "h-[48px] sm:h-[52px] rounded-xl px-3.5 py-2 text-xs"
             }`}
           >
             {hoveredItem ? (
@@ -1985,6 +2268,45 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
                     </span>
                   </div>
                 </div>
+              ) : hoveredItem.type === 'optionTrade' ? (
+                <div className="flex items-center justify-between w-full gap-2 min-w-0">
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="px-2 py-0.5 rounded-md font-black text-xs bg-zinc-950 text-white border border-zinc-600 shadow-xs">
+                      期權{hoveredItem.data.positionSide === 'sell' ? '賣出' : '買入'} ({String(hoveredItem.data.optionType || 'call').toUpperCase()})
+                    </span>
+                    <span className="text-xs font-bold text-emerald-100 hidden sm:inline">
+                      {hoveredItem.data.dateFormatted} · 已過 {hoveredItem.data.daysElapsed} 天
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2.5 sm:gap-4 text-xs font-mono shrink-0">
+                    <div className="flex items-center gap-1">
+                      <span className="text-emerald-200 font-sans font-bold text-[10px] sm:text-xs">行權價:</span>
+                      <span className="font-black text-white text-xs sm:text-sm">
+                        ${Number(hoveredItem.data.strikePrice || 0).toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-emerald-200 font-sans font-bold text-[10px] sm:text-xs">合約金額(×100股):</span>
+                      <span className="font-black text-amber-300 text-xs sm:text-sm">
+                        ${Number(hoveredItem.data.contractAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-emerald-200 font-sans font-bold text-[10px] sm:text-xs">當前損益:</span>
+                      <span
+                        className={`font-black text-xs sm:text-sm ${
+                          Number(hoveredItem.data.currentPnL || 0) >= 0 ? 'text-emerald-300' : 'text-rose-300'
+                        }`}
+                      >
+                        {Number(hoveredItem.data.currentPnL || 0) >= 0 ? '+' : '-'}$
+                        {Math.abs(Number(hoveredItem.data.currentPnL || 0)).toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </span>
+                    </div>
+                  </div>
+                </div>
               ) : (
                 <div className="flex items-center justify-between w-full gap-2 min-w-0">
                   <div className="flex items-center gap-1.5 shrink-0">
@@ -2062,15 +2384,19 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
             )}
           </div>
 
-          {/* 3. Chart Canvas Area (精簡模式適度調降高度，使個股跳轉置中時可完整顯示整體內容) */}
+          {/* 3. Chart Canvas Area (X 軸平分 50/50 上下空間，全螢幕模式 flex-1 min-h-0) */}
           <div
-            className={`relative w-full pt-1 ${
-              compact
-                ? "h-[250px] sm:h-[275px] lg:h-[295px] xl:h-[315px]"
-                : "h-[390px] sm:h-[440px] lg:h-[485px] xl:h-[520px]"
+            ref={chartContainerRef}
+            className={`relative w-full ${
+              isFullscreen
+                ? "flex-1 min-h-0 w-full"
+                : compact
+                ? "h-[260px] sm:h-[285px] lg:h-[305px] xl:h-[325px] pt-1"
+                : "h-[360px] sm:h-[390px] lg:h-[420px] xl:h-[440px] pt-1"
             }`}
           >
             <Chart
+              key={`chart_${symbol || 'default'}_${calcMode}_${compact ? 'compact' : 'full'}`}
               ref={chartRef}
               type="line"
               data={chartData}
@@ -2081,9 +2407,9 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
 
           {/* 4. 底部說明註解 (只顯示上面的攤平曲線、綠點、圓點、交易紀錄與明細快捷入口) */}
           <div
-            className={`flex flex-wrap items-center justify-center sm:justify-start border-t border-emerald-100 ${
-              compact
-                ? "gap-x-4 gap-y-1 text-[11px] pt-1.5"
+            className={`flex flex-wrap items-center justify-center sm:justify-start border-t border-emerald-100 shrink-0 ${
+              isFullscreen || compact
+                ? "gap-x-4 gap-y-1 text-[11px] pt-1"
                 : "gap-x-6 gap-y-2 text-xs pt-2 font-bold text-emerald-950"
             }`}
           >
@@ -2106,10 +2432,18 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
             </div>
 
             {/* 歷史交易紀錄 */}
-            {showTrades && totalTradesCount > 0 && (
+            {showTrades && validTrades.length > 0 && (
               <div className="flex items-center gap-1.5 font-bold text-blue-800">
                 <span className="w-2.5 h-2.5 rounded-full bg-blue-600 border border-white shrink-0" />
-                <span>歷史交易紀錄 ({totalTradesCount} 筆，懸停顯示價格)</span>
+                <span>歷史交易紀錄 ({validTrades.length} 筆，懸停顯示價格)</span>
+              </div>
+            )}
+
+            {/* 期權購買紀錄 (黑色虛線) */}
+            {showStrikePrices && optionPurchaseRecords.length > 0 && (
+              <div className="flex items-center gap-1.5 font-bold text-zinc-900">
+                <span className="w-4 h-0.5 border-b-2 border-dashed border-zinc-950 shrink-0" />
+                <span>期權購買紀錄 ({optionPurchaseRecords.length} 筆 · 黑色虛線：行權價 / 合約金額 / 當前損益)</span>
               </div>
             )}
 

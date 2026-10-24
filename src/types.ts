@@ -49,6 +49,34 @@ export interface StockTab {
   pyramidRowsSys2?: { price: string; quantity: string; quantity2?: string; bought?: boolean; riskFlag?: boolean }[];
   refPnLPointUpSys2?: number | string;
   selectedSplitTrade?: string;
+  optionsCalcData?: {
+    optionType: 'call' | 'put';
+    positionSide: 'buy' | 'sell';
+    targetStockPrice: string;
+    strikePrice: string;
+    entryOptionPrice: string;
+    entryStockPrice?: string;
+    purchaseDate?: string;
+    costPerContract100: number;
+    totalCost: number;
+    manualCurrentOptionPrice: string;
+    dte: string;
+    contractsCount: string;
+    contractMultiplier: string;
+    holdingDays: string;
+    ivPercent: string;
+    interestRate: string;
+    delta?: string;
+    theta?: string;
+    gamma?: string;
+    vega?: string;
+    targetIvPercent?: string;
+    targetDelta?: string;
+    targetTheta?: string;
+    targetGamma?: string;
+    targetVega?: string;
+    savedAt: string;
+  };
 }
 
 export interface ChartAnnotation {
@@ -83,6 +111,27 @@ export interface Trade {
   tags?: string[];
   notes?: string;
   createdAt: Timestamp;
+  // Option trade fields (期權交易紀錄欄位)
+  isOptionTrade?: boolean;
+  optionType?: 'call' | 'put';
+  positionSide?: 'buy' | 'sell';
+  strikePrice?: number;
+  dte?: number;
+  entryOptionPrice?: number;
+  entryStockPrice?: number;
+  targetStockPrice?: number;
+  contractAmount?: number; // 合約金額 (開倉單價 * 100)
+  totalHoldingCost?: number; // 總持倉成本 (合約金額 * 張數)
+  contractsCount?: number;
+  contractMultiplier?: number;
+  delta?: number;
+  theta?: number;
+  gamma?: number;
+  vega?: number;
+  ivPercent?: number;
+  interestRate?: number;
+  purchaseDate?: string; // 購買日 YYYY-MM-DD
+  manualCurrentOptionPrice?: number;
 }
 
 export interface PlannedOrder {

@@ -647,6 +647,77 @@ body.ps5-theme-active .stock-card-bottom-nav .bottom-nav-indicator {
   box-shadow: 0 0 6px rgba(0, 0, 0, 0.9), 0 0 10px rgba(255, 255, 255, 0.7) !important;
 }
 
+/* =========================================================
+   10. Batch Entry Tracker Animations & Motion System
+   ========================================================= */
+@keyframes batchPulseBreathe {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.35;
+  }
+  50% {
+    transform: scale(1.4);
+    opacity: 1;
+  }
+}
+
+@keyframes batchShimmerSweep {
+  0% {
+    transform: translateX(-150%);
+  }
+  100% {
+    transform: translateX(350%);
+  }
+}
+
+@keyframes batchHaloGlow {
+  0% {
+    box-shadow: 0 0 0 0px rgba(16, 185, 129, 0.75);
+  }
+  100% {
+    box-shadow: 0 0 0 10px rgba(16, 185, 129, 0);
+  }
+}
+
+@keyframes cyanHaloGlow {
+  0% {
+    box-shadow: 0 0 0 0px rgba(27, 208, 247, 0.9);
+  }
+  100% {
+    box-shadow: 0 0 0 12px rgba(27, 208, 247, 0);
+  }
+}
+
+@keyframes cyanElectricPulse {
+  0%, 100% {
+    box-shadow: 0 0 6px rgba(27, 208, 247, 0.45);
+    filter: drop-shadow(0 0 2px rgba(27, 208, 247, 0.6));
+  }
+  50% {
+    box-shadow: 0 0 14px rgba(27, 208, 247, 0.85);
+    filter: drop-shadow(0 0 6px rgba(27, 208, 247, 0.95));
+  }
+}
+
+@keyframes cyanStreamFlow {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .batch-animated-bar,
+  .batch-card-hover {
+    transition: none !important;
+    animation: none !important;
+    transform: none !important;
+  }
+}
+
+
 
 
 

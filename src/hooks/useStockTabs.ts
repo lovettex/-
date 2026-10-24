@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { collection, query, where, onSnapshot, addDoc, serverTimestamp, doc, updateDoc, deleteDoc, Timestamp } from 'firebase/firestore';
+import { collection, query, onSnapshot, addDoc, serverTimestamp, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db, OperationType, handleFirestoreError } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
 import { StockTab } from '../types';
@@ -31,6 +31,17 @@ const getCachedTabs = (userId?: string | null): StockTab[] => {
   return [];
 };
 
+const saveCachedTabs = (userId: string | undefined | null, nextTabs: StockTab[]) => {
+  try {
+    if (userId) {
+      safeLocalStorage.setItem(`cached_stock_tabs_v3_${userId}`, JSON.stringify(nextTabs));
+    }
+    safeLocalStorage.setItem('cached_stock_tabs_v3_shared', JSON.stringify(nextTabs));
+  } catch (e) {
+    // ignore storage quota error
+  }
+};
+
 export function useStockTabs() {
   const { user } = useAuth();
   const [tabs, setTabs] = useState<StockTab[]>(() => getCachedTabs(user?.uid));
@@ -55,12 +66,18 @@ export function useStockTabs() {
       setLoading(true);
     }
 
+    // Ensure loading skeleton never blocks the UI for more than 800ms on slow networks
+    const fallbackTimer = setTimeout(() => {
+      setLoading(false);
+    }, 800);
+
     // Query all stock tabs in the shared workspace
     const q = query(
       collection(db, 'stockTabs')
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
+      clearTimeout(fallbackTimer);
       const data = snapshot.docs.map(docSnap => ({
         id: docSnap.id,
         ...docSnap.data()
@@ -75,18 +92,17 @@ export function useStockTabs() {
       });
       setTabs(sorted);
       setLoading(false);
-      try {
-        safeLocalStorage.setItem(`cached_stock_tabs_v3_${user.uid}`, JSON.stringify(sorted));
-        safeLocalStorage.setItem('cached_stock_tabs_v3_shared', JSON.stringify(sorted));
-      } catch (e) {
-        // ignore storage quota error
-      }
+      saveCachedTabs(user.uid, sorted);
     }, (error) => {
+      clearTimeout(fallbackTimer);
       handleFirestoreError(error, OperationType.LIST, 'stockTabs');
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      clearTimeout(fallbackTimer);
+      unsubscribe();
+    };
   }, [user?.uid]);
 
   const addTab = useCallback(async (symbol: string, companyName: string, tradeType: 'simulated' | 'real' = 'simulated') => {
@@ -111,11 +127,7 @@ export function useStockTabs() {
   const updateTradeType = useCallback(async (id: string, tradeType: 'simulated' | 'real') => {
     setTabs(prev => {
       const next = prev.map(t => (t.id === id ? { ...t, tradeType } : t));
-      if (user?.uid) {
-        try {
-          safeLocalStorage.setItem(`cached_stock_tabs_v3_${user.uid}`, JSON.stringify(next));
-        } catch (e) {}
-      }
+      saveCachedTabs(user?.uid, next);
       return next;
     });
     try {
@@ -132,11 +144,7 @@ export function useStockTabs() {
   const updateTabStatus = useCallback(async (id: string, status: 'ACTIVE' | 'COMPLETED', finalPnL?: number) => {
     setTabs(prev => {
       const next = prev.map(t => (t.id === id ? { ...t, status, ...(finalPnL !== undefined ? { finalPnL } : {}) } : t));
-      if (user?.uid) {
-        try {
-          safeLocalStorage.setItem(`cached_stock_tabs_v3_${user.uid}`, JSON.stringify(next));
-        } catch (e) {}
-      }
+      saveCachedTabs(user?.uid, next);
       return next;
     });
     try {
@@ -157,11 +165,7 @@ export function useStockTabs() {
   const updateCurrentPrice = useCallback(async (id: string, price: number) => {
     setTabs(prev => {
       const next = prev.map(t => (t.id === id ? { ...t, currentPrice: price } : t));
-      if (user?.uid) {
-        try {
-          safeLocalStorage.setItem(`cached_stock_tabs_v3_${user.uid}`, JSON.stringify(next));
-        } catch (e) {}
-      }
+      saveCachedTabs(user?.uid, next);
       return next;
     });
     try {
@@ -177,11 +181,7 @@ export function useStockTabs() {
   const updateTabHidden = useCallback(async (id: string, isHidden: boolean) => {
     setTabs(prev => {
       const next = prev.map(t => (t.id === id ? { ...t, isHidden } : t));
-      if (user?.uid) {
-        try {
-          safeLocalStorage.setItem(`cached_stock_tabs_v3_${user.uid}`, JSON.stringify(next));
-        } catch (e) {}
-      }
+      saveCachedTabs(user?.uid, next);
       return next;
     });
     try {
@@ -196,6 +196,14 @@ export function useStockTabs() {
   }, [user?.uid]);
 
   const updateTabOrder = useCallback(async (updates: { id: string, sortOrder: number }[]) => {
+    const orderMap = new Map(updates.map(u => [u.id, u.sortOrder]));
+    setTabs(prev => {
+      const next = prev
+        .map(t => (orderMap.has(t.id) ? { ...t, sortOrder: orderMap.get(t.id) } : t))
+        .sort((a, b) => (a.sortOrder ?? 999999) - (b.sortOrder ?? 999999));
+      saveCachedTabs(user?.uid, next);
+      return next;
+    });
     try {
       const promises = updates.map(update => 
         updateDoc(doc(db, 'stockTabs', update.id), {
@@ -207,19 +215,13 @@ export function useStockTabs() {
       toast.error('排序更新失敗');
       handleFirestoreError(error, OperationType.UPDATE, 'stockTabs/sortOrder');
     }
-  }, []);
+  }, [user?.uid]);
 
   const updateTab = useCallback(async (id: string, data: Partial<StockTab>) => {
     // Optimistically update local tabs state and persistent cache immediately for zero-latency response
     setTabs(prev => {
       const next = prev.map(t => (t.id === id ? { ...t, ...data } : t));
-      if (user?.uid) {
-        try {
-          safeLocalStorage.setItem(`cached_stock_tabs_v3_${user.uid}`, JSON.stringify(next));
-        } catch (e) {
-          // ignore
-        }
-      }
+      saveCachedTabs(user?.uid, next);
       return next;
     });
     try {
@@ -235,11 +237,7 @@ export function useStockTabs() {
   const deleteTab = useCallback(async (id: string) => {
     setTabs(prev => {
       const next = prev.filter(t => t.id !== id);
-      if (user?.uid) {
-        try {
-          safeLocalStorage.setItem(`cached_stock_tabs_v3_${user.uid}`, JSON.stringify(next));
-        } catch (e) {}
-      }
+      saveCachedTabs(user?.uid, next);
       return next;
     });
     try {

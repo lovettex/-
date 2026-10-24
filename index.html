@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-TW">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -7,61 +7,36 @@
     <meta name="description" content="個人美股交易日誌、策略追蹤與損益管理工具" />
     <meta property="og:title" content="美股交易策略紀錄" />
     <meta property="og:description" content="個人美股交易日誌、策略追蹤與損益管理工具" />
-    <!-- Early Service Worker Bypass to Prevent Stale Caching Blank Screens in Shared App Subdomains -->
     <script>
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.getRegistrations().then(function(registrations) {
-          for (var i = 0; i < registrations.length; i++) {
-            registrations[i].unregister();
-          }
-        }).catch(function(err) {
-          console.error('Service worker unregistration failed: ', err);
-        });
-      }
-    </script>
-    <!-- Early Startup Error Recovery Script to Prevent Blank Screens on iOS/Webkit -->
-    <script>
-      window.addEventListener('error', function(e) {
-        setTimeout(function() {
-          var root = document.getElementById('root');
-          if (root && (!root.innerHTML || root.innerHTML.trim() === '')) {
-            root.innerHTML = `
-              <div style="font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 32px 16px; text-align: center; background-color: #F5F5F5; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #27272a; box-sizing: border-box;">
-                <div style="max-width: 440px; width: 100%; background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); padding: 40px 32px; border-radius: 40px; border: 1px solid rgba(255, 255, 255, 0.6); box-shadow: 0 20px 50px rgba(0,0,0,0.04); box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center;">
-                  <div style="display: inline-flex; justify-content: center; align-items: center; background: #f4f4f5; width: 72px; height: 72px; border-radius: 20px; border: 1px solid rgba(228, 228, 231, 0.8); margin-bottom: 24px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);">
-                    <span style="font-size: 32px;">⚠️</span>
-                  </div>
-                  <h2 style="font-size: 22px; font-weight: 900; margin: 0 0 10px 0; color: #09090b; letter-spacing: -0.025em;">網頁載入時發生錯誤</h2>
-                  <p style="font-size: 11px; text-transform: uppercase; font-weight: 800; letter-spacing: 0.1em; background: #f4f4f5; border: 1px solid rgba(228, 228, 231, 0.6); padding: 4px 12px; border-radius: 9999px; display: inline-block; margin: 0 0 20px 0; color: #71717a;">
-                    Diagnostic Check
-                  </p>
-                  <div style="text-align: left; background: #fafafa; border: 1px solid rgba(244, 244, 245, 0.5); padding: 16px; border-radius: 12px; margin-bottom: 24px; width: 100%; box-sizing: border-box;">
-                    <p style="font-size: 13px; font-weight: 700; color: #3f3f46; margin: 0 0 8px 0;">這通常是因為：</p>
-                    <ul style="font-size: 12px; color: #71717a; padding-left: 20px; margin: 0; line-height: 1.6;">
-                      <li>您在 iOS 裝置（如 iPhone Chrome 或 Safari）上啟用了「防止跨網站追蹤」或「阻擋所有 Cookie」。</li>
-                      <li>Firebase 驗證程式碼因安全沙盒限制而中斷載入或崩潰。</li>
-                    </ul>
-                  </div>
-                  <a href="${window.location.href}" target="_blank" rel="noopener noreferrer" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 52px; background-color: #059669; color: white; border-radius: 16px; font-weight: 800; text-decoration: none; font-size: 15px; margin-bottom: 16px; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 12px rgba(5, 150, 105, 0.15);">
-                    在獨立新分頁中開啟 ↗
-                  </a>
-                  <p style="font-size: 11px; color: #a1a1aa; font-weight: 500; margin: 0;">
-                    💡 請至手機的「設定」&gt;「Chrome」並啟動「允許跨網站追蹤」再重試。
-                  </p>
-                  <div style="font-size: 10px; color: #a1a1aa; line-height: 1.4; font-family: monospace; word-break: break-all; background: #f4f4f5; padding: 10px; border-radius: 8px; width: 100%; box-sizing: border-box; text-align: left; margin-top: 16px; border: 1px solid #e4e4e7;">
-                    ${e.message || 'Script evaluation error during bootstrap'}
-                  </div>
-                </div>
-              </div>
-            `;
-          }
-        }, 1500);
-      });
+      (function() {
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.getRegistrations().then(function(registrations) {
+            for (var i = 0; i < registrations.length; i++) {
+              registrations[i].unregister();
+            }
+          }).catch(function() {});
+        }
+        if ('caches' in window) {
+          caches.keys().then(function(names) {
+            for (var i = 0; i < names.length; i++) {
+              caches.delete(names[i]);
+            }
+          }).catch(function() {});
+        }
+      })();
     </script>
   </head>
-  <body>
-    <div id="root"></div>
+  <body style="margin: 0; background-color: #f5f5f7; color: #18181b; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+    <div id="root">
+      <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; box-sizing: border-box; background: #f5f5f7;">
+        <div style="background: #ffffff; border: 1px solid #e4e4e7; border-radius: 20px; padding: 28px 36px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; max-width: 420px; width: 100%;">
+          <div style="width: 36px; height: 36px; border: 3px solid #e4e4e7; border-top-color: #10b981; border-radius: 50%; animation: aistudio-spin 0.8s linear infinite;"></div>
+          <div style="font-size: 16px; font-weight: 800; color: #18181b; letter-spacing: -0.01em;">美股交易策略與風險管理系統</div>
+          <div style="font-size: 12px; font-weight: 600; color: #71717a;">正在載入系統工作區與即時報價...</div>
+        </div>
+      </div>
+      <style>@keyframes aistudio-spin { to { transform: rotate(360deg); } }</style>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

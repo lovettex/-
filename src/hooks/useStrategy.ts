@@ -4,6 +4,7 @@ import { db, OperationType, handleFirestoreError } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
 import { StrategyConfig } from '../types';
 import { toast } from 'sonner';
+import { safeSessionStorage } from '../lib/utils';
 
 function stripUndefined(obj: any): any {
   if (obj === null || obj === undefined) return obj;
@@ -23,9 +24,37 @@ function stripUndefined(obj: any): any {
   return obj;
 }
 
+const getCachedTabStrategy = (userId?: string | null, tabId?: string): StrategyConfig | null => {
+  if (!userId || !tabId) return null;
+  try {
+    const raw = safeSessionStorage.getItem(`cached_tab_strategies_v3_${userId}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed[tabId]) {
+        return parsed[tabId] as StrategyConfig;
+      }
+    }
+  } catch (e) {}
+  return null;
+};
+
+const saveCachedTabStrategy = (userId: string | undefined | null, tabId: string | undefined, next: StrategyConfig | null) => {
+  if (!userId || !tabId) return;
+  try {
+    const raw = safeSessionStorage.getItem(`cached_tab_strategies_v3_${userId}`);
+    const parsed = raw ? JSON.parse(raw) : {};
+    if (next) {
+      parsed[tabId] = next;
+    } else {
+      delete parsed[tabId];
+    }
+    safeSessionStorage.setItem(`cached_tab_strategies_v3_${userId}`, JSON.stringify(parsed));
+  } catch (e) {}
+};
+
 export function useStrategy(tabId: string | undefined) {
   const { user } = useAuth();
-  const [strategy, setStrategy] = useState<StrategyConfig | null>(null);
+  const [strategy, setStrategy] = useState<StrategyConfig | null>(() => getCachedTabStrategy(user?.uid, tabId));
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -35,11 +64,18 @@ export function useStrategy(tabId: string | undefined) {
       return;
     }
 
+    const cached = getCachedTabStrategy(user.uid, tabId);
+    if (cached) {
+      setStrategy(cached);
+    }
+
     const docRef = doc(db, `stockTabs/${tabId}/strategy`, 'main');
 
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists()) {
-        setStrategy({ id: docSnap.id, ...docSnap.data() } as StrategyConfig);
+        const next = { id: docSnap.id, ...docSnap.data() } as StrategyConfig;
+        setStrategy(next);
+        saveCachedTabStrategy(user?.uid, tabId, next);
       } else {
         setStrategy(null);
       }
@@ -50,7 +86,7 @@ export function useStrategy(tabId: string | undefined) {
     });
 
     return () => unsubscribe();
-  }, [tabId, user]);
+  }, [tabId, user?.uid]);
 
   const saveStrategy = async (data: Partial<StrategyConfig>) => {
     if (!tabId || !user) return;
@@ -90,7 +126,7 @@ export function useStrategy(tabId: string | undefined) {
       toast.success('策略已儲存');
     } catch (error) {
       toast.error('系統錯誤');
-      console.error(error);
+      console.warn(error);
     }
   };
 

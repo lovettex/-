@@ -36,6 +36,11 @@ export const scrollToMainTabs = (behavior: ScrollBehavior = 'smooth') => {
 };
 
 export const enterFullscreen = async (): Promise<boolean> => {
+  if (typeof window === 'undefined') return false;
+  // If running inside an iframe (like AI Studio preview environment), fullscreen request is restricted by policy
+  if (window.self !== window.top) {
+    return false;
+  }
   const elem = document.documentElement as any;
   if (isAlreadyFullscreen()) {
     scrollToMainTabs('smooth');
@@ -62,6 +67,10 @@ export const enterFullscreen = async (): Promise<boolean> => {
 };
 
 export const exitFullscreen = async (): Promise<boolean> => {
+  if (typeof window === 'undefined') return false;
+  if (window.self !== window.top) {
+    return false;
+  }
   const doc = document as any;
   if (!isAlreadyFullscreen()) return false;
   try {
@@ -94,51 +103,12 @@ export function useAutoFullscreen() {
   const startPosRef = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
+    // If inside an iframe (e.g. preview environment), skip automatic fullscreen interception
+    if (typeof window !== 'undefined' && window.self !== window.top) {
+      return;
+    }
+
     let isDisposed = false;
-    let hasEnteredOnce = false;
-
-    // 1. 初次載入自動全螢幕嘗試
-    enterFullscreen().then((success) => {
-      if (success) {
-        hasEnteredOnce = true;
-        removeFirstGestureListeners();
-      }
-    });
-
-    // 2. 監聽 User Gesture 初次自動進入全螢幕
-    const handleUserGesture = async () => {
-      if (hasEnteredOnce || isAlreadyFullscreen()) {
-        removeFirstGestureListeners();
-        return;
-      }
-
-      const ok = await enterFullscreen();
-      if (ok || isAlreadyFullscreen()) {
-        hasEnteredOnce = true;
-        removeFirstGestureListeners();
-      }
-    };
-
-    const firstGestureEvents = ['click', 'touchend', 'keydown'] as const;
-
-    const addFirstGestureListeners = () => {
-      firstGestureEvents.forEach((eventName) => {
-        window.addEventListener(eventName, handleUserGesture, {
-          capture: true,
-          passive: true,
-        });
-      });
-    };
-
-    const removeFirstGestureListeners = () => {
-      firstGestureEvents.forEach((eventName) => {
-        window.removeEventListener(eventName, handleUserGesture, {
-          capture: true,
-        });
-      });
-    };
-
-    addFirstGestureListeners();
 
     // 嚴格判斷是否為「純網頁背景」（排除任何卡片、列表、表格、圖表、彈窗、選單、工具列及文字反白）
     const isPureBackgroundElement = (target: HTMLElement | null): boolean => {
@@ -276,8 +246,6 @@ export function useAutoFullscreen() {
     const onFullscreenChange = () => {
       cancelLongPress();
       if (isAlreadyFullscreen()) {
-        hasEnteredOnce = true;
-        removeFirstGestureListeners();
         setTimeout(() => scrollToMainTabs('smooth'), 80);
         setTimeout(() => scrollToMainTabs('smooth'), 220);
         setTimeout(() => scrollToMainTabs('smooth'), 450);
@@ -292,7 +260,6 @@ export function useAutoFullscreen() {
     return () => {
       isDisposed = true;
       cancelLongPress();
-      removeFirstGestureListeners();
       window.removeEventListener('dblclick', handleBackgroundDblClick);
       window.removeEventListener('wheel', cancelLongPress, { capture: true } as any);
       window.removeEventListener('scroll', cancelLongPress, { capture: true } as any);

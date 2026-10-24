@@ -1,101 +1,98 @@
-# 3D Crawler Spider Architecture & Interaction Plan
+# 交易策略與風險管理系統 — 預覽面板白屏錯誤修復與載入強化計畫
 
-Upgrade the 3D Cyber Crawler Spider to deliver smooth 5-second crawling physics upon clicking any card or price tag, accurate `#DBFA6B` node styling with black outlines, and multi-tag leg touching within ±2.5% price range of current price tags ("現價").
+徹底解決 AI Studio 右側預覽視窗（Preview 面板跨網域 `<iframe>` 環境）開啟時出現完全空白畫面的問題，確保系統在任何嵌入式預覽或獨立視窗環境下都能秒開呈現首頁與全部 99 檔股票戰情資料。
 
-## User Review & Critical Decisions
+### User Review & Critical Decisions
 
 > [!IMPORTANT]
-> The following interactive choices were confirmed by the user in Phase 1:
-
-- **Confirmed Decision 1**: **全螢幕動態路徑巡檢 (Full-screen Dynamic Crawling)**
-  - Clicking any card, section, or price tag triggers the spider to crawl from its current position across the screen to the target over a smooth 5-second duration (`duration: 5.0`).
-- **Confirmed Decision 2**: **DBFA6B 黃綠色緩慢波紋 (Yellow-Green Wave Ripples)**
-  - When reaching the target price tag (e.g. 現價), spider body movement stops completely (`isCrawling = false`). The 8 long legs extend outward and touch all nearby price tags (支撐/止損/壓力/止盈/歷史買入價/分批金字塔價格) within a ±2.5% price range, triggering gentle `#DBFA6B` wave ripples over each price tag.
-
----
-
-## 1. Overview & Core Concept
-
-- **What It Does**: The 3D Crawler is an interactive 3D WebGL cyber spider inspecting stock cards and technical price levels.
-- **Target Audience / Persona**: Stock traders and chip analysts inspecting trading journals, price ladders, and averaging targets.
-- **Key Value**: Provides an engaging visual inspection mechanic without obscuring price charts or card data, highlighting nearby price thresholds within ±2.5% of the current price ("現價").
+> 依據您在問答中確認的現場狀況，我們已鎖定造成白屏的四大核心根因並制定修復方案：
+> - **已確認環境與症狀**：於 **AI Studio 右側預覽視窗 (Preview 面板)** 開啟時呈現 **完全空白畫面（全白無任何文字）**。
+> - **根因 1（預覽框架 `fetch` 攔截死鎖）**：預覽代理注入的跨視窗腳本在 `<iframe>` 內覆寫了 `window.fetch` 並無限期等待父視窗 `bootstrap` 訊息，導致雲端資料庫連線與 API 請求被永久卡住。我們將保留並恢復原生 `fetch` 通道（附帶安全超時回退機制），徹底解除請求死鎖。
+> - **根因 2（跨網域 Iframe 本地快取鎖定衝突）**：在跨網域 `<iframe>` 中啟用多視窗持久化快取（IndexedDB 跨分頁鎖）會受瀏覽器第三方儲存隔離限制而卡死，改為自動偵測嵌入式環境並切換為記憶體快取模式。
+> - **根因 3（捲動進場動畫於 Iframe 內透明度卡在 `0`）**：首頁區塊原本依賴負邊距 `IntersectionObserver`（`whileInView` 搭配 `-50px` 邊距），在預覽視窗內未觸發捲動事件時會維持 `opacity: 0` 隱形狀態，改為掛載即刻顯示（`animate` 立即呈現）。
+> - **根因 4（首屏即時預載骨架與按需載入）**：為根容器加上即時可見的載入骨架，並將次要大型視圖與 3D 動態特效改為非同步按需載入，杜絕模組傳輸期間的空白等待。
 
 ---
 
-## 2. User Experience & Visual Design
+### 1. Overview & Core Concept
 
-- **Key User Flows**:
-  1. User toggles `3D Crawler 巡檢` ON via the top header button.
-  2. The slim left-top HUD ribbon banner (`fixed top-4 left-6`) displays active status, locked card name, and card navigation buttons without listing text tags.
-  3. Clicking ANY card container, stock card, or price tag ("現價 $189.50") calculates target screen coordinates `(targetX, targetY)` immediately.
-  4. The 3D spider rotates over 0.8s toward `(targetX, targetY)`, then gracefully crawls across the screen over **5.0 seconds** with continuous organic leg stepping (`walkCycle += 0.12`).
-  5. Upon arrival at the price tag, the body stops moving. The 8 long legs reach out to touch all surrounding price tags within **±2.5%** price range (e.g. 支撐, 止損, 壓力, 止盈, 均本, 歷史買入價, 分批金字塔價格).
-  6. Each touched price tag displays a gentle `#DBFA6B` yellow-green expanding wave ring ripple (`animate-ping`).
-
-- **Visual Identity & Theme**:
-  - *Spider Body*: Abstract vector wireframe (Hexagonal head + Diamond abdomen) in glowing cyan/emerald (`#34d399`), 0% solid color fill, semi-transparent wireframe lines.
-  - *4x Long Legs*: 8 sprawling extra-long 3-segment wireframe legs with knee and tip joint spheres.
-  - *#DBFA6B Outlined Nodes*: Sphere nodes filled with warm chartreuse yellow (`#DBFA6B`) and outlined with crisp black border rings (`#000000`).
-  - *Left-Top HUD*: Slim horizontal glassmorphic ribbon (`bg-zinc-950/85 backdrop-blur-xl border-emerald-500/40 rounded-full sm:rounded-2xl`).
+- **What It Does**：修復量化交易策略與風險管理工作台在嵌入式預覽視窗中的白屏阻斷問題，讓投資組合總覽、分批進場金字塔計算機、真實交易紀錄與籌碼分析報告在開啟瞬間穩定渲染。
+- **Target Audience / Persona**：進行美股與台股部位控管、停損規模試算與金字塔加減碼規劃的交易者，於預覽面板及正式視窗中流暢操作。
+- **Key Value**：消除跨網域預覽環境下的網路攔截、儲存鎖定與動畫隱形問題，同時 100% 完整保留雲端資料庫中現有的 99 檔股票（持有中 28 檔、真實交易 25 檔、已完成 46 檔）與所有交易工具。
 
 ---
 
-## 3. Technical Architecture & Component Mapping
+### 2. User Experience & Visual Design
+
+- **Key User Flows**：
+  1. **零延遲首屏啟動**：開啟預覽視窗瞬間即顯示高對比品牌載入骨架，無任何一秒出現全白或全黑無字畫面。
+  2. **戰情總覽即時呈現**：React 掛載後立即渲染頂部導航列、雙欄計算機（停損規模計算機 + 金字塔策略計算機）與下方的股票分類清單，無需滾動即可看見所有區塊。
+  3. **順暢切換股票詳情**：點擊任一股票卡片或快速跳轉按鈕時，平滑載入該標的之分批進場金字塔互動圖表、壓力支撐視覺線與交易日誌。
+- **Visual Identity & Theme**：
+  - *Aesthetic Direction*：高密度金融戰情室與現代極簡雙模式介面（支援深色戰情模式與明亮玻璃擬態模式）。
+  - *Color Palette & Mood*：採用乾淨石板灰與純白基底（`--background: #F8FAFC` / 深色 `#0F172A`），搭配皇家藍主色調（`#1E3A8A` / `#2563EB`），以及語義化金融狀態色——獲利翠綠（`#16A34A`）、警示琥珀（`#D97706`）、停損緋紅（`#DC2626`）。
+  - *Typography & Hierarchy*：標題與導航採用俐落幾何無襯線字體（`Outfit` / `Plus Jakarta Sans`），所有股價、損益金額、股數與百分比全面強制使用等寬對齊數字（`JetBrains Mono` / `tabular-nums`），確保小數點與欄位垂直對齊不跳動。
+  - *Component Styling & Layout*：維持 1440px 寬螢幕戰情格局與緊湊高資訊密度卡片，移除冗餘裝飾膠囊，確保單行控制按鈕不換行、不裁切。
+- **Interactive Feedback & Motion**：
+  - 移除會在 `<iframe>` 中卡住的負邊距視窗偵測動畫，改為確定性的平滑淡入過渡（200ms 內完成顯現）。
+  - 新增全域錯誤防護邊界與網路連線保底機制，即使外部行情接口延遲，頁面核心功能與雲端資料庫仍可獨立運作。
+
+---
+
+### 3. Key Product Decisions & Trade-Offs
+
+- **Decision 1：預覽視窗 `window.fetch` 安全保底與原生通道保護**
+  - *Chosen Approach*：在頁面初始化階段保存瀏覽器原生 `fetch`，並針對預覽環境的訊息通道加入安全超時與原生回退機制，確保雲端資料庫（Firestore WebChannel）與後端 `/api/*` 請求永不無限期掛起。
+  - *Why*：預覽代理腳本在父視窗訊息未送達時會永久阻塞所有網路請求，這是造成預覽面板卡死白屏的最關鍵底層原因。
+  - *Alternatives Considered*：僅依賴重整頁面無法解決跨視窗握手時序問題，必須從執行期通道層面根治。
+- **Decision 2：依執行環境動態切換雲端資料庫快取策略**
+  - *Chosen Approach*：當偵測到應用運行於嵌入式 `<iframe>` 時，自動採用輕量記憶體快取；於獨立頂層視窗運行時則維持多視窗持久化快取。
+  - *Why*：避免瀏覽器在跨網域 `<iframe>` 中封鎖或延遲 IndexedDB 跨分頁鎖定機制，確保即時資料訂閱（99 檔股票與交易紀錄）毫秒級完成同步。
+  - *Alternatives Considered*：全面關閉快取會降低獨立視窗的離線體驗，動態切換能兼顧兩者優勢。
+- **Decision 3：確定性進場渲染與模組按需分割**
+  - *Chosen Approach*：將所有進場包裝元件由依賴滾動觸發改為掛載即刻渲染，並將次要詳情頁與 3D 視覺背景拆分為獨立非同步區塊。
+  - *Why*：大幅縮減首屏需要下載與解析的腳本體積，並保證在任何視窗尺寸下所有 UI 元件透明度皆為 100% 可見。
+
+---
+
+### 4. Technical Architecture & Data Strategy *(Technical Reference)*
+
+- **Architecture & Component Diagram**：
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                             src/Layout.tsx                                  │
+│                   AI Studio Preview Iframe / Browser Host                   │
 │  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │ Fixed Top-Right Toolbar Button: <CrawlerSpider isActive={...} />       │  │
-│  └───────────────────────────────────────────────────────────────────────┘  │
-└──────────────────────────────────────┬──────────────────────────────────────┘
-                                       │
-                                       ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                      src/components/CrawlerSpider.tsx                       │
-│                                                                             │
-│ ┌───────────────────────────┐    ┌────────────────────────────────────────┐ │
-│ │  Three.js WebGL Scene     │    │  Global Click & Target Extractor       │ │
-│ │  - Orthographic Camera    │    │  - Capture event listener              │ │
-│ │  - Hexagonal Head         │    │  - Finds clicked card & price tag      │ │
-│ │  - Diamond Abdomen        │    │  - Extracts numeric price $P_{base}$    │ │
-│ │  - 4x Long Wireframe Legs │    │  - Matches tags within ±2.5% price     │ │
-│ │  - #DBFA6B Outlined Nodes │    └───────────────────┬────────────────────┘ │
-│ └─────────────┬─────────────┘                        │                      │
-│               │                                      │                      │
-│               └───────────────────┬──────────────────┘                      │
-│                                   ▼                                         │
-│ ┌─────────────────────────────────────────────────────────────────────────┐ │
-│ │                     GSAP 5.0-Second Crawl Engine                        │ │
-│ │  - Smooth rotation to (targetX, targetY) [0.8s]                         │ │
-│ │  - Crawling translation over 5.0 seconds [duration: 5.0]                │ │
-│ │  - Body halts; leg nodes touch nearby ±2.5% price tags                  │ │
-│ │  - Triggers HTML #DBFA6B wave ripple animations                          │ │
-│ └─────────────────────────────────────────────────────────────────────────┘ │
+│  │ Bootstrap Guard & Native Fetch Fallback  +  Instant HTML Shell        │  │
+│  └───────────────────────────────────┬───────────────────────────────────┘  │
+│                                      ▼                                      │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │ Global Error Boundary & Shared Workspace Auth Context                 │  │
+│  └─────────────────┬───────────────────────────────────┬─────────────────┘  │
+│                    ▼                                   ▼                    │
+│  ┌───────────────────────────────────┐ ┌─────────────────────────────────┐  │
+│  │ Adaptive Firestore Client         │ │ Express API Proxy (/api/*)      │  │
+│  │ - Iframe: Memory Cache (Lock-free)│ │ - Live Quotes & Chart History   │  │
+│  │ - Top Window: Persistent Cache    │ │ - Fundamental & Chip Reports    │  │
+│  └─────────────────┬─────────────────┘ └───────────────┬─────────────────┘  │
+│                    └─────────────────┬─────────────────┘                    │
+│                                      ▼                                      │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │ Primary Workspace Layout (Immediate Mount, Deterministic Opacity)     │  │
+│  ├───────────────────────────────────┬───────────────────────────────────┤  │
+│  │ Dashboard View (Eager Loaded)     │ Secondary Views (Lazy Suspense)   │  │
+│  │ - Risk & Stop-Loss Calculator     │ - Stock Tab Detail & Pyramid Chart│  │
+│  │ - Pyramid Sizing Calculator       │ - Visual Support/Resistance Lines │  │
+│  │ - 99 Stock Tabs (Hold/Real/Done)  │ - 3D Ambient Canvas & Spider      │  │
+│  └───────────────────────────────────┴───────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
----
-
-## 4. Key Implementation Steps
-
-1. **Universal Click Target Extractor**:
-   - Register `window.addEventListener('click', handleCardClick, { capture: true })`.
-   - On click, extract `targetEl`. Ignore HUD button clicks.
-   - Match nearest card container using `targetEl.closest(...)` or fallback to parent container.
-   - Detect clicked price tag or extract text (`現價`, `止盈`, `止損`, `支撐`, `壓力`, `均本`, `歷史買入價`, `分批金字塔價格`).
-   - Extract numeric price value $P_{base}$.
-
-2. **5-Second GSAP Crawling Motion**:
-   - Calculate exact screen pixel coordinates `(targetX, targetY)`.
-   - Rotate spider toward target over 0.8s.
-   - Translate spider position `x, y` over **5.0 seconds** using GSAP (`duration: 5.0, ease: 'sine.inOut'`).
-   - Increment `spiderPos.current.walkCycle += 0.12` continuously every frame.
-
-3. **Multi-Tag ±2.5% Price Range Leg Touch**:
-   - Query all price tags on the card.
-   - Filter tags where $|P_{tag} - P_{base}| / P_{base} \le 0.025$.
-   - Body freezes at destination; long legs extend and trigger gentle `#DBFA6B` wave ripples sequentially.
-
-4. **#DBFA6B Nodes with Black Outlines**:
-   - Construct Three.js joint nodes using `#DBFA6B` yellow-green sphere meshes paired with concentric black border wireframe rings.
+- **Data Model & State**：
+  - **共享工作區帳戶狀態**：預設載入共享工作區身分（`shared_workspace`），無需等待彈窗登入即可直接讀寫名下全部 99 檔股票分頁（`stockTabs`）、真實交易紀錄（`trades`）、預計掛單（`plannedOrders`）、策略規則（`strategies`）與支撐壓力視覺線（`visualLines`）。
+  - **即時分類統計**：前端依據股票狀態自動聚合為「持有中」、「真實交易」、「觀察中」與「已完成」四大分頁，並即時計算總投入資金、浮動損益與風險敞口。
+- **Interactive Component & State Mapping**：
+  - **首屏啟動與載入過渡**：HTML 原生骨架在 JS 載入期間即時顯示進度提示 -> React 根元件完成掛載後無縫接管畫面 -> 自動訂閱雲端資料並填入股票卡片。
+  - **計算機與部位連動**：使用者輸入帳戶資金、風險比例、進場價與停損價 -> 即時計算最大可承受虧損與建議買入股數 -> 點擊儲存可直接建立或更新對應股票分頁。
+  - **股票詳情與圖表互動**：點擊任一股票進入詳情視圖 -> 按需載入分批進場金字塔圖表與歷史 K 線 -> 支援切換行權價、攤平、突破、支撐、壓力線與全螢幕檢視模式。
+  - **異常恢復機制**：若任何子元件發生渲染異常或網路請求逾時，全域錯誤邊界提供一鍵重試與快取清理按鈕，絕不退化為空白畫面。

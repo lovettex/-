@@ -1,22 +1,38 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { useAuth } from './lib/AuthContext';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { LogOut, ActivitySquare, ExternalLink, HelpCircle } from 'lucide-react';
+import { Outlet } from 'react-router-dom';
+import { ActivitySquare } from 'lucide-react';
 import { Premium3DGrid } from './components/Premium3DGrid';
 import { WhiteNoisePlayer } from './components/WhiteNoisePlayer';
-import { PS5DynamicBackground } from './components/PS5DynamicBackground';
-import { CrawlerSpider } from './components/CrawlerSpider';
 import { whiteNoiseEngine, WhiteNoiseState } from './lib/whiteNoiseEngine';
 
-export default function Layout() {
-  const { user, login, logout, loading: authLoading } = useAuth();
-  const location = useLocation();
-  const match = location.pathname.match(/\/stock\/(.+)/);
-  const stockId = match ? match[1] : null;
+const PS5DynamicBackground = lazy(() =>
+  import('./components/PS5DynamicBackground').then((m) => ({ default: m.PS5DynamicBackground }))
+);
+const CrawlerSpider = lazy(() =>
+  import('./components/CrawlerSpider').then((m) => ({ default: m.CrawlerSpider }))
+);
 
-  const [loadingTimeout, setLoadingTimeout] = useState(false);
+export default function Layout() {
+  const { user, login, loginAsGuest, loading: authLoading } = useAuth();
   const [ambientState, setAmbientState] = useState<WhiteNoiseState>(whiteNoiseEngine.getState());
   const [isCrawlerActive, setIsCrawlerActive] = useState(false);
+
+  useEffect(() => {
+    const handleToggle = () => setIsCrawlerActive((prev) => !prev);
+    const handleSet = (e: Event) => {
+      const ce = e as CustomEvent<boolean>;
+      if (typeof ce.detail === 'boolean') {
+        setIsCrawlerActive(ce.detail);
+      }
+    };
+    window.addEventListener('toggle-crawler-spider', handleToggle);
+    window.addEventListener('set-crawler-spider', handleSet);
+    return () => {
+      window.removeEventListener('toggle-crawler-spider', handleToggle);
+      window.removeEventListener('set-crawler-spider', handleSet);
+    };
+  }, []);
 
   useEffect(() => {
     const unsubscribe = whiteNoiseEngine.subscribe((s) => {
@@ -25,72 +41,13 @@ export default function Layout() {
     return () => unsubscribe();
   }, []);
 
-  useEffect(() => {
-    if (authLoading) {
-      const timer = setTimeout(() => {
-        setLoadingTimeout(true);
-      }, 7000);
-      return () => clearTimeout(timer);
-    } else {
-      setLoadingTimeout(false);
-    }
-  }, [authLoading]);
-
   if (authLoading) {
-    if (loadingTimeout) {
-      return (
-        <div className="min-h-screen w-full flex flex-col items-center justify-center px-4 py-10 relative text-zinc-800">
-          {/* Nike Premium 3D Grid Background with depth-of-field effect */}
-          <Premium3DGrid />
-
-          <div className="w-full max-w-[440px] p-8 sm:p-10 bg-white/80 backdrop-blur-xl border border-white/60 shadow-[0_20px_50px_rgba(0,0,0,0.04)] rounded-[2.5rem] flex flex-col items-center text-center space-y-6 relative z-10">
-            <div className="inline-flex justify-center items-center bg-zinc-100 p-4 border border-zinc-200/80 shadow-inner rounded-2xl">
-              <HelpCircle className="h-10 w-10 text-emerald-600 animate-pulse" />
-            </div>
-
-            <div className="space-y-2">
-              <h2 className="text-2xl font-black tracking-tight text-zinc-900">
-                網頁載入時間較長
-              </h2>
-              <p className="text-[11px] text-zinc-500 font-extrabold tracking-widest uppercase bg-zinc-100 border border-zinc-200/60 px-3.5 py-1 rounded-full inline-block">
-                Connection Check
-              </p>
-            </div>
-
-            <div className="text-zinc-600 text-sm font-semibold text-left space-y-2.5 leading-relaxed bg-zinc-50 border border-zinc-200/50 p-4 rounded-xl">
-              <p className="text-[13px] font-bold text-zinc-700">這通常是因為您目前的瀏覽器：</p>
-              <ul className="list-disc pl-5 space-y-1.5 text-xs text-zinc-500">
-                <li>在行動裝置（如 iPhone Chrome 或 Safari）中開啟，且限制了第三方 Cookie。</li>
-                <li>啟用了「防止跨網站追蹤」或是處於無痕模式（Private Mode），阻擋了資料庫與登入驗證連線。</li>
-              </ul>
-            </div>
-
-            <div className="w-full space-y-3 pt-2">
-              <a
-                href={window.location.href}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full py-4 px-6 text-sm sm:text-base font-extrabold flex items-center justify-center bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl shadow-sm hover:shadow-md transition-all duration-300 active:scale-[0.98] cursor-pointer gap-2"
-              >
-                <ExternalLink className="w-4 h-4" />
-                <span>在獨立新分頁中開啟</span>
-              </a>
-
-              <p className="text-[11px] text-zinc-400 font-medium">
-                💡 iOS 用戶可至「設定」&gt;「Chrome」或「Safari」&gt; 啟用「允許跨網站追蹤」
-              </p>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
     return (
-      <div className="min-h-screen w-full flex flex-col items-center justify-center py-10 text-zinc-800 relative">
+      <div className="min-h-screen w-full flex flex-col items-center justify-center py-10 text-zinc-800 relative bg-[#f5f5f7]">
         <Premium3DGrid />
         <div className="flex flex-col items-center space-y-4 relative z-10 p-8 bg-white/80 backdrop-blur-md rounded-2xl border border-zinc-200/50 shadow-lg">
           <div className="h-8 w-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
-          <span className="text-sm font-bold tracking-wider text-zinc-500">系統載入中，請稍候...</span>
+          <span className="text-sm font-bold tracking-wider text-zinc-600">系統載入中...</span>
         </div>
       </div>
     );
@@ -98,11 +55,9 @@ export default function Layout() {
 
   if (!user) {
     return (
-      <div className="min-h-screen w-full flex flex-col items-center justify-center px-4 py-10 relative text-zinc-800">
-        {/* Nike Premium 3D Grid Background with depth-of-field effect */}
+      <div className="min-h-screen w-full flex flex-col items-center justify-center px-4 py-10 relative text-zinc-800 bg-[#f5f5f7]">
         <Premium3DGrid />
 
-        {/* Elegant Frosted Container Card */}
         <div className="w-full max-w-[420px] p-8 sm:p-10 bg-white/75 backdrop-blur-xl border border-white/60 shadow-[0_20px_50px_rgba(0,0,0,0.04)] rounded-[2.5rem] flex flex-col items-center text-center space-y-8 relative z-10">
           <div className="space-y-5 flex flex-col items-center">
             <div className="inline-flex justify-center items-center bg-zinc-100 p-4 border border-zinc-200/80 shadow-[0_10px_35px_rgba(16,185,129,0.12)] rounded-2xl backdrop-blur-xl hover:scale-105 transition-transform duration-300">
@@ -133,53 +88,56 @@ export default function Layout() {
             </svg>
             <span>使用 Google 帳號登入</span>
           </button>
-        </div>
 
-        {window.self !== window.top && (
-          <div className="flex flex-col items-center space-y-3 relative z-10 max-w-sm w-full mt-4">
-            <p className="text-xs font-bold text-zinc-500 text-center leading-relaxed bg-white/50 border border-zinc-200/40 px-5 py-2.5 rounded-2xl backdrop-blur-sm shadow-xs">
-              如遇到無法登入的情況，請點擊下方按鈕以獨立新分頁開啟本站。
-            </p>
-            <a
-              href={window.location.href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs font-black text-emerald-700 hover:text-emerald-800 transition-colors px-4 py-2 rounded-xl bg-emerald-150 hover:bg-emerald-200 border border-emerald-250/50 shadow-xs active:scale-95 duration-150"
-            >
-              開啟獨立新分頁
-            </a>
+          <div className="w-full flex items-center gap-3 my-1">
+            <div className="flex-1 h-[1px] bg-zinc-200/80" />
+            <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">或</span>
+            <div className="flex-1 h-[1px] bg-zinc-200/80" />
           </div>
-        )}
+
+          <button
+            type="button"
+            onClick={loginAsGuest}
+            className="w-full py-3.5 px-6 text-sm font-extrabold flex items-center justify-center bg-zinc-100 hover:bg-zinc-200 text-zinc-800 rounded-2xl transition-all duration-200 active:scale-[0.98] cursor-pointer gap-2"
+          >
+            <span>以訪客體驗模式進入系統</span>
+            <span className="text-emerald-600 font-bold">➔</span>
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="flex min-h-screen text-zinc-800 relative w-full overflow-x-hidden">
-      {/* Default Clean Grid Background */}
       <Premium3DGrid />
       
-      {/* PS5 Console Dashboard Dynamic Animated Background (Active when White Noise is playing) */}
-      <PS5DynamicBackground
-        isActive={ambientState.isPlaying && ambientState.bgEnabled}
-        themeId={ambientState.bgThemeId}
-        speedMultiplier={ambientState.bgSpeed}
-      />
+      {ambientState.isPlaying && ambientState.bgEnabled && (
+        <Suspense fallback={null}>
+          <PS5DynamicBackground
+            isActive={true}
+            themeId={ambientState.bgThemeId}
+            speedMultiplier={ambientState.bgSpeed}
+          />
+        </Suspense>
+      )}
 
-      {/* Top Right Floating Toolbar for 3D Crawler Spider */}
-      <div className="fixed top-3 right-3 sm:top-4 sm:right-6 z-[995] flex items-center gap-2">
-        <CrawlerSpider
-          isActive={isCrawlerActive}
-          onToggle={() => setIsCrawlerActive((prev) => !prev)}
-        />
-      </div>
+      {isCrawlerActive && (
+        <div className="fixed top-3 right-3 sm:top-4 sm:right-6 z-[995] flex items-center gap-2">
+          <Suspense fallback={null}>
+            <CrawlerSpider
+              isActive={isCrawlerActive}
+              onToggle={() => setIsCrawlerActive((prev) => !prev)}
+              hideButton={true}
+            />
+          </Suspense>
+        </div>
+      )}
 
-      {/* Bottom Right WhiteNoise Floating Player & PS5 Dynamic Background Controls */}
       <div className="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 z-[990]">
         <WhiteNoisePlayer />
       </div>
 
-      {/* Main Content */}
       <main className="flex-1 relative z-10 focus:outline-none w-full">
         <div className="w-full mx-auto px-2 sm:px-4 md:px-6 pt-3 sm:pt-4 pb-20 md:pb-24 max-w-[1920px]">
           <Outlet />

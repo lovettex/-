@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, query, onSnapshot, addDoc, serverTimestamp, doc, updateDoc, deleteDoc, Timestamp } from 'firebase/firestore';
+import { collection, query, onSnapshot, addDoc, serverTimestamp, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db, OperationType, handleFirestoreError } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
 import { Trade } from '../types';
@@ -7,9 +7,36 @@ import { toast } from 'sonner';
 import { getTimestampMillis } from '../lib/dateUtils';
 import { safeSessionStorage } from '../lib/utils';
 
+const getCachedTabTrades = (userId?: string | null, tabId?: string): Trade[] => {
+  if (!userId || !tabId) return [];
+  try {
+    const raw = safeSessionStorage.getItem(`cached_tab_trades_v3_${userId}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed[tabId])) {
+        return parsed[tabId];
+      }
+    }
+  } catch (e) {}
+  return [];
+};
+
+const saveCachedTabTrades = (userId: string | undefined | null, tabId: string | undefined, sorted: Trade[]) => {
+  if (!userId || !tabId) return;
+  try {
+    const cachedTradesRaw = safeSessionStorage.getItem(`cached_tab_trades_v3_${userId}`);
+    const cachedTrades = cachedTradesRaw ? JSON.parse(cachedTradesRaw) : {};
+    cachedTrades[tabId] = sorted;
+    safeSessionStorage.setItem(`cached_tab_trades_v3_${userId}`, JSON.stringify(cachedTrades));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('tab_trades_updated', { detail: { tabId, trades: sorted } }));
+    }
+  } catch (e) {}
+};
+
 export function useTrades(tabId: string | undefined) {
   const { user } = useAuth();
-  const [trades, setTrades] = useState<Trade[]>([]);
+  const [trades, setTrades] = useState<Trade[]>(() => getCachedTabTrades(user?.uid, tabId));
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -17,6 +44,11 @@ export function useTrades(tabId: string | undefined) {
       setTrades([]);
       setLoading(false);
       return;
+    }
+
+    const cached = getCachedTabTrades(user.uid, tabId);
+    if (cached.length > 0) {
+      setTrades(cached);
     }
 
     const q = query(
@@ -32,25 +64,14 @@ export function useTrades(tabId: string | undefined) {
       const sorted = data.sort((a, b) => getTimestampMillis(b.tradeDate) - getTimestampMillis(a.tradeDate));
       setTrades(sorted);
       setLoading(false);
-
-      if (user?.uid && tabId) {
-        try {
-          const cachedTradesRaw = safeSessionStorage.getItem(`cached_tab_trades_v3_${user.uid}`);
-          const cachedTrades = cachedTradesRaw ? JSON.parse(cachedTradesRaw) : {};
-          cachedTrades[tabId] = sorted;
-          safeSessionStorage.setItem(`cached_tab_trades_v3_${user.uid}`, JSON.stringify(cachedTrades));
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('tab_trades_updated', { detail: { tabId, trades: sorted } }));
-          }
-        } catch (e) {}
-      }
+      saveCachedTabTrades(user?.uid, tabId, sorted);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, `stockTabs/${tabId}/trades`);
       setLoading(false);
     });
 
     return () => unsubscribe();
-  }, [tabId, user]);
+  }, [tabId, user?.uid]);
 
   const addTrade = async (trade: Partial<Trade>) => {
     if (!tabId || !user) return;

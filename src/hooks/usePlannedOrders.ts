@@ -1,19 +1,49 @@
 import { useState, useEffect } from 'react';
-import { collection, query, onSnapshot, addDoc, serverTimestamp, doc, updateDoc, deleteDoc, deleteField } from 'firebase/firestore';
+import { collection, query, onSnapshot, addDoc, serverTimestamp, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db, OperationType, handleFirestoreError } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
 import { PlannedOrder } from '../types';
 import { toast } from 'sonner';
 import { getTimestampMillis } from '../lib/dateUtils';
+import { safeSessionStorage } from '../lib/utils';
+
+const getCachedTabOrders = (userId?: string | null, tabId?: string): PlannedOrder[] => {
+  if (!userId || !tabId) return [];
+  try {
+    const raw = safeSessionStorage.getItem(`cached_tab_orders_v3_${userId}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed[tabId])) {
+        return parsed[tabId];
+      }
+    }
+  } catch (e) {}
+  return [];
+};
+
+const saveCachedTabOrders = (userId: string | undefined | null, tabId: string | undefined, sorted: PlannedOrder[]) => {
+  if (!userId || !tabId) return;
+  try {
+    const raw = safeSessionStorage.getItem(`cached_tab_orders_v3_${userId}`);
+    const parsed = raw ? JSON.parse(raw) : {};
+    parsed[tabId] = sorted;
+    safeSessionStorage.setItem(`cached_tab_orders_v3_${userId}`, JSON.stringify(parsed));
+  } catch (e) {}
+};
 
 export function usePlannedOrders(tabId: string | undefined) {
   const { user } = useAuth();
-  const [orders, setOrders] = useState<PlannedOrder[]>([]);
+  const [orders, setOrders] = useState<PlannedOrder[]>(() => getCachedTabOrders(user?.uid, tabId));
 
   useEffect(() => {
     if (!tabId || !user) {
       setOrders([]);
       return;
+    }
+
+    const cached = getCachedTabOrders(user.uid, tabId);
+    if (cached.length > 0) {
+      setOrders(cached);
     }
 
     const q = query(
@@ -27,12 +57,13 @@ export function usePlannedOrders(tabId: string | undefined) {
       })) as PlannedOrder[];
       const sorted = data.sort((a, b) => getTimestampMillis(b.createdAt) - getTimestampMillis(a.createdAt));
       setOrders(sorted);
+      saveCachedTabOrders(user?.uid, tabId, sorted);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, `stockTabs/${tabId}/plannedOrders`);
     });
 
     return () => unsubscribe();
-  }, [tabId, user]);
+  }, [tabId, user?.uid]);
 
   const addOrder = async (order: Partial<PlannedOrder>) => {
     if (!tabId || !user) return;

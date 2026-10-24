@@ -27,7 +27,7 @@ import {
   serverTimestamp,
   Timestamp,
 } from "firebase/firestore";
-import { db } from "../lib/firebase";
+import { db, auth } from "../lib/firebase";
 import { useAuth } from "../lib/AuthContext";
 import { formatTimestamp, getTimestampDate } from "../lib/dateUtils";
 import { whiteNoiseEngine } from "../lib/whiteNoiseEngine";
@@ -38,6 +38,7 @@ import {
   Magnetic,
 } from "../components/MotionWrappers";
 import { AnimatedNumber } from "../components/AnimatedNumber";
+import { SpiderIcon } from "../components/SpiderIcon";
 import {
   Dialog,
   DialogContent,
@@ -112,7 +113,7 @@ import {
   Database,
   Circle,
 } from "lucide-react";
-import { calculateStats, generateAveragingDownRows, shouldUpdateAveragingRows } from "../lib/calculations";
+import { calculateStats, calculateOptionPortfolioSummary, generateAveragingDownRows, shouldUpdateAveragingRows } from "../lib/calculations";
 import { safeLocalStorage, safeSessionStorage } from "../lib/utils";
 import { format } from "date-fns";
 import { StockCardVisualizer, prefetchStockPrice } from "../components/StockCardVisualizer";
@@ -152,15 +153,19 @@ function handleFirestoreError(
   user: any,
 ): void {
   const errorMessage = error instanceof Error ? error.message : String(error);
-  const isOffline =
-    errorMessage.includes("offline") ||
-    errorMessage.includes("client is offline") ||
-    errorMessage.includes("unavailable") ||
-    errorMessage.includes("could not reach") ||
-    errorMessage.includes("backend didn't respond");
+  const msgLower = errorMessage.toLowerCase();
+  const isOfflineOrPermission =
+    msgLower.includes("offline") ||
+    msgLower.includes("client is offline") ||
+    msgLower.includes("unavailable") ||
+    msgLower.includes("could not reach") ||
+    msgLower.includes("backend didn't respond") ||
+    msgLower.includes("permission") ||
+    msgLower.includes("insufficient") ||
+    !auth.currentUser;
 
-  if (isOffline) {
-    console.warn(`[Firestore Offline Cache Active] ${operationType} '${path}': ${errorMessage}`);
+  if (isOfflineOrPermission) {
+    console.warn(`[Firestore Local Cache Active] ${operationType} '${path}': ${errorMessage}`);
     return;
   }
 
@@ -174,7 +179,7 @@ function handleFirestoreError(
     operationType,
     path,
   };
-  console.error("Firestore Error: ", JSON.stringify(errInfo));
+  console.warn("Firestore Notice: ", JSON.stringify(errInfo));
 }
 
 const getDisplayHoldingStatus = (
@@ -408,7 +413,7 @@ export default function Dashboard() {
           errMsg.includes("network") ||
           errMsg.includes("timed out");
         if (!isOffline) {
-          console.error("Failed to fetch userSettings:", error);
+          console.warn("Failed to fetch userSettings:", error);
           handleFirestoreError(error, OperationType.GET, `userSettings/${user.uid}`, user);
         } else {
           console.info("[userSettings] Operating with local cache/storage.");
@@ -695,6 +700,23 @@ export default function Dashboard() {
   // AI Analysis Panel States & Helpers
   const [isAiAnalysisOpen, setIsAiAnalysisOpen] = useState(false);
   const [isVisualLinesBoardOpen, setIsVisualLinesBoardOpen] = useState(false);
+  const [isCrawlerActive, setIsCrawlerActive] = useState(false);
+
+  useEffect(() => {
+    const handleToggle = () => setIsCrawlerActive((prev) => !prev);
+    const handleSet = (e: Event) => {
+      const ce = e as CustomEvent<boolean>;
+      if (typeof ce.detail === "boolean") {
+        setIsCrawlerActive(ce.detail);
+      }
+    };
+    window.addEventListener("toggle-crawler-spider", handleToggle);
+    window.addEventListener("set-crawler-spider", handleSet);
+    return () => {
+      window.removeEventListener("toggle-crawler-spider", handleToggle);
+      window.removeEventListener("set-crawler-spider", handleSet);
+    };
+  }, []);
   const [miniVisualLinesStock, setMiniVisualLinesStock] = useState<{
     stockName: string;
     currentPrice?: number;
@@ -817,7 +839,7 @@ export default function Dashboard() {
           }
         }
       } catch (err) {
-        console.error("Failed to sync prompts cross-device:", err);
+        console.warn("Failed to sync prompts cross-device:", err);
       }
     };
     syncPromptsCrossDevice();
@@ -1395,9 +1417,15 @@ export default function Dashboard() {
     "all" | "highlight" | "operation" | "deviation" | "group"
   >("all");
 
+  // 綜合未實現損益 漲跌幅度百分比門檻篩選 (2%, 3%, 4%, 6%, 8%, 9%, 10%, 12%)
+  const [pnlPercentFilter, setPnlPercentFilter] = useState<number | null>(null);
+  // 多空雙向切換: 'all' (雙向絕對值), 'gain' (獲利達標), 'loss' (虧損達標)
+  const [pnlDirectionFilter, setPnlDirectionFilter] = useState<"all" | "gain" | "loss">("all");
+
   useEffect(() => {
     safeSessionStorage.setItem('preferredHoldingSubTab', activeHoldingSubTab);
     setActiveCardDefinitionFilter("all");
+    setPnlPercentFilter(null);
   }, [activeHoldingSubTab]);
 
   useEffect(() => {
@@ -4147,7 +4175,9 @@ export default function Dashboard() {
       .reduce((sum, tab) => {
         const trades = activeTabTrades[tab.id] || [];
         const stats = calculateStats(trades, tab.currentPrice);
-        return sum + (stats.totalQuantity * stats.averagePrice);
+        const effectiveHoldingQuantity = trades.length > 0 ? stats.totalQuantity : (tab.holdingQuantity || 0);
+        const effectiveAveragePrice = (trades.length > 0 && stats.averagePrice > 0) ? stats.averagePrice : (tab.averageCost || 0);
+        return sum + (effectiveHoldingQuantity * effectiveAveragePrice);
       }, 0);
   }, [activeTabs, activeTabTrades]);
 
@@ -4157,7 +4187,9 @@ export default function Dashboard() {
       .reduce((sum, tab) => {
         const trades = activeTabTrades[tab.id] || [];
         const stats = calculateStats(trades, tab.currentPrice);
-        return sum + (stats.totalQuantity * stats.averagePrice);
+        const effectiveHoldingQuantity = trades.length > 0 ? stats.totalQuantity : (tab.holdingQuantity || 0);
+        const effectiveAveragePrice = (trades.length > 0 && stats.averagePrice > 0) ? stats.averagePrice : (tab.averageCost || 0);
+        return sum + (effectiveHoldingQuantity * effectiveAveragePrice);
       }, 0);
   }, [activeTabs, activeTabTrades]);
 
@@ -4181,8 +4213,58 @@ export default function Dashboard() {
       }, 0);
   }, [activeTabs, activeTabTrades]);
 
-  const realHoldingCount = useMemo(() => activeTabs.filter((t) => t.tradeType === "real").length, [activeTabs]);
-  const simulatedHoldingCount = useMemo(() => activeTabs.filter((t) => t.tradeType === "simulated").length, [activeTabs]);
+  // 看板總追蹤個股檔數 (含觀察中、候選、買賣等所有卡片)
+  const totalRealTrackedCount = useMemo(
+    () => activeTabs.filter((t) => t.tradeType === "real").length,
+    [activeTabs]
+  );
+  const totalSimulatedTrackedCount = useMemo(
+    () => activeTabs.filter((t) => t.tradeType === "simulated").length,
+    [activeTabs]
+  );
+
+  // 實際持有在倉部位數 (庫存股數不為0 或 有進行中期權合約)
+  const realHoldingCount = useMemo(() => {
+    return activeTabs
+      .filter((tab) => tab.tradeType === "real")
+      .filter((tab) => {
+        const trades = activeTabTrades[tab.id] || [];
+        const stats = calculateStats(trades, tab.currentPrice);
+        const effectiveHoldingQuantity = trades.length > 0 ? stats.totalQuantity : (tab.holdingQuantity || 0);
+        const optionSummary = calculateOptionPortfolioSummary(
+          trades,
+          tab.currentPrice,
+          tab.optionsCalcData
+        );
+        const hasStockHolding = Math.abs(effectiveHoldingQuantity) > 0;
+        const hasOptionHolding = Boolean(
+          optionSummary.hasOptionRecords &&
+            (optionSummary.totalContracts > 0 || Math.abs(optionSummary.totalHoldingCost) > 0)
+        );
+        return hasStockHolding || hasOptionHolding;
+      }).length;
+  }, [activeTabs, activeTabTrades]);
+
+  const simulatedHoldingCount = useMemo(() => {
+    return activeTabs
+      .filter((tab) => tab.tradeType === "simulated")
+      .filter((tab) => {
+        const trades = activeTabTrades[tab.id] || [];
+        const stats = calculateStats(trades, tab.currentPrice);
+        const effectiveHoldingQuantity = trades.length > 0 ? stats.totalQuantity : (tab.holdingQuantity || 0);
+        const optionSummary = calculateOptionPortfolioSummary(
+          trades,
+          tab.currentPrice,
+          tab.optionsCalcData
+        );
+        const hasStockHolding = Math.abs(effectiveHoldingQuantity) > 0;
+        const hasOptionHolding = Boolean(
+          optionSummary.hasOptionRecords &&
+            (optionSummary.totalContracts > 0 || Math.abs(optionSummary.totalHoldingCost) > 0)
+        );
+        return hasStockHolding || hasOptionHolding;
+      }).length;
+  }, [activeTabs, activeTabTrades]);
   const maxStrategyRiskPool60 = (totalCapital * 2) * 0.6;
   const remainingStrategyRiskPool = maxStrategyRiskPool60 - totalRealHoldingCost;
 
@@ -4359,20 +4441,98 @@ export default function Dashboard() {
     }
   }, [currentSubTabVisibleTabs, activeCardDefinitionFilter]);
 
+  // 計算個股之綜合未實現損益 漲跌幅度百分比 (四捨五入至小數點後2位，與卡片頂部標籤一致)
+  const getTabReturnPercentage = useCallback((tab: any): number => {
+    const trades = activeTabTrades[tab.id] || [];
+    const stats = calculateStats(trades, tab.currentPrice);
+    const effectiveHoldingQuantity = stats.totalQuantity !== 0 ? stats.totalQuantity : (tab.holdingQuantity || 0);
+    const effectiveAveragePrice = (stats.totalQuantity !== 0 && stats.averagePrice > 0) ? stats.averagePrice : (tab.averageCost || 0);
+    const optionSummary = calculateOptionPortfolioSummary(
+      trades,
+      tab.currentPrice,
+      tab.optionsCalcData
+    );
+
+    const stockHoldingCost = effectiveHoldingQuantity * effectiveAveragePrice;
+    const totalCostBasis = stockHoldingCost + (optionSummary.hasOptionRecords ? optionSummary.totalHoldingCost : 0);
+
+    const stockUnrealizedPnL = stats.unrealizedPnL || 0;
+    const totalCombinedUnrealizedPnL = stockUnrealizedPnL + (optionSummary.hasOptionRecords ? optionSummary.totalCurrentPnL : 0);
+
+    let rawPct = 0;
+    if (totalCostBasis > 0) {
+      rawPct = (totalCombinedUnrealizedPnL / totalCostBasis) * 100;
+    } else if (effectiveAveragePrice > 0 && effectiveHoldingQuantity > 0 && tab.currentPrice) {
+      rawPct = ((tab.currentPrice - effectiveAveragePrice) / effectiveAveragePrice) * 100;
+    } else if (optionSummary.hasOptionRecords && optionSummary.totalHoldingCost > 0) {
+      rawPct = optionSummary.totalRoiPct;
+    }
+    return Math.round(rawPct * 100) / 100;
+  }, [activeTabTrades]);
+
+  const PNL_PERCENT_BRACKETS = useMemo(() => [2, 3, 4, 6, 8, 9, 10, 12] as const, []);
+
+  const getPnlBracketBounds = useCallback(
+    (pct: number): { min: number; max: number } => {
+      const idx = PNL_PERCENT_BRACKETS.indexOf(pct as any);
+      const min = pct;
+      const max =
+        idx >= 0 && idx < PNL_PERCENT_BRACKETS.length - 1
+          ? PNL_PERCENT_BRACKETS[idx + 1]
+          : Infinity;
+      return { min, max };
+    },
+    [PNL_PERCENT_BRACKETS]
+  );
+
+  const getPnlBracketRangeLabel = useCallback(
+    (pct: number, direction: "all" | "gain" | "loss"): string => {
+      const { min, max } = getPnlBracketBounds(pct);
+      const prefix = direction === "gain" ? "+" : direction === "loss" ? "-" : "±";
+      if (max === Infinity) {
+        return `${prefix}${min}% 以上`;
+      }
+      return `${prefix}${min}% ~ <${prefix}${max}%`;
+    },
+    [getPnlBracketBounds]
+  );
+
   const filteredSubTabVisibleTabs = useMemo(() => {
+    let list = currentSubTabVisibleTabs;
     switch (activeCardDefinitionFilter) {
       case "highlight":
-        return currentSubTabVisibleTabs.filter(t => !!t.isFavoriteHighlight);
+        list = list.filter(t => !!t.isFavoriteHighlight);
+        break;
       case "operation":
-        return currentSubTabVisibleTabs.filter(t => !!t.isOperationConfirmed);
+        list = list.filter(t => !!t.isOperationConfirmed);
+        break;
       case "deviation":
-        return currentSubTabVisibleTabs.filter(t => !!t.isDeviationConfirmed);
+        list = list.filter(t => !!t.isDeviationConfirmed);
+        break;
       case "group":
-        return currentSubTabVisibleTabs.filter(t => !!t.groupId);
+        list = list.filter(t => !!t.groupId);
+        break;
       default:
-        return currentSubTabVisibleTabs;
+        break;
     }
-  }, [currentSubTabVisibleTabs, activeCardDefinitionFilter]);
+
+    if (pnlPercentFilter !== null) {
+      const { min, max } = getPnlBracketBounds(pnlPercentFilter);
+      list = list.filter((t) => {
+        const retPct = getTabReturnPercentage(t);
+        if (pnlDirectionFilter === "gain") {
+          return retPct >= min && retPct < max;
+        } else if (pnlDirectionFilter === "loss") {
+          return retPct <= -min && retPct > -max;
+        } else {
+          const absPct = Math.abs(retPct);
+          return absPct >= min && absPct < max;
+        }
+      });
+    }
+
+    return list;
+  }, [currentSubTabVisibleTabs, activeCardDefinitionFilter, pnlPercentFilter, pnlDirectionFilter, getTabReturnPercentage, getPnlBracketBounds]);
 
   visibleTabsRef.current = filteredSubTabVisibleTabs;
 
@@ -4385,9 +4545,13 @@ export default function Dashboard() {
       if (shouldGroup) {
         if (!processedGroupIds.has(tab.groupId!)) {
           processedGroupIds.add(tab.groupId!);
-          const allGroupTabs = effectiveVisibleActiveTabs.filter(t => t.groupId === tab.groupId);
+          // 當啟用百分比區間篩選時，僅顯示符合該百分比區間的同群組個股，避免帶出其他區間的卡片
+          const allGroupTabs =
+            pnlPercentFilter !== null
+              ? filteredSubTabVisibleTabs.filter(t => t.groupId === tab.groupId)
+              : effectiveVisibleActiveTabs.filter(t => t.groupId === tab.groupId);
           groups.push({
-            isGroup: true,
+            isGroup: allGroupTabs.length > 1,
             id: tab.groupId!,
             tabs: allGroupTabs
           });
@@ -4401,7 +4565,7 @@ export default function Dashboard() {
       }
     });
     return groups;
-  }, [filteredSubTabVisibleTabs, effectiveVisibleActiveTabs, isMobile]);
+  }, [filteredSubTabVisibleTabs, effectiveVisibleActiveTabs, isMobile, pnlPercentFilter]);
 
   const orderedFilteredSubTabVisibleTabs = useMemo(() => {
     return renderGroups.flatMap((g) => g.tabs);
@@ -5306,7 +5470,7 @@ export default function Dashboard() {
     });
   }, [baseCompletedTabs, completedResultFilter, completedSearchQuery]);
 
-  if (loading) {
+  if (loading && tabs.length === 0) {
     return (
       <div className="w-full max-w-[1680px] mx-auto px-2 sm:px-4 py-3 sm:py-6 space-y-4 sm:space-y-6 select-none pointer-events-none">
         {/* Top Control Bar Skeleton */}
@@ -6103,6 +6267,7 @@ export default function Dashboard() {
                 setIsDesktopMetricsOpen(true);
               }}
               style={metricsTradeTab === "simulated" ? { color: "#ffffff" } : undefined}
+              title={`模擬交易：在倉持股 ${simulatedHoldingCount} 檔 / 看板追蹤 ${totalSimulatedTrackedCount} 檔`}
               className={`relative flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-extrabold transition-all duration-200 cursor-pointer select-none ${
                 metricsTradeTab === "simulated"
                   ? "bg-gradient-to-b from-zinc-800 to-zinc-950 text-white shadow-[0_3px_10px_rgba(0,0,0,0.22)] ring-1 ring-black/20 scale-[1.01]"
@@ -6134,6 +6299,7 @@ export default function Dashboard() {
                 setIsDesktopMetricsOpen(true);
               }}
               style={metricsTradeTab === "real" ? { color: "#ffffff" } : undefined}
+              title={`真實交易：在倉持股 ${realHoldingCount} 檔 / 看板追蹤 ${totalRealTrackedCount} 檔`}
               className={`relative flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-extrabold transition-all duration-200 cursor-pointer select-none ${
                 metricsTradeTab === "real"
                   ? "bg-gradient-to-b from-[#065f46] to-[#044633] text-white shadow-[0_3px_10px_rgba(6,95,70,0.3)] ring-1 ring-emerald-900/30 scale-[1.01]"
@@ -6257,9 +6423,10 @@ export default function Dashboard() {
                         <AnimatedNumber value={simulatedHoldingCount} prefix="" suffix="" decimals={0} showPlus={false} />
                       </span>
                       <span className="text-xs font-semibold text-zinc-400">檔</span>
+                      <span className="text-[11px] font-medium text-zinc-400 ml-1">/ 追蹤 {totalSimulatedTrackedCount} 檔</span>
                     </div>
                     <div className="text-[11px] font-medium text-zinc-400 truncate">
-                      進行中模擬部位
+                      進行中模擬部位 (看板追蹤共 {totalSimulatedTrackedCount} 檔)
                     </div>
                   </div>
 
@@ -6387,8 +6554,11 @@ export default function Dashboard() {
                         <AnimatedNumber value={realHoldingCount} prefix="" suffix="" decimals={0} showPlus={false} />
                       </span>
                       <span className="text-[11px] font-semibold text-zinc-400">檔</span>
+                      <span className="text-[10px] font-medium text-zinc-400 ml-1">/ 追蹤 {totalRealTrackedCount} 檔</span>
                     </div>
-                    <div className="text-[10.5px] font-medium text-zinc-400 truncate">實盤持倉部位</div>
+                    <div className="text-[10.5px] font-medium text-zinc-400 truncate">
+                      實盤持倉部位 (看板追蹤共 {totalRealTrackedCount} 檔)
+                    </div>
                   </div>
 
                   {/* 2. 真實實現損益 */}
@@ -6555,7 +6725,10 @@ export default function Dashboard() {
           {metricsTradeTab === "real" ? (
             <div className="grid grid-cols-2 divide-x divide-y divide-zinc-200/70">
               <div className="p-3 flex flex-col justify-between">
-                <span className="text-[11px] text-zinc-500 font-bold">真實持股數</span>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-zinc-500 font-bold">真實持股數</span>
+                  <span className="text-[10px] text-zinc-400">追蹤 {totalRealTrackedCount} 檔</span>
+                </div>
                 <div className="text-lg font-extrabold tracking-tight mt-1 text-zinc-900 font-mono tabular-nums">
                   <AnimatedNumber value={realHoldingCount} prefix="" suffix=" 檔" decimals={0} showPlus={false} />
                 </div>
@@ -6618,7 +6791,10 @@ export default function Dashboard() {
           ) : (
             <div className="grid grid-cols-2 divide-x divide-y divide-zinc-200/70">
               <div className="p-3 flex flex-col justify-between">
-                <span className="text-[11px] text-zinc-500 font-bold">模擬持股數</span>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-zinc-500 font-bold">模擬持股數</span>
+                  <span className="text-[10px] text-zinc-400">追蹤 {totalSimulatedTrackedCount} 檔</span>
+                </div>
                 <div className="text-lg font-extrabold tracking-tight mt-1 text-zinc-900 font-mono tabular-nums">
                   <AnimatedNumber value={simulatedHoldingCount} prefix="" suffix=" 檔" decimals={0} showPlus={false} />
                 </div>
@@ -7520,8 +7696,9 @@ export default function Dashboard() {
                           </button>
                         </div>
 
-                        {/* Action buttons group */}
-                        <div className="flex items-center bg-zinc-100/90 p-1 rounded-2xl border border-zinc-200/90 shadow-2xs gap-1 select-none shrink-0">
+                        {/* Action buttons group (Optimized rounded pill container) */}
+                        <div className="flex items-center bg-zinc-100/90 p-1 rounded-full border border-zinc-200/90 shadow-2xs gap-1 select-none shrink-0">
+                          {/* 1. Ai分析 */}
                           <InteractiveButton
                             noGlow
                             as="button"
@@ -7530,10 +7707,33 @@ export default function Dashboard() {
                               playClickSound();
                             }}
                             title="Ai分析回傳"
-                            className="w-8 h-8 p-0 bg-white hover:bg-amber-50/60 border border-zinc-200/80 hover:border-amber-300 text-zinc-600 hover:text-amber-700 rounded-xl transition-all cursor-pointer flex items-center justify-center shrink-0 shadow-2xs hover:shadow-xs"
+                            className="w-8 h-8 p-0 bg-white hover:bg-amber-50/80 border border-zinc-200/80 hover:border-amber-300 text-zinc-700 hover:text-amber-700 rounded-full transition-all cursor-pointer flex items-center justify-center shrink-0 shadow-2xs hover:shadow-xs"
                           >
                             <Sparkles className="w-4 h-4 text-amber-500 animate-pulse" />
                           </InteractiveButton>
+
+                          {/* 2. 3D Crawler 蜘蛛巡檢 (Spider Button) */}
+                          <InteractiveButton
+                            noGlow
+                            as="button"
+                            onClick={() => {
+                              window.dispatchEvent(new CustomEvent("toggle-crawler-spider"));
+                              playClickSound();
+                            }}
+                            title={isCrawlerActive ? "關閉 3D Crawler 蜘蛛籌碼巡檢" : "開啟 3D Crawler 蜘蛛籌碼巡檢"}
+                            className={`w-8 h-8 p-0 rounded-full transition-all duration-300 cursor-pointer flex items-center justify-center shrink-0 shadow-2xs hover:shadow-xs relative ${
+                              isCrawlerActive
+                                ? "bg-emerald-500 hover:bg-emerald-600 text-white border border-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.5)] scale-105"
+                                : "bg-white hover:bg-emerald-50/80 border border-zinc-200/80 hover:border-emerald-300 text-zinc-700 hover:text-emerald-600"
+                            }`}
+                          >
+                            <SpiderIcon className={`w-4 h-4 transition-transform duration-300 ${isCrawlerActive ? "scale-110" : ""}`} />
+                            {isCrawlerActive && (
+                              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-emerald-300 rounded-full animate-ping" />
+                            )}
+                          </InteractiveButton>
+
+                          {/* 3. 動態視覺線標籤 */}
                           <InteractiveButton
                             noGlow
                             as="button"
@@ -7542,19 +7742,23 @@ export default function Dashboard() {
                               playClickSound();
                             }}
                             title="動態視覺線標籤 (Alt + W)"
-                            className="w-8 h-8 p-0 bg-white hover:bg-zinc-50 border border-zinc-200/80 hover:border-zinc-300 text-zinc-600 hover:text-zinc-900 rounded-xl transition-all cursor-pointer flex items-center justify-center shrink-0 shadow-2xs hover:shadow-xs"
+                            className="w-8 h-8 p-0 bg-white hover:bg-indigo-50/80 border border-zinc-200/80 hover:border-indigo-300 text-zinc-700 hover:text-indigo-600 rounded-full transition-all cursor-pointer flex items-center justify-center shrink-0 shadow-2xs hover:shadow-xs"
                           >
                             <SlidersHorizontal className="w-4 h-4" />
                           </InteractiveButton>
+
+                          {/* 4. 管理持有中股票 */}
                           <InteractiveButton
                             noGlow
                             as="button"
                             onClick={() => setIsManageHiddenOpen(true)}
                             title="管理持有中股票"
-                            className="w-8 h-8 p-0 bg-white hover:bg-zinc-50 border border-zinc-200/80 hover:border-zinc-300 text-zinc-600 hover:text-zinc-900 rounded-xl transition-all cursor-pointer flex items-center justify-center shrink-0 shadow-2xs hover:shadow-xs"
+                            className="w-8 h-8 p-0 bg-white hover:bg-zinc-50 border border-zinc-200/80 hover:border-zinc-300 text-zinc-700 hover:text-zinc-900 rounded-full transition-all cursor-pointer flex items-center justify-center shrink-0 shadow-2xs hover:shadow-xs"
                           >
                             <Settings2 className="w-4 h-4" />
                           </InteractiveButton>
+
+                          {/* 5. 放大卡片 (電影觀賞模式) */}
                           <InteractiveButton
                             noGlow
                             as="button"
@@ -7576,16 +7780,18 @@ export default function Dashboard() {
                               }
                             }}
                             title="放大卡片 (電影觀賞模式)"
-                            className="w-8 h-8 p-0 bg-white hover:bg-zinc-50 border border-zinc-200/80 hover:border-zinc-300 text-zinc-600 hover:text-zinc-900 rounded-xl transition-all cursor-pointer flex items-center justify-center shrink-0 shadow-2xs hover:shadow-xs"
+                            className="w-8 h-8 p-0 bg-white hover:bg-blue-50/80 border border-zinc-200/80 hover:border-blue-300 text-zinc-700 hover:text-blue-600 rounded-full transition-all cursor-pointer flex items-center justify-center shrink-0 shadow-2xs hover:shadow-xs"
                           >
                             <Maximize2 className="w-4 h-4" />
                           </InteractiveButton>
+
+                          {/* 6. 匯出持有股數交易數據 (.md) */}
                           <InteractiveButton
                             noGlow
                             as="button"
                             onClick={handleExportMd}
                             title="匯出持有股數交易數據 (.md)"
-                            className="w-8 h-8 p-0 bg-white hover:bg-zinc-50 border border-zinc-200/80 hover:border-zinc-300 text-zinc-600 hover:text-zinc-900 rounded-xl transition-all cursor-pointer flex items-center justify-center shrink-0 shadow-2xs hover:shadow-xs"
+                            className="w-8 h-8 p-0 bg-white hover:bg-purple-50/80 border border-zinc-200/80 hover:border-purple-300 text-zinc-700 hover:text-purple-600 rounded-full transition-all cursor-pointer flex items-center justify-center shrink-0 shadow-2xs hover:shadow-xs"
                           >
                             <Printer className="w-4 h-4" />
                           </InteractiveButton>
@@ -7638,8 +7844,8 @@ export default function Dashboard() {
                         )}
                       </div>
 
-                      <div className="flex items-center justify-end pb-1 w-full">
-                        <div className="flex items-center gap-2">
+                      <div className="flex items-center justify-end pb-1 w-full overflow-x-auto no-scrollbar">
+                        <div className="flex items-center gap-1.5 shrink-0">
                           <InteractiveButton
                             noGlow
                             as="button"
@@ -7647,11 +7853,30 @@ export default function Dashboard() {
                               setIsAiAnalysisOpen(true);
                               playClickSound();
                             }}
-                            className="px-2.5 py-1 bg-zinc-50 border border-zinc-200 text-zinc-650 hover:text-zinc-850 hover:bg-zinc-100 rounded-lg transition-all text-[11px] flex items-center gap-1 font-extrabold cursor-pointer"
+                            className="px-2 py-1 bg-white border border-zinc-200 text-zinc-700 hover:text-amber-700 hover:bg-amber-50 rounded-lg transition-all text-[11px] flex items-center gap-1 font-extrabold cursor-pointer shadow-2xs"
                           >
-                            <Sparkles className="w-3 h-3 text-amber-600 animate-pulse" />
-                            Ai分析
+                            <Sparkles className="w-3 h-3 text-amber-500 animate-pulse" />
+                            <span>Ai分析</span>
                           </InteractiveButton>
+
+                          <InteractiveButton
+                            noGlow
+                            as="button"
+                            onClick={() => {
+                              window.dispatchEvent(new CustomEvent("toggle-crawler-spider"));
+                              playClickSound();
+                            }}
+                            className={`px-2 py-1 border rounded-lg transition-all text-[11px] flex items-center gap-1 font-extrabold cursor-pointer shadow-2xs ${
+                              isCrawlerActive
+                                ? "bg-emerald-500 text-white border-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.4)]"
+                                : "bg-white border-zinc-200 text-zinc-700 hover:text-emerald-700 hover:bg-emerald-50"
+                            }`}
+                            title="3D Crawler 蜘蛛籌碼巡檢"
+                          >
+                            <SpiderIcon className={`w-3 h-3 ${isCrawlerActive ? "text-white" : "text-emerald-600"}`} />
+                            <span>巡檢</span>
+                          </InteractiveButton>
+
                           <InteractiveButton
                             noGlow
                             as="button"
@@ -7659,21 +7884,23 @@ export default function Dashboard() {
                               setIsVisualLinesBoardOpen(true);
                               playClickSound();
                             }}
-                            className="px-2.5 py-1 bg-zinc-50 border border-zinc-200 text-zinc-650 hover:text-zinc-850 hover:bg-zinc-100 rounded-lg transition-all text-[11px] flex items-center gap-1 font-extrabold cursor-pointer"
+                            className="px-2 py-1 bg-white border border-zinc-200 text-zinc-700 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-all text-[11px] flex items-center gap-1 font-extrabold cursor-pointer shadow-2xs"
                             title="動態視覺線標籤 (Alt + W)"
                           >
-                            <SlidersHorizontal className="w-3 h-3" />
-                            視覺線
+                            <SlidersHorizontal className="w-3 h-3 text-indigo-500" />
+                            <span>視覺線</span>
                           </InteractiveButton>
+
                           <InteractiveButton
                             noGlow
                             as="button"
                             onClick={() => setIsManageHiddenOpen(true)}
-                            className="px-2.5 py-1 bg-zinc-50 border border-zinc-200 text-zinc-650 hover:text-zinc-850 hover:bg-zinc-100 rounded-lg transition-all text-[11px] flex items-center gap-1 font-extrabold cursor-pointer"
+                            className="px-2 py-1 bg-white border border-zinc-200 text-zinc-700 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg transition-all text-[11px] flex items-center gap-1 font-extrabold cursor-pointer shadow-2xs"
                           >
-                            <Settings2 className="w-3 h-3" />
-                            管理
+                            <Settings2 className="w-3 h-3 text-zinc-500" />
+                            <span>管理</span>
                           </InteractiveButton>
+
                           <InteractiveButton
                             noGlow
                             as="button"
@@ -7688,21 +7915,22 @@ export default function Dashboard() {
                                 toast.error("目前無可見的股票卡片可供放大");
                               }
                             }}
-                            className="px-2.5 py-1 bg-zinc-50 border border-zinc-200 text-zinc-650 hover:text-zinc-850 hover:bg-zinc-100 rounded-lg transition-all text-[11px] flex items-center gap-1 font-extrabold cursor-pointer"
+                            className="px-2 py-1 bg-white border border-zinc-200 text-zinc-700 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-all text-[11px] flex items-center gap-1 font-extrabold cursor-pointer shadow-2xs"
                             title="放大卡片"
                           >
-                            <Maximize2 className="w-3 h-3" />
-                            放大
+                            <Maximize2 className="w-3 h-3 text-blue-500" />
+                            <span>放大</span>
                           </InteractiveButton>
+
                           <InteractiveButton
                             noGlow
                             as="button"
                             onClick={handleExportMd}
-                            className="px-2.5 py-1 bg-zinc-50 border border-zinc-200 text-zinc-650 hover:text-zinc-850 hover:bg-zinc-100 rounded-lg transition-all text-[11px] flex items-center gap-1 font-extrabold cursor-pointer"
+                            className="px-2 py-1 bg-white border border-zinc-200 text-zinc-700 hover:text-purple-700 hover:bg-purple-50 rounded-lg transition-all text-[11px] flex items-center gap-1 font-extrabold cursor-pointer shadow-2xs"
                             title="匯出持股資料"
                           >
-                            <Printer className="w-3 h-3" />
-                            匯出
+                            <Printer className="w-3 h-3 text-purple-500" />
+                            <span>匯出</span>
                           </InteractiveButton>
                         </div>
                       </div>
@@ -8083,9 +8311,142 @@ export default function Dashboard() {
                       </DialogContent>
                     </Dialog>
 
-                      {/* Circular Tickbox Select All / Deselect All Toolbar */}
-                      <div className="py-2.5 px-6 max-w-6xl mx-auto w-full flex items-center justify-end border-t border-zinc-200 sm:border-t-0 select-none">
-                        <div className="flex items-center gap-2 flex-wrap ml-auto">
+                      {/* 綜合未實現損益 漲跌幅度百分比歸類篩選工具列 & 批次選取工具列 */}
+                      <div className="py-2.5 px-3 sm:px-6 max-w-6xl mx-auto w-full flex flex-col md:flex-row items-start md:items-center justify-between gap-2.5 border-t border-zinc-200/80 sm:border-t-0 select-none">
+                        {/* 左側：綜合未實現損益漲跌幅百分比歸類篩選開關按鈕 (2% 3% 4% 6% 8% 9% 10% 12%) & 多空雙向切換 */}
+                        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap w-full md:w-auto">
+                          {/* 多空雙向切換器 */}
+                          <div className="flex items-center p-0.5 bg-zinc-100 rounded-lg border border-zinc-250 shadow-xs shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                playClickSound();
+                                setPnlDirectionFilter("all");
+                              }}
+                              className={`px-2 py-0.5 rounded-md text-[11px] font-black transition-all cursor-pointer ${
+                                pnlDirectionFilter === "all"
+                                  ? "bg-zinc-800 text-white shadow-xs"
+                                  : "text-zinc-600 hover:text-zinc-900"
+                              }`}
+                               title="雙向區間 (以絕對值 |損益%| 篩選各百分比範圍)"
+                            >
+                              雙向 ±
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                playClickSound();
+                                setPnlDirectionFilter("gain");
+                              }}
+                              className={`px-2 py-0.5 rounded-md text-[11px] font-black transition-all cursor-pointer flex items-center gap-0.5 ${
+                                pnlDirectionFilter === "gain"
+                                  ? "bg-emerald-600 text-white shadow-xs"
+                                  : "text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50"
+                              }`}
+                              title="僅篩選獲利區間個股 (+損益% 落於該百分比區間)"
+                            >
+                              <span>▲</span>
+                              <span>獲利</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                playClickSound();
+                                setPnlDirectionFilter("loss");
+                              }}
+                              className={`px-2 py-0.5 rounded-md text-[11px] font-black transition-all cursor-pointer flex items-center gap-0.5 ${
+                                pnlDirectionFilter === "loss"
+                                  ? "bg-rose-600 text-white shadow-xs"
+                                  : "text-rose-700 hover:text-rose-900 hover:bg-rose-50"
+                              }`}
+                              title="僅篩選虧損區間個股 (-損益% 落於該百分比區間)"
+                            >
+                              <span>▼</span>
+                              <span>虧損</span>
+                            </button>
+                          </div>
+
+                          {/* 百分比區間按鈕列: 全部, 2%, 3%, 4%, 6%, 8%, 9%, 10%, 12% */}
+                          <div className="flex items-center gap-1 flex-wrap overflow-x-auto py-0.5 scrollbar-hide">
+                            <InteractiveButton
+                              noGlow
+                              as="button"
+                              onClick={() => {
+                                playClickSound();
+                                setPnlPercentFilter(null);
+                              }}
+                              className={`px-2.5 py-1 rounded-full text-[11px] font-black transition-all shadow-xs cursor-pointer border ${
+                                pnlPercentFilter === null
+                                  ? "bg-zinc-800 text-white border-zinc-800 shadow-xs"
+                                  : "bg-white hover:bg-zinc-50 border-zinc-250 text-zinc-600 hover:text-zinc-900"
+                              }`}
+                              title="顯示全部個股"
+                            >
+                              全部
+                            </InteractiveButton>
+                            {PNL_PERCENT_BRACKETS.map((pct) => {
+                              const isActive = pnlPercentFilter === pct;
+                              const rangeLabel = getPnlBracketRangeLabel(pct, pnlDirectionFilter);
+                              const activeColorClass =
+                                pnlDirectionFilter === "gain"
+                                  ? "bg-emerald-600 text-white border-emerald-600"
+                                  : pnlDirectionFilter === "loss"
+                                  ? "bg-rose-600 text-white border-rose-600"
+                                  : "bg-zinc-800 text-white border-zinc-800";
+                              const hoverBorderClass =
+                                pnlDirectionFilter === "gain"
+                                  ? "hover:border-emerald-400 hover:text-emerald-700 hover:bg-emerald-50/50"
+                                  : pnlDirectionFilter === "loss"
+                                  ? "hover:border-rose-400 hover:text-rose-700 hover:bg-rose-50/50"
+                                  : "hover:border-zinc-400 hover:text-zinc-900 hover:bg-zinc-50";
+
+                              return (
+                                <InteractiveButton
+                                  key={pct}
+                                  noGlow
+                                  as="button"
+                                  onClick={() => {
+                                    playClickSound();
+                                    // 點擊已選中的百分比按鈕時取消篩選 (返回全部)
+                                    setPnlPercentFilter(isActive ? null : pct);
+                                  }}
+                                  className={`px-2.5 py-1 rounded-full text-[11px] font-black transition-all shadow-xs cursor-pointer border tabular-nums ${
+                                    isActive
+                                      ? `${activeColorClass} shadow-xs font-black`
+                                      : `bg-white border-zinc-250 text-zinc-700 ${hoverBorderClass}`
+                                  }`}
+                                  title={`點擊${isActive ? "取消篩選" : `僅顯示未實現損益落於 ${rangeLabel} 區間之個股`}`}
+                                >
+                                  {pnlDirectionFilter === "gain" ? "+" : pnlDirectionFilter === "loss" ? "-" : "±"}{pct}%
+                                </InteractiveButton>
+                              );
+                            })}
+                          </div>
+
+                          {/* 若啟動篩選，顯示區間統計標籤 */}
+                          {pnlPercentFilter !== null && (
+                            <span className="text-[11px] font-black text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs animate-in fade-in select-none shrink-0">
+                              <span>區間 {getPnlBracketRangeLabel(pnlPercentFilter, pnlDirectionFilter)}:</span>
+                              <span className="tabular-nums font-extrabold">{filteredSubTabVisibleTabs.length}/{currentSubTabVisibleTabs.length}</span>
+                              <span>檔</span>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  playClickSound();
+                                  setPnlPercentFilter(null);
+                                }}
+                                className="ml-0.5 text-indigo-400 hover:text-indigo-800 font-bold cursor-pointer"
+                                title="清除篩選"
+                              >
+                                ✕
+                              </button>
+                            </span>
+                          )}
+                        </div>
+
+                        {/* 右側：全選與勾選統計工具按鈕 */}
+                        <div className="flex items-center gap-2 flex-wrap ml-auto shrink-0">
                           {selectedCardIds.size > 0 && (
                             <span className="text-[11px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 shadow-xs select-none">
                               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
@@ -8136,8 +8497,22 @@ export default function Dashboard() {
                                 <Activity className="h-10 w-10 opacity-40" />
                               </div>
                               <p className="text-base font-bold text-white/50 tracking-wide">
-                                尚無可見的{activeHoldingSubTab === "觀察中" && activeViewTab === "active" ? "虛擬交易" : activeHoldingSubTab}股票
+                                {pnlPercentFilter !== null
+                                  ? `尚無未實現損益落於 ${getPnlBracketRangeLabel(pnlPercentFilter, pnlDirectionFilter)} 範圍內的股票`
+                                  : `尚無可見的${activeHoldingSubTab === "觀察中" && activeViewTab === "active" ? "虛擬交易" : activeHoldingSubTab}股票`}
                               </p>
+                              {pnlPercentFilter !== null && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    playClickSound();
+                                    setPnlPercentFilter(null);
+                                  }}
+                                  className="mt-3 px-3 py-1 bg-white/10 hover:bg-white/20 text-white/80 hover:text-white text-xs font-bold rounded-lg border border-white/20 transition-all cursor-pointer"
+                                >
+                                  重設百分比篩選
+                                </button>
+                              )}
                             </motion.div>
                           ) : (
                             <>
@@ -8273,8 +8648,30 @@ export default function Dashboard() {
                                   );
                                   const effectiveHoldingQuantity = stats.totalQuantity !== 0 ? stats.totalQuantity : (tab.holdingQuantity || 0);
                                   const effectiveAveragePrice = (stats.totalQuantity !== 0 && stats.averagePrice > 0) ? stats.averagePrice : (tab.averageCost || 0);
-                                  const unrealizedPnL =
-                                    stats.unrealizedPnL || 0;
+                                  const optionSummary = calculateOptionPortfolioSummary(
+                                    trades,
+                                    tab.currentPrice,
+                                    tab.optionsCalcData
+                                  );
+
+                                  const stockHoldingCost = effectiveHoldingQuantity * effectiveAveragePrice;
+                                  const totalCostBasis = stockHoldingCost + (optionSummary.hasOptionRecords ? optionSummary.totalHoldingCost : 0);
+
+                                  const stockUnrealizedPnL = stats.unrealizedPnL || 0;
+                                  // 綜合未實現損益：現股未實現損益 ＋ 期權當前損益
+                                  const totalCombinedUnrealizedPnL = stockUnrealizedPnL + (optionSummary.hasOptionRecords ? optionSummary.totalCurrentPnL : 0);
+
+                                  // 漲跌幅度的百分比
+                                  let returnPercentage = 0;
+                                  if (totalCostBasis > 0) {
+                                    returnPercentage = (totalCombinedUnrealizedPnL / totalCostBasis) * 100;
+                                  } else if (effectiveAveragePrice > 0 && effectiveHoldingQuantity > 0 && tab.currentPrice) {
+                                    returnPercentage = ((tab.currentPrice - effectiveAveragePrice) / effectiveAveragePrice) * 100;
+                                  } else if (optionSummary.hasOptionRecords && optionSummary.totalHoldingCost > 0) {
+                                    returnPercentage = optionSummary.totalRoiPct;
+                                  }
+
+                                  const unrealizedPnL = totalCombinedUnrealizedPnL;
                                   const pnlColor =
                                     unrealizedPnL > 0
                                       ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
@@ -8441,21 +8838,35 @@ export default function Dashboard() {
                                             })()}
                                           </div>
 
-                                          {/* Top Center Edge Badge: Stock's Unrealized PnL (未實現損益) - 支援 PS5 動態背景高對比顯示，手機/平板適應字體 */}
+                                          {/* Top Center Edge Badge: Stock's Combined Unrealized PnL (綜合未實現損益 ＋ 漲跌幅度百分比) */}
                                           <div className="absolute -top-3.5 sm:-top-4 left-1/2 -translate-x-1/2 z-40 pointer-events-none flex items-center justify-center stock-card-top-unrealized-badge">
                                             <div
-                                              className={`flex items-center gap-1.5 text-[13px] sm:text-[16px] font-black whitespace-nowrap select-none font-mono px-3 sm:px-3.5 py-0.5 rounded-full bg-white/95 backdrop-blur-md border border-zinc-200/90 shadow-[0_2px_10px_-2px_rgba(0,0,0,0.12)] transition-all duration-300 ${
-                                                unrealizedPnL > 0
+                                              className={`flex items-center gap-1.5 text-[12.5px] sm:text-[15px] font-black whitespace-nowrap select-none font-mono px-3 sm:px-3.5 py-0.5 rounded-full bg-white/95 backdrop-blur-md border border-zinc-200/90 shadow-[0_2px_10px_-2px_rgba(0,0,0,0.12)] transition-all duration-300 ${
+                                                totalCombinedUnrealizedPnL > 0
                                                   ? "text-[#065f46] stock-pnl-pos"
-                                                  : unrealizedPnL < 0
+                                                  : totalCombinedUnrealizedPnL < 0
                                                     ? "text-rose-600 stock-pnl-neg"
                                                     : "text-zinc-500 stock-pnl-zero"
                                               }`}
                                             >
-                                              <span className="text-[11px] sm:text-[13px] font-bold text-zinc-500 stock-pnl-label">未實現</span>
+                                              <span className="text-[10.5px] sm:text-[12px] font-bold text-zinc-500 stock-pnl-label">
+                                                {optionSummary.hasOptionRecords ? "綜合未實現" : "未實現"}
+                                              </span>
                                               <span className="tabular-nums font-extrabold tracking-tight stock-pnl-val">
-                                                {unrealizedPnL > 0 ? "+" : ""}
-                                                ${unrealizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                {totalCombinedUnrealizedPnL > 0 ? "+" : ""}
+                                                ${totalCombinedUnrealizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                              </span>
+                                              {/* 漲跌幅度的百分比 (放在綜合未實現損益 金額後面) */}
+                                              <span
+                                                className={`text-[10.5px] sm:text-[12px] font-bold tabular-nums ml-0.5 px-1.5 py-0.2 rounded-md ${
+                                                  returnPercentage > 0
+                                                    ? "bg-emerald-500/15 text-[#047857]"
+                                                    : returnPercentage < 0
+                                                      ? "bg-rose-500/15 text-rose-700"
+                                                      : "bg-zinc-100 text-zinc-600"
+                                                }`}
+                                              >
+                                                ({returnPercentage > 0 ? "+" : ""}{returnPercentage.toFixed(2)}%)
                                               </span>
                                             </div>
                                           </div>

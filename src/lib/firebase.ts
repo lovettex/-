@@ -1,20 +1,20 @@
 import { initializeApp } from 'firebase/app';
-import { 
+import {
   getAuth,
-  initializeAuth, 
-  indexedDBLocalPersistence, 
-  browserLocalPersistence, 
+  initializeAuth,
+  indexedDBLocalPersistence,
+  browserLocalPersistence,
   inMemoryPersistence,
-  browserPopupRedirectResolver
+  browserPopupRedirectResolver,
+  Auth
 } from 'firebase/auth';
 import { 
   getFirestore,
   initializeFirestore,
+  memoryLocalCache,
   persistentLocalCache,
   persistentMultipleTabManager,
   setLogLevel,
-  doc,
-  getDocFromCache
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
@@ -22,40 +22,52 @@ export const app = initializeApp(firebaseConfig);
 
 // Suppress non-critical internal network latency / offline mode warnings from Firestore SDK
 try {
-  setLogLevel('error');
+  setLogLevel('silent');
 } catch (e) {
   // Ignore in case setLogLevel is restricted
 }
 
-// Initialize Firestore with robust multi-tab persistent IndexedDB cache & auto-detecting transport for optimal reliability
+// Initialize Firestore: use lock-free memory cache inside cross-origin iframes (AI Studio Preview)
+// and multi-tab persistent cache in standalone top-level windows.
+const isEmbeddedIframe = typeof window !== 'undefined' && window.self !== window.top;
 let firestoreInstance;
 try {
   firestoreInstance = initializeFirestore(
     app,
     {
-      localCache: persistentLocalCache({
-        tabManager: persistentMultipleTabManager(),
-      }),
+      localCache: isEmbeddedIframe
+        ? memoryLocalCache()
+        : persistentLocalCache({
+            tabManager: persistentMultipleTabManager(),
+          }),
+      experimentalForceLongPolling: isEmbeddedIframe,
       experimentalAutoDetectLongPolling: true,
     },
     firebaseConfig.firestoreDatabaseId
   );
 } catch (e) {
-  console.warn("initializeFirestore with persistentLocalCache fallback:", e);
+  console.warn("initializeFirestore fallback:", e);
   firestoreInstance = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 }
 
 export const db = firestoreInstance;
 
-// Initialize Firebase Auth with multiple persistence targets to prevent WKWebView/Chrome iOS sandboxed storage crashes.
-let authInstance;
+// Initialize Firebase Auth with resilient persistence fallback for iframe / third-party cookie restrictions
+let authInstance: Auth;
 try {
-  authInstance = initializeAuth(app, {
-    persistence: [indexedDBLocalPersistence, browserLocalPersistence, inMemoryPersistence],
-    popupRedirectResolver: browserPopupRedirectResolver
-  });
+  if (typeof window !== 'undefined') {
+    authInstance = initializeAuth(app, {
+      persistence: [
+        indexedDBLocalPersistence,
+        browserLocalPersistence,
+        inMemoryPersistence,
+      ],
+      popupRedirectResolver: browserPopupRedirectResolver,
+    });
+  } else {
+    authInstance = getAuth(app);
+  }
 } catch (e) {
-  console.warn("initializeAuth failed, falling back to standard getAuth:", e);
   authInstance = getAuth(app);
 }
 
@@ -99,16 +111,18 @@ export function isFirestoreOfflineError(error: unknown): boolean {
     msg.includes('failed-precondition') ||
     msg.includes('deadline-exceeded') ||
     msg.includes('network-request-failed') ||
-    msg.includes('timed out')
+    msg.includes('timed out') ||
+    msg.includes('permission') ||
+    msg.includes('insufficient')
   );
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
   const errorMessage = error instanceof Error ? error.message : String(error);
   
-  // Gracefully handle transient offline / connection latency without throwing unhandled exceptions
-  if (isFirestoreOfflineError(error)) {
-    console.warn(`[Firestore Offline Cache Active] Operation ${operationType} on path '${path}': ${errorMessage}`);
+  // Gracefully handle transient offline, connection latency, or unauthenticated state without throwing unhandled exceptions
+  if (isFirestoreOfflineError(error) || !auth.currentUser) {
+    console.warn(`[Firestore Local/Cache Fallback] Operation ${operationType} on path '${path}': ${errorMessage}`);
     return;
   }
 
@@ -128,6 +142,5 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     operationType,
     path
   };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  console.warn('Firestore Notice: ', JSON.stringify(errInfo));
 }

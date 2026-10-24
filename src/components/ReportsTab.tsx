@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, doc, onSnapshot, setDoc, serverTimestamp, query, orderBy } from 'firebase/firestore';
 import { DailyReport } from '../types';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths, startOfWeek, endOfWeek } from 'date-fns';
@@ -68,7 +68,7 @@ export default function ReportsTab({ tabId }: ReportsTabProps) {
       });
       toast.success('報告連結已儲存');
     } catch (err) {
-      console.error(err);
+      console.warn(err);
       toast.error('儲存失敗');
       handleFirestoreError(err, OperationType.WRITE, `stockTabs/${tabId}/dailyReports/${dateStr}`);
     }
