@@ -488,22 +488,14 @@ export const StockCardVisualizer: React.FC<Props> = ({
   });
 
   useEffect(() => {
+    if (isPs5Mode !== undefined) return;
     const unsub = whiteNoiseEngine.subscribe((state) => {
       setInternalPs5Mode(!!(state.isPlaying && state.bgEnabled));
     });
-    const observer = new MutationObserver(() => {
-      if (typeof document !== "undefined" && document.body) {
-        setInternalPs5Mode(document.body.classList.contains("ps5-theme-active"));
-      }
-    });
-    if (typeof document !== "undefined" && document.body) {
-      observer.observe(document.body, { attributes: true, attributeFilter: ["class"] });
-    }
     return () => {
       unsub();
-      observer.disconnect();
     };
-  }, []);
+  }, [isPs5Mode]);
 
   const activePs5Mode = isPs5Mode !== undefined ? isPs5Mode : internalPs5Mode;
   const activeSplitTrade = selectedSplitTrade || strategy?.selectedSplitTrade;

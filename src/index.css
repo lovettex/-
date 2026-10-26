@@ -710,18 +710,41 @@ body.ps5-theme-active .stock-card-bottom-nav .bottom-nav-indicator {
 
 /* Cards and Card Wrappers: No dark shadows, no frosted blur, no 3D extrusion */
 body.ps5-theme-active .glass-card,
-body.ps5-theme-active .card-front,
-body.ps5-theme-active .card-back,
 body.ps5-theme-active .card-wrapper,
 body.ps5-theme-active [id^="stock-card-"],
-body.ps5-theme-active .card-inner-parallax,
-body.ps5-theme-active .slide-drawer-container {
+body.ps5-theme-active .card-inner-parallax {
   box-shadow: none !important;
   filter: none !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
-  opacity: 1 !important;
-  transform: none !important;
+}
+
+/* Prevent cards from bulging/translating up on hover in PS5 mode while keeping flat */
+body.ps5-theme-active .glass-card:hover {
+  transform: none;
+  box-shadow: none !important;
+}
+
+/* Maintain proper drawer slide positions for front & back faces without 3D extrusion or dark shadows */
+body.ps5-theme-active .card-front,
+body.ps5-theme-active .card-back {
+  box-shadow: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+body.ps5-theme-active .slide-drawer-container {
+  box-shadow: none !important;
+}
+
+body.ps5-theme-active .card-inner-parallax {
+  perspective: none !important;
+}
+
+body.ps5-theme-active .premium-3d-grid {
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* Price Labels: Flat, clean, no dark floating shadows, no 3D translateZ bulging */

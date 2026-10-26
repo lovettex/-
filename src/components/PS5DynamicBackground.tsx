@@ -693,11 +693,16 @@ function TokyoLiveWallpaper({ speedMultiplier = 0.5 }: { speedMultiplier?: numbe
 
     render();
 
+    let rafMoveId: number | null = null;
     const handleMouseMove = (e: MouseEvent) => {
       if (!containerRef.current) return;
-      const dx = e.clientX / width - 0.5;
-      const dy = e.clientY / height - 0.5;
-      containerRef.current.style.transform = `translate3d(${-dx * 16}px, ${-dy * 10}px, 0)`;
+      if (rafMoveId) cancelAnimationFrame(rafMoveId);
+      rafMoveId = requestAnimationFrame(() => {
+        if (!containerRef.current) return;
+        const dx = e.clientX / width - 0.5;
+        const dy = e.clientY / height - 0.5;
+        containerRef.current.style.transform = `translate3d(${-dx * 16}px, ${-dy * 10}px, 0)`;
+      });
     };
 
     window.addEventListener('mousemove', handleMouseMove);
@@ -705,6 +710,7 @@ function TokyoLiveWallpaper({ speedMultiplier = 0.5 }: { speedMultiplier?: numbe
     return () => {
       window.removeEventListener('resize', handleResize);
       window.removeEventListener('mousemove', handleMouseMove);
+      if (rafMoveId) cancelAnimationFrame(rafMoveId);
       cancelAnimationFrame(animId);
     };
   }, [speedMultiplier]);
@@ -873,6 +879,13 @@ export function PS5DynamicBackground({
     const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, powerPreference: 'high-performance' });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.domElement.style.position = 'absolute';
+    renderer.domElement.style.top = '0';
+    renderer.domElement.style.left = '0';
+    renderer.domElement.style.width = '100%';
+    renderer.domElement.style.height = '100%';
+    renderer.domElement.style.display = 'block';
+    renderer.domElement.style.pointerEvents = 'none';
     container.appendChild(renderer.domElement);
 
     // Select specific GLSL shader
@@ -1214,6 +1227,7 @@ export function PS5DynamicBackground({
           exit={{ opacity: 0 }}
           transition={{ duration: 0.8, ease: 'easeInOut' }}
           className="fixed inset-0 z-0 pointer-events-none overflow-hidden select-none"
+          style={{ transform: 'translate3d(0, 0, 0)', backfaceVisibility: 'hidden', isolation: 'isolate' }}
         >
           {/* Tokyo Series Mode: Porsche GT3 RS Live Wallpaper */}
           {theme.category === 'tokyo' && (
@@ -1222,12 +1236,12 @@ export function PS5DynamicBackground({
 
           {/* Galaxy Mode: GLSL Shaders Container */}
           {theme.category === 'galaxy' && (
-            <div ref={glslContainerRef} className="absolute inset-0 w-full h-full block" />
+            <div ref={glslContainerRef} className="absolute inset-0 w-full h-full block pointer-events-none" />
           )}
 
           {/* Classic Mode: 2D Canvas Wave Ribbons */}
           {theme.category === 'classic' && (
-            <canvas ref={classicCanvasRef} className="absolute inset-0 w-full h-full block" />
+            <canvas ref={classicCanvasRef} className="absolute inset-0 w-full h-full block pointer-events-none" style={{ transform: 'translate3d(0, 0, 0)', backfaceVisibility: 'hidden' }} />
           )}
 
           {/* Subtle cinematic overlay vignette */}

@@ -321,15 +321,8 @@ export default function Dashboard() {
     const unsubscribe = whiteNoiseEngine.subscribe((state) => {
       setIsPs5ModeActive(!!(state.isPlaying && state.bgEnabled));
     });
-    const observer = new MutationObserver(() => {
-      setIsPs5ModeActive(document.body.classList.contains("ps5-theme-active"));
-    });
-    if (typeof document !== "undefined" && document.body) {
-      observer.observe(document.body, { attributes: true, attributeFilter: ["class"] });
-    }
     return () => {
       unsubscribe();
-      observer.disconnect();
     };
   }, []);
 
