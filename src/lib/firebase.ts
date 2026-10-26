@@ -27,27 +27,32 @@ try {
   // Ignore in case setLogLevel is restricted
 }
 
-// Initialize Firestore: use lock-free memory cache inside cross-origin iframes (AI Studio Preview)
-// and multi-tab persistent cache in standalone top-level windows.
-const isEmbeddedIframe = typeof window !== 'undefined' && window.self !== window.top;
+// Initialize Firestore: Use experimentalForceLongPolling and lock-free memory cache
+// to guarantee instant connectivity in cross-origin iframes (AI Studio Preview) and Cloud Run.
+const isEmbeddedIframe = typeof window !== 'undefined' && (
+  window.self !== window.top ||
+  (window.location?.hostname || '').includes('run.app') ||
+  (window.location?.hostname || '').includes('aistudio') ||
+  true
+);
+
 let firestoreInstance;
 try {
   firestoreInstance = initializeFirestore(
     app,
     {
-      localCache: isEmbeddedIframe
-        ? memoryLocalCache()
-        : persistentLocalCache({
-            tabManager: persistentMultipleTabManager(),
-          }),
-      experimentalForceLongPolling: isEmbeddedIframe,
-      experimentalAutoDetectLongPolling: true,
+      localCache: memoryLocalCache(),
+      experimentalForceLongPolling: true,
     },
     firebaseConfig.firestoreDatabaseId
   );
 } catch (e) {
-  console.warn("initializeFirestore fallback:", e);
-  firestoreInstance = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+  console.warn("initializeFirestore initial attempt notice:", e);
+  try {
+    firestoreInstance = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+  } catch (err) {
+    console.error("Firestore initialization fallback error:", err);
+  }
 }
 
 export const db = firestoreInstance;

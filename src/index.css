@@ -321,35 +321,18 @@ body.ps5-theme-active {
   color: #09090b;
 }
 
-/* 1. Transparent Frosted Glass Containers (Cards, Panels, Modals, Popovers) */
-body.ps5-theme-active .glass-card,
-body.ps5-theme-active .card-front,
-body.ps5-theme-active .card-back,
-body.ps5-theme-active .glass-panel,
-body.ps5-theme-active [id^="stock-card-"],
+/* 1. Modal, Dialog & Popover Containers */
 body.ps5-theme-active [data-slot="dialog-content"],
 body.ps5-theme-active .modal-frosted,
 body.ps5-theme-active .white-noise-menu {
-  background-color: rgba(255, 255, 255, 0.85) !important;
+  background-color: rgba(255, 255, 255, 0.95) !important;
   backdrop-filter: blur(24px) saturate(180%) !important;
   -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
-  border: 1px solid rgba(255, 255, 255, 0.8) !important;
+  border: 1px solid rgba(228, 228, 231, 0.8) !important;
   box-shadow: 
     0 12px 36px rgba(0, 0, 0, 0.12),
-    0 2px 8px rgba(0, 0, 0, 0.06),
-    inset 0 1px 0 rgba(255, 255, 255, 0.95) !important;
+    0 2px 8px rgba(0, 0, 0, 0.06) !important;
   transition: all 250ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-body.ps5-theme-active .glass-card:hover,
-body.ps5-theme-active .card-front:hover,
-body.ps5-theme-active .card-back:hover {
-  background-color: rgba(255, 255, 255, 0.92) !important;
-  border-color: rgba(255, 255, 255, 0.95) !important;
-  box-shadow: 
-    0 18px 48px rgba(0, 0, 0, 0.16),
-    0 0 20px var(--ps5-glow, rgba(0, 212, 255, 0.2)),
-    inset 0 1px 0 rgba(255, 255, 255, 1) !important;
 }
 
 /* 2. Deep Crisp Black & Charcoal Text (High Contrast, No Blurry White Glows) */
@@ -571,13 +554,17 @@ body.ps5-theme-active .chips-summary-panel {
 }
 
 body.ps5-theme-active .chips-summary-panel .group\/card {
-  background-color: rgba(255, 255, 255, 0.75) !important;
+  background-color: #ffffff !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
   border-color: rgba(228, 228, 231, 0.8) !important;
 }
 
 body.ps5-theme-active .chips-summary-panel .group\/card:hover {
-  background-color: rgba(255, 255, 255, 0.95) !important;
-  border-color: rgba(255, 255, 255, 1) !important;
+  background-color: #ffffff !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border-color: rgba(200, 200, 205, 1) !important;
 }
 
 /* 7. iOS Style Segmented Control in PS5 Active Mode */
@@ -717,10 +704,93 @@ body.ps5-theme-active .stock-card-bottom-nav .bottom-nav-indicator {
   }
 }
 
+/* =========================================================
+   11. PS5 Dynamic Mode: Card Styling (No Dark Shadows, No 3D Embossed Effect)
+   ========================================================= */
 
+/* Cards and Card Wrappers: No dark shadows, no frosted blur, no 3D extrusion */
+body.ps5-theme-active .glass-card,
+body.ps5-theme-active .card-front,
+body.ps5-theme-active .card-back,
+body.ps5-theme-active .card-wrapper,
+body.ps5-theme-active [id^="stock-card-"],
+body.ps5-theme-active .card-inner-parallax,
+body.ps5-theme-active .slide-drawer-container {
+  box-shadow: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  opacity: 1 !important;
+  transform: none !important;
+}
 
+/* Price Labels: Flat, clean, no dark floating shadows, no 3D translateZ bulging */
+body.ps5-theme-active [data-price-tag="true"] {
+  border-width: 1px !important;
+  border-style: solid !important;
+  border-color: rgba(255, 255, 255, 0.4) !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+  transform: none !important;
+  font-weight: 800 !important;
+}
 
+body.ps5-theme-active [data-price-tag="true"]:hover {
+  transform: scale(1.04) !important;
+  box-shadow: none !important;
+}
 
+/* Inner white number badge pills */
+body.ps5-theme-active [data-price-tag="true"] span.bg-white {
+  background-color: #ffffff !important;
+  box-shadow: none !important;
+  border: none !important;
+  text-shadow: none !important;
+}
 
+/* Current price tag (現價) & Average cost tag (均本): Flat vibrant colors without black drop shadows */
+body.ps5-theme-active [data-price-tag="true"][data-is-cp="true"] {
+  background-color: #9333ea !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+body.ps5-theme-active [data-price-tag="true"][data-category="均本"] {
+  background-color: #ea580c !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+/* Lines and Axis Text: Flat, clean, no dark drop-shadow filters */
+body.ps5-theme-active svg.stock-card-svg {
+  overflow: visible !important;
+}
+
+body.ps5-theme-active svg line.stock-card-benchmark-line,
+body.ps5-theme-active svg [data-benchmark-line="true"],
+body.ps5-theme-active svg line.stock-card-ac-line,
+body.ps5-theme-active svg [data-ac-line="true"],
+body.ps5-theme-active svg line.stock-card-cp-line,
+body.ps5-theme-active svg [data-cp-line="true"],
+body.ps5-theme-active .stock-card-axis-text-3d {
+  filter: none !important;
+  text-shadow: none !important;
+}
+
+/* Stock Symbol Title inside Card Header */
+body.ps5-theme-active .stock-symbol-title .stock-symbol-text {
+  color: #09090b !important;
+  font-weight: 900 !important;
+  text-shadow: none !important;
+}
+
+/* Top Mode Switch pill in card header (突破加碼 / 分批攤平) */
+body.ps5-theme-active .card-front .bg-zinc-100\/95 {
+  background-color: #f4f4f5 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border-color: rgba(0, 0, 0, 0.08) !important;
+  box-shadow: none !important;
+}
 
 

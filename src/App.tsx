@@ -8,7 +8,9 @@ import { useAutoFullscreen } from './hooks/useAutoFullscreen';
 import Layout from './Layout';
 import Dashboard from './pages/Dashboard';
 
-const StockTabDetail = lazy(() => import('./pages/StockTabDetail'));
+const StockTabDetail = lazy(() =>
+  import('./pages/StockTabDetail').catch(() => import('./pages/StockTabDetail'))
+);
 
 function AppContent() {
   useAutoFullscreen();

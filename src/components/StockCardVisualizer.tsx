@@ -9,6 +9,7 @@ import { calculateBatchPlanning } from "../lib/calculations";
 import { formatTimestamp } from "../lib/dateUtils";
 import { safeSessionStorage } from "../lib/utils";
 import { playClickSound } from "../lib/audio";
+import { whiteNoiseEngine } from "../lib/whiteNoiseEngine";
 import {
   Chart as ChartJS,
   registerables,
@@ -94,6 +95,7 @@ interface Props {
     holdingStatus?: string;
     tradeType?: string;
   }) => void;
+  isPs5Mode?: boolean;
 }
 
 function resolveGlobalLayout<T extends { id: string; price?: number; rawY: number; column: number; isFixed?: boolean }>(
@@ -475,7 +477,35 @@ export const StockCardVisualizer: React.FC<Props> = ({
   batchCalcMode: propBatchCalcMode,
   onBatchCalcModeChange,
   onOpenMiniVisualLinesModal,
+  isPs5Mode,
 }) => {
+  const [internalPs5Mode, setInternalPs5Mode] = useState(() => {
+    if (typeof document !== "undefined" && document.body) {
+      return document.body.classList.contains("ps5-theme-active");
+    }
+    const s = whiteNoiseEngine.getState();
+    return !!(s.isPlaying && s.bgEnabled);
+  });
+
+  useEffect(() => {
+    const unsub = whiteNoiseEngine.subscribe((state) => {
+      setInternalPs5Mode(!!(state.isPlaying && state.bgEnabled));
+    });
+    const observer = new MutationObserver(() => {
+      if (typeof document !== "undefined" && document.body) {
+        setInternalPs5Mode(document.body.classList.contains("ps5-theme-active"));
+      }
+    });
+    if (typeof document !== "undefined" && document.body) {
+      observer.observe(document.body, { attributes: true, attributeFilter: ["class"] });
+    }
+    return () => {
+      unsub();
+      observer.disconnect();
+    };
+  }, []);
+
+  const activePs5Mode = isPs5Mode !== undefined ? isPs5Mode : internalPs5Mode;
   const activeSplitTrade = selectedSplitTrade || strategy?.selectedSplitTrade;
   const { price: dynamicPrice, isLoading: isCardLoading } = useStockPrice(stockName, currentPrice);
 
@@ -2793,7 +2823,11 @@ export const StockCardVisualizer: React.FC<Props> = ({
         data-category={categoryName}
         data-price={typeof l.price === "number" ? l.price : undefined}
         title={isCp ? "現價標籤 - 雙擊開啟動態視覺線定位" : undefined}
-        className={`absolute whitespace-nowrap transition-all duration-150 font-extrabold px-1 sm:px-1.5 py-0.5 rounded-md text-[11px] sm:text-[13px] tracking-tight cursor-pointer select-none hover:scale-110 hover:z-40 active:scale-95 shadow-md border border-black/15 leading-tight max-w-[130px] xs:max-w-[160px] sm:max-w-none truncate sm:whitespace-nowrap ${
+        className={`absolute whitespace-nowrap transition-all duration-150 font-extrabold px-1 sm:px-1.5 py-0.5 rounded-md text-[11px] sm:text-[13px] tracking-tight cursor-pointer select-none hover:scale-110 hover:z-40 active:scale-95 leading-tight max-w-[130px] xs:max-w-[160px] sm:max-w-none truncate sm:whitespace-nowrap ${
+          activePs5Mode
+            ? "border border-white/40"
+            : "shadow-md border border-black/15"
+        } ${
           isCp ? "hover:ring-2 hover:ring-purple-400" : "hover:ring-2 hover:ring-white/40"
         } ${extraClass} ${blinkClass} ${alertClass}`}
         style={{
@@ -2983,7 +3017,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
         <svg
           viewBox="0 0 100 100"
           preserveAspectRatio="none"
-          className="absolute inset-0 w-full h-full overflow-visible"
+          className="stock-card-svg absolute inset-0 w-full h-full overflow-visible"
         >
           <defs>
             <filter id="glowGreen" x="-20%" y="-20%" width="140%" height="140%">
@@ -3033,9 +3067,11 @@ export const StockCardVisualizer: React.FC<Props> = ({
               y2={getYPct(dynamicPrice)}
               vectorEffect="non-scaling-stroke"
               stroke="#c084fc"
-              strokeWidth="1.5"
+              strokeWidth={activePs5Mode ? "2" : "1.5"}
               strokeDasharray="2 2"
-              opacity="0.6"
+              opacity={activePs5Mode ? "1" : "0.6"}
+              className="stock-card-cp-line"
+              data-cp-line="true"
             />
           )}
 
@@ -3047,9 +3083,11 @@ export const StockCardVisualizer: React.FC<Props> = ({
               y2={getYPct(averageCost)}
               vectorEffect="non-scaling-stroke"
               stroke="#f97316"
-              strokeWidth="2.2"
+              strokeWidth={activePs5Mode ? "2.4" : "2.2"}
               strokeDasharray="6 4"
-              opacity="0.95"
+              opacity={activePs5Mode ? "1" : "0.95"}
+              className="stock-card-ac-line"
+              data-ac-line="true"
             />
           )}
 
@@ -3195,11 +3233,11 @@ export const StockCardVisualizer: React.FC<Props> = ({
                     x2={ann.x2}
                     y2={ann.y2}
                     stroke={ann.color}
-                    strokeWidth={ann.strokeWidth}
+                    strokeWidth={activePs5Mode ? Number(ann.strokeWidth || 2) + 0.6 : ann.strokeWidth}
                     markerEnd={markerId ? `url(#${markerId})` : undefined}
                     vectorEffect="non-scaling-stroke"
-                    opacity={mode === 'eraser' || mode === 'move' ? "0.75" : "0.85"}
-                    className={`transition-all ${
+                    opacity={mode === 'eraser' || mode === 'move' ? "0.75" : (activePs5Mode ? "1" : "0.85")}
+                    className={`transition-all stock-card-vector-line ${
                       mode === 'eraser'
                         ? 'cursor-pointer hover:stroke-red-500 hover:opacity-100 transition-all duration-150 [stroke-dasharray:none]'
                         : mode === 'move'
@@ -3302,11 +3340,12 @@ export const StockCardVisualizer: React.FC<Props> = ({
                     x2="100"
                     y2={dividerY}
                     stroke={isBeingDragged ? '#f59e0b' : ann.color}
-                    strokeWidth={isBeingDragged ? Number(ann.strokeWidth || 4) + 1 : ann.strokeWidth}
+                    strokeWidth={isBeingDragged ? Number(ann.strokeWidth || 4) + 1 : (activePs5Mode ? Number(ann.strokeWidth || 4) + 0.8 : ann.strokeWidth)}
                     strokeDasharray={isBeingDragged ? '4 2' : 'none'}
                     vectorEffect="non-scaling-stroke"
-                    opacity={isBeingDragged ? '1' : (mode === 'eraser' || mode === 'move' ? '0.8' : '0.85')}
-                    className={`transition-all ${
+                    opacity={isBeingDragged ? '1' : (mode === 'eraser' || mode === 'move' ? '0.8' : (activePs5Mode ? '1' : '0.85'))}
+                    data-benchmark-line="true"
+                    className={`transition-all stock-card-benchmark-line ${
                       mode === 'eraser'
                         ? 'cursor-pointer hover:stroke-red-500 hover:opacity-100 transition-all duration-150 [stroke-dasharray:none]'
                         : mode === 'move'
@@ -3348,10 +3387,10 @@ export const StockCardVisualizer: React.FC<Props> = ({
                       x="98.5"
                       y={dividerY - 1.2}
                       textAnchor="end"
-                      fill={isBeingDragged ? '#f59e0b' : '#9ca3af'}
-                      fontSize="3.8"
-                      fontWeight="800"
-                      className="select-none pointer-events-none font-mono tracking-wider opacity-90"
+                      fill={isBeingDragged ? '#f59e0b' : (activePs5Mode ? '#ffffff' : '#9ca3af')}
+                      fontSize={activePs5Mode ? "4.2" : "3.8"}
+                      fontWeight="900"
+                      className={`select-none pointer-events-none font-mono tracking-wider ${activePs5Mode ? "stock-card-axis-text-3d opacity-100" : "opacity-90"}`}
                     >
                       {axisLetter} {ann.price && ann.price > 0 ? `$${ann.price.toFixed(2)}` : ''}
                     </text>

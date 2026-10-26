@@ -9467,6 +9467,7 @@ export default function Dashboard() {
                                               isSelected={selectedCardIds.has(tab.id)}
                                               onToggleSelected={() => handleToggleCardSelected(tab.id)}
                                               onOpenMiniVisualLinesModal={(info) => setMiniVisualLinesStock(info)}
+                                              isPs5Mode={isPs5ModeActive}
                                             />
                                           </div>
 

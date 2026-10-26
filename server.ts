@@ -906,6 +906,16 @@ async function startServer() {
       server: { middlewareMode: true },
       appType: "spa",
     });
+    // Prevent Edge/Chrome from caching HTML/entry points with stale prebundled chunk hashes
+    app.use((req, res, next) => {
+      const url = req.url || "";
+      if (url === "/" || url.startsWith("/index.html") || url.startsWith("/src/main.tsx") || url.startsWith("/src/App.tsx")) {
+        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+        res.setHeader("Pragma", "no-cache");
+        res.setHeader("Expires", "0");
+      }
+      next();
+    });
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');

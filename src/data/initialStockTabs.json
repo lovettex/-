@@ -1,0 +1,8604 @@
+[
+  {
+    "id": "0JBhaW4hV8kwWVqUqEPY",
+    "sortOrder": 3,
+    "buyRate": 7,
+    "crashSimilarity": 5,
+    "qualityScore": 8,
+    "valueScore": 7,
+    "chartAnnotations": [
+      {
+        "y2": 55.38,
+        "strokeWidth": 8,
+        "type": "divider",
+        "x1": 0,
+        "y": 55.38,
+        "id": "div-1789274832300-hcbtka",
+        "price": 105.5,
+        "x2": 100,
+        "color": "#000000",
+        "y1": 55.38
+      },
+      {
+        "y1": 66.13,
+        "price": 102,
+        "type": "divider",
+        "id": "div-1789274835932-a1isc8",
+        "strokeWidth": 8,
+        "x2": 100,
+        "color": "#3b82f6",
+        "y2": 66.13,
+        "y": 66.13,
+        "x1": 0
+      },
+      {
+        "price": 92.18,
+        "x2": 100,
+        "type": "divider",
+        "strokeWidth": 8,
+        "id": "div-1789274840390-3zn4l6",
+        "y": 87.63,
+        "color": "#10b981",
+        "y1": 87.63,
+        "x1": 0,
+        "y2": 87.63
+      },
+      {
+        "x1": 0,
+        "y": 44.63,
+        "type": "divider",
+        "y2": 44.63,
+        "x2": 100,
+        "strokeWidth": 8,
+        "price": 108.8,
+        "id": "div-1789274844330-5dvekm",
+        "y1": 44.63,
+        "color": "#ef4444"
+      }
+    ],
+    "longTermOutlook": "觀察",
+    "holdingStatus": "候選名單",
+    "isOperationConfirmed": false,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "sellRate": 3,
+    "currentPrice": 112.52,
+    "updatedAt": {
+      "seconds": 1790353536,
+      "nanoseconds": 620000000
+    },
+    "shortTermImpact": "看多",
+    "isFavoriteHighlight": false,
+    "groupId": "",
+    "rating": 7,
+    "status": "ACTIVE",
+    "tags": [
+      "長線"
+    ],
+    "createdAt": {
+      "seconds": 1778265643,
+      "nanoseconds": 948000000
+    },
+    "plannedBuyQty": 120,
+    "companyName": "DISNEY",
+    "tradeType": "simulated",
+    "isDeviationConfirmed": false,
+    "recommendation": "推薦買進",
+    "symbol": "DIS",
+    "sentiment": 60
+  },
+  {
+    "id": "0YmgpT4bAgeXqSZc7dt0",
+    "symbol": "BA",
+    "crashSimilarity": 4,
+    "chartAnnotations": [
+      {
+        "y2": 59.92,
+        "x1": 0,
+        "color": "#000000",
+        "type": "divider",
+        "strokeWidth": 8,
+        "y1": 59.92,
+        "id": "div-1789274444372-47ii68",
+        "price": 210.5,
+        "y": 59.92,
+        "x2": 100
+      },
+      {
+        "y2": 73.15,
+        "color": "#3b82f6",
+        "x1": 0,
+        "price": 198,
+        "y": 73.15,
+        "strokeWidth": 8,
+        "id": "div-1789274447676-y5uaod",
+        "type": "divider",
+        "x2": 100,
+        "y1": 73.15
+      },
+      {
+        "x1": 0,
+        "y": 93,
+        "y2": 93,
+        "price": 176.77,
+        "strokeWidth": 8,
+        "type": "divider",
+        "color": "#10b981",
+        "x2": 100,
+        "id": "div-1789274451125-01p3e1",
+        "y1": 93
+      }
+    ],
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "qualityScore": 4,
+    "isNew": true,
+    "createdAt": {
+      "seconds": 1780500262,
+      "nanoseconds": 975000000
+    },
+    "holdingStatus": "觀察中",
+    "tradeType": "simulated",
+    "sellRate": 4,
+    "groupId": "BA-1780500553777",
+    "companyName": "BOEING",
+    "status": "ACTIVE",
+    "rating": 7,
+    "valueScore": 6,
+    "updatedAt": {
+      "seconds": 1789656959,
+      "nanoseconds": 262000000
+    },
+    "currentPrice": 188.35,
+    "sortOrder": 21,
+    "buyRate": 7
+  },
+  {
+    "id": "1UvoSu7sg6ADgMmYT1hq",
+    "buyRate": 7,
+    "averageCost": 75.65698367636622,
+    "holdingStatus": "觀察中",
+    "qualityScore": 8,
+    "holdingQuantity": 1409,
+    "status": "ACTIVE",
+    "selectedSplitTrade": "",
+    "rating": 7,
+    "companyName": "Public Service Enterprise Group Inc",
+    "plannedBuyPercent": 10,
+    "valueScore": 7,
+    "refPnLPointSys2": "73.07",
+    "averagingRows": [
+      {
+        "bought": false,
+        "quantity": "",
+        "quantity2": "",
+        "riskFlag": false,
+        "price": "74.14"
+      },
+      {
+        "price": "72.63",
+        "riskFlag": false,
+        "quantity2": "",
+        "bought": false,
+        "quantity": ""
+      },
+      {
+        "bought": false,
+        "riskFlag": false,
+        "quantity2": "",
+        "quantity": "",
+        "price": "71.12"
+      },
+      {
+        "riskFlag": false,
+        "bought": false,
+        "price": "69.60",
+        "quantity": "",
+        "quantity2": ""
+      }
+    ],
+    "currentPrice": 72.02,
+    "chartAnnotations": [
+      {
+        "y2": 27.24,
+        "x1": 0,
+        "type": "divider",
+        "y": 27.24,
+        "id": "div-1789274465556-rydzdi",
+        "price": 76.5,
+        "x2": 100,
+        "color": "#000000",
+        "strokeWidth": 8,
+        "y1": 27.24
+      },
+      {
+        "x1": 0,
+        "y2": 52.53,
+        "y": 52.53,
+        "x2": 100,
+        "id": "div-1789274469202-886bit",
+        "color": "#3b82f6",
+        "y1": 52.53,
+        "type": "divider",
+        "strokeWidth": 8,
+        "price": 75
+      },
+      {
+        "id": "div-1789274478395-zlunzj",
+        "x2": 100,
+        "y": 64.33,
+        "y1": 64.33,
+        "strokeWidth": 8,
+        "y2": 64.33,
+        "color": "#10b981",
+        "x1": 0,
+        "type": "divider",
+        "price": 73
+      }
+    ],
+    "sortOrder": 22,
+    "refPnLPoint": "73.07",
+    "averagingRowsSys2": [
+      {
+        "riskFlag": false,
+        "quantity": "",
+        "price": "73.39",
+        "bought": false,
+        "quantity2": ""
+      },
+      {
+        "bought": false,
+        "riskFlag": false,
+        "quantity2": "",
+        "price": "71.12",
+        "quantity": ""
+      },
+      {
+        "riskFlag": false,
+        "bought": false,
+        "quantity": "",
+        "quantity2": "",
+        "price": "68.85"
+      },
+      {
+        "price": "66.58",
+        "bought": false,
+        "quantity": "",
+        "quantity2": "",
+        "riskFlag": false
+      }
+    ],
+    "isDeviationConfirmed": false,
+    "symbol": "PEG",
+    "sellRate": 3,
+    "pyramidRowsSys2": [
+      {
+        "bought": false,
+        "quantity": "",
+        "quantity2": "",
+        "riskFlag": false,
+        "price": "77.93"
+      },
+      {
+        "price": "80.20",
+        "bought": false,
+        "quantity": "",
+        "quantity2": "",
+        "riskFlag": false
+      },
+      {
+        "price": "82.47",
+        "quantity": "",
+        "quantity2": "",
+        "riskFlag": false,
+        "bought": false
+      },
+      {
+        "riskFlag": false,
+        "price": "84.74",
+        "bought": false,
+        "quantity": "",
+        "quantity2": ""
+      }
+    ],
+    "pyramidRows": [
+      {
+        "quantity": "",
+        "bought": false,
+        "quantity2": "",
+        "price": "77.17",
+        "riskFlag": false
+      },
+      {
+        "quantity2": "",
+        "riskFlag": false,
+        "price": "78.68",
+        "quantity": "",
+        "bought": false
+      },
+      {
+        "bought": false,
+        "quantity2": "",
+        "riskFlag": false,
+        "price": "80.20",
+        "quantity": ""
+      },
+      {
+        "riskFlag": false,
+        "bought": false,
+        "quantity2": "",
+        "price": "81.71",
+        "quantity": ""
+      }
+    ],
+    "tradeType": "simulated",
+    "groupId": "PEG-1790777020806",
+    "plannedBuyQty": 1650,
+    "createdAt": {
+      "seconds": 1780127506,
+      "nanoseconds": 31000000
+    },
+    "includeCurrentHolding": true,
+    "isNew": false,
+    "isFavoriteHighlight": false,
+    "optionsCalcData": {
+      "vega": "0.0835",
+      "holdingDays": "0",
+      "theta": "-0.0270",
+      "contractMultiplier": "100",
+      "totalCost": 180,
+      "ivPercent": "24.4",
+      "targetStockPrice": "68.54",
+      "targetIvPercent": "24.4",
+      "strikePrice": "70",
+      "targetGamma": "0.0777",
+      "interestRate": "4.35",
+      "optionType": "put",
+      "entryOptionPrice": "1.8",
+      "targetDelta": "-0.5780",
+      "costPerContract100": 180,
+      "purchaseDate": "2026-10-20",
+      "savedAt": "2026/10/20 00:11:06",
+      "positionSide": "buy",
+      "manualCurrentOptionPrice": "1.80",
+      "contractsCount": "1",
+      "targetTheta": "-0.0248",
+      "gamma": "0.0765",
+      "entryStockPrice": "70.25",
+      "dte": "33",
+      "delta": "-0.4448",
+      "targetVega": "0.0806"
+    },
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "crashSimilarity": 6,
+    "isOperationConfirmed": false,
+    "updatedAt": {
+      "seconds": 1792858923,
+      "nanoseconds": 138000000
+    }
+  },
+  {
+    "id": "25jklgIm5PDIFAJxp8gi",
+    "createdAt": {
+      "seconds": 1779344738,
+      "nanoseconds": 876000000
+    },
+    "tradeType": "simulated",
+    "isFavoriteHighlight": false,
+    "holdingStatus": "賣出操作",
+    "symbol": "SMCI",
+    "buyRate": 5,
+    "crashSimilarity": 8,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "sellRate": 5,
+    "isHidden": false,
+    "qualityScore": 4,
+    "updatedAt": {
+      "seconds": 1789275001,
+      "nanoseconds": 491000000
+    },
+    "tradeDirection": "看漲",
+    "sortOrder": 25,
+    "chartAnnotations": [
+      {
+        "y1": 71.5,
+        "x2": 100,
+        "id": "div-1789274984296-gp7140",
+        "strokeWidth": 8,
+        "color": "#000000",
+        "y": 71.5,
+        "type": "divider",
+        "x1": 0,
+        "price": 29.5,
+        "y2": 71.5
+      },
+      {
+        "y1": 79.93,
+        "price": 27.08,
+        "type": "divider",
+        "x2": 100,
+        "color": "#3b82f6",
+        "id": "div-1789274990083-8rcwwj",
+        "y": 79.93,
+        "strokeWidth": 8,
+        "x1": 0,
+        "y2": 79.93
+      },
+      {
+        "color": "#10b981",
+        "y2": 93,
+        "price": 19.5,
+        "strokeWidth": 8,
+        "x1": 0,
+        "type": "divider",
+        "y1": 93,
+        "id": "div-1789274994237-hfb3aq",
+        "x2": 100,
+        "y": 93
+      },
+      {
+        "color": "#ef4444",
+        "y1": 52.47,
+        "strokeWidth": 8,
+        "id": "div-1789275002100-mz4dxb",
+        "price": 35.81,
+        "x2": 100,
+        "type": "divider",
+        "y2": 52.47,
+        "y": 52.47,
+        "x1": 0
+      }
+    ],
+    "companyName": "Super Micro Computer, Inc",
+    "valueScore": 7,
+    "currentPrice": 32.94,
+    "rating": 5,
+    "status": "ACTIVE"
+  },
+  {
+    "id": "2dJAMAefFA9BC3nhcIrN",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "averageCost": 0,
+    "createdAt": {
+      "seconds": 1790776703,
+      "nanoseconds": 179000000
+    },
+    "holdingStatus": "觀察中",
+    "groupId": "PEG-1790777020806",
+    "currentPrice": 72.02,
+    "tradeType": "simulated",
+    "symbol": "PEG",
+    "companyName": "Public Service Enterprise Group Inc",
+    "holdingQuantity": 0,
+    "updatedAt": {
+      "seconds": 1790777021,
+      "nanoseconds": 239000000
+    },
+    "status": "ACTIVE",
+    "chartAnnotations": [
+      {
+        "y2": 67.2,
+        "x1": 0,
+        "strokeWidth": 8,
+        "y": 67.2,
+        "id": "div-1790776932229-125rf7",
+        "color": "#000000",
+        "x2": 100,
+        "type": "divider",
+        "price": 66.15,
+        "y1": 67.2
+      },
+      {
+        "strokeWidth": 8,
+        "y1": 75.8,
+        "type": "divider",
+        "id": "div-1790776937728-rsjri2",
+        "x2": 100,
+        "price": 64.82,
+        "y2": 75.8,
+        "y": 75.8,
+        "color": "#3b82f6",
+        "x1": 0
+      },
+      {
+        "color": "#10b981",
+        "y1": 84.4,
+        "id": "div-1790776943281-8tfopa",
+        "price": 62.48,
+        "x2": 100,
+        "strokeWidth": 8,
+        "type": "divider",
+        "y": 84.4,
+        "y2": 84.4,
+        "x1": 0
+      },
+      {
+        "id": "div-1790776948272-zktbzn",
+        "strokeWidth": 8,
+        "color": "#eab308",
+        "x2": 100,
+        "price": 61.94,
+        "y": 93,
+        "y1": 93,
+        "y2": 93,
+        "x1": 0,
+        "type": "divider"
+      },
+      {
+        "color": "#ef4444",
+        "strokeWidth": 8,
+        "y1": 50,
+        "id": "div-1790776958213-wmk9jm",
+        "price": 70.42,
+        "x2": 100,
+        "y2": 50,
+        "type": "divider",
+        "y": 50,
+        "x1": 0
+      }
+    ]
+  },
+  {
+    "id": "3BqZ0oNBuZRrRjlyMu4A",
+    "sortOrder": 6,
+    "holdingStatus": "賣出操作",
+    "tradeType": "real",
+    "updatedAt": {
+      "seconds": 1785937872,
+      "nanoseconds": 673000000
+    },
+    "createdAt": {
+      "seconds": 1785937872,
+      "nanoseconds": 673000000
+    },
+    "finalPnL": 20.6,
+    "status": "COMPLETED",
+    "plannedBuyQty": 50,
+    "currentPrice": 37.92,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "symbol": "MTCH",
+    "companyName": "Match group"
+  },
+  {
+    "id": "3bU9gdor0KLiPA41uyP0",
+    "currentPrice": 524.51,
+    "isNew": true,
+    "symbol": "MSFT",
+    "companyName": "MICROSOFT",
+    "tradeType": "simulated",
+    "chartAnnotations": [],
+    "updatedAt": {
+      "seconds": 1791987406,
+      "nanoseconds": 373000000
+    },
+    "groupId": "MSFT-1786635469019",
+    "status": "ACTIVE",
+    "createdAt": {
+      "seconds": 1786633591,
+      "nanoseconds": 345000000
+    },
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "holdingStatus": "乖離名單"
+  },
+  {
+    "id": "4VX6peObSHhUYiENUXSz",
+    "averagingRowsSys2": [
+      {
+        "price": "20.31",
+        "quantity2": "4",
+        "quantity": "2",
+        "bought": false,
+        "riskFlag": false
+      },
+      {
+        "riskFlag": false,
+        "quantity2": "5",
+        "bought": false,
+        "price": "19.68",
+        "quantity": "4"
+      },
+      {
+        "price": "19.05",
+        "riskFlag": false,
+        "quantity": "5",
+        "quantity2": "8",
+        "bought": false
+      },
+      {
+        "bought": false,
+        "quantity2": "5",
+        "quantity": "4",
+        "price": "18.43",
+        "riskFlag": false
+      }
+    ],
+    "refPnLPointSys2": "21.88",
+    "refPnLPoint": "21.88",
+    "averagingRows": [
+      {
+        "price": "20.52",
+        "quantity2": "4",
+        "riskFlag": false,
+        "quantity": "2",
+        "bought": false
+      },
+      {
+        "quantity2": "5",
+        "price": "20.10",
+        "quantity": "4",
+        "bought": false,
+        "riskFlag": false
+      },
+      {
+        "quantity2": "8",
+        "quantity": "5",
+        "bought": false,
+        "price": "19.68",
+        "riskFlag": false
+      },
+      {
+        "riskFlag": false,
+        "bought": false,
+        "quantity2": "5",
+        "quantity": "4",
+        "price": "19.26"
+      }
+    ],
+    "status": "COMPLETED",
+    "updatedAt": {
+      "seconds": 1789394983,
+      "nanoseconds": 313000000
+    },
+    "plannedBuyPercent": 40,
+    "holdingStatus": "觀察中",
+    "currentPrice": 22.51,
+    "companyName": "Macy's",
+    "chartAnnotations": [
+      {
+        "price": 22.8,
+        "id": "div-1789275197297-gfzudn",
+        "type": "divider",
+        "x2": 100,
+        "strokeWidth": 8,
+        "color": "#000000",
+        "y": 43.21,
+        "y1": 43.21,
+        "y2": 43.21,
+        "x1": 0
+      },
+      {
+        "price": 21.5,
+        "type": "divider",
+        "strokeWidth": 8,
+        "x1": 0,
+        "color": "#3b82f6",
+        "y2": 56.79,
+        "y1": 56.79,
+        "y": 56.79,
+        "x2": 100,
+        "id": "div-1789275200830-5jayoo"
+      },
+      {
+        "x2": 100,
+        "y": 70.37,
+        "id": "div-1789275204518-zaxe25",
+        "price": 20.5,
+        "type": "divider",
+        "y1": 70.37,
+        "strokeWidth": 8,
+        "color": "#10b981",
+        "x1": 0,
+        "y2": 70.37
+      }
+    ],
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "holdingQuantity": 0,
+    "finalPnL": 6.25,
+    "tradeType": "real",
+    "averageCost": 0,
+    "includeCurrentHolding": true,
+    "plannedBuyQty": 35,
+    "symbol": "M",
+    "createdAt": {
+      "seconds": 1789394983,
+      "nanoseconds": 313000000
+    }
+  },
+  {
+    "id": "5WyMOokQgERpIBSQqRMJ",
+    "updatedAt": {
+      "seconds": 1790002724,
+      "nanoseconds": 820000000
+    },
+    "holdingStatus": "觀察中",
+    "refPnLPointSys2": "57.46",
+    "status": "COMPLETED",
+    "plannedBuyPercent": 20,
+    "currentPrice": 59.971,
+    "refPnLPoint": "57.46",
+    "averagingRowsSys2": [
+      {
+        "price": "54.95",
+        "bought": false,
+        "quantity": "294",
+        "quantity2": "336",
+        "riskFlag": false
+      },
+      {
+        "riskFlag": false,
+        "price": "53.25",
+        "bought": false,
+        "quantity": "420",
+        "quantity2": "630"
+      },
+      {
+        "quantity": "630",
+        "bought": false,
+        "price": "51.55",
+        "riskFlag": false,
+        "quantity2": "839"
+      },
+      {
+        "quantity": "420",
+        "bought": false,
+        "price": "49.85",
+        "riskFlag": false,
+        "quantity2": "630"
+      }
+    ],
+    "chartAnnotations": [
+      {
+        "x2": 100,
+        "id": "div-1789274557900-yjfmwj",
+        "color": "#000000",
+        "y": 43.59,
+        "y1": 43.59,
+        "price": 62.86,
+        "x1": 0,
+        "y2": 43.59,
+        "strokeWidth": 8,
+        "type": "divider"
+      },
+      {
+        "y1": 52.27,
+        "x2": 100,
+        "id": "div-1789274571725-awf1i1",
+        "y": 52.27,
+        "color": "#3b82f6",
+        "type": "divider",
+        "x1": 0,
+        "strokeWidth": 8,
+        "y2": 52.27,
+        "price": 58.54
+      },
+      {
+        "y2": 67.2,
+        "x1": 0,
+        "type": "divider",
+        "y": 67.2,
+        "strokeWidth": 8,
+        "price": 55,
+        "id": "div-1789274576366-7yr315",
+        "x2": 100,
+        "color": "#10b981",
+        "y1": 67.2
+      }
+    ],
+    "includeCurrentHolding": true,
+    "plannedBuyQty": 4197,
+    "averageCost": 0,
+    "symbol": "KR",
+    "createdAt": {
+      "seconds": 1790002724,
+      "nanoseconds": 820000000
+    },
+    "averagingRows": [
+      {
+        "price": "55.52",
+        "riskFlag": false,
+        "quantity": "294",
+        "quantity2": "336",
+        "bought": false
+      },
+      {
+        "quantity": "420",
+        "bought": false,
+        "quantity2": "630",
+        "riskFlag": false,
+        "price": "54.38"
+      },
+      {
+        "quantity2": "839",
+        "riskFlag": false,
+        "bought": false,
+        "quantity": "630",
+        "price": "53.25"
+      },
+      {
+        "quantity2": "630",
+        "price": "52.12",
+        "quantity": "420",
+        "bought": false,
+        "riskFlag": false
+      }
+    ],
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "tradeType": "simulated",
+    "finalPnL": 1292,
+    "holdingQuantity": 0,
+    "companyName": "KROGER"
+  },
+  {
+    "id": "78n7xM3UkHwYookLdSRY",
+    "isFavoriteHighlight": false,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "selectedSplitTrade": "",
+    "currentPrice": 82.1,
+    "plannedBuyQty": 13,
+    "isDeviationConfirmed": false,
+    "chartAnnotations": [
+      {
+        "y2": 39.76,
+        "x1": 0,
+        "color": "#000000",
+        "y": 39.76,
+        "price": 86.5,
+        "strokeWidth": 8,
+        "id": "div-1789275087963-dmbfy9",
+        "x2": 100,
+        "y1": 39.76,
+        "type": "divider"
+      },
+      {
+        "y1": 47.95,
+        "color": "#3b82f6",
+        "strokeWidth": 8,
+        "x2": 100,
+        "price": 85,
+        "id": "div-1789275091721-iwbxwo",
+        "y": 47.95,
+        "type": "divider",
+        "x1": 0,
+        "y2": 47.95
+      },
+      {
+        "y2": 68.43,
+        "strokeWidth": 8,
+        "x1": 0,
+        "y": 68.43,
+        "id": "div-1789275095459-y8npvf",
+        "color": "#10b981",
+        "x2": 100,
+        "type": "divider",
+        "price": 83.5,
+        "y1": 68.43
+      },
+      {
+        "x2": 100,
+        "id": "div-1789275100229-ww0e2k",
+        "price": 89.5,
+        "y": 31.57,
+        "type": "divider",
+        "strokeWidth": 8,
+        "y1": 31.57,
+        "color": "#ef4444",
+        "x1": 0,
+        "y2": 31.57
+      }
+    ],
+    "pyramidRows": [
+      {
+        "bought": false,
+        "quantity": "",
+        "quantity2": "",
+        "riskFlag": false,
+        "price": "83.83"
+      },
+      {
+        "quantity2": "",
+        "riskFlag": false,
+        "bought": false,
+        "price": "85.47",
+        "quantity": ""
+      },
+      {
+        "quantity": "",
+        "quantity2": "",
+        "bought": false,
+        "riskFlag": false,
+        "price": "87.12"
+      },
+      {
+        "price": "88.76",
+        "riskFlag": false,
+        "quantity2": "",
+        "bought": false,
+        "quantity": ""
+      }
+    ],
+    "sortOrder": 5,
+    "isNew": false,
+    "pyramidRowsSys2": [
+      {
+        "riskFlag": false,
+        "bought": false,
+        "quantity": "",
+        "quantity2": "",
+        "price": "84.65"
+      },
+      {
+        "bought": false,
+        "quantity": "",
+        "price": "87.12",
+        "quantity2": "",
+        "riskFlag": false
+      },
+      {
+        "bought": false,
+        "quantity": "",
+        "riskFlag": false,
+        "quantity2": "",
+        "price": "89.58"
+      },
+      {
+        "quantity": "",
+        "price": "92.05",
+        "bought": false,
+        "riskFlag": false,
+        "quantity2": ""
+      }
+    ],
+    "refPnLPoint": "83.85",
+    "plannedBuyPercent": 60,
+    "createdAt": {
+      "seconds": 1784645096,
+      "nanoseconds": 621000000
+    },
+    "holdingStatus": "觀察中",
+    "tradeType": "real",
+    "averagingRowsSys2": [
+      {
+        "quantity2": "",
+        "riskFlag": false,
+        "price": "79.72",
+        "bought": false,
+        "quantity": ""
+      },
+      {
+        "bought": false,
+        "riskFlag": false,
+        "quantity2": "",
+        "quantity": "",
+        "price": "77.25"
+      },
+      {
+        "quantity": "",
+        "price": "74.79",
+        "quantity2": "",
+        "riskFlag": false,
+        "bought": false
+      },
+      {
+        "riskFlag": false,
+        "price": "72.32",
+        "bought": false,
+        "quantity": "",
+        "quantity2": ""
+      }
+    ],
+    "refPnLPointSys2": "83.85",
+    "isOperationConfirmed": false,
+    "symbol": "NEE",
+    "groupId": "NEE-1790347787550",
+    "companyName": "NextEra Energy Inc",
+    "holdingQuantity": 8,
+    "updatedAt": {
+      "seconds": 1792934872,
+      "nanoseconds": 44000000
+    },
+    "averagingRows": [
+      {
+        "quantity2": "",
+        "quantity": "",
+        "price": "80.54",
+        "bought": false,
+        "riskFlag": false
+      },
+      {
+        "price": "78.90",
+        "quantity2": "",
+        "quantity": "",
+        "bought": false,
+        "riskFlag": false
+      },
+      {
+        "price": "77.25",
+        "riskFlag": false,
+        "bought": false,
+        "quantity": "",
+        "quantity2": ""
+      },
+      {
+        "riskFlag": false,
+        "quantity2": "",
+        "bought": false,
+        "quantity": "",
+        "price": "75.61"
+      }
+    ],
+    "includeCurrentHolding": true,
+    "status": "ACTIVE",
+    "averageCost": 82.18549999999999
+  },
+  {
+    "id": "7hN8SZI5mM2D0blcbGVe",
+    "status": "ACTIVE",
+    "chartAnnotations": [
+      {
+        "color": "#000000",
+        "strokeWidth": 8,
+        "id": "1787588706318",
+        "x2": 100,
+        "price": 113.25,
+        "y": 50,
+        "y1": 50,
+        "type": "divider",
+        "y2": 50,
+        "x1": 0
+      },
+      {
+        "color": "#3b82f6",
+        "strokeWidth": 8,
+        "y2": 71.5,
+        "price": 102.5,
+        "x1": 0,
+        "type": "divider",
+        "y1": 71.5,
+        "id": "1787588716250",
+        "x2": 100,
+        "y": 71.5
+      },
+      {
+        "color": "#10b981",
+        "price": 94.15,
+        "x1": 0,
+        "y2": 93,
+        "strokeWidth": 8,
+        "y1": 93,
+        "type": "divider",
+        "y": 93,
+        "x2": 100,
+        "id": "1787588730497"
+      }
+    ],
+    "updatedAt": {
+      "seconds": 1791988000,
+      "nanoseconds": 667000000
+    },
+    "currentPrice": 86.96,
+    "sortOrder": 11,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "holdingStatus": "買進操作",
+    "symbol": "INTC",
+    "createdAt": {
+      "seconds": 1782659678,
+      "nanoseconds": 829000000
+    },
+    "isDeviationConfirmed": false,
+    "groupId": "INTC-1785251487231",
+    "tradeType": "real",
+    "companyName": "INTEL"
+  },
+  {
+    "id": "7wi5rDZorBCOSn5f9NYZ",
+    "currentPrice": 59.64,
+    "holdingStatus": "買進操作",
+    "chartAnnotations": [],
+    "valueScore": 7,
+    "updatedAt": {
+      "seconds": 1785250992,
+      "nanoseconds": 752000000
+    },
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "crashSimilarity": 6,
+    "sortOrder": 23,
+    "sellRate": 4,
+    "symbol": "KR",
+    "plannedBuyQty": 30,
+    "isOperationConfirmed": false,
+    "companyName": "The Kroger Co",
+    "qualityScore": 7,
+    "buyRate": 6,
+    "createdAt": {
+      "seconds": 1785250992,
+      "nanoseconds": 752000000
+    },
+    "status": "COMPLETED",
+    "rating": 6,
+    "tradeType": "real",
+    "finalPnL": 73.25
+  },
+  {
+    "id": "8RtbCbIyEQkulpu4b5JK",
+    "finalPnL": 8.58,
+    "crashSimilarity": 9,
+    "tradeType": "real",
+    "valueScore": 8,
+    "refPnLPoint": "139.49",
+    "createdAt": {
+      "seconds": 1787337596,
+      "nanoseconds": 361000000
+    },
+    "qualityScore": 9,
+    "includeCurrentHolding": true,
+    "averagingRowsSys2": [
+      {
+        "bought": false,
+        "riskFlag": false,
+        "quantity": "",
+        "quantity2": "",
+        "price": "134.64"
+      },
+      {
+        "riskFlag": false,
+        "bought": false,
+        "quantity2": "",
+        "price": "130.47",
+        "quantity": ""
+      },
+      {
+        "bought": false,
+        "quantity": "",
+        "quantity2": "",
+        "riskFlag": false,
+        "price": "126.31"
+      },
+      {
+        "quantity2": "",
+        "bought": false,
+        "quantity": "",
+        "riskFlag": false,
+        "price": "122.14"
+      }
+    ],
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "companyName": "PepsiCo, Inc",
+    "buyRate": 8,
+    "updatedAt": {
+      "seconds": 1787337596,
+      "nanoseconds": 361000000
+    },
+    "currentPrice": 142.95,
+    "rating": 8,
+    "status": "COMPLETED",
+    "holdingStatus": "觀察中",
+    "chartAnnotations": [
+      {
+        "type": "divider",
+        "strokeWidth": 6,
+        "x1": 0,
+        "y2": 72.51545963038815,
+        "y1": 72.51545963038815,
+        "y": 72.51545963038815,
+        "color": "#000000",
+        "x2": 100,
+        "id": "1786848343421"
+      },
+      {
+        "y2": 85.69253507524981,
+        "type": "divider",
+        "x1": 0,
+        "y1": 85.69253507524981,
+        "id": "1786850007280",
+        "strokeWidth": 8,
+        "x2": 100,
+        "color": "#3b82f6",
+        "y": 85.69253507524981
+      },
+      {
+        "y": 57.52072435967855,
+        "x2": 100,
+        "id": "1787235849176",
+        "y1": 57.52072435967855,
+        "type": "divider",
+        "strokeWidth": 8,
+        "x1": 0,
+        "y2": 57.52072435967855,
+        "color": "#ef4444"
+      }
+    ],
+    "refPnLPointSys2": "139.49",
+    "averagingRows": [
+      {
+        "riskFlag": false,
+        "quantity2": "",
+        "bought": false,
+        "quantity": "",
+        "price": "136.02"
+      },
+      {
+        "bought": false,
+        "riskFlag": false,
+        "price": "133.25",
+        "quantity": "",
+        "quantity2": ""
+      },
+      {
+        "quantity": "",
+        "price": "130.47",
+        "bought": false,
+        "quantity2": "",
+        "riskFlag": false
+      },
+      {
+        "price": "127.70",
+        "quantity": "",
+        "quantity2": "",
+        "riskFlag": false,
+        "bought": false
+      }
+    ],
+    "sellRate": 2,
+    "sortOrder": 14,
+    "symbol": "PEP",
+    "isFavoriteHighlight": false,
+    "groupId": "PEP-1784733672903"
+  },
+  {
+    "id": "8wjdLpW1UqbkETz2fzXp",
+    "qualityScore": 9,
+    "rating": 7,
+    "status": "ACTIVE",
+    "sortOrder": 1,
+    "companyName": "VISA",
+    "updatedAt": {
+      "seconds": 1787588230,
+      "nanoseconds": 13000000
+    },
+    "holdingStatus": "乖離名單",
+    "symbol": "V",
+    "currentPrice": 407.92,
+    "isFavoriteHighlight": false,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "chartAnnotations": [
+      {
+        "x1": 0,
+        "color": "#ef4444",
+        "y2": 43.64156739911985,
+        "y": 43.64156739911985,
+        "strokeWidth": 8,
+        "x2": 100,
+        "id": "1787235745613",
+        "type": "divider",
+        "y1": 43.64156739911985
+      },
+      {
+        "y1": 62.45863291444653,
+        "id": "1787588216647",
+        "strokeWidth": 8,
+        "type": "divider",
+        "x2": 100,
+        "y2": 62.45863291444653,
+        "color": "#000000",
+        "x1": 0,
+        "y": 62.45863291444653
+      }
+    ],
+    "sellRate": 5,
+    "isHidden": false,
+    "tradeType": "simulated",
+    "crashSimilarity": 4,
+    "createdAt": {
+      "seconds": 1778574927,
+      "nanoseconds": 236000000
+    },
+    "valueScore": 5,
+    "buyRate": 5
+  },
+  {
+    "id": "9VdcsWqvVYIrxMSb1SHO",
+    "symbol": "BAC",
+    "sortOrder": 12,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "updatedAt": {
+      "seconds": 1792771010,
+      "nanoseconds": 889000000
+    },
+    "holdingStatus": "觀察中",
+    "currentPrice": 50.56,
+    "pyramidRowsSys2": [
+      {
+        "bought": false,
+        "quantity": "",
+        "riskFlag": false,
+        "quantity2": "",
+        "price": "53.75"
+      },
+      {
+        "quantity2": "",
+        "riskFlag": false,
+        "bought": false,
+        "quantity": "",
+        "price": "55.31"
+      },
+      {
+        "bought": false,
+        "quantity": "",
+        "price": "56.88",
+        "quantity2": "",
+        "riskFlag": false
+      },
+      {
+        "quantity2": "",
+        "riskFlag": false,
+        "quantity": "",
+        "bought": false,
+        "price": "58.44"
+      }
+    ],
+    "averagingRowsSys2": [
+      {
+        "quantity2": "",
+        "bought": false,
+        "riskFlag": false,
+        "price": "50.62",
+        "quantity": ""
+      },
+      {
+        "price": "49.05",
+        "quantity2": "",
+        "quantity": "",
+        "riskFlag": false,
+        "bought": false
+      },
+      {
+        "quantity": "",
+        "quantity2": "",
+        "bought": false,
+        "riskFlag": false,
+        "price": "47.49"
+      },
+      {
+        "quantity": "",
+        "quantity2": "",
+        "price": "45.92",
+        "riskFlag": false,
+        "bought": false
+      }
+    ],
+    "companyName": "Bank of America Corp",
+    "pyramidRows": [
+      {
+        "quantity": "",
+        "price": "53.23",
+        "riskFlag": false,
+        "quantity2": "",
+        "bought": false
+      },
+      {
+        "quantity2": "",
+        "price": "54.27",
+        "quantity": "",
+        "bought": false,
+        "riskFlag": false
+      },
+      {
+        "quantity2": "",
+        "bought": false,
+        "quantity": "",
+        "price": "55.31",
+        "riskFlag": false
+      },
+      {
+        "bought": false,
+        "quantity2": "",
+        "riskFlag": false,
+        "price": "56.36",
+        "quantity": ""
+      }
+    ],
+    "chartAnnotations": [
+      {
+        "y2": 56.14,
+        "color": "#000000",
+        "x1": 0,
+        "price": 56.5,
+        "y": 56.14,
+        "strokeWidth": 8,
+        "id": "div-1790703705341-1gk2d8",
+        "type": "divider",
+        "x2": 100,
+        "y1": 56.14
+      },
+      {
+        "price": 55,
+        "y2": 68.43,
+        "type": "divider",
+        "x1": 0,
+        "color": "#3b82f6",
+        "y1": 68.43,
+        "strokeWidth": 8,
+        "y": 68.43,
+        "id": "div-1790703709348-o90xrd",
+        "x2": 100
+      },
+      {
+        "y1": 86.86,
+        "type": "divider",
+        "strokeWidth": 8,
+        "id": "div-1790703714988-62mn2d",
+        "x2": 100,
+        "price": 54.22,
+        "y2": 86.86,
+        "color": "#10b981",
+        "x1": 0,
+        "y": 86.86
+      },
+      {
+        "x1": 0,
+        "color": "#ef4444",
+        "y2": 37.71,
+        "y": 37.71,
+        "price": 59.2,
+        "strokeWidth": 8,
+        "x2": 100,
+        "id": "div-1790703719401-yzc9cb",
+        "type": "divider",
+        "y1": 37.71
+      }
+    ],
+    "holdingQuantity": 71,
+    "tradeType": "simulated",
+    "averagingRows": [
+      {
+        "quantity2": "",
+        "quantity": "",
+        "price": "51.14",
+        "riskFlag": false,
+        "bought": false
+      },
+      {
+        "price": "50.09",
+        "riskFlag": false,
+        "bought": false,
+        "quantity2": "",
+        "quantity": ""
+      },
+      {
+        "quantity2": "",
+        "quantity": "",
+        "price": "49.05",
+        "riskFlag": false,
+        "bought": false
+      },
+      {
+        "bought": false,
+        "quantity": "",
+        "quantity2": "",
+        "price": "48.01",
+        "riskFlag": false
+      }
+    ],
+    "status": "ACTIVE",
+    "averageCost": 52.181971830985916,
+    "createdAt": {
+      "seconds": 1782490545,
+      "nanoseconds": 334000000
+    }
+  },
+  {
+    "id": "CB1Pg84hjFaFmUJq0Jl9",
+    "updatedAt": {
+      "seconds": 1786542106,
+      "nanoseconds": 161000000
+    },
+    "includeCurrentHolding": true,
+    "plannedBuyQty": 26,
+    "refPnLPoint": "75.02",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "stopLossPrice": 70.5,
+    "finalPnL": 65.24,
+    "holdingStatus": "買進操作",
+    "symbol": "UBER",
+    "createdAt": {
+      "seconds": 1786542106,
+      "nanoseconds": 161000000
+    },
+    "averagingRowsSys2": [
+      {
+        "riskFlag": false,
+        "quantity": "4",
+        "bought": true,
+        "price": "67.66"
+      },
+      {
+        "quantity": "4",
+        "riskFlag": false,
+        "price": "66.96",
+        "bought": true
+      },
+      {
+        "price": "",
+        "riskFlag": false,
+        "bought": false,
+        "quantity": ""
+      },
+      {
+        "riskFlag": false,
+        "quantity": "",
+        "bought": false,
+        "price": ""
+      }
+    ],
+    "refPnLPointSys2": "75.02",
+    "tradeType": "real",
+    "currentPrice": 77.91,
+    "companyName": "u",
+    "takeProfitPrice": 75.42,
+    "status": "COMPLETED",
+    "averagingRows": [
+      {
+        "quantity": "4",
+        "riskFlag": false,
+        "bought": true,
+        "price": "67.66"
+      },
+      {
+        "quantity": "4",
+        "price": "65.56",
+        "riskFlag": false,
+        "bought": true
+      },
+      {
+        "quantity": "",
+        "price": "",
+        "riskFlag": false,
+        "bought": false
+      },
+      {
+        "bought": false,
+        "riskFlag": false,
+        "quantity": "",
+        "price": ""
+      }
+    ]
+  },
+  {
+    "id": "CFL3I31qQhXYppTfWFos",
+    "companyName": "Boston Scientific",
+    "currentPrice": 45.69,
+    "status": "ACTIVE",
+    "updatedAt": {
+      "seconds": 1789656831,
+      "nanoseconds": 889000000
+    },
+    "averageCost": 0,
+    "tradeType": "real",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "groupId": "BSX-1786548016526",
+    "createdAt": {
+      "seconds": 1785348043,
+      "nanoseconds": 651000000
+    },
+    "chartAnnotations": [
+      {
+        "color": "#000000",
+        "x1": 0,
+        "price": 43.55,
+        "y2": 53.31,
+        "strokeWidth": 8,
+        "y1": 53.31,
+        "type": "divider",
+        "y": 53.31,
+        "x2": 100,
+        "id": "div-1789275160564-ep69q5"
+      },
+      {
+        "x2": 100,
+        "color": "#3b82f6",
+        "id": "div-1789275164990-k23ix7",
+        "y": 73.15,
+        "y1": 73.15,
+        "price": 42.5,
+        "x1": 0,
+        "y2": 73.15,
+        "strokeWidth": 8,
+        "type": "divider"
+      },
+      {
+        "y1": 86.38,
+        "price": 41.2,
+        "type": "divider",
+        "id": "div-1789275168420-ylgjee",
+        "x2": 100,
+        "strokeWidth": 8,
+        "color": "#10b981",
+        "y": 86.38,
+        "y2": 86.38,
+        "x1": 0
+      },
+      {
+        "y1": 42.6,
+        "type": "divider",
+        "x2": 100,
+        "id": "div-1789275175750-a8qoho",
+        "strokeWidth": 8,
+        "price": 47.12,
+        "y": 42.6,
+        "x1": 0,
+        "color": "#ef4444",
+        "y2": 42.6
+      }
+    ],
+    "symbol": "BSX",
+    "isNew": true,
+    "holdingQuantity": 0,
+    "holdingStatus": "買進操作"
+  },
+  {
+    "id": "EFtYKMcLfdoweevyWGmy",
+    "sortOrder": 13,
+    "tradeType": "simulated",
+    "updatedAt": {
+      "seconds": 1787147701,
+      "nanoseconds": 83000000
+    },
+    "currentPrice": 75.3,
+    "chartAnnotations": [
+      {
+        "y2": 73.36439857835674,
+        "x1": 0,
+        "y": 73.36439857835674,
+        "strokeWidth": 8,
+        "color": "#000000",
+        "id": "1786848921274",
+        "x2": 100,
+        "type": "divider",
+        "y1": 73.36439857835674
+      },
+      {
+        "y2": 80.7490871782058,
+        "x1": 0,
+        "color": "#3b82f6",
+        "y": 80.7490871782058,
+        "id": "1786977224213",
+        "x2": 100,
+        "strokeWidth": 8,
+        "y1": 80.7490871782058,
+        "type": "divider"
+      }
+    ],
+    "createdAt": {
+      "seconds": 1787147701,
+      "nanoseconds": 83000000
+    },
+    "finalPnL": 500.85,
+    "status": "COMPLETED",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "symbol": "UBER",
+    "holdingStatus": "觀察中",
+    "companyName": "UBER"
+  },
+  {
+    "id": "FWNzYw5DX8gz377ZFh85",
+    "symbol": "META",
+    "holdingStatus": "觀察中",
+    "companyName": "META",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "finalPnL": 269.85,
+    "tradeType": "simulated",
+    "chartAnnotations": [
+      {
+        "type": "divider",
+        "x1": 0,
+        "color": "#000000",
+        "y2": 77.71984872787908,
+        "y1": 77.71984872787908,
+        "y": 77.71984872787908,
+        "strokeWidth": 8,
+        "x2": 100,
+        "id": "1786849065202"
+      },
+      {
+        "x1": 0,
+        "y2": 85.69253507524981,
+        "y": 85.69253507524981,
+        "color": "#3b82f6",
+        "type": "divider",
+        "x2": 100,
+        "strokeWidth": 8,
+        "id": "1786850019436",
+        "y1": 85.69253507524981
+      },
+      {
+        "y2": 88.86654852570727,
+        "x1": 0,
+        "strokeWidth": 8,
+        "y": 88.86654852570727,
+        "color": "#10b981",
+        "type": "divider",
+        "id": "1787061440538",
+        "x2": 100,
+        "y1": 88.86654852570727
+      }
+    ],
+    "createdAt": {
+      "seconds": 1787156055,
+      "nanoseconds": 404000000
+    },
+    "status": "COMPLETED",
+    "currentPrice": 551.89,
+    "groupId": "META-1785420465449",
+    "sortOrder": 8,
+    "updatedAt": {
+      "seconds": 1787156055,
+      "nanoseconds": 404000000
+    }
+  },
+  {
+    "id": "FYGJ5ypssith4rzOw3Zp",
+    "updatedAt": {
+      "seconds": 1778487688,
+      "nanoseconds": 927000000
+    },
+    "companyName": "APPLE",
+    "createdAt": {
+      "seconds": 1778487542,
+      "nanoseconds": 476000000
+    },
+    "finalPnL": 147.2,
+    "symbol": "AAPL",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "tradeType": "simulated",
+    "status": "COMPLETED"
+  },
+  {
+    "id": "Fc9l7EA0I2CzzzHm004v",
+    "holdingQuantity": 0,
+    "updatedAt": {
+      "seconds": 1790353254,
+      "nanoseconds": 339000000
+    },
+    "groupId": "NEE-1790347787550",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "currentPrice": 82.1,
+    "symbol": "NEE",
+    "tradeType": "real",
+    "companyName": "NextEra Energy, Inc",
+    "chartAnnotations": [
+      {
+        "id": "div-1790353222749-6jjojz",
+        "x2": 100,
+        "type": "divider",
+        "y": 53.91,
+        "y1": 53.91,
+        "y2": 53.91,
+        "price": 72.05,
+        "x1": 0,
+        "color": "#000000",
+        "strokeWidth": 8
+      },
+      {
+        "type": "divider",
+        "strokeWidth": 8,
+        "y1": 69.55,
+        "id": "div-1790353227397-e6z1a3",
+        "x2": 100,
+        "price": 68.5,
+        "color": "#3b82f6",
+        "y2": 69.55,
+        "y": 69.55,
+        "x1": 0
+      },
+      {
+        "x2": 100,
+        "id": "div-1790353232178-ybgnza",
+        "color": "#10b981",
+        "y": 85.18,
+        "y1": 85.18,
+        "price": 63.88,
+        "x1": 0,
+        "y2": 85.18,
+        "type": "divider",
+        "strokeWidth": 8
+      },
+      {
+        "y2": 32.71,
+        "type": "divider",
+        "x1": 0,
+        "y": 32.71,
+        "id": "div-1790353254394-hvnig9",
+        "price": 81.39,
+        "x2": 100,
+        "color": "#ef4444",
+        "strokeWidth": 8,
+        "y1": 32.71
+      }
+    ],
+    "holdingStatus": "觀察中",
+    "createdAt": {
+      "seconds": 1790346646,
+      "nanoseconds": 860000000
+    },
+    "averageCost": 0,
+    "status": "ACTIVE"
+  },
+  {
+    "id": "G74TCVcpgbXlm0aFUxL5",
+    "groupId": "INTC-1785251487231",
+    "plannedBuyQty": 8,
+    "status": "ACTIVE",
+    "refPnLPointSys2": "89.98",
+    "holdingStatus": "買進操作",
+    "currentPrice": 86.96,
+    "refPnLPoint": "89.98",
+    "updatedAt": {
+      "seconds": 1791988006,
+      "nanoseconds": 610000000
+    },
+    "symbol": "INTC",
+    "averageCost": 0,
+    "includeCurrentHolding": true,
+    "averagingRowsSys2": [
+      {
+        "quantity2": "1",
+        "riskFlag": false,
+        "bought": false,
+        "price": "87.28",
+        "quantity": "1"
+      },
+      {
+        "riskFlag": false,
+        "price": "84.58",
+        "bought": false,
+        "quantity2": "1",
+        "quantity": "1"
+      },
+      {
+        "riskFlag": false,
+        "price": "81.88",
+        "bought": false,
+        "quantity": "1",
+        "quantity2": "2"
+      },
+      {
+        "quantity": "1",
+        "quantity2": "1",
+        "bought": false,
+        "riskFlag": false,
+        "price": "79.18"
+      }
+    ],
+    "chartAnnotations": [
+      {
+        "x1": 36.074271845333826,
+        "x2": 21.106482400182436,
+        "color": "#ffffff",
+        "strokeWidth": 2,
+        "id": "1785251644443",
+        "y2": 70.00258678058067,
+        "y1": 35.66386931455097,
+        "type": "arrow"
+      },
+      {
+        "y": 62.29,
+        "x2": 100,
+        "id": "1787589683453",
+        "y1": 62.29,
+        "type": "divider",
+        "strokeWidth": 8,
+        "x1": 0,
+        "price": 82.54,
+        "y2": 62.29,
+        "color": "#000000"
+      },
+      {
+        "price": 74.88,
+        "y1": 80.71,
+        "type": "divider",
+        "x2": 100,
+        "color": "#3b82f6",
+        "id": "1787589689963",
+        "y": 80.71,
+        "x1": 0,
+        "strokeWidth": 8,
+        "y2": 80.71
+      },
+      {
+        "id": "1787589694466",
+        "color": "#10b981",
+        "x2": 100,
+        "price": 62.07,
+        "y": 93,
+        "y1": 93,
+        "y2": 93,
+        "type": "divider",
+        "strokeWidth": 8,
+        "x1": 0
+      },
+      {
+        "y2": 31.57,
+        "type": "divider",
+        "x1": 0,
+        "strokeWidth": 8,
+        "price": 105.45,
+        "y1": 31.57,
+        "id": "1787589698768",
+        "y": 31.57,
+        "x2": 100,
+        "color": "#ef4444"
+      }
+    ],
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "tradeType": "real",
+    "averagingRows": [
+      {
+        "quantity2": "1",
+        "quantity": "1",
+        "bought": false,
+        "riskFlag": false,
+        "price": "87.28"
+      },
+      {
+        "bought": false,
+        "riskFlag": false,
+        "quantity2": "1",
+        "price": "86.38",
+        "quantity": "1"
+      },
+      {
+        "price": "84.58",
+        "quantity": "1",
+        "quantity2": "2",
+        "riskFlag": false,
+        "bought": false
+      },
+      {
+        "quantity2": "1",
+        "riskFlag": false,
+        "price": "82.78",
+        "bought": false,
+        "quantity": "1"
+      }
+    ],
+    "plannedBuyPercent": 40,
+    "holdingQuantity": 0,
+    "companyName": "INTEL",
+    "isNew": true,
+    "createdAt": {
+      "seconds": 1785251349,
+      "nanoseconds": 670000000
+    }
+  },
+  {
+    "id": "GUAsolG8l8k8GUqqr4pM",
+    "holdingStatus": "觀察中",
+    "chartAnnotations": [
+      {
+        "y2": 76.97091730961637,
+        "x1": 0,
+        "y": 76.97091730961637,
+        "type": "divider",
+        "color": "#10b981",
+        "id": "1786982445930",
+        "strokeWidth": 8,
+        "x2": 100,
+        "y1": 76.97091730961637
+      },
+      {
+        "x1": 0,
+        "y2": 70.9108778932223,
+        "y": 70.9108778932223,
+        "y1": 70.9108778932223,
+        "strokeWidth": 8,
+        "color": "#3b82f6",
+        "x2": 100,
+        "type": "divider",
+        "id": "1786982450310"
+      },
+      {
+        "x2": 100,
+        "y": 65.86084504622724,
+        "id": "1786982477554",
+        "y1": 65.86084504622724,
+        "color": "#000000",
+        "strokeWidth": 8,
+        "x1": 0,
+        "type": "divider",
+        "y2": 65.86084504622724
+      }
+    ],
+    "createdAt": {
+      "seconds": 1787238210,
+      "nanoseconds": 688000000
+    },
+    "updatedAt": {
+      "seconds": 1787238210,
+      "nanoseconds": 688000000
+    },
+    "finalPnL": -222,
+    "tradeType": "simulated",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "companyName": "KROGER",
+    "status": "COMPLETED",
+    "currentPrice": 55.49,
+    "symbol": "KR"
+  },
+  {
+    "id": "HjFEMPd4BIXeR0ceUWl8",
+    "updatedAt": {
+      "seconds": 1791988070,
+      "nanoseconds": 425000000
+    },
+    "createdAt": {
+      "seconds": 1789491806,
+      "nanoseconds": 415000000
+    },
+    "holdingQuantity": 0,
+    "currentPrice": 179.49,
+    "chartAnnotations": [
+      {
+        "id": "div-1789492120092-85jfnx",
+        "x2": 100,
+        "y": 53.91,
+        "y1": 53.91,
+        "strokeWidth": 8,
+        "y2": 53.91,
+        "x1": 0,
+        "color": "#000000",
+        "type": "divider",
+        "price": 199.63
+      },
+      {
+        "id": "div-1789492124150-3ybxjo",
+        "price": 193,
+        "type": "divider",
+        "x2": 100,
+        "color": "#3b82f6",
+        "y": 69.55,
+        "y1": 69.55,
+        "y2": 69.55,
+        "strokeWidth": 8,
+        "x1": 0
+      },
+      {
+        "strokeWidth": 8,
+        "type": "divider",
+        "x1": 0,
+        "y2": 85.18,
+        "y1": 85.18,
+        "y": 85.18,
+        "price": 186.5,
+        "x2": 100,
+        "color": "#10b981",
+        "id": "div-1789492127750-uzk5do"
+      },
+      {
+        "strokeWidth": 8,
+        "x1": 0,
+        "y2": 30.45,
+        "y": 30.45,
+        "y1": 30.45,
+        "color": "#ef4444",
+        "x2": 100,
+        "type": "divider",
+        "price": 218.5,
+        "id": "div-1789492152314-l556vs"
+      },
+      {
+        "y2": 94.5,
+        "x1": 0,
+        "type": "divider",
+        "y": 94.5,
+        "id": "div-1791988070424-diwm0m",
+        "price": 180.89,
+        "x2": 100,
+        "color": "#eab308",
+        "strokeWidth": 8,
+        "y1": 94.5
+      }
+    ],
+    "averageCost": 0,
+    "tradeType": "real",
+    "symbol": "MS",
+    "holdingStatus": "買進操作",
+    "status": "ACTIVE",
+    "companyName": "Morgan Stanley Financials",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2"
+  },
+  {
+    "id": "IQ0cFQokBWZhP3dReDYO",
+    "holdingStatus": "買進操作",
+    "tradeType": "real",
+    "createdAt": {
+      "seconds": 1787151570,
+      "nanoseconds": 618000000
+    },
+    "includeCurrentHolding": true,
+    "refPnLPointSys2": "52.89",
+    "chartAnnotations": [
+      {
+        "x1": 0,
+        "y2": 50,
+        "y1": 50,
+        "y": 50,
+        "color": "#000000",
+        "x2": 100,
+        "strokeWidth": 8,
+        "type": "divider",
+        "id": "1787589881303",
+        "price": 59.9
+      },
+      {
+        "y2": 37.71,
+        "x1": 0,
+        "type": "divider",
+        "strokeWidth": 8,
+        "y1": 37.71,
+        "price": 63.15,
+        "id": "1787589887598",
+        "y": 37.71,
+        "x2": 100,
+        "color": "#ef4444"
+      },
+      {
+        "y1": 62.29,
+        "x2": 100,
+        "id": "1787589892267",
+        "y": 62.29,
+        "color": "#3b82f6",
+        "type": "divider",
+        "strokeWidth": 8,
+        "x1": 0,
+        "price": 56,
+        "y2": 62.29
+      },
+      {
+        "x2": 100,
+        "id": "div-1788103279483-0b404i",
+        "price": 50,
+        "y": 86.86,
+        "strokeWidth": 8,
+        "type": "divider",
+        "y1": 86.86,
+        "color": "#10b981",
+        "x1": 0,
+        "y2": 86.86
+      }
+    ],
+    "plannedBuyQty": 14,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "companyName": "Paypal",
+    "symbol": "PYPL",
+    "averagingRowsSys2": [
+      {
+        "quantity2": "2",
+        "price": "51.30",
+        "quantity": "1",
+        "bought": false,
+        "riskFlag": false
+      },
+      {
+        "quantity2": "3",
+        "quantity": "1",
+        "price": "49.72",
+        "riskFlag": false,
+        "bought": false
+      },
+      {
+        "price": "48.13",
+        "riskFlag": false,
+        "bought": false,
+        "quantity": "2",
+        "quantity2": "3"
+      },
+      {
+        "bought": false,
+        "quantity2": "3",
+        "quantity": "1",
+        "riskFlag": false,
+        "price": "46.54"
+      }
+    ],
+    "averagingRows": [
+      {
+        "riskFlag": false,
+        "quantity2": "2",
+        "bought": false,
+        "price": "51.30",
+        "quantity": "1"
+      },
+      {
+        "quantity2": "3",
+        "riskFlag": false,
+        "bought": false,
+        "price": "50.77",
+        "quantity": "1"
+      },
+      {
+        "quantity": "2",
+        "quantity2": "3",
+        "riskFlag": false,
+        "bought": false,
+        "price": "49.72"
+      },
+      {
+        "price": "48.66",
+        "quantity": "1",
+        "quantity2": "3",
+        "bought": false,
+        "riskFlag": false
+      }
+    ],
+    "updatedAt": {
+      "seconds": 1789275522,
+      "nanoseconds": 370000000
+    },
+    "status": "ACTIVE",
+    "refPnLPoint": "52.89",
+    "currentPrice": 57.02,
+    "plannedBuyPercent": 40
+  },
+  {
+    "id": "IcQMjDS7IvYayZTscwSQ",
+    "sellRate": 7,
+    "holdingStatus": "賣出操作",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "symbol": "PSIX",
+    "buyRate": 3,
+    "isFavoriteHighlight": true,
+    "qualityScore": 3,
+    "createdAt": {
+      "seconds": 1778688541,
+      "nanoseconds": 629000000
+    },
+    "tradeType": "simulated",
+    "chartAnnotations": [
+      {
+        "x1": 26.56348045258714,
+        "x2": 16.991049800710687,
+        "y2": 72.88660231198904,
+        "id": "1779291678326",
+        "color": "#ffffff",
+        "type": "arrow",
+        "y1": 28.040641295148006,
+        "strokeWidth": 2
+      },
+      {
+        "y": 23.420493857689735,
+        "color": "#ffffff",
+        "x": 53.605597044138115,
+        "fontSize": 16,
+        "type": "text",
+        "strokeWidth": 2,
+        "text": "接近支撐. 觀察成交量. 若反彈沒力 再加碼",
+        "id": "1779291717641"
+      }
+    ],
+    "finalPnL": 33.27,
+    "status": "COMPLETED",
+    "rating": 2,
+    "isOperationConfirmed": true,
+    "currentPrice": 41.525,
+    "valueScore": 4,
+    "updatedAt": {
+      "seconds": 1779988863,
+      "nanoseconds": 859000000
+    },
+    "companyName": "Power Solutions International Inc"
+  },
+  {
+    "id": "JZ58DBm27dtClcpUn5Hl",
+    "status": "COMPLETED",
+    "finalPnL": 278.22,
+    "shortTermImpact": "看空",
+    "isFavoriteHighlight": false,
+    "rating": 3,
+    "recommendation": "保持觀望",
+    "isOperationConfirmed": true,
+    "crashSimilarity": 8,
+    "valueScore": 3,
+    "sortOrder": 5,
+    "holdingStatus": "買進操作",
+    "currentPrice": 110.67,
+    "updatedAt": {
+      "seconds": 1782141488,
+      "nanoseconds": 717000000
+    },
+    "buyRate": 3,
+    "symbol": "CRWV",
+    "chartAnnotations": [],
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "sellRate": 8,
+    "tradeType": "simulated",
+    "companyName": "CoreWeave",
+    "qualityScore": 4,
+    "createdAt": {
+      "seconds": 1778268406,
+      "nanoseconds": 842000000
+    },
+    "longTermOutlook": "看多"
+  },
+  {
+    "id": "JZ9fHUvezBfivGyOY5f9",
+    "plannedBuyPercent": 3,
+    "averageCost": 0,
+    "holdingQuantity": 0,
+    "symbol": "CRWV",
+    "averagingRowsSys2": [
+      {
+        "riskFlag": false,
+        "bought": false,
+        "quantity2": "35",
+        "price": "83.54",
+        "quantity": "31"
+      },
+      {
+        "riskFlag": false,
+        "bought": false,
+        "quantity2": "65",
+        "price": "80.96",
+        "quantity": "44"
+      },
+      {
+        "quantity": "65",
+        "price": "78.38",
+        "quantity2": "88",
+        "riskFlag": false,
+        "bought": false
+      },
+      {
+        "quantity2": "65",
+        "quantity": "44",
+        "bought": false,
+        "price": "75.79",
+        "riskFlag": false
+      }
+    ],
+    "companyName": "CoreWeave",
+    "isOperationConfirmed": false,
+    "includeCurrentHolding": true,
+    "refPnLPointSys2": "82.94",
+    "selectedSplitTrade": "",
+    "plannedBuyQty": 434,
+    "finalPnL": 208.38,
+    "isNew": false,
+    "status": "COMPLETED",
+    "refPnLPoint": "82.94",
+    "currentPrice": 90.94,
+    "pyramidRowsSys2": [
+      {
+        "price": "88.71",
+        "quantity2": "",
+        "quantity": "",
+        "bought": false,
+        "riskFlag": false
+      },
+      {
+        "price": "91.29",
+        "bought": false,
+        "quantity": "",
+        "quantity2": "",
+        "riskFlag": false
+      },
+      {
+        "quantity2": "",
+        "bought": false,
+        "price": "93.88",
+        "quantity": "",
+        "riskFlag": false
+      },
+      {
+        "price": "96.46",
+        "riskFlag": false,
+        "quantity2": "",
+        "bought": false,
+        "quantity": ""
+      }
+    ],
+    "chartAnnotations": [
+      {
+        "x2": 100,
+        "type": "divider",
+        "y": 43.86,
+        "id": "div-1789274604313-zj5xg4",
+        "y1": 43.86,
+        "x1": 0,
+        "strokeWidth": 8,
+        "price": 89.89,
+        "y2": 43.86,
+        "color": "#000000"
+      },
+      {
+        "color": "#3b82f6",
+        "y2": 56.14,
+        "x1": 0,
+        "price": 85,
+        "strokeWidth": 8,
+        "y1": 56.14,
+        "y": 56.14,
+        "id": "div-1789274608381-wdepro",
+        "x2": 100,
+        "type": "divider"
+      },
+      {
+        "color": "#10b981",
+        "y2": 80.71,
+        "x1": 0,
+        "y": 80.71,
+        "price": 80,
+        "id": "div-1789274612340-q4k1u8",
+        "x2": 100,
+        "type": "divider",
+        "strokeWidth": 8,
+        "y1": 80.71
+      }
+    ],
+    "updatedAt": {
+      "seconds": 1791297350,
+      "nanoseconds": 990000000
+    },
+    "isFavoriteHighlight": false,
+    "pyramidRows": [
+      {
+        "price": "87.85",
+        "riskFlag": false,
+        "bought": false,
+        "quantity": "",
+        "quantity2": ""
+      },
+      {
+        "riskFlag": false,
+        "quantity2": "",
+        "bought": false,
+        "price": "89.57",
+        "quantity": ""
+      },
+      {
+        "quantity": "",
+        "bought": false,
+        "quantity2": "",
+        "riskFlag": false,
+        "price": "91.29"
+      },
+      {
+        "quantity2": "",
+        "quantity": "",
+        "bought": false,
+        "price": "93.02",
+        "riskFlag": false
+      }
+    ],
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "averagingRows": [
+      {
+        "riskFlag": false,
+        "bought": false,
+        "quantity": "31",
+        "quantity2": "35",
+        "price": "84.40"
+      },
+      {
+        "price": "82.68",
+        "quantity": "44",
+        "bought": false,
+        "riskFlag": false,
+        "quantity2": "65"
+      },
+      {
+        "riskFlag": false,
+        "quantity2": "88",
+        "price": "80.96",
+        "bought": false,
+        "quantity": "65"
+      },
+      {
+        "quantity": "44",
+        "bought": false,
+        "price": "79.24",
+        "quantity2": "65",
+        "riskFlag": false
+      }
+    ],
+    "isDeviationConfirmed": false,
+    "tradeType": "simulated",
+    "createdAt": {
+      "seconds": 1791297350,
+      "nanoseconds": 990000000
+    },
+    "holdingStatus": "觀察中"
+  },
+  {
+    "id": "La46lLCz4UWK16rzTeec",
+    "isDeviationConfirmed": false,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "finalPnL": -31.7,
+    "updatedAt": {
+      "seconds": 1785250947,
+      "nanoseconds": 745000000
+    },
+    "status": "COMPLETED",
+    "companyName": "INTEL",
+    "holdingStatus": "觀察中",
+    "createdAt": {
+      "seconds": 1785250947,
+      "nanoseconds": 745000000
+    },
+    "currentPrice": 94.965,
+    "sortOrder": 11,
+    "symbol": "INTC",
+    "tradeType": "real"
+  },
+  {
+    "id": "MCZgNsKpQsKDJJjD8Pr8",
+    "companyName": "The Kroger Co",
+    "plannedBuyQty": 30,
+    "crashSimilarity": 6,
+    "rating": 6,
+    "currentPrice": 57.9,
+    "status": "COMPLETED",
+    "isOperationConfirmed": false,
+    "refPnLPoint": "56.87",
+    "qualityScore": 7,
+    "finalPnL": 7.35,
+    "valueScore": 7,
+    "sortOrder": 23,
+    "symbol": "KR",
+    "buyRate": 6,
+    "sellRate": 4,
+    "chartAnnotations": [
+      {
+        "y1": 76.74646969291913,
+        "id": "1786982107078",
+        "type": "divider",
+        "x2": 100,
+        "y2": 76.74646969291913,
+        "strokeWidth": 8,
+        "color": "#10b981",
+        "y": 76.74646969291913,
+        "x1": 0
+      },
+      {
+        "y2": 70.34976142005873,
+        "x1": 0,
+        "type": "divider",
+        "y": 70.34976142005873,
+        "color": "#3b82f6",
+        "id": "1786982111708",
+        "strokeWidth": 8,
+        "x2": 100,
+        "y1": 70.34976142005873
+      },
+      {
+        "y1": 67.31974171186168,
+        "type": "divider",
+        "id": "1786982118620",
+        "x2": 100,
+        "color": "#000000",
+        "y": 67.31974171186168,
+        "strokeWidth": 8,
+        "y2": 67.31974171186168,
+        "x1": 0
+      },
+      {
+        "y2": 80.86915556156465,
+        "x1": 0,
+        "y": 80.86915556156465,
+        "strokeWidth": 8,
+        "color": "#facc15",
+        "id": "1787238068309",
+        "x2": 100,
+        "type": "divider",
+        "y1": 80.86915556156465
+      },
+      {
+        "id": "1787238070559",
+        "type": "divider",
+        "strokeWidth": 8,
+        "x2": 100,
+        "color": "#facc15",
+        "y": 87.94547397260789,
+        "y1": 87.94547397260789,
+        "y2": 87.94547397260789,
+        "x1": 0
+      }
+    ],
+    "refPnLPointSys2": "56.87",
+    "holdingStatus": "觀察中",
+    "createdAt": {
+      "seconds": 1787337505,
+      "nanoseconds": 733000000
+    },
+    "tradeType": "real",
+    "averagingRowsSys2": [
+      {
+        "price": "55.16",
+        "bought": false,
+        "riskFlag": false,
+        "quantity2": "3",
+        "quantity": "3"
+      },
+      {
+        "bought": false,
+        "quantity2": "4",
+        "quantity": "4",
+        "price": "53.46",
+        "riskFlag": false
+      },
+      {
+        "price": "51.75",
+        "bought": false,
+        "quantity": "6",
+        "riskFlag": false,
+        "quantity2": "6"
+      },
+      {
+        "bought": false,
+        "quantity": "4",
+        "quantity2": "4",
+        "riskFlag": false,
+        "price": "50.05"
+      }
+    ],
+    "averagingRows": [
+      {
+        "quantity2": "3",
+        "quantity": "3",
+        "riskFlag": false,
+        "bought": false,
+        "price": "55.73"
+      },
+      {
+        "price": "54.60",
+        "riskFlag": false,
+        "quantity": "4",
+        "quantity2": "4",
+        "bought": false
+      },
+      {
+        "riskFlag": false,
+        "quantity2": "6",
+        "price": "53.46",
+        "quantity": "6",
+        "bought": false
+      },
+      {
+        "quantity": "4",
+        "quantity2": "4",
+        "price": "52.32",
+        "bought": false,
+        "riskFlag": false
+      }
+    ],
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "updatedAt": {
+      "seconds": 1787337505,
+      "nanoseconds": 733000000
+    },
+    "includeCurrentHolding": true
+  },
+  {
+    "id": "MLBznwq9jobdWjr7hDza",
+    "tradeType": "simulated",
+    "holdingStatus": "觀察中",
+    "isDeviationConfirmed": false,
+    "refPnLPoint": "75.69",
+    "createdAt": {
+      "seconds": 1788196906,
+      "nanoseconds": 844000000
+    },
+    "isFavoriteHighlight": false,
+    "averagingRows": [
+      {
+        "quantity": "33",
+        "bought": false,
+        "quantity2": "39",
+        "price": "71.30",
+        "riskFlag": false
+      },
+      {
+        "quantity": "48",
+        "price": "69.85",
+        "quantity2": "72",
+        "bought": false,
+        "riskFlag": false
+      },
+      {
+        "bought": false,
+        "riskFlag": false,
+        "quantity2": "95",
+        "price": "68.39",
+        "quantity": "72"
+      },
+      {
+        "price": "66.94",
+        "quantity2": "72",
+        "quantity": "48",
+        "bought": false,
+        "riskFlag": false
+      }
+    ],
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "companyName": "Xcel Energy Inc",
+    "pyramidRowsSys2": [
+      {
+        "quantity": "",
+        "price": "74.94",
+        "quantity2": "",
+        "bought": false,
+        "riskFlag": false
+      },
+      {
+        "quantity2": "",
+        "price": "77.12",
+        "quantity": "",
+        "riskFlag": false,
+        "bought": false
+      },
+      {
+        "quantity": "",
+        "price": "79.30",
+        "quantity2": "",
+        "bought": false,
+        "riskFlag": false
+      },
+      {
+        "quantity": "",
+        "price": "81.49",
+        "quantity2": "",
+        "riskFlag": false,
+        "bought": false
+      }
+    ],
+    "updatedAt": {
+      "seconds": 1792864401,
+      "nanoseconds": 793000000
+    },
+    "isNew": false,
+    "averageCost": 72.75642857142857,
+    "selectedSplitTrade": "",
+    "averagingRowsSys2": [
+      {
+        "price": "70.57",
+        "riskFlag": false,
+        "quantity2": "39",
+        "quantity": "33",
+        "bought": false
+      },
+      {
+        "riskFlag": false,
+        "quantity2": "72",
+        "bought": false,
+        "price": "68.39",
+        "quantity": "48"
+      },
+      {
+        "price": "66.21",
+        "riskFlag": false,
+        "quantity2": "95",
+        "quantity": "72",
+        "bought": false
+      },
+      {
+        "quantity": "48",
+        "quantity2": "72",
+        "bought": false,
+        "riskFlag": false,
+        "price": "64.03"
+      }
+    ],
+    "refPnLPointSys2": "75.69",
+    "isOperationConfirmed": false,
+    "status": "ACTIVE",
+    "plannedBuyQty": 0,
+    "plannedBuyPercent": 3,
+    "chartAnnotations": [
+      {
+        "x1": 0,
+        "y2": 43.21,
+        "y1": 43.21,
+        "y": 43.21,
+        "strokeWidth": 8,
+        "color": "#000000",
+        "x2": 100,
+        "id": "div-1789274487762-kzj2wu",
+        "type": "divider",
+        "price": 77.38
+      },
+      {
+        "strokeWidth": 8,
+        "price": 72.46,
+        "type": "divider",
+        "color": "#10b981",
+        "y2": 79.42,
+        "x1": 0,
+        "y1": 79.42,
+        "y": 79.42,
+        "id": "div-1789274491196-yn2929",
+        "x2": 100
+      },
+      {
+        "y1": 52.26,
+        "id": "div-1789274505532-rva4hu",
+        "x2": 100,
+        "strokeWidth": 8,
+        "color": "#3b82f6",
+        "type": "divider",
+        "y2": 52.26,
+        "price": 76.16,
+        "x1": 0,
+        "y": 52.26
+      }
+    ],
+    "symbol": "XEL",
+    "pyramidRows": [
+      {
+        "riskFlag": false,
+        "quantity2": "",
+        "quantity": "",
+        "bought": false,
+        "price": "74.21"
+      },
+      {
+        "bought": false,
+        "price": "75.67",
+        "quantity": "",
+        "quantity2": "",
+        "riskFlag": false
+      },
+      {
+        "quantity2": "",
+        "quantity": "",
+        "price": "77.12",
+        "bought": false,
+        "riskFlag": false
+      },
+      {
+        "bought": false,
+        "quantity": "",
+        "quantity2": "",
+        "price": "78.58",
+        "riskFlag": false
+      }
+    ],
+    "currentPrice": 78.05,
+    "holdingQuantity": 70,
+    "includeCurrentHolding": true
+  },
+  {
+    "id": "MoiXSkKCtXOC8c5At4nC",
+    "averageCost": 0,
+    "buyRate": 8,
+    "tags": [
+      "波段"
+    ],
+    "holdingStatus": "賣出操作",
+    "qualityScore": 8,
+    "holdingQuantity": 0,
+    "status": "ACTIVE",
+    "rating": 8,
+    "companyName": "CRM",
+    "valueScore": 7,
+    "currentPrice": 248.57,
+    "recommendation": "推薦買進",
+    "shortTermImpact": "看多",
+    "chartAnnotations": [
+      {
+        "strokeWidth": 8,
+        "y2": 62.29,
+        "color": "#000000",
+        "x1": 0,
+        "y": 62.29,
+        "price": 171.24,
+        "id": "div-1789274917503-sxi19b",
+        "x2": 100,
+        "y1": 62.29,
+        "type": "divider"
+      },
+      {
+        "type": "divider",
+        "x1": 0,
+        "y2": 68.43,
+        "y1": 68.43,
+        "price": 164.62,
+        "y": 68.43,
+        "color": "#3b82f6",
+        "x2": 100,
+        "id": "div-1789274921094-57pnxt",
+        "strokeWidth": 8
+      },
+      {
+        "x2": 100,
+        "y": 74.57,
+        "color": "#10b981",
+        "id": "div-1789274924095-x0cdkb",
+        "y1": 74.57,
+        "price": 163.52,
+        "x1": 0,
+        "y2": 74.57,
+        "strokeWidth": 8,
+        "type": "divider"
+      },
+      {
+        "y2": 50,
+        "x1": 0,
+        "strokeWidth": 8,
+        "y": 50,
+        "id": "div-1789274930148-ktsdly",
+        "color": "#ef4444",
+        "x2": 100,
+        "type": "divider",
+        "price": 193,
+        "y1": 50
+      }
+    ],
+    "sortOrder": 2,
+    "isDeviationConfirmed": false,
+    "symbol": "CRM",
+    "sellRate": 2,
+    "tradeType": "simulated",
+    "groupId": "CRM-1781796722343",
+    "longTermOutlook": "看多",
+    "createdAt": {
+      "seconds": 1778488433,
+      "nanoseconds": 336000000
+    },
+    "volatility": "低",
+    "isFavoriteHighlight": false,
+    "crashSimilarity": 8,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "isOperationConfirmed": false,
+    "tradeDirection": "看漲",
+    "updatedAt": {
+      "seconds": 1789274944,
+      "nanoseconds": 738000000
+    }
+  },
+  {
+    "id": "MtWi2eod34zwgC56vpxh",
+    "tradeType": "simulated",
+    "companyName": "NVIDIA",
+    "updatedAt": {
+      "seconds": 1778267935,
+      "nanoseconds": 790000000
+    },
+    "createdAt": {
+      "seconds": 1778267690,
+      "nanoseconds": 661000000
+    },
+    "currentPrice": 215.34,
+    "finalPnL": 1762.2,
+    "symbol": "NVDA",
+    "status": "COMPLETED",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2"
+  },
+  {
+    "id": "Mvc1ja0UuTPRF5BVmN3X",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "pyramidRows": [
+      {
+        "riskFlag": false,
+        "quantity2": "",
+        "bought": false,
+        "quantity": "",
+        "price": "54.83"
+      },
+      {
+        "riskFlag": false,
+        "bought": false,
+        "quantity2": "",
+        "quantity": "",
+        "price": "55.90"
+      },
+      {
+        "price": "56.98",
+        "riskFlag": false,
+        "bought": false,
+        "quantity": "",
+        "quantity2": ""
+      },
+      {
+        "quantity2": "",
+        "quantity": "",
+        "bought": false,
+        "price": "58.05",
+        "riskFlag": false
+      }
+    ],
+    "isNew": false,
+    "holdingStatus": "觀察中",
+    "updatedAt": {
+      "seconds": 1792864433,
+      "nanoseconds": 547000000
+    },
+    "isOperationConfirmed": false,
+    "refPnLPointSys2": "55.62",
+    "holdingQuantity": 44,
+    "includeCurrentHolding": true,
+    "currentPrice": 57.02,
+    "averagingRows": [
+      {
+        "bought": false,
+        "riskFlag": false,
+        "price": "52.68",
+        "quantity": "",
+        "quantity2": ""
+      },
+      {
+        "bought": false,
+        "quantity": "",
+        "quantity2": "",
+        "riskFlag": false,
+        "price": "51.60"
+      },
+      {
+        "bought": false,
+        "quantity": "",
+        "price": "50.53",
+        "quantity2": "",
+        "riskFlag": false
+      },
+      {
+        "quantity2": "",
+        "price": "49.45",
+        "quantity": "",
+        "riskFlag": false,
+        "bought": false
+      }
+    ],
+    "createdAt": {
+      "seconds": 1788196222,
+      "nanoseconds": 253000000
+    },
+    "tradeType": "simulated",
+    "plannedBuyQty": 678,
+    "companyName": "Paypal",
+    "selectedSplitTrade": "",
+    "isFavoriteHighlight": false,
+    "symbol": "PYPL",
+    "averageCost": 53.75120967741935,
+    "isDeviationConfirmed": false,
+    "status": "ACTIVE",
+    "refPnLPoint": "55.62",
+    "plannedBuyPercent": 3,
+    "pyramidRowsSys2": [
+      {
+        "quantity": "",
+        "bought": false,
+        "price": "55.36",
+        "quantity2": "",
+        "riskFlag": false
+      },
+      {
+        "bought": false,
+        "quantity": "",
+        "riskFlag": false,
+        "price": "56.98",
+        "quantity2": ""
+      },
+      {
+        "bought": false,
+        "riskFlag": false,
+        "quantity2": "",
+        "price": "58.59",
+        "quantity": ""
+      },
+      {
+        "quantity": "",
+        "quantity2": "",
+        "bought": false,
+        "price": "60.20",
+        "riskFlag": false
+      }
+    ],
+    "chartAnnotations": [
+      {
+        "price": 56,
+        "y2": 42.18,
+        "x1": 0,
+        "type": "divider",
+        "color": "#000000",
+        "y": 42.18,
+        "id": "div-1789274533818-l5lama",
+        "strokeWidth": 8,
+        "x2": 100,
+        "y1": 42.18
+      },
+      {
+        "x1": 0,
+        "y2": 73.45,
+        "y": 73.45,
+        "type": "divider",
+        "strokeWidth": 8,
+        "x2": 100,
+        "price": 52.01,
+        "id": "div-1789274537331-235h2x",
+        "color": "#3b82f6",
+        "y1": 73.45
+      },
+      {
+        "x1": 0,
+        "y": 81.27,
+        "type": "divider",
+        "y2": 81.27,
+        "x2": 100,
+        "price": 50,
+        "strokeWidth": 8,
+        "id": "div-1789274541203-pp9fgc",
+        "y1": 81.27,
+        "color": "#10b981"
+      }
+    ],
+    "averagingRowsSys2": [
+      {
+        "riskFlag": false,
+        "price": "52.14",
+        "quantity": "",
+        "quantity2": "",
+        "bought": false
+      },
+      {
+        "quantity": "",
+        "quantity2": "",
+        "price": "50.53",
+        "riskFlag": false,
+        "bought": false
+      },
+      {
+        "quantity": "",
+        "bought": false,
+        "riskFlag": false,
+        "price": "48.91",
+        "quantity2": ""
+      },
+      {
+        "price": "47.30",
+        "quantity2": "",
+        "riskFlag": false,
+        "quantity": "",
+        "bought": false
+      }
+    ]
+  },
+  {
+    "id": "Mxoj5bGJy6MxhAwRsLbB",
+    "companyName": "Walmart",
+    "status": "ACTIVE",
+    "currentPrice": 119.89,
+    "refPnLPointSys2": "104.58",
+    "updatedAt": {
+      "seconds": 1790703774,
+      "nanoseconds": 764000000
+    },
+    "averagingRows": [
+      {
+        "bought": false,
+        "quantity2": "92",
+        "quantity": "81",
+        "riskFlag": false,
+        "price": "102.49"
+      },
+      {
+        "quantity2": "174",
+        "quantity": "115",
+        "bought": false,
+        "price": "100.40",
+        "riskFlag": false
+      },
+      {
+        "quantity": "173",
+        "bought": false,
+        "quantity2": "231",
+        "riskFlag": false,
+        "price": "98.31"
+      },
+      {
+        "quantity2": "174",
+        "quantity": "115",
+        "bought": false,
+        "price": "96.21",
+        "riskFlag": false
+      }
+    ],
+    "tradeType": "simulated",
+    "refPnLPoint": "104.58",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "groupId": "WMT-1787237438208",
+    "createdAt": {
+      "seconds": 1787237346,
+      "nanoseconds": 39000000
+    },
+    "plannedBuyQty": 1153,
+    "chartAnnotations": [
+      {
+        "x1": 0,
+        "y": 56.46,
+        "strokeWidth": 8,
+        "type": "divider",
+        "y2": 56.46,
+        "x2": 100,
+        "price": 100.87,
+        "id": "div-1789274853790-64nsez",
+        "y1": 56.46,
+        "color": "#000000"
+      },
+      {
+        "x1": 0,
+        "y2": 67.2,
+        "strokeWidth": 8,
+        "type": "divider",
+        "y": 67.2,
+        "price": 95.42,
+        "x2": 100,
+        "id": "div-1789274859393-mmi0a1",
+        "color": "#3b82f6",
+        "y1": 67.2
+      },
+      {
+        "price": 85.57,
+        "x1": 0,
+        "type": "divider",
+        "y2": 93,
+        "color": "#10b981",
+        "y1": 93,
+        "y": 93,
+        "x2": 100,
+        "strokeWidth": 8,
+        "id": "div-1789274864608-3gmwd5"
+      }
+    ],
+    "symbol": "WMT",
+    "averagingRowsSys2": [
+      {
+        "quantity": "81",
+        "quantity2": "92",
+        "bought": false,
+        "riskFlag": false,
+        "price": "101.44"
+      },
+      {
+        "price": "98.31",
+        "riskFlag": false,
+        "quantity2": "174",
+        "quantity": "115",
+        "bought": false
+      },
+      {
+        "quantity": "173",
+        "quantity2": "231",
+        "price": "95.17",
+        "bought": false,
+        "riskFlag": false
+      },
+      {
+        "quantity2": "174",
+        "bought": false,
+        "quantity": "115",
+        "price": "92.03",
+        "riskFlag": false
+      }
+    ],
+    "isNew": true,
+    "includeCurrentHolding": true,
+    "plannedBuyPercent": 10,
+    "holdingStatus": "候選名單"
+  },
+  {
+    "id": "NaITUMnvKy6edRMZdP2p",
+    "chartAnnotations": [
+      {
+        "color": "#000000",
+        "x1": 0,
+        "price": 205.81,
+        "y2": 62.29,
+        "y1": 62.29,
+        "y": 62.29,
+        "type": "divider",
+        "x2": 100,
+        "id": "1787759627600",
+        "strokeWidth": 8
+      },
+      {
+        "price": 186.75,
+        "type": "divider",
+        "x1": 0,
+        "color": "#10b981",
+        "y2": 86.86,
+        "y1": 86.86,
+        "y": 86.86,
+        "strokeWidth": 8,
+        "x2": 100,
+        "id": "1787759641195"
+      },
+      {
+        "y2": 68.43,
+        "color": "#3b82f6",
+        "x1": 0,
+        "y": 68.43,
+        "price": 200,
+        "id": "1787759662629",
+        "x2": 100,
+        "type": "divider",
+        "strokeWidth": 8,
+        "y1": 68.43
+      }
+    ],
+    "isFavoriteHighlight": false,
+    "symbol": "BE",
+    "tradeType": "real",
+    "currentPrice": 193.3,
+    "companyName": "Bloom Energy",
+    "status": "ACTIVE",
+    "createdAt": {
+      "seconds": 1787758506,
+      "nanoseconds": 582000000
+    },
+    "updatedAt": {
+      "seconds": 1789275296,
+      "nanoseconds": 747000000
+    },
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2"
+  },
+  {
+    "id": "O8uP2zxQV2H0SB65qJlz",
+    "status": "COMPLETED",
+    "companyName": "Schlumberger Ltd.",
+    "rating": 8,
+    "currentPrice": 56.025,
+    "finalPnL": 2.96,
+    "valueScore": 7,
+    "updatedAt": {
+      "seconds": 1780416101,
+      "nanoseconds": 515000000
+    },
+    "chartAnnotations": [
+      {
+        "color": "#ffffff",
+        "type": "arrow",
+        "y1": 83.59868775914924,
+        "strokeWidth": 6,
+        "id": "1780064140417",
+        "y2": 67.22264492385193,
+        "x1": 84.41816754529562,
+        "x2": 18.1854374822045
+      },
+      {
+        "x2": 33.24919919330465,
+        "x1": 32.7709845358094,
+        "strokeWidth": 6,
+        "type": "arrow",
+        "id": "1780064172696",
+        "y2": 60.399293742478044,
+        "y1": 31.28632870194948,
+        "color": "#ef4444"
+      }
+    ],
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "qualityScore": 8,
+    "crashSimilarity": 2,
+    "buyRate": 8,
+    "symbol": "SLB",
+    "holdingStatus": "買進操作",
+    "sellRate": 3,
+    "tradeType": "real",
+    "createdAt": {
+      "seconds": 1779791919,
+      "nanoseconds": 886000000
+    }
+  },
+  {
+    "id": "PmMPY3NH5ONT1JVPM3Aa",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "chartAnnotations": [
+      {
+        "price": 75.23,
+        "y1": 66.54,
+        "type": "divider",
+        "id": "div-1789275370623-1s4a2e",
+        "color": "#000000",
+        "x2": 100,
+        "y2": 66.54,
+        "strokeWidth": 8,
+        "x1": 0,
+        "y": 66.54
+      },
+      {
+        "id": "div-1789275374157-grhn9r",
+        "x2": 100,
+        "y1": 73.15,
+        "y": 73.15,
+        "strokeWidth": 8,
+        "y2": 73.15,
+        "color": "#3b82f6",
+        "type": "divider",
+        "x1": 0,
+        "price": 74.56
+      },
+      {
+        "y": 86.38,
+        "x1": 0,
+        "y2": 86.38,
+        "type": "divider",
+        "x2": 100,
+        "id": "div-1789275376885-eg1x3c",
+        "price": 72.33,
+        "y1": 86.38,
+        "strokeWidth": 8,
+        "color": "#10b981"
+      },
+      {
+        "price": 79.32,
+        "x1": 0,
+        "type": "divider",
+        "color": "#ef4444",
+        "y2": 40.08,
+        "y1": 40.08,
+        "y": 40.08,
+        "x2": 100,
+        "strokeWidth": 8,
+        "id": "div-1789275382575-5oo1yj"
+      }
+    ],
+    "companyName": "NETFLIX",
+    "status": "ACTIVE",
+    "holdingStatus": "買進操作",
+    "symbol": "NFLX",
+    "currentPrice": 65.85,
+    "tradeType": "real",
+    "updatedAt": {
+      "seconds": 1790002801,
+      "nanoseconds": 80000000
+    },
+    "createdAt": {
+      "seconds": 1786981780,
+      "nanoseconds": 694000000
+    }
+  },
+  {
+    "id": "QG6LSDIIojhY0Q4p7dPK",
+    "sortOrder": 13,
+    "averageCost": 0,
+    "updatedAt": {
+      "seconds": 1790960361,
+      "nanoseconds": 600000000
+    },
+    "status": "ACTIVE",
+    "pyramidRows": [
+      {
+        "bought": false,
+        "quantity": "",
+        "price": "70.29",
+        "quantity2": "",
+        "riskFlag": false
+      },
+      {
+        "riskFlag": false,
+        "quantity2": "",
+        "quantity": "",
+        "bought": false,
+        "price": "71.67"
+      },
+      {
+        "riskFlag": false,
+        "quantity2": "",
+        "bought": false,
+        "price": "73.04",
+        "quantity": ""
+      },
+      {
+        "price": "74.42",
+        "quantity": "",
+        "quantity2": "",
+        "riskFlag": false,
+        "bought": false
+      }
+    ],
+    "holdingStatus": "買進操作",
+    "chartAnnotations": [
+      {
+        "id": "div-1789274881470-4egjnk",
+        "x2": 100,
+        "y": 62.29,
+        "y1": 62.29,
+        "color": "#000000",
+        "y2": 62.29,
+        "type": "divider",
+        "strokeWidth": 8,
+        "x1": 0,
+        "price": 71.56
+      },
+      {
+        "type": "divider",
+        "x1": 0,
+        "y2": 80.71,
+        "price": 68.61,
+        "y1": 80.71,
+        "y": 80.71,
+        "x2": 100,
+        "color": "#3b82f6",
+        "id": "div-1789274886129-pniouf",
+        "strokeWidth": 8
+      },
+      {
+        "y2": 86.86,
+        "x1": 0,
+        "color": "#10b981",
+        "strokeWidth": 8,
+        "y": 86.86,
+        "price": 67.19,
+        "id": "div-1789274888917-qagugw",
+        "x2": 100,
+        "y1": 86.86,
+        "type": "divider"
+      }
+    ],
+    "companyName": "UBER",
+    "pyramidRowsSys2": [
+      {
+        "quantity2": "",
+        "quantity": "",
+        "price": "70.98",
+        "bought": false,
+        "riskFlag": false
+      },
+      {
+        "quantity2": "",
+        "bought": false,
+        "quantity": "",
+        "riskFlag": false,
+        "price": "73.04"
+      },
+      {
+        "quantity": "",
+        "price": "75.11",
+        "quantity2": "",
+        "bought": false,
+        "riskFlag": false
+      },
+      {
+        "price": "77.18",
+        "quantity2": "",
+        "quantity": "",
+        "riskFlag": false,
+        "bought": false
+      }
+    ],
+    "tradeType": "simulated",
+    "createdAt": {
+      "seconds": 1782486517,
+      "nanoseconds": 811000000
+    },
+    "holdingQuantity": 0,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "averagingRowsSys2": [
+      {
+        "riskFlag": false,
+        "bought": false,
+        "price": "66.84",
+        "quantity2": "",
+        "quantity": ""
+      },
+      {
+        "riskFlag": false,
+        "price": "64.78",
+        "quantity": "",
+        "bought": false,
+        "quantity2": ""
+      },
+      {
+        "price": "62.71",
+        "quantity": "",
+        "bought": false,
+        "quantity2": "",
+        "riskFlag": false
+      },
+      {
+        "riskFlag": false,
+        "quantity2": "",
+        "bought": false,
+        "quantity": "",
+        "price": "60.64"
+      }
+    ],
+    "averagingRows": [
+      {
+        "riskFlag": false,
+        "bought": false,
+        "quantity2": "",
+        "price": "67.53",
+        "quantity": ""
+      },
+      {
+        "riskFlag": false,
+        "price": "66.15",
+        "quantity2": "",
+        "bought": false,
+        "quantity": ""
+      },
+      {
+        "quantity": "",
+        "price": "64.78",
+        "quantity2": "",
+        "bought": false,
+        "riskFlag": false
+      },
+      {
+        "riskFlag": false,
+        "bought": false,
+        "quantity2": "",
+        "quantity": "",
+        "price": "63.40"
+      }
+    ],
+    "currentPrice": 66.7,
+    "symbol": "UBER"
+  },
+  {
+    "id": "QXbRLBIJrJGLebiTVt8K",
+    "updatedAt": {
+      "seconds": 1782230007,
+      "nanoseconds": 991000000
+    },
+    "holdingStatus": "買進操作",
+    "rating": 6,
+    "status": "COMPLETED",
+    "plannedBuyQty": 6,
+    "qualityScore": 8,
+    "sellRate": 3,
+    "buyRate": 7,
+    "chartAnnotations": [],
+    "createdAt": {
+      "seconds": 1780680884,
+      "nanoseconds": 983000000
+    },
+    "symbol": "O",
+    "companyName": "Realty Income",
+    "tradeType": "real",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "isOperationConfirmed": false,
+    "crashSimilarity": 3,
+    "currentPrice": 60.58,
+    "finalPnL": 1.65,
+    "valueScore": 4
+  },
+  {
+    "id": "RaiwjOePNwwGKVCZQnSB",
+    "averageCost": 0,
+    "isNew": false,
+    "averagingRows": [
+      {
+        "bought": false,
+        "quantity2": "1",
+        "riskFlag": false,
+        "price": "71.01",
+        "quantity": "0"
+      },
+      {
+        "price": "69.56",
+        "riskFlag": false,
+        "bought": false,
+        "quantity2": "1",
+        "quantity": "1"
+      },
+      {
+        "riskFlag": false,
+        "bought": false,
+        "price": "68.11",
+        "quantity": "1",
+        "quantity2": "1"
+      },
+      {
+        "price": "66.66",
+        "quantity2": "1",
+        "riskFlag": false,
+        "quantity": "1",
+        "bought": false
+      }
+    ],
+    "companyName": "Xcel Energy Inc",
+    "pyramidRows": [
+      {
+        "quantity": "",
+        "price": "73.91",
+        "bought": false,
+        "quantity2": "",
+        "riskFlag": false
+      },
+      {
+        "quantity2": "",
+        "price": "75.36",
+        "quantity": "",
+        "bought": false,
+        "riskFlag": false
+      },
+      {
+        "price": "76.81",
+        "quantity": "",
+        "bought": false,
+        "quantity2": "",
+        "riskFlag": false
+      },
+      {
+        "riskFlag": false,
+        "quantity": "",
+        "bought": false,
+        "price": "78.26",
+        "quantity2": ""
+      }
+    ],
+    "status": "ACTIVE",
+    "createdAt": {
+      "seconds": 1789565536,
+      "nanoseconds": 694000000
+    },
+    "selectedSplitTrade": "",
+    "finalPnL": 0,
+    "tradeType": "real",
+    "chartAnnotations": [
+      {
+        "x2": 100,
+        "id": "div-1789574703860-fx85g3",
+        "y": 45.22,
+        "y1": 45.22,
+        "color": "#000000",
+        "x1": 0,
+        "type": "divider",
+        "strokeWidth": 8,
+        "y2": 45.22,
+        "price": 77.38
+      },
+      {
+        "color": "#3b82f6",
+        "y2": 54.78,
+        "strokeWidth": 8,
+        "x1": 0,
+        "y": 54.78,
+        "price": 76.16,
+        "id": "div-1789574707926-qolcl3",
+        "x2": 100,
+        "type": "divider",
+        "y1": 54.78
+      },
+      {
+        "price": 72.46,
+        "x2": 100,
+        "y": 73.89,
+        "type": "divider",
+        "id": "div-1789574711726-lmx0kc",
+        "y1": 73.89,
+        "color": "#10b981",
+        "x1": 0,
+        "y2": 73.89,
+        "strokeWidth": 8
+      },
+      {
+        "price": 82.06,
+        "type": "divider",
+        "x1": 0,
+        "color": "#ef4444",
+        "y2": 35.67,
+        "strokeWidth": 8,
+        "y1": 35.67,
+        "y": 35.67,
+        "x2": 100,
+        "id": "div-1789574721156-ejp7bu"
+      }
+    ],
+    "plannedBuyQty": 5,
+    "currentPrice": 78.05,
+    "isFavoriteHighlight": false,
+    "plannedBuyPercent": 20,
+    "holdingQuantity": 0,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "updatedAt": {
+      "seconds": 1791385123,
+      "nanoseconds": 64000000
+    },
+    "holdingStatus": "買進操作",
+    "pyramidRowsSys2": [
+      {
+        "quantity2": "",
+        "bought": false,
+        "quantity": "",
+        "riskFlag": false,
+        "price": "74.63"
+      },
+      {
+        "riskFlag": false,
+        "quantity2": "",
+        "bought": false,
+        "quantity": "",
+        "price": "76.81"
+      },
+      {
+        "bought": false,
+        "quantity2": "",
+        "riskFlag": false,
+        "price": "78.98",
+        "quantity": ""
+      },
+      {
+        "riskFlag": false,
+        "quantity": "",
+        "bought": false,
+        "price": "81.16",
+        "quantity2": ""
+      }
+    ],
+    "isDeviationConfirmed": false,
+    "isOperationConfirmed": false,
+    "symbol": "XEL",
+    "averagingRowsSys2": [
+      {
+        "bought": false,
+        "riskFlag": false,
+        "price": "70.29",
+        "quantity2": "1",
+        "quantity": "0"
+      },
+      {
+        "riskFlag": false,
+        "bought": false,
+        "quantity": "1",
+        "price": "68.11",
+        "quantity2": "1"
+      },
+      {
+        "price": "65.94",
+        "riskFlag": false,
+        "bought": false,
+        "quantity": "1",
+        "quantity2": "1"
+      },
+      {
+        "riskFlag": false,
+        "price": "63.76",
+        "bought": false,
+        "quantity": "1",
+        "quantity2": "1"
+      }
+    ]
+  },
+  {
+    "id": "SQUyCw2INr1ioLoavAC3",
+    "holdingStatus": "觀察中",
+    "finalPnL": 306,
+    "updatedAt": {
+      "seconds": 1787147581,
+      "nanoseconds": 693000000
+    },
+    "isNew": false,
+    "sortOrder": 17,
+    "companyName": "NextEra Energy, Inc",
+    "status": "COMPLETED",
+    "chartAnnotations": [
+      {
+        "y1": 68.75057658708701,
+        "strokeWidth": 8,
+        "type": "divider",
+        "id": "1786848903300",
+        "x2": 100,
+        "y": 68.75057658708701,
+        "y2": 68.75057658708701,
+        "color": "#000000",
+        "x1": 0
+      },
+      {
+        "y2": 58.042643762882705,
+        "x1": 0,
+        "strokeWidth": 8,
+        "y": 58.042643762882705,
+        "id": "1787147513945",
+        "color": "#ef4444",
+        "type": "divider",
+        "x2": 100,
+        "y1": 58.042643762882705
+      }
+    ],
+    "createdAt": {
+      "seconds": 1787147581,
+      "nanoseconds": 693000000
+    },
+    "isOperationConfirmed": false,
+    "tradeType": "simulated",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "currentPrice": 86.76,
+    "groupId": "NEE-1781796771281",
+    "symbol": "NEE"
+  },
+  {
+    "id": "TTle7YtywTuW39DMZ9Tz",
+    "sortOrder": 9,
+    "chartAnnotations": [
+      {
+        "y2": 81.98656871503398,
+        "id": "1785423722655",
+        "color": "#10b981",
+        "type": "arrow",
+        "x2": 19.969688265107646,
+        "x1": 39.29518856137907,
+        "strokeWidth": 6,
+        "y1": 29.210955965229957
+      }
+    ],
+    "holdingStatus": "觀察中",
+    "tradeType": "simulated",
+    "finalPnL": 232.8,
+    "updatedAt": {
+      "seconds": 1785938077,
+      "nanoseconds": 243000000
+    },
+    "currentPrice": 112.02,
+    "companyName": "Walmart",
+    "createdAt": {
+      "seconds": 1785938077,
+      "nanoseconds": 243000000
+    },
+    "status": "COMPLETED",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "symbol": "WMT"
+  },
+  {
+    "id": "TXVudUmu24knpQHzn9MS",
+    "updatedAt": {
+      "seconds": 1790353512,
+      "nanoseconds": 579000000
+    },
+    "includeCurrentHolding": true,
+    "plannedBuyQty": 4197,
+    "refPnLPoint": "57.46",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "holdingQuantity": 0,
+    "finalPnL": 0,
+    "holdingStatus": "買進操作",
+    "symbol": "KR",
+    "createdAt": {
+      "seconds": 1786982365,
+      "nanoseconds": 141000000
+    },
+    "averagingRowsSys2": [
+      {
+        "riskFlag": false,
+        "price": "54.95",
+        "quantity": "294",
+        "bought": false,
+        "quantity2": "336"
+      },
+      {
+        "riskFlag": false,
+        "quantity2": "630",
+        "bought": false,
+        "quantity": "420",
+        "price": "53.25"
+      },
+      {
+        "price": "51.55",
+        "riskFlag": false,
+        "bought": false,
+        "quantity2": "839",
+        "quantity": "630"
+      },
+      {
+        "price": "49.85",
+        "quantity2": "630",
+        "quantity": "420",
+        "riskFlag": false,
+        "bought": false
+      }
+    ],
+    "refPnLPointSys2": "57.46",
+    "currentPrice": 66.77,
+    "tradeType": "simulated",
+    "companyName": "KROGER",
+    "chartAnnotations": [
+      {
+        "x1": 0,
+        "y2": 43.59,
+        "strokeWidth": 8,
+        "y1": 43.59,
+        "y": 43.59,
+        "color": "#000000",
+        "x2": 100,
+        "id": "div-1789274557900-yjfmwj",
+        "type": "divider",
+        "price": 62.86
+      },
+      {
+        "y1": 52.27,
+        "x2": 100,
+        "strokeWidth": 8,
+        "id": "div-1789274571725-awf1i1",
+        "y": 52.27,
+        "color": "#3b82f6",
+        "x1": 0,
+        "type": "divider",
+        "price": 58.54,
+        "y2": 52.27
+      },
+      {
+        "x2": 100,
+        "y": 67.2,
+        "strokeWidth": 8,
+        "color": "#10b981",
+        "id": "div-1789274576366-7yr315",
+        "y1": 67.2,
+        "price": 55,
+        "x1": 0,
+        "y2": 67.2,
+        "type": "divider"
+      }
+    ],
+    "plannedBuyPercent": 20,
+    "status": "ACTIVE",
+    "averageCost": 0,
+    "averagingRows": [
+      {
+        "quantity": "294",
+        "riskFlag": false,
+        "bought": false,
+        "price": "55.52",
+        "quantity2": "336"
+      },
+      {
+        "quantity": "420",
+        "price": "54.38",
+        "bought": false,
+        "riskFlag": false,
+        "quantity2": "630"
+      },
+      {
+        "riskFlag": false,
+        "quantity": "630",
+        "bought": false,
+        "quantity2": "839",
+        "price": "53.25"
+      },
+      {
+        "quantity": "420",
+        "bought": false,
+        "riskFlag": false,
+        "quantity2": "630",
+        "price": "52.12"
+      }
+    ]
+  },
+  {
+    "id": "Tyigpr8I0Y4JEJYNk3bh",
+    "crashSimilarity": 9,
+    "status": "ACTIVE",
+    "sellRate": 2,
+    "averagingRows": [
+      {
+        "quantity": "0",
+        "bought": false,
+        "quantity2": "1",
+        "riskFlag": false,
+        "price": "137.19"
+      },
+      {
+        "riskFlag": false,
+        "price": "134.39",
+        "bought": false,
+        "quantity": "1",
+        "quantity2": "1"
+      },
+      {
+        "quantity2": "1",
+        "quantity": "1",
+        "bought": false,
+        "riskFlag": false,
+        "price": "131.59"
+      },
+      {
+        "price": "128.79",
+        "riskFlag": false,
+        "quantity": "1",
+        "quantity2": "1",
+        "bought": false
+      }
+    ],
+    "rating": 8,
+    "sortOrder": 14,
+    "valueScore": 8,
+    "symbol": "PEP",
+    "buyRate": 8,
+    "holdingStatus": "買進操作",
+    "createdAt": {
+      "seconds": 1782401681,
+      "nanoseconds": 167000000
+    },
+    "plannedBuyPercent": 40,
+    "chartAnnotations": [
+      {
+        "id": "1787590018137",
+        "x2": 100,
+        "color": "#000000",
+        "y": 56.14,
+        "strokeWidth": 8,
+        "price": 141.96,
+        "y1": 56.14,
+        "y2": 56.14,
+        "x1": 0,
+        "type": "divider"
+      },
+      {
+        "y2": 62.29,
+        "x1": 0,
+        "price": 140.06,
+        "y": 62.29,
+        "type": "divider",
+        "color": "#3b82f6",
+        "id": "1787590022070",
+        "x2": 100,
+        "y1": 62.29,
+        "strokeWidth": 8
+      },
+      {
+        "y1": 93,
+        "id": "div-1788189619824-q8dqd4",
+        "x2": 100,
+        "color": "#10b981",
+        "y2": 93,
+        "type": "divider",
+        "strokeWidth": 8,
+        "y": 93,
+        "price": 135,
+        "x1": 0
+      }
+    ],
+    "tradeType": "real",
+    "companyName": "PepsiCo, Inc",
+    "qualityScore": 9,
+    "averagingRowsSys2": [
+      {
+        "riskFlag": false,
+        "price": "135.79",
+        "quantity2": "1",
+        "quantity": "0",
+        "bought": false
+      },
+      {
+        "quantity2": "1",
+        "quantity": "1",
+        "price": "131.59",
+        "bought": false,
+        "riskFlag": false
+      },
+      {
+        "price": "127.39",
+        "quantity2": "1",
+        "quantity": "1",
+        "bought": false,
+        "riskFlag": false
+      },
+      {
+        "bought": false,
+        "riskFlag": false,
+        "quantity2": "1",
+        "price": "123.19",
+        "quantity": "1"
+      }
+    ],
+    "refPnLPointSys2": "139.99",
+    "averageCost": 0,
+    "includeCurrentHolding": true,
+    "updatedAt": {
+      "seconds": 1790783171,
+      "nanoseconds": 4000000
+    },
+    "groupId": "PEP-1784733672903",
+    "plannedBuyQty": 5,
+    "holdingQuantity": 0,
+    "refPnLPoint": "139.99",
+    "currentPrice": 135.77,
+    "isFavoriteHighlight": false,
+    "finalPnL": 0,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2"
+  },
+  {
+    "id": "U8xLuU65f8H3EWiDKSp0",
+    "holdingQuantity": 0,
+    "averageCost": 0,
+    "holdingStatus": "觀察中",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "companyName": "Boston Scientific",
+    "createdAt": {
+      "seconds": 1789656777,
+      "nanoseconds": 354000000
+    },
+    "chartAnnotations": [
+      {
+        "color": "#000000",
+        "x1": 0,
+        "y2": 39.76,
+        "y": 39.76,
+        "price": 48.33,
+        "x2": 100,
+        "id": "div-1789275133266-xmdgf7",
+        "type": "divider",
+        "y1": 39.76,
+        "strokeWidth": 8
+      },
+      {
+        "price": 47.5,
+        "type": "divider",
+        "x1": 0,
+        "color": "#3b82f6",
+        "y2": 43.86,
+        "strokeWidth": 8,
+        "y1": 43.86,
+        "y": 43.86,
+        "x2": 100,
+        "id": "div-1789275136561-ii5ohc"
+      },
+      {
+        "color": "#10b981",
+        "y2": 52.05,
+        "x1": 0,
+        "y": 52.05,
+        "price": 45.51,
+        "id": "div-1789275140933-ytkrmg",
+        "x2": 100,
+        "type": "divider",
+        "strokeWidth": 8,
+        "y1": 52.05
+      },
+      {
+        "price": 42.98,
+        "type": "divider",
+        "x1": 0,
+        "color": "#eab308",
+        "y2": 72.52,
+        "y1": 72.52,
+        "y": 72.52,
+        "strokeWidth": 8,
+        "x2": 100,
+        "id": "div-1789275153411-sz3hv9"
+      }
+    ],
+    "tradeType": "real",
+    "symbol": "BSX",
+    "plannedBuyQty": 3,
+    "averagingRowsSys2": [
+      {
+        "bought": false,
+        "quantity": "0",
+        "quantity2": "1",
+        "price": "41.86",
+        "riskFlag": false
+      },
+      {
+        "riskFlag": false,
+        "quantity2": "1",
+        "bought": false,
+        "quantity": "0",
+        "price": "40.56"
+      },
+      {
+        "riskFlag": false,
+        "price": "39.27",
+        "quantity": "0",
+        "quantity2": "2",
+        "bought": false
+      },
+      {
+        "riskFlag": false,
+        "quantity2": "1",
+        "bought": false,
+        "price": "37.98",
+        "quantity": "0"
+      }
+    ],
+    "currentPrice": 42.97,
+    "averagingRows": [
+      {
+        "quantity2": "1",
+        "quantity": "0",
+        "bought": false,
+        "price": "42.29",
+        "riskFlag": false
+      },
+      {
+        "price": "41.43",
+        "riskFlag": false,
+        "quantity": "0",
+        "quantity2": "1",
+        "bought": false
+      },
+      {
+        "quantity": "0",
+        "quantity2": "2",
+        "riskFlag": false,
+        "price": "40.56",
+        "bought": false
+      },
+      {
+        "bought": false,
+        "riskFlag": false,
+        "quantity2": "1",
+        "price": "39.70",
+        "quantity": "0"
+      }
+    ],
+    "finalPnL": 3.53,
+    "includeCurrentHolding": true,
+    "groupId": "BSX-1786548016526",
+    "refPnLPoint": "47.60",
+    "plannedBuyPercent": 10,
+    "updatedAt": {
+      "seconds": 1789656777,
+      "nanoseconds": 354000000
+    },
+    "status": "COMPLETED",
+    "refPnLPointSys2": "47.60"
+  },
+  {
+    "id": "V0WY5HsqPmWdIstPQm75",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "status": "ACTIVE",
+    "companyName": "NVIDIA",
+    "symbol": "NVDA",
+    "currentPrice": 210.96,
+    "createdAt": {
+      "seconds": 1786981001,
+      "nanoseconds": 298000000
+    },
+    "updatedAt": {
+      "seconds": 1789395548,
+      "nanoseconds": 384000000
+    },
+    "chartAnnotations": [
+      {
+        "y1": 64.33,
+        "x2": 100,
+        "id": "div-1789275391183-ctd4ub",
+        "strokeWidth": 8,
+        "y": 64.33,
+        "color": "#000000",
+        "type": "divider",
+        "x1": 0,
+        "price": 216.03,
+        "y2": 64.33
+      },
+      {
+        "type": "divider",
+        "x1": 0,
+        "y2": 83.44,
+        "y1": 83.44,
+        "price": 207.45,
+        "y": 83.44,
+        "color": "#3b82f6",
+        "x2": 100,
+        "id": "div-1789275397461-ojrzwk",
+        "strokeWidth": 8
+      },
+      {
+        "price": 198.51,
+        "y2": 93,
+        "strokeWidth": 8,
+        "x1": 0,
+        "type": "divider",
+        "y": 93,
+        "color": "#10b981",
+        "id": "div-1789275401369-jgaekn",
+        "x2": 100,
+        "y1": 93
+      },
+      {
+        "y2": 37.73,
+        "x1": 0,
+        "y": 37.73,
+        "strokeWidth": 8,
+        "id": "div-1789275407989-rvgswn",
+        "color": "#ef4444",
+        "x2": 100,
+        "type": "divider",
+        "price": 226.09,
+        "y1": 37.73
+      }
+    ],
+    "tradeType": "real",
+    "holdingStatus": "候選名單"
+  },
+  {
+    "id": "VC6v71sXcnDlgQiubG2s",
+    "holdingStatus": "買進操作",
+    "currentPrice": 253.56,
+    "updatedAt": {
+      "seconds": 1790704061,
+      "nanoseconds": 159000000
+    },
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "createdAt": {
+      "seconds": 1786547896,
+      "nanoseconds": 361000000
+    },
+    "companyName": "IBM",
+    "status": "ACTIVE",
+    "tradeType": "real",
+    "chartAnnotations": [
+      {
+        "x2": 100,
+        "y": 68.43,
+        "color": "#000000",
+        "id": "1787589951469",
+        "y1": 68.43,
+        "price": 222.58,
+        "x1": 0,
+        "y2": 68.43,
+        "strokeWidth": 8,
+        "type": "divider"
+      },
+      {
+        "x1": 0,
+        "y2": 74.57,
+        "y": 74.57,
+        "x2": 100,
+        "color": "#3b82f6",
+        "id": "1787589955077",
+        "strokeWidth": 8,
+        "type": "divider",
+        "y1": 74.57,
+        "price": 218.86
+      },
+      {
+        "id": "1787589959481",
+        "color": "#ef4444",
+        "x2": 100,
+        "strokeWidth": 8,
+        "y": 25.43,
+        "price": 248.71,
+        "y1": 25.43,
+        "y2": 25.43,
+        "x1": 0,
+        "type": "divider"
+      },
+      {
+        "id": "div-1788529282087-4dh8jz",
+        "type": "divider",
+        "x2": 100,
+        "y": 86.86,
+        "y1": 86.86,
+        "price": 212.5,
+        "y2": 86.86,
+        "x1": 0,
+        "color": "#10b981",
+        "strokeWidth": 8
+      }
+    ],
+    "symbol": "IBM",
+    "groupId": "IBM-1786547967624"
+  },
+  {
+    "id": "VDeGNRsjhngMLFPJTo0m",
+    "valueScore": 7,
+    "currentPrice": 72.02,
+    "pyramidRowsSys2": [
+      {
+        "riskFlag": false,
+        "quantity2": "",
+        "price": "74.03",
+        "quantity": "",
+        "bought": false
+      },
+      {
+        "riskFlag": false,
+        "quantity": "",
+        "price": "76.19",
+        "bought": false,
+        "quantity2": ""
+      },
+      {
+        "bought": false,
+        "quantity2": "",
+        "quantity": "",
+        "riskFlag": false,
+        "price": "78.34"
+      },
+      {
+        "quantity": "",
+        "quantity2": "",
+        "bought": false,
+        "riskFlag": false,
+        "price": "80.50"
+      }
+    ],
+    "sellRate": 2,
+    "averageCost": 71.87601,
+    "buyRate": 8,
+    "symbol": "PEG",
+    "isOperationConfirmed": false,
+    "companyName": "Public Service Enterprise Group Inc",
+    "isNew": false,
+    "averagingRowsSys2": [
+      {
+        "riskFlag": false,
+        "bought": false,
+        "price": "69.72",
+        "quantity": "",
+        "quantity2": ""
+      },
+      {
+        "quantity2": "",
+        "quantity": "",
+        "price": "67.56",
+        "bought": false,
+        "riskFlag": false
+      },
+      {
+        "bought": false,
+        "riskFlag": false,
+        "quantity2": "",
+        "quantity": "",
+        "price": "65.41"
+      },
+      {
+        "riskFlag": false,
+        "bought": false,
+        "quantity2": "",
+        "quantity": "",
+        "price": "63.25"
+      }
+    ],
+    "qualityScore": 8,
+    "plannedBuyQty": 10,
+    "optionsCalcData": null,
+    "crashSimilarity": 8,
+    "status": "ACTIVE",
+    "plannedBuyPercent": 40,
+    "rating": 8,
+    "refPnLPoint": "73.19",
+    "selectedSplitTrade": "",
+    "includeCurrentHolding": true,
+    "chartAnnotations": [
+      {
+        "color": "#000000",
+        "x1": 0,
+        "y2": 32.59,
+        "y": 32.59,
+        "price": 75,
+        "strokeWidth": 8,
+        "x2": 100,
+        "id": "div-1789275214430-ch8yeh",
+        "type": "divider",
+        "y1": 32.59
+      },
+      {
+        "strokeWidth": 8,
+        "x2": 100,
+        "y": 79.02,
+        "id": "div-1791728948311-mt062v",
+        "y1": 79.02,
+        "color": "#3b82f6",
+        "x1": 0,
+        "type": "divider",
+        "y2": 79.02,
+        "price": 67.58
+      },
+      {
+        "y2": 40.33,
+        "color": "#10b981",
+        "x1": 0,
+        "y": 40.33,
+        "price": 73.23,
+        "id": "div-1791728961556-4sniim",
+        "x2": 100,
+        "type": "divider",
+        "strokeWidth": 8,
+        "y1": 40.33
+      }
+    ],
+    "holdingQuantity": 40,
+    "averagingRows": [
+      {
+        "bought": false,
+        "quantity": "",
+        "price": "70.44",
+        "quantity2": "",
+        "riskFlag": false
+      },
+      {
+        "quantity": "",
+        "quantity2": "",
+        "price": "69.00",
+        "riskFlag": false,
+        "bought": false
+      },
+      {
+        "riskFlag": false,
+        "bought": false,
+        "quantity2": "",
+        "quantity": "",
+        "price": "67.56"
+      },
+      {
+        "quantity": "",
+        "price": "66.13",
+        "riskFlag": false,
+        "quantity2": "",
+        "bought": false
+      }
+    ],
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "updatedAt": {
+      "seconds": 1792934286,
+      "nanoseconds": 287000000
+    },
+    "pyramidRows": [
+      {
+        "quantity": "",
+        "price": "73.31",
+        "riskFlag": false,
+        "bought": false,
+        "quantity2": ""
+      },
+      {
+        "riskFlag": false,
+        "price": "74.75",
+        "quantity2": "",
+        "quantity": "",
+        "bought": false
+      },
+      {
+        "quantity": "",
+        "price": "76.19",
+        "bought": false,
+        "quantity2": "",
+        "riskFlag": false
+      },
+      {
+        "riskFlag": false,
+        "price": "77.63",
+        "quantity": "",
+        "quantity2": "",
+        "bought": false
+      }
+    ],
+    "isDeviationConfirmed": false,
+    "ringColor": "#D4E157",
+    "refPnLPointSys2": "73.19",
+    "holdingStatus": "觀察中",
+    "tradeType": "real",
+    "takeProfitPrice": 82.5,
+    "createdAt": {
+      "seconds": 1785426721,
+      "nanoseconds": 489000000
+    },
+    "stopLossPrice": 75.5,
+    "isFavoriteHighlight": false
+  },
+  {
+    "id": "VNiJqUSS8qIPtctWyMNv",
+    "groupId": "NEE-1781796771281",
+    "updatedAt": {
+      "seconds": 1782231107,
+      "nanoseconds": 470000000
+    },
+    "rating": 8,
+    "buyRate": 8,
+    "status": "COMPLETED",
+    "sellRate": 3,
+    "chartAnnotations": [],
+    "currentPrice": 86.49,
+    "crashSimilarity": 3,
+    "isOperationConfirmed": true,
+    "valueScore": 7,
+    "createdAt": {
+      "seconds": 1779898879,
+      "nanoseconds": 941000000
+    },
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "holdingStatus": "買進操作",
+    "companyName": "NextEra Energy, Inc",
+    "tradeType": "simulated",
+    "finalPnL": 41.02,
+    "symbol": "NEE",
+    "qualityScore": 8
+  },
+  {
+    "id": "WgUiyohaHJgSwQWiFhwr",
+    "companyName": "SEA",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "status": "ACTIVE",
+    "chartAnnotations": [
+      {
+        "id": "1787588257993",
+        "x2": 100,
+        "strokeWidth": 8,
+        "y": 64.6246978367362,
+        "y1": 64.6246978367362,
+        "y2": 64.6246978367362,
+        "x1": 0,
+        "color": "#000000",
+        "type": "divider"
+      },
+      {
+        "y2": 71.12289260360518,
+        "strokeWidth": 8,
+        "type": "divider",
+        "x1": 0,
+        "y1": 71.12289260360518,
+        "id": "1787588274673",
+        "y": 71.12289260360518,
+        "color": "#3b82f6",
+        "x2": 100
+      },
+      {
+        "x1": 0,
+        "strokeWidth": 8,
+        "y2": 85.83,
+        "type": "divider",
+        "y1": 85.83,
+        "y": 85.83,
+        "price": 77,
+        "x2": 100,
+        "id": "div-1788529197374-70lw67",
+        "color": "#10b981"
+      }
+    ],
+    "symbol": "SE",
+    "createdAt": {
+      "seconds": 1784127143,
+      "nanoseconds": 314000000
+    },
+    "updatedAt": {
+      "seconds": 1792513687,
+      "nanoseconds": 157000000
+    },
+    "currentPrice": 74.63,
+    "tradeType": "simulated",
+    "sortOrder": 7,
+    "holdingStatus": "買進操作"
+  },
+  {
+    "id": "X5Ai2gCE31zIbcClgAef",
+    "averagingRowsSys2": [
+      {
+        "bought": false,
+        "riskFlag": false,
+        "quantity2": "",
+        "price": "124.51",
+        "quantity": ""
+      },
+      {
+        "riskFlag": false,
+        "price": "120.66",
+        "bought": false,
+        "quantity": "",
+        "quantity2": ""
+      },
+      {
+        "quantity": "",
+        "price": "116.81",
+        "bought": false,
+        "quantity2": "",
+        "riskFlag": false
+      },
+      {
+        "price": "112.96",
+        "quantity": "",
+        "quantity2": "",
+        "bought": false,
+        "riskFlag": false
+      }
+    ],
+    "averagingRows": [
+      {
+        "riskFlag": false,
+        "quantity2": "",
+        "bought": false,
+        "price": "125.79",
+        "quantity": ""
+      },
+      {
+        "bought": false,
+        "riskFlag": false,
+        "quantity2": "",
+        "quantity": "",
+        "price": "123.23"
+      },
+      {
+        "riskFlag": false,
+        "bought": false,
+        "price": "120.66",
+        "quantity": "",
+        "quantity2": ""
+      },
+      {
+        "riskFlag": false,
+        "price": "118.09",
+        "bought": false,
+        "quantity": "",
+        "quantity2": ""
+      }
+    ],
+    "averageCost": 128.36,
+    "pyramidRowsSys2": [
+      {
+        "price": "132.21",
+        "riskFlag": false,
+        "quantity": "",
+        "quantity2": "",
+        "bought": false
+      },
+      {
+        "quantity": "",
+        "bought": false,
+        "price": "136.06",
+        "riskFlag": false,
+        "quantity2": ""
+      },
+      {
+        "riskFlag": false,
+        "bought": false,
+        "quantity2": "",
+        "quantity": "",
+        "price": "139.91"
+      },
+      {
+        "riskFlag": false,
+        "price": "143.76",
+        "quantity": "",
+        "quantity2": "",
+        "bought": false
+      }
+    ],
+    "companyName": "PepsiCo, Inc",
+    "createdAt": {
+      "seconds": 1790783204,
+      "nanoseconds": 418000000
+    },
+    "pyramidRows": [
+      {
+        "riskFlag": false,
+        "quantity2": "",
+        "price": "130.93",
+        "quantity": "",
+        "bought": false
+      },
+      {
+        "price": "133.49",
+        "quantity2": "",
+        "riskFlag": false,
+        "quantity": "",
+        "bought": false
+      },
+      {
+        "quantity": "",
+        "price": "136.06",
+        "quantity2": "",
+        "bought": false,
+        "riskFlag": false
+      },
+      {
+        "price": "138.63",
+        "riskFlag": false,
+        "quantity2": "",
+        "quantity": "",
+        "bought": false
+      }
+    ],
+    "chartAnnotations": [
+      {
+        "type": "divider",
+        "x2": 100,
+        "y": 50,
+        "id": "div-1790783235882-hmzwz7",
+        "strokeWidth": 8,
+        "y1": 50,
+        "price": 143.4,
+        "x1": 0,
+        "y2": 50,
+        "color": "#000000"
+      },
+      {
+        "color": "#3b82f6",
+        "x1": 0,
+        "price": 141.96,
+        "strokeWidth": 8,
+        "y2": 56.14,
+        "y1": 56.14,
+        "y": 56.14,
+        "type": "divider",
+        "x2": 100,
+        "id": "div-1790783240598-olhh68"
+      },
+      {
+        "price": 140.06,
+        "type": "divider",
+        "y2": 62.29,
+        "color": "#10b981",
+        "x1": 0,
+        "strokeWidth": 8,
+        "y1": 62.29,
+        "id": "div-1790783244395-j0vqnj",
+        "y": 62.29,
+        "x2": 100
+      },
+      {
+        "strokeWidth": 8,
+        "y2": 86.86,
+        "x1": 0,
+        "color": "#eab308",
+        "y1": 86.86,
+        "type": "divider",
+        "y": 86.86,
+        "price": 135,
+        "id": "div-1790783248627-cpt1we",
+        "x2": 100
+      },
+      {
+        "x2": 100,
+        "y": 37.71,
+        "strokeWidth": 8,
+        "id": "div-1790783259108-gxic3t",
+        "y1": 37.71,
+        "color": "#ef4444",
+        "x1": 0,
+        "type": "divider",
+        "y2": 37.71,
+        "price": 146.95
+      }
+    ],
+    "holdingQuantity": 100,
+    "tradeType": "simulated",
+    "status": "ACTIVE",
+    "holdingStatus": "觀察中",
+    "updatedAt": {
+      "seconds": 1792826772,
+      "nanoseconds": 640000000
+    },
+    "symbol": "PEP",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "currentPrice": 135.77
+  },
+  {
+    "id": "ZAwxHePRE0cKITcjVV94",
+    "currentPrice": 147.49,
+    "createdAt": {
+      "seconds": 1789480012,
+      "nanoseconds": 371000000
+    },
+    "symbol": "SPCX",
+    "updatedAt": {
+      "seconds": 1789480257,
+      "nanoseconds": 831000000
+    },
+    "tradeType": "real",
+    "status": "ACTIVE",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "averageCost": 0,
+    "companyName": "SPACEX",
+    "chartAnnotations": [
+      {
+        "x1": 0,
+        "y2": 59.92,
+        "y1": 59.92,
+        "color": "#000000",
+        "y": 59.92,
+        "type": "divider",
+        "x2": 100,
+        "strokeWidth": 8,
+        "price": 142.99,
+        "id": "div-1789480225272-naft3s"
+      },
+      {
+        "y2": 66.54,
+        "color": "#3b82f6",
+        "x1": 0,
+        "price": 139.91,
+        "y": 66.54,
+        "id": "div-1789480230632-c4r666",
+        "x2": 100,
+        "type": "divider",
+        "strokeWidth": 8,
+        "y1": 66.54
+      },
+      {
+        "strokeWidth": 8,
+        "y1": 79.77,
+        "id": "div-1789480234971-nfu6y5",
+        "x2": 100,
+        "color": "#10b981",
+        "y2": 79.77,
+        "type": "divider",
+        "price": 135,
+        "y": 79.77,
+        "x1": 0
+      },
+      {
+        "price": 130,
+        "type": "divider",
+        "color": "#eab308",
+        "x1": 0,
+        "strokeWidth": 8,
+        "y2": 93,
+        "y1": 93,
+        "y": 93,
+        "x2": 100,
+        "id": "div-1789480239003-7i6vnm"
+      },
+      {
+        "y2": 33.46,
+        "strokeWidth": 8,
+        "x1": 0,
+        "color": "#ef4444",
+        "y": 33.46,
+        "price": 152.56,
+        "id": "div-1789480257741-q9fb5d",
+        "x2": 100,
+        "y1": 33.46,
+        "type": "divider"
+      }
+    ],
+    "holdingQuantity": 0
+  },
+  {
+    "id": "ZqsmBW0vXVaLr0uVIT6O",
+    "finalPnL": 74,
+    "holdingStatus": "賣出操作",
+    "tradeType": "simulated",
+    "status": "COMPLETED",
+    "createdAt": {
+      "seconds": 1778488607,
+      "nanoseconds": 465000000
+    },
+    "rating": 4,
+    "tradeDirection": "看跌",
+    "sortOrder": 2,
+    "symbol": "AKAN AKANDA",
+    "companyName": "AKAN Akanda",
+    "currentPrice": 20.48,
+    "updatedAt": {
+      "seconds": 1779200484,
+      "nanoseconds": 389000000
+    },
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2"
+  },
+  {
+    "id": "aZbLBU8QPjNDtjFKgsTL",
+    "finalPnL": -36,
+    "status": "COMPLETED",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "currentPrice": 426.071,
+    "companyName": "TESLA",
+    "symbol": "TSLA",
+    "tradeType": "real",
+    "createdAt": {
+      "seconds": 1778267575,
+      "nanoseconds": 307000000
+    },
+    "updatedAt": {
+      "seconds": 1778268180,
+      "nanoseconds": 799000000
+    }
+  },
+  {
+    "id": "bRyEKfotq1awd7i3hds9",
+    "companyName": "Vistra Corp",
+    "status": "ACTIVE",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "symbol": "VST",
+    "chartAnnotations": [
+      {
+        "type": "divider",
+        "y2": 60.202312532767486,
+        "color": "#000000",
+        "x1": 0,
+        "strokeWidth": 8,
+        "y1": 60.202312532767486,
+        "id": "1787589899222",
+        "x2": 100,
+        "y": 60.202312532767486
+      },
+      {
+        "x2": 100,
+        "y": 79.96765494866065,
+        "color": "#3b82f6",
+        "id": "1787589902811",
+        "y1": 79.96765494866065,
+        "x1": 0,
+        "strokeWidth": 8,
+        "y2": 79.96765494866065,
+        "type": "divider"
+      },
+      {
+        "x1": 0,
+        "y": 93,
+        "y2": 93,
+        "strokeWidth": 8,
+        "type": "divider",
+        "x2": 100,
+        "price": 105,
+        "id": "div-1789275347674-33x39p",
+        "y1": 93,
+        "color": "#10b981"
+      },
+      {
+        "y2": 35.92,
+        "color": "#ef4444",
+        "x1": 0,
+        "y": 35.92,
+        "price": 152.54,
+        "id": "div-1789275359256-l3jj06",
+        "x2": 100,
+        "type": "divider",
+        "strokeWidth": 8,
+        "y1": 35.92
+      }
+    ],
+    "currentPrice": 140.16,
+    "createdAt": {
+      "seconds": 1787151051,
+      "nanoseconds": 179000000
+    },
+    "updatedAt": {
+      "seconds": 1789275358,
+      "nanoseconds": 652000000
+    },
+    "tradeType": "real"
+  },
+  {
+    "id": "cmz7ToDgsM0ce1nWfWAJ",
+    "currentPrice": 247.06,
+    "status": "COMPLETED",
+    "sellRate": 2,
+    "rating": 8,
+    "isOperationConfirmed": true,
+    "buyRate": 8,
+    "isFavoriteHighlight": false,
+    "valueScore": 8,
+    "createdAt": {
+      "seconds": 1779467156,
+      "nanoseconds": 840000000
+    },
+    "companyName": "Adobe",
+    "tradeType": "simulated",
+    "holdingStatus": "買進操作",
+    "finalPnL": 179.75,
+    "qualityScore": 9,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "chartAnnotations": [],
+    "crashSimilarity": 8,
+    "symbol": "ADBE",
+    "updatedAt": {
+      "seconds": 1780933369,
+      "nanoseconds": 426000000
+    }
+  },
+  {
+    "id": "d5gcQErPZFm3uLVOVXuQ",
+    "isOperationConfirmed": false,
+    "holdingQuantity": 0,
+    "holdingStatus": "買進操作",
+    "updatedAt": {
+      "seconds": 1790347869,
+      "nanoseconds": 923000000
+    },
+    "currentPrice": 66.77,
+    "status": "ACTIVE",
+    "rating": 6,
+    "finalPnL": 0,
+    "valueScore": 7,
+    "averagingRows": [
+      {
+        "price": "55.46",
+        "riskFlag": false,
+        "quantity2": "1",
+        "bought": false,
+        "quantity": "1"
+      },
+      {
+        "quantity": "1",
+        "bought": false,
+        "quantity2": "3",
+        "riskFlag": false,
+        "price": "54.33"
+      },
+      {
+        "riskFlag": false,
+        "quantity2": "3",
+        "bought": false,
+        "price": "53.19",
+        "quantity": "2"
+      },
+      {
+        "quantity": "1",
+        "quantity2": "3",
+        "bought": false,
+        "riskFlag": false,
+        "price": "52.06"
+      }
+    ],
+    "symbol": "KR",
+    "createdAt": {
+      "seconds": 1779990943,
+      "nanoseconds": 164000000
+    },
+    "refPnLPointSys2": "57.46",
+    "qualityScore": 7,
+    "tradeType": "real",
+    "averageCost": 0,
+    "averagingRowsSys2": [
+      {
+        "bought": false,
+        "quantity": "1",
+        "price": "54.89",
+        "quantity2": "1",
+        "riskFlag": false
+      },
+      {
+        "riskFlag": false,
+        "quantity2": "3",
+        "quantity": "1",
+        "bought": false,
+        "price": "53.19"
+      },
+      {
+        "quantity2": "3",
+        "bought": false,
+        "riskFlag": false,
+        "price": "51.50",
+        "quantity": "2"
+      },
+      {
+        "quantity": "1",
+        "price": "49.80",
+        "bought": false,
+        "riskFlag": false,
+        "quantity2": "3"
+      }
+    ],
+    "companyName": "The Kroger Co",
+    "sortOrder": 23,
+    "plannedBuyQty": 13,
+    "plannedBuyPercent": 40,
+    "crashSimilarity": 6,
+    "refPnLPoint": "57.46",
+    "buyRate": 6,
+    "includeCurrentHolding": true,
+    "chartAnnotations": [
+      {
+        "x2": 100,
+        "y": 41.4,
+        "price": 65.82,
+        "id": "div-1789275110850-gfnr9h",
+        "y1": 41.4,
+        "type": "divider",
+        "color": "#000000",
+        "x1": 0,
+        "strokeWidth": 8,
+        "y2": 41.4
+      },
+      {
+        "color": "#3b82f6",
+        "price": 58.55,
+        "x1": 0,
+        "y2": 52.07,
+        "strokeWidth": 8,
+        "y1": 52.07,
+        "type": "divider",
+        "y": 52.07,
+        "x2": 100,
+        "id": "div-1789275116151-4duzy5"
+      },
+      {
+        "x1": 0,
+        "y": 67.2,
+        "y2": 67.2,
+        "type": "divider",
+        "strokeWidth": 8,
+        "x2": 100,
+        "price": 55,
+        "id": "div-1789275120338-k3zzxh",
+        "color": "#10b981",
+        "y1": 67.2
+      }
+    ],
+    "sellRate": 4,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2"
+  },
+  {
+    "id": "ee4RTGrKxsSXcrhoizQO",
+    "updatedAt": {
+      "seconds": 1780671832,
+      "nanoseconds": 806000000
+    },
+    "crashSimilarity": 8,
+    "chartAnnotations": [
+      {
+        "y1": 30.376548544432957,
+        "type": "arrow",
+        "x1": 53.57332213685246,
+        "x2": 21.293832755923574,
+        "id": "1780064070420",
+        "y2": 64.72074949068151,
+        "color": "#ffffff",
+        "strokeWidth": 6
+      }
+    ],
+    "qualityScore": 8,
+    "holdingStatus": "買進操作",
+    "finalPnL": 31,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "isFavoriteHighlight": false,
+    "symbol": "ABT",
+    "companyName": "Abbott Laboratories",
+    "createdAt": {
+      "seconds": 1779897399,
+      "nanoseconds": 160000000
+    },
+    "sellRate": 2,
+    "tradeType": "real",
+    "currentPrice": 91.88,
+    "rating": 8,
+    "buyRate": 8,
+    "status": "COMPLETED",
+    "valueScore": 7
+  },
+  {
+    "id": "etWxxxyulJTGnKQHeqZT",
+    "sortOrder": 14,
+    "isFavoriteHighlight": false,
+    "updatedAt": {
+      "seconds": 1785250862,
+      "nanoseconds": 579000000
+    },
+    "groupId": "PEP-1784733672903",
+    "rating": 8,
+    "buyRate": 8,
+    "holdingStatus": "觀察中",
+    "status": "COMPLETED",
+    "qualityScore": 9,
+    "valueScore": 8,
+    "finalPnL": 1366,
+    "tradeType": "simulated",
+    "createdAt": {
+      "seconds": 1785250862,
+      "nanoseconds": 579000000
+    },
+    "crashSimilarity": 9,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "companyName": "PepsiCo, Inc",
+    "currentPrice": 144.72,
+    "sellRate": 2,
+    "symbol": "PEP"
+  },
+  {
+    "id": "gwncpV4O30LlKJ9o12Hi",
+    "sellRate": 2,
+    "updatedAt": {
+      "seconds": 1779988578,
+      "nanoseconds": 5000000
+    },
+    "holdingStatus": "買進操作",
+    "currentPrice": 179.235,
+    "rating": 8,
+    "status": "COMPLETED",
+    "buyRate": 8,
+    "finalPnL": 3.8,
+    "tradeType": "real",
+    "crashSimilarity": 8,
+    "valueScore": 7,
+    "createdAt": {
+      "seconds": 1779111451,
+      "nanoseconds": 274000000
+    },
+    "symbol": "CRM",
+    "qualityScore": 8,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "companyName": "Salesforce",
+    "groupId": "CRM-1779182985945"
+  },
+  {
+    "id": "h3qtJNpT0nK9ijwMQUet",
+    "updatedAt": {
+      "seconds": 1778487273,
+      "nanoseconds": 770000000
+    },
+    "status": "COMPLETED",
+    "createdAt": {
+      "seconds": 1778486925,
+      "nanoseconds": 847000000
+    },
+    "companyName": "AMD",
+    "finalPnL": 3824,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "symbol": "AMD",
+    "tradeType": "simulated"
+  },
+  {
+    "id": "hVevYwLiKMuuyDHYfpah",
+    "createdAt": {
+      "seconds": 1785506533,
+      "nanoseconds": 767000000
+    },
+    "symbol": "UBER",
+    "averagingRows": [
+      {
+        "quantity": "4",
+        "price": "67.66",
+        "riskFlag": false,
+        "bought": true
+      },
+      {
+        "bought": true,
+        "riskFlag": false,
+        "quantity": "4",
+        "price": "65.56"
+      },
+      {
+        "quantity": "",
+        "riskFlag": false,
+        "bought": false,
+        "price": ""
+      },
+      {
+        "quantity": "",
+        "price": "",
+        "riskFlag": false,
+        "bought": false
+      }
+    ],
+    "tradeType": "real",
+    "refPnLPointSys2": "75.02",
+    "chartAnnotations": [
+      {
+        "x2": 100,
+        "y": 62.29,
+        "id": "1787590052147",
+        "price": 71.56,
+        "type": "divider",
+        "y1": 62.29,
+        "color": "#000000",
+        "x1": 0,
+        "y2": 62.29,
+        "strokeWidth": 8
+      },
+      {
+        "x1": 0,
+        "y2": 80.71,
+        "color": "#3b82f6",
+        "y": 80.71,
+        "price": 68.61,
+        "strokeWidth": 8,
+        "x2": 100,
+        "id": "1787590056242",
+        "y1": 80.71,
+        "type": "divider"
+      },
+      {
+        "y1": 86.86,
+        "strokeWidth": 8,
+        "id": "div-1789275612776-vcbtqz",
+        "x2": 100,
+        "color": "#10b981",
+        "type": "divider",
+        "y2": 86.86,
+        "y": 86.86,
+        "price": 67.19,
+        "x1": 0
+      },
+      {
+        "x1": 0,
+        "y": 43.86,
+        "y2": 43.86,
+        "type": "divider",
+        "strokeWidth": 8,
+        "x2": 100,
+        "price": 73.77,
+        "id": "div-1789275617207-4vw1fj",
+        "color": "#ef4444",
+        "y1": 43.86
+      }
+    ],
+    "refPnLPoint": "75.02",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "currentPrice": 66.7,
+    "takeProfitPrice": 75.42,
+    "updatedAt": {
+      "seconds": 1790783489,
+      "nanoseconds": 751000000
+    },
+    "holdingStatus": "買進操作",
+    "status": "ACTIVE",
+    "stopLossPrice": 70.5,
+    "includeCurrentHolding": true,
+    "companyName": "u",
+    "averagingRowsSys2": [
+      {
+        "riskFlag": false,
+        "quantity": "4",
+        "bought": true,
+        "price": "67.66"
+      },
+      {
+        "bought": true,
+        "quantity": "4",
+        "price": "66.96",
+        "riskFlag": false
+      },
+      {
+        "price": "",
+        "riskFlag": false,
+        "bought": false,
+        "quantity": ""
+      },
+      {
+        "price": "",
+        "quantity": "",
+        "bought": false,
+        "riskFlag": false
+      }
+    ],
+    "holdingQuantity": 0,
+    "plannedBuyQty": 26,
+    "averageCost": 0
+  },
+  {
+    "id": "j8ejMFXuFaxbnxvXM3db",
+    "currentPrice": 347.725,
+    "crashSimilarity": 6,
+    "sortOrder": 10,
+    "updatedAt": {
+      "seconds": 1786897836,
+      "nanoseconds": 671000000
+    },
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "chartAnnotations": [
+      {
+        "y2": 24.863889965184786,
+        "x1": 0,
+        "strokeWidth": 8,
+        "y": 24.863889965184786,
+        "id": "1786850336603",
+        "color": "#ef4444",
+        "x2": 100,
+        "type": "divider",
+        "y1": 24.863889965184786
+      }
+    ],
+    "symbol": "AAPL",
+    "qualityScore": 9,
+    "buyRate": 7,
+    "tradeType": "simulated",
+    "holdingStatus": "乖離名單",
+    "createdAt": {
+      "seconds": 1782659859,
+      "nanoseconds": 762000000
+    },
+    "status": "ACTIVE",
+    "sellRate": 4,
+    "rating": 7,
+    "valueScore": 7,
+    "companyName": "APPLE",
+    "groupId": "AAPL-1786897837456"
+  },
+  {
+    "id": "jpLspcoC2wky84ShCT1m",
+    "holdingStatus": "候選名單",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "updatedAt": {
+      "seconds": 1779805719,
+      "nanoseconds": 508000000
+    },
+    "finalPnL": 612.5,
+    "symbol": "VST",
+    "valueScore": 7,
+    "qualityScore": 8,
+    "chartAnnotations": [
+      {
+        "id": "1779271845871",
+        "color": "#ffffff",
+        "y2": 77.84233668341709,
+        "type": "arrow",
+        "x1": 32.58713942307692,
+        "x2": 18.644831730769234,
+        "strokeWidth": 2,
+        "y1": 58.914363484087104
+      },
+      {
+        "color": "#ffffff",
+        "type": "text",
+        "y": 55.22367856254002,
+        "x": 38.80148428873757,
+        "text": "可以進場!",
+        "strokeWidth": 2,
+        "id": "1779271865122"
+      }
+    ],
+    "rating": 8,
+    "companyName": "Vistra Energy",
+    "status": "COMPLETED",
+    "createdAt": {
+      "seconds": 1779270775,
+      "nanoseconds": 507000000
+    },
+    "sellRate": 2,
+    "crashSimilarity": 5,
+    "tradeType": "simulated",
+    "isOperationConfirmed": false,
+    "buyRate": 8,
+    "currentPrice": 164.88
+  },
+  {
+    "id": "kO7DdQh2CQvYyBk7diiY",
+    "tradeType": "real",
+    "chartAnnotations": [
+      {
+        "y1": 45.22,
+        "type": "divider",
+        "id": "div-1789574703860-fx85g3",
+        "x2": 100,
+        "strokeWidth": 8,
+        "price": 77.38,
+        "y2": 45.22,
+        "y": 45.22,
+        "color": "#000000",
+        "x1": 0
+      },
+      {
+        "x2": 100,
+        "price": 76.16,
+        "y": 54.78,
+        "type": "divider",
+        "id": "div-1789574707926-qolcl3",
+        "y1": 54.78,
+        "color": "#3b82f6",
+        "x1": 0,
+        "y2": 54.78,
+        "strokeWidth": 8
+      },
+      {
+        "color": "#10b981",
+        "y1": 73.89,
+        "price": 72.46,
+        "id": "div-1789574711726-lmx0kc",
+        "x2": 100,
+        "type": "divider",
+        "y2": 73.89,
+        "y": 73.89,
+        "x1": 0,
+        "strokeWidth": 8
+      },
+      {
+        "color": "#ef4444",
+        "y1": 35.67,
+        "strokeWidth": 8,
+        "id": "div-1789574721156-ejp7bu",
+        "price": 82.06,
+        "x2": 100,
+        "y2": 35.67,
+        "type": "divider",
+        "x1": 0,
+        "y": 35.67
+      }
+    ],
+    "createdAt": {
+      "seconds": 1791384428,
+      "nanoseconds": 113000000
+    },
+    "averagingRowsSys2": [
+      {
+        "quantity2": "1",
+        "quantity": "0",
+        "bought": false,
+        "price": "70.29",
+        "riskFlag": false
+      },
+      {
+        "price": "68.11",
+        "riskFlag": false,
+        "quantity2": "1",
+        "bought": false,
+        "quantity": "1"
+      },
+      {
+        "riskFlag": false,
+        "quantity": "1",
+        "bought": false,
+        "price": "65.94",
+        "quantity2": "1"
+      },
+      {
+        "price": "63.76",
+        "quantity2": "1",
+        "quantity": "1",
+        "riskFlag": false,
+        "bought": false
+      }
+    ],
+    "averagingRows": [
+      {
+        "price": "71.01",
+        "riskFlag": false,
+        "quantity": "0",
+        "bought": false,
+        "quantity2": "1"
+      },
+      {
+        "quantity": "1",
+        "price": "69.56",
+        "bought": false,
+        "riskFlag": false,
+        "quantity2": "1"
+      },
+      {
+        "bought": false,
+        "quantity": "1",
+        "quantity2": "1",
+        "price": "68.11",
+        "riskFlag": false
+      },
+      {
+        "quantity": "1",
+        "price": "66.66",
+        "quantity2": "1",
+        "bought": false,
+        "riskFlag": false
+      }
+    ],
+    "status": "COMPLETED",
+    "currentPrice": 72.325,
+    "plannedBuyPercent": 20,
+    "finalPnL": -0.06,
+    "selectedSplitTrade": "",
+    "pyramidRowsSys2": [
+      {
+        "price": "74.63",
+        "riskFlag": false,
+        "quantity2": "",
+        "quantity": "",
+        "bought": false
+      },
+      {
+        "quantity": "",
+        "price": "76.81",
+        "quantity2": "",
+        "riskFlag": false,
+        "bought": false
+      },
+      {
+        "price": "78.98",
+        "bought": false,
+        "quantity": "",
+        "riskFlag": false,
+        "quantity2": ""
+      },
+      {
+        "price": "81.16",
+        "riskFlag": false,
+        "quantity2": "",
+        "bought": false,
+        "quantity": ""
+      }
+    ],
+    "averageCost": 0,
+    "updatedAt": {
+      "seconds": 1791384428,
+      "nanoseconds": 113000000
+    },
+    "holdingStatus": "觀察中",
+    "isNew": false,
+    "isFavoriteHighlight": false,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "holdingQuantity": 0,
+    "isOperationConfirmed": false,
+    "isDeviationConfirmed": false,
+    "pyramidRows": [
+      {
+        "quantity": "",
+        "quantity2": "",
+        "bought": false,
+        "price": "73.91",
+        "riskFlag": false
+      },
+      {
+        "quantity": "",
+        "price": "75.36",
+        "quantity2": "",
+        "bought": false,
+        "riskFlag": false
+      },
+      {
+        "bought": false,
+        "quantity": "",
+        "quantity2": "",
+        "riskFlag": false,
+        "price": "76.81"
+      },
+      {
+        "quantity": "",
+        "quantity2": "",
+        "price": "78.26",
+        "riskFlag": false,
+        "bought": false
+      }
+    ],
+    "symbol": "XEL",
+    "plannedBuyQty": 5,
+    "companyName": "Xcel Energy Inc"
+  },
+  {
+    "id": "kUptS8wTl22rJKKmsi7G",
+    "tradeType": "real",
+    "createdAt": {
+      "seconds": 1786354177,
+      "nanoseconds": 353000000
+    },
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "chartAnnotations": [
+      {
+        "y2": 69.55,
+        "type": "divider",
+        "x1": 0,
+        "price": 142.34,
+        "strokeWidth": 8,
+        "y1": 69.55,
+        "id": "div-1788103307260-y4zrr4",
+        "color": "#000000",
+        "y": 69.55,
+        "x2": 100
+      },
+      {
+        "y2": 77.36,
+        "x1": 0,
+        "type": "divider",
+        "y": 77.36,
+        "id": "div-1788103311641-016bis",
+        "price": 133.74,
+        "x2": 100,
+        "strokeWidth": 8,
+        "color": "#3b82f6",
+        "y1": 77.36
+      },
+      {
+        "strokeWidth": 8,
+        "y2": 85.18,
+        "x1": 0,
+        "price": 125.96,
+        "y": 85.18,
+        "color": "#10b981",
+        "type": "divider",
+        "id": "div-1788103314658-h37akl",
+        "x2": 100,
+        "y1": 85.18
+      },
+      {
+        "id": "div-1789275596957-jzlsep",
+        "x2": 100,
+        "strokeWidth": 8,
+        "y": 46.09,
+        "y1": 46.09,
+        "y2": 46.09,
+        "x1": 0,
+        "color": "#ef4444",
+        "type": "divider",
+        "price": 151.24
+      }
+    ],
+    "currentPrice": 126.16,
+    "holdingQuantity": 0,
+    "symbol": "ORCL",
+    "averageCost": 0,
+    "updatedAt": {
+      "seconds": 1790704285,
+      "nanoseconds": 110000000
+    },
+    "holdingStatus": "買進操作",
+    "status": "ACTIVE",
+    "companyName": "Oracle",
+    "groupId": "ORCL-1790704284847"
+  },
+  {
+    "id": "lQKzO4PD0rWMphVqtvcY",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "updatedAt": {
+      "seconds": 1789395325,
+      "nanoseconds": 0
+    },
+    "companyName": "The Kroger Co",
+    "holdingStatus": "觀察中",
+    "includeCurrentHolding": true,
+    "averageCost": 0,
+    "tradeType": "real",
+    "averagingRows": [
+      {
+        "price": "55.46",
+        "riskFlag": false,
+        "quantity": "1",
+        "quantity2": "1",
+        "bought": false
+      },
+      {
+        "quantity": "1",
+        "bought": false,
+        "quantity2": "3",
+        "riskFlag": false,
+        "price": "54.33"
+      },
+      {
+        "bought": false,
+        "quantity": "2",
+        "riskFlag": false,
+        "quantity2": "3",
+        "price": "53.19"
+      },
+      {
+        "riskFlag": false,
+        "bought": false,
+        "price": "52.06",
+        "quantity2": "3",
+        "quantity": "1"
+      }
+    ],
+    "createdAt": {
+      "seconds": 1789395325,
+      "nanoseconds": 0
+    },
+    "sellRate": 4,
+    "refPnLPoint": "57.46",
+    "valueScore": 7,
+    "buyRate": 6,
+    "crashSimilarity": 6,
+    "sortOrder": 23,
+    "finalPnL": 3.59,
+    "currentPrice": 59.73,
+    "symbol": "KR",
+    "holdingQuantity": 0,
+    "plannedBuyQty": 13,
+    "refPnLPointSys2": "57.46",
+    "rating": 6,
+    "status": "COMPLETED",
+    "plannedBuyPercent": 40,
+    "qualityScore": 7,
+    "isOperationConfirmed": false,
+    "chartAnnotations": [
+      {
+        "color": "#000000",
+        "strokeWidth": 8,
+        "y2": 41.4,
+        "price": 65.82,
+        "x1": 0,
+        "type": "divider",
+        "y1": 41.4,
+        "id": "div-1789275110850-gfnr9h",
+        "y": 41.4,
+        "x2": 100
+      },
+      {
+        "y1": 52.07,
+        "price": 58.55,
+        "x2": 100,
+        "type": "divider",
+        "color": "#3b82f6",
+        "id": "div-1789275116151-4duzy5",
+        "y": 52.07,
+        "strokeWidth": 8,
+        "x1": 0,
+        "y2": 52.07
+      },
+      {
+        "y1": 67.2,
+        "x2": 100,
+        "type": "divider",
+        "strokeWidth": 8,
+        "id": "div-1789275120338-k3zzxh",
+        "y": 67.2,
+        "price": 55,
+        "x1": 0,
+        "color": "#10b981",
+        "y2": 67.2
+      }
+    ],
+    "averagingRowsSys2": [
+      {
+        "bought": false,
+        "price": "54.89",
+        "riskFlag": false,
+        "quantity": "1",
+        "quantity2": "1"
+      },
+      {
+        "bought": false,
+        "riskFlag": false,
+        "price": "53.19",
+        "quantity": "1",
+        "quantity2": "3"
+      },
+      {
+        "riskFlag": false,
+        "bought": false,
+        "price": "51.50",
+        "quantity": "2",
+        "quantity2": "3"
+      },
+      {
+        "riskFlag": false,
+        "price": "49.80",
+        "quantity": "1",
+        "quantity2": "3",
+        "bought": false
+      }
+    ]
+  },
+  {
+    "id": "n5yIZDGR5hwy0wc5rwdS",
+    "holdingStatus": "觀察中",
+    "finalPnL": 306.61,
+    "isOperationConfirmed": false,
+    "symbol": "META",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "qualityScore": 9,
+    "sortOrder": 4,
+    "plannedBuyQty": 0,
+    "longTermOutlook": "看多",
+    "isFavoriteHighlight": false,
+    "chartAnnotations": [
+      {
+        "x1": 46.739596578924115,
+        "type": "arrow",
+        "x2": 17.9051091785149,
+        "id": "1781099099786",
+        "y2": 84.47764103576047,
+        "color": "#ffffff",
+        "y1": 33.91042953715187,
+        "strokeWidth": 6
+      }
+    ],
+    "updatedAt": {
+      "seconds": 1784125945,
+      "nanoseconds": 301000000
+    },
+    "valueScore": 7,
+    "volatility": "高",
+    "rating": 8,
+    "shortTermImpact": "看多",
+    "status": "COMPLETED",
+    "currentPrice": 658.23,
+    "tradeType": "simulated",
+    "companyName": "META",
+    "createdAt": {
+      "seconds": 1778487798,
+      "nanoseconds": 716000000
+    }
+  },
+  {
+    "id": "n9hOVHlHLbAKogwG7HnD",
+    "finalPnL": 0,
+    "refPnLPointSys2": "21.88",
+    "tradeType": "real",
+    "status": "ACTIVE",
+    "holdingStatus": "候選名單",
+    "includeCurrentHolding": true,
+    "createdAt": {
+      "seconds": 1786545405,
+      "nanoseconds": 314000000
+    },
+    "plannedBuyQty": 35,
+    "refPnLPoint": "21.88",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "averagingRows": [
+      {
+        "riskFlag": false,
+        "bought": false,
+        "quantity": "2",
+        "price": "20.52",
+        "quantity2": "4"
+      },
+      {
+        "quantity": "4",
+        "bought": false,
+        "quantity2": "5",
+        "price": "20.10",
+        "riskFlag": false
+      },
+      {
+        "riskFlag": false,
+        "bought": false,
+        "price": "19.68",
+        "quantity": "5",
+        "quantity2": "8"
+      },
+      {
+        "quantity2": "5",
+        "quantity": "4",
+        "price": "19.26",
+        "riskFlag": false,
+        "bought": false
+      }
+    ],
+    "plannedBuyPercent": 40,
+    "averageCost": 0,
+    "chartAnnotations": [
+      {
+        "price": 22.8,
+        "type": "divider",
+        "x1": 0,
+        "color": "#000000",
+        "y2": 43.21,
+        "y1": 43.21,
+        "y": 43.21,
+        "strokeWidth": 8,
+        "x2": 100,
+        "id": "div-1789275197297-gfzudn"
+      },
+      {
+        "type": "divider",
+        "y2": 56.79,
+        "x1": 0,
+        "price": 21.5,
+        "y1": 56.79,
+        "strokeWidth": 8,
+        "y": 56.79,
+        "color": "#3b82f6",
+        "id": "div-1789275200830-5jayoo",
+        "x2": 100
+      },
+      {
+        "x2": 100,
+        "y": 70.37,
+        "type": "divider",
+        "id": "div-1789275204518-zaxe25",
+        "y1": 70.37,
+        "x1": 0,
+        "price": 20.5,
+        "y2": 70.37,
+        "color": "#10b981",
+        "strokeWidth": 8
+      }
+    ],
+    "updatedAt": {
+      "seconds": 1792169104,
+      "nanoseconds": 615000000
+    },
+    "symbol": "M",
+    "averagingRowsSys2": [
+      {
+        "price": "20.31",
+        "riskFlag": false,
+        "quantity": "2",
+        "quantity2": "4",
+        "bought": false
+      },
+      {
+        "bought": false,
+        "quantity2": "5",
+        "riskFlag": false,
+        "quantity": "4",
+        "price": "19.68"
+      },
+      {
+        "bought": false,
+        "quantity": "5",
+        "quantity2": "8",
+        "riskFlag": false,
+        "price": "19.05"
+      },
+      {
+        "riskFlag": false,
+        "price": "18.43",
+        "quantity2": "5",
+        "bought": false,
+        "quantity": "4"
+      }
+    ],
+    "currentPrice": 24.1,
+    "holdingQuantity": 0,
+    "companyName": "Macy's"
+  },
+  {
+    "id": "nJXiRcBW6ghkkhoW7Els",
+    "buyRate": 4,
+    "isOperationConfirmed": true,
+    "currentPrice": 386.58,
+    "finalPnL": -4638,
+    "updatedAt": {
+      "seconds": 1779988043,
+      "nanoseconds": 932000000
+    },
+    "status": "COMPLETED",
+    "holdingStatus": "賣出操作",
+    "rating": 5,
+    "sellRate": 6,
+    "qualityScore": 8,
+    "symbol": "MAR",
+    "chartAnnotations": [],
+    "valueScore": 4,
+    "companyName": "Marriott International",
+    "createdAt": {
+      "seconds": 1779086492,
+      "nanoseconds": 760000000
+    },
+    "crashSimilarity": 2,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "tradeType": "simulated"
+  },
+  {
+    "id": "nNFcn9GzXjYHiVg2OXH1",
+    "tags": [
+      "長線"
+    ],
+    "sortOrder": 3,
+    "qualityScore": 8,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "isDeviationConfirmed": false,
+    "valueScore": 7,
+    "groupId": "",
+    "sellRate": 3,
+    "currentPrice": 97.74,
+    "plannedBuyQty": 120,
+    "shortTermImpact": "看多",
+    "finalPnL": 99.71,
+    "symbol": "DIS",
+    "buyRate": 7,
+    "longTermOutlook": "觀察",
+    "updatedAt": {
+      "seconds": 1785250526,
+      "nanoseconds": 500000000
+    },
+    "recommendation": "推薦買進",
+    "isOperationConfirmed": false,
+    "isFavoriteHighlight": false,
+    "companyName": "DISNEY",
+    "status": "COMPLETED",
+    "rating": 7,
+    "chartAnnotations": [],
+    "tradeType": "simulated",
+    "crashSimilarity": 5,
+    "createdAt": {
+      "seconds": 1785250526,
+      "nanoseconds": 500000000
+    },
+    "sentiment": 60,
+    "holdingStatus": "觀察中"
+  },
+  {
+    "id": "nOODqH613uwfJzGPSmp4",
+    "qualityScore": 4,
+    "sellRate": 8,
+    "companyName": "York Space Systems Inc",
+    "valueScore": 3,
+    "status": "COMPLETED",
+    "buyRate": 3,
+    "rating": 3,
+    "isOperationConfirmed": false,
+    "updatedAt": {
+      "seconds": 1779988215,
+      "nanoseconds": 973000000
+    },
+    "longTermOutlook": "觀察",
+    "chartAnnotations": [],
+    "currentPrice": 33.27,
+    "shortTermImpact": "看空",
+    "finalPnL": -403.05,
+    "tradeType": "simulated",
+    "crashSimilarity": 8,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "symbol": "YSS",
+    "createdAt": {
+      "seconds": 1778855831,
+      "nanoseconds": 78000000
+    },
+    "holdingStatus": "賣出操作"
+  },
+  {
+    "id": "nb0FTFofCIvlZ2NaSkMF",
+    "updatedAt": {
+      "seconds": 1778487506,
+      "nanoseconds": 435000000
+    },
+    "status": "COMPLETED",
+    "createdAt": {
+      "seconds": 1778487336,
+      "nanoseconds": 70000000
+    },
+    "companyName": "INTEL",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "symbol": "INTC",
+    "tradeType": "simulated",
+    "finalPnL": 1922.4
+  },
+  {
+    "id": "noZYoSQKg0JU9kEa8Waf",
+    "currentPrice": 102.83,
+    "status": "COMPLETED",
+    "sellRate": 3,
+    "rating": 7,
+    "buyRate": 7,
+    "isFavoriteHighlight": false,
+    "valueScore": 7,
+    "createdAt": {
+      "seconds": 1778265625,
+      "nanoseconds": 889000000
+    },
+    "groupId": "",
+    "companyName": "DISNEY",
+    "holdingStatus": "買進操作",
+    "tradeType": "real",
+    "qualityScore": 8,
+    "finalPnL": 10.26,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "crashSimilarity": 5,
+    "symbol": "DIS",
+    "updatedAt": {
+      "seconds": 1779204812,
+      "nanoseconds": 139000000
+    },
+    "sortOrder": 9
+  },
+  {
+    "id": "oEyY3nHcoOTET7OtOFhW",
+    "averageCost": 0,
+    "status": "ACTIVE",
+    "holdingStatus": "買進操作",
+    "isDeviationConfirmed": false,
+    "companyName": "CoreWeave",
+    "symbol": "CRWV",
+    "averagingRows": [
+      {
+        "bought": false,
+        "quantity": "31",
+        "quantity2": "35",
+        "riskFlag": false,
+        "price": "81.25"
+      },
+      {
+        "bought": false,
+        "quantity2": "65",
+        "quantity": "44",
+        "price": "79.59",
+        "riskFlag": false
+      },
+      {
+        "price": "77.94",
+        "riskFlag": false,
+        "quantity2": "88",
+        "bought": false,
+        "quantity": "65"
+      },
+      {
+        "quantity": "44",
+        "quantity2": "65",
+        "price": "76.28",
+        "bought": false,
+        "riskFlag": false
+      }
+    ],
+    "pyramidRowsSys2": [
+      {
+        "bought": false,
+        "quantity": "",
+        "riskFlag": false,
+        "quantity2": "",
+        "price": "85.40"
+      },
+      {
+        "price": "87.88",
+        "riskFlag": false,
+        "quantity2": "",
+        "quantity": "",
+        "bought": false
+      },
+      {
+        "quantity2": "",
+        "quantity": "",
+        "price": "90.37",
+        "riskFlag": false,
+        "bought": false
+      },
+      {
+        "bought": false,
+        "quantity": "",
+        "riskFlag": false,
+        "quantity2": "",
+        "price": "92.86"
+      }
+    ],
+    "chartAnnotations": [
+      {
+        "y2": 43.86,
+        "x1": 0,
+        "strokeWidth": 8,
+        "type": "divider",
+        "y": 43.86,
+        "id": "div-1789274604313-zj5xg4",
+        "price": 89.89,
+        "x2": 100,
+        "color": "#000000",
+        "y1": 43.86
+      },
+      {
+        "id": "div-1789274608381-wdepro",
+        "strokeWidth": 8,
+        "color": "#3b82f6",
+        "x2": 100,
+        "y": 56.14,
+        "y1": 56.14,
+        "price": 85,
+        "y2": 56.14,
+        "x1": 0,
+        "type": "divider"
+      },
+      {
+        "price": 80,
+        "y1": 80.71,
+        "id": "div-1789274612340-q4k1u8",
+        "type": "divider",
+        "color": "#10b981",
+        "x2": 100,
+        "y2": 80.71,
+        "strokeWidth": 8,
+        "x1": 0,
+        "y": 80.71
+      }
+    ],
+    "refPnLPoint": "82.94",
+    "plannedBuyQty": 434,
+    "finalPnL": 0,
+    "plannedBuyPercent": 3,
+    "selectedSplitTrade": "",
+    "isNew": false,
+    "tradeType": "simulated",
+    "averagingRowsSys2": [
+      {
+        "riskFlag": false,
+        "bought": false,
+        "price": "80.42",
+        "quantity": "31",
+        "quantity2": "35"
+      },
+      {
+        "riskFlag": false,
+        "quantity2": "65",
+        "price": "77.94",
+        "quantity": "44",
+        "bought": false
+      },
+      {
+        "riskFlag": false,
+        "bought": false,
+        "price": "75.45",
+        "quantity2": "88",
+        "quantity": "65"
+      },
+      {
+        "bought": false,
+        "quantity2": "65",
+        "quantity": "44",
+        "riskFlag": false,
+        "price": "72.96"
+      }
+    ],
+    "pyramidRows": [
+      {
+        "riskFlag": false,
+        "bought": false,
+        "quantity2": "",
+        "quantity": "",
+        "price": "84.57"
+      },
+      {
+        "quantity2": "",
+        "quantity": "",
+        "bought": false,
+        "price": "86.23",
+        "riskFlag": false
+      },
+      {
+        "bought": false,
+        "riskFlag": false,
+        "quantity2": "",
+        "price": "87.88",
+        "quantity": ""
+      },
+      {
+        "riskFlag": false,
+        "bought": false,
+        "price": "89.54",
+        "quantity": "",
+        "quantity2": ""
+      }
+    ],
+    "createdAt": {
+      "seconds": 1786546519,
+      "nanoseconds": 931000000
+    },
+    "isOperationConfirmed": false,
+    "refPnLPointSys2": "82.94",
+    "holdingQuantity": 0,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "isFavoriteHighlight": false,
+    "includeCurrentHolding": true,
+    "currentPrice": 54.235,
+    "updatedAt": {
+      "seconds": 1791385521,
+      "nanoseconds": 238000000
+    }
+  },
+  {
+    "id": "oOmRKqPTdq7qTLMED1AM",
+    "averageCost": 0,
+    "isFavoriteHighlight": false,
+    "includeCurrentHolding": true,
+    "plannedBuyQty": 63,
+    "holdingQuantity": 0,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "updatedAt": {
+      "seconds": 1792934504,
+      "nanoseconds": 532000000
+    },
+    "holdingStatus": "買進操作",
+    "companyName": "META",
+    "isDeviationConfirmed": true,
+    "symbol": "META",
+    "sortOrder": 8,
+    "groupId": "META-1792934505747",
+    "currentPrice": 642.62,
+    "plannedBuyPercent": 3,
+    "chartAnnotations": [
+      {
+        "color": "#000000",
+        "id": "div-1789274629749-kztn18",
+        "x2": 100,
+        "y": 66.54,
+        "price": 597.5,
+        "y1": 66.54,
+        "strokeWidth": 8,
+        "type": "divider",
+        "y2": 66.54,
+        "x1": 0
+      },
+      {
+        "id": "div-1789274634342-x9yyli",
+        "x2": 100,
+        "strokeWidth": 8,
+        "y1": 73.15,
+        "y": 73.15,
+        "y2": 73.15,
+        "color": "#3b82f6",
+        "type": "divider",
+        "x1": 0,
+        "price": 592
+      },
+      {
+        "y2": 77.73,
+        "x1": 0,
+        "price": 587.16,
+        "type": "divider",
+        "color": "#10b981",
+        "y": 77.73,
+        "id": "div-1789274639076-q3bzv6",
+        "x2": 100,
+        "strokeWidth": 8,
+        "y1": 77.73
+      },
+      {
+        "id": "div-1789274643572-jzg9l3",
+        "color": "#eab308",
+        "x2": 100,
+        "price": 530,
+        "y1": 93,
+        "y": 93,
+        "y2": 93,
+        "strokeWidth": 8,
+        "x1": 0,
+        "type": "divider"
+      }
+    ],
+    "averagingRows": [
+      {
+        "quantity": "4",
+        "quantity2": "6",
+        "bought": false,
+        "riskFlag": false,
+        "price": "553.83"
+      },
+      {
+        "bought": false,
+        "quantity": "6",
+        "quantity2": "10",
+        "riskFlag": false,
+        "price": "541.97"
+      },
+      {
+        "bought": false,
+        "quantity": "9",
+        "price": "530.68",
+        "quantity2": "14",
+        "riskFlag": false
+      },
+      {
+        "quantity": "6",
+        "quantity2": "10",
+        "price": "519.39",
+        "bought": false,
+        "riskFlag": false
+      }
+    ],
+    "refPnLPointSys2": "570.96",
+    "finalPnL": 0,
+    "status": "ACTIVE",
+    "createdAt": {
+      "seconds": 1784125996,
+      "nanoseconds": 420000000
+    },
+    "refPnLPoint": "570.96",
+    "averagingRowsSys2": [
+      {
+        "price": "553.83",
+        "riskFlag": false,
+        "quantity2": "6",
+        "quantity": "4",
+        "bought": false
+      },
+      {
+        "price": "530.68",
+        "bought": false,
+        "quantity": "6",
+        "quantity2": "10",
+        "riskFlag": false
+      },
+      {
+        "quantity2": "14",
+        "bought": false,
+        "quantity": "9",
+        "riskFlag": false,
+        "price": "513.74"
+      },
+      {
+        "quantity2": "10",
+        "quantity": "6",
+        "bought": false,
+        "price": "496.80",
+        "riskFlag": false
+      }
+    ],
+    "tradeType": "simulated"
+  },
+  {
+    "id": "p6cvSED0shFDAmuw4kvt",
+    "companyName": "Adobe",
+    "symbol": "ADBE",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "tradeType": "simulated",
+    "createdAt": {
+      "seconds": 1780933414,
+      "nanoseconds": 376000000
+    },
+    "holdingStatus": "候選名單",
+    "groupId": "ADBE-1781796777024",
+    "currentPrice": 263.82,
+    "status": "ACTIVE",
+    "chartAnnotations": [
+      {
+        "price": 230.43,
+        "id": "1786850085403",
+        "type": "divider",
+        "x2": 100,
+        "y": 74.22,
+        "color": "#000000",
+        "y1": 74.22,
+        "strokeWidth": 8,
+        "y2": 74.22,
+        "x1": 0
+      },
+      {
+        "color": "#ef4444",
+        "id": "1786850358155",
+        "x2": 100,
+        "strokeWidth": 8,
+        "y": 38.016556510781434,
+        "y1": 38.016556510781434,
+        "y2": 38.016556510781434,
+        "type": "divider",
+        "x1": 0
+      },
+      {
+        "strokeWidth": 8,
+        "y2": 82.31,
+        "type": "divider",
+        "x1": 0,
+        "y1": 82.31,
+        "price": 219.26,
+        "y": 82.31,
+        "id": "div-1788529226086-d49cez",
+        "x2": 100,
+        "color": "#3b82f6"
+      },
+      {
+        "y2": 90.07,
+        "x1": 0,
+        "price": 206.18,
+        "strokeWidth": 8,
+        "y": 90.07,
+        "type": "divider",
+        "color": "#10b981",
+        "id": "div-1788529229520-2iz67y",
+        "x2": 100,
+        "y1": 90.07
+      }
+    ],
+    "sortOrder": 19,
+    "isFavoriteHighlight": false,
+    "updatedAt": {
+      "seconds": 1792513648,
+      "nanoseconds": 559000000
+    }
+  },
+  {
+    "id": "pVqlSseXYtrTLkQumYU5",
+    "rating": 2,
+    "status": "COMPLETED",
+    "finalPnL": 1.5,
+    "updatedAt": {
+      "seconds": 1779988699,
+      "nanoseconds": 639000000
+    },
+    "currentPrice": 19.81,
+    "companyName": "Tango Therapeutics",
+    "isOperationConfirmed": false,
+    "holdingStatus": "賣出操作",
+    "tradeType": "simulated",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "createdAt": {
+      "seconds": 1778860548,
+      "nanoseconds": 77000000
+    },
+    "shortTermImpact": "看空",
+    "sellRate": 9,
+    "symbol": "TNGX",
+    "qualityScore": 2,
+    "volatility": "高",
+    "valueScore": 2,
+    "crashSimilarity": 8,
+    "buyRate": 2
+  },
+  {
+    "id": "pXdCRxKxwAyZfwflZduW",
+    "holdingQuantity": 0,
+    "plannedBuyQty": 652,
+    "chartAnnotations": [
+      {
+        "y1": 41.4,
+        "id": "div-1789274585317-q2c9on",
+        "strokeWidth": 8,
+        "x2": 100,
+        "color": "#000000",
+        "type": "divider",
+        "y2": 41.4,
+        "price": 108.46,
+        "x1": 0,
+        "y": 41.4
+      },
+      {
+        "y2": 54.3,
+        "x1": 0,
+        "y": 54.3,
+        "type": "divider",
+        "id": "div-1789274589327-zxhd93",
+        "strokeWidth": 8,
+        "x2": 100,
+        "price": 99.4,
+        "y1": 54.3,
+        "color": "#3b82f6"
+      },
+      {
+        "x2": 100,
+        "price": 92.99,
+        "y": 67.2,
+        "type": "divider",
+        "strokeWidth": 8,
+        "id": "div-1789274593129-wsi827",
+        "y1": 67.2,
+        "color": "#10b981",
+        "x1": 0,
+        "y2": 67.2
+      }
+    ],
+    "createdAt": {
+      "seconds": 1789575018,
+      "nanoseconds": 594000000
+    },
+    "averageCost": 0,
+    "plannedBuyPercent": 5,
+    "tradeType": "simulated",
+    "status": "COMPLETED",
+    "companyName": "Everpure",
+    "holdingStatus": "觀察中",
+    "averagingRowsSys2": [
+      {
+        "bought": false,
+        "riskFlag": false,
+        "quantity2": "52",
+        "price": "90.07",
+        "quantity": "46"
+      },
+      {
+        "riskFlag": false,
+        "quantity2": "98",
+        "price": "87.29",
+        "quantity": "65",
+        "bought": false
+      },
+      {
+        "price": "84.50",
+        "riskFlag": false,
+        "bought": false,
+        "quantity2": "131",
+        "quantity": "98"
+      },
+      {
+        "riskFlag": false,
+        "bought": false,
+        "quantity2": "98",
+        "quantity": "65",
+        "price": "81.72"
+      }
+    ],
+    "includeCurrentHolding": true,
+    "currentPrice": 98,
+    "updatedAt": {
+      "seconds": 1789575018,
+      "nanoseconds": 594000000
+    },
+    "symbol": "P",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "isDeviationConfirmed": false,
+    "refPnLPoint": "92.35",
+    "averagingRows": [
+      {
+        "quantity2": "52",
+        "bought": false,
+        "price": "91.00",
+        "quantity": "46",
+        "riskFlag": false
+      },
+      {
+        "riskFlag": false,
+        "quantity2": "98",
+        "price": "89.15",
+        "bought": false,
+        "quantity": "65"
+      },
+      {
+        "quantity": "98",
+        "quantity2": "131",
+        "bought": false,
+        "riskFlag": false,
+        "price": "87.29"
+      },
+      {
+        "riskFlag": false,
+        "price": "85.43",
+        "quantity": "65",
+        "bought": false,
+        "quantity2": "98"
+      }
+    ],
+    "finalPnL": 222.64,
+    "refPnLPointSys2": "92.35"
+  },
+  {
+    "id": "r2SSlYZyi3psk3HafxLq",
+    "averageCost": 0,
+    "createdAt": {
+      "seconds": 1789479835,
+      "nanoseconds": 342000000
+    },
+    "updatedAt": {
+      "seconds": 1792074893,
+      "nanoseconds": 159000000
+    },
+    "holdingQuantity": 0,
+    "chartAnnotations": [
+      {
+        "price": 348.56,
+        "type": "divider",
+        "y2": 53.91,
+        "color": "#000000",
+        "x1": 0,
+        "y1": 53.91,
+        "id": "div-1789479892105-0cr522",
+        "strokeWidth": 8,
+        "x2": 100,
+        "y": 53.91
+      },
+      {
+        "price": 339.43,
+        "type": "divider",
+        "y1": 69.55,
+        "color": "#3b82f6",
+        "id": "div-1789479897152-3xqyzc",
+        "x2": 100,
+        "y2": 69.55,
+        "strokeWidth": 8,
+        "y": 69.55,
+        "x1": 0
+      },
+      {
+        "type": "divider",
+        "price": 324.41,
+        "y1": 85.18,
+        "color": "#10b981",
+        "id": "div-1789479901699-t6cfnu",
+        "x2": 100,
+        "strokeWidth": 8,
+        "y": 85.18,
+        "y2": 85.18,
+        "x1": 0
+      },
+      {
+        "x2": 100,
+        "price": 363.74,
+        "type": "divider",
+        "y": 29.77,
+        "strokeWidth": 8,
+        "id": "div-1789479916261-rldwrr",
+        "y1": 29.77,
+        "color": "#ef4444",
+        "x1": 0,
+        "y2": 29.77
+      }
+    ],
+    "currentPrice": 372.22,
+    "tradeType": "real",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "status": "ACTIVE",
+    "companyName": "TESLA",
+    "symbol": "TSLA"
+  },
+  {
+    "id": "rj4YFoXlGrOEZJZTWc82",
+    "tradeType": "real",
+    "status": "ACTIVE",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "currentPrice": 126.16,
+    "createdAt": {
+      "seconds": 1786807402,
+      "nanoseconds": 734000000
+    },
+    "updatedAt": {
+      "seconds": 1790704285,
+      "nanoseconds": 179000000
+    },
+    "symbol": "ORCL",
+    "holdingStatus": "買進操作",
+    "groupId": "ORCL-1790704284847",
+    "chartAnnotations": [
+      {
+        "y1": 53.91,
+        "type": "divider",
+        "x2": 100,
+        "id": "div-1789275414672-2lodyf",
+        "y": 53.91,
+        "price": 144.24,
+        "x1": 0,
+        "color": "#000000",
+        "strokeWidth": 8,
+        "y2": 53.91
+      },
+      {
+        "color": "#3b82f6",
+        "x1": 0,
+        "price": 141.01,
+        "y2": 61.73,
+        "strokeWidth": 8,
+        "y1": 61.73,
+        "y": 61.73,
+        "type": "divider",
+        "x2": 100,
+        "id": "div-1789275418247-oxvaxh"
+      },
+      {
+        "color": "#10b981",
+        "x1": 0,
+        "strokeWidth": 8,
+        "y2": 85.18,
+        "price": 134,
+        "y1": 85.18,
+        "y": 85.18,
+        "x2": 100,
+        "id": "div-1789275421848-qxem3c",
+        "type": "divider"
+      },
+      {
+        "price": 156.39,
+        "type": "divider",
+        "x1": 0,
+        "color": "#ef4444",
+        "y2": 30.45,
+        "y1": 30.45,
+        "y": 30.45,
+        "strokeWidth": 8,
+        "x2": 100,
+        "id": "div-1789275427638-dit7j1"
+      }
+    ],
+    "companyName": "Oracle"
+  },
+  {
+    "id": "rkjpl8l7xyLCr18dTyX3",
+    "holdingStatus": "觀察中",
+    "chartAnnotations": [
+      {
+        "y1": 37.79,
+        "color": "#000000",
+        "x2": 100,
+        "price": 11.21,
+        "id": "div-1789274809340-uqgh8q",
+        "y": 37.79,
+        "x1": 0,
+        "type": "divider",
+        "strokeWidth": 8,
+        "y2": 37.79
+      },
+      {
+        "x2": 100,
+        "y": 80.71,
+        "id": "div-1789274812854-lpzxww",
+        "y1": 80.71,
+        "x1": 0,
+        "color": "#3b82f6",
+        "strokeWidth": 8,
+        "type": "divider",
+        "y2": 80.71,
+        "price": 9.36
+      },
+      {
+        "strokeWidth": 8,
+        "y1": 93,
+        "id": "div-1789274816306-f5htjl",
+        "x2": 100,
+        "color": "#10b981",
+        "y2": 93,
+        "type": "divider",
+        "y": 93,
+        "price": 7.95,
+        "x1": 0
+      }
+    ],
+    "plannedBuyPercent": 1,
+    "plannedBuyQty": 992,
+    "updatedAt": {
+      "seconds": 1791994506,
+      "nanoseconds": 222000000
+    },
+    "currentPrice": 9.36,
+    "averagingRowsSys2": [
+      {
+        "riskFlag": false,
+        "price": "8.93",
+        "quantity": "69",
+        "quantity2": "80",
+        "bought": false
+      },
+      {
+        "quantity2": "149",
+        "riskFlag": false,
+        "price": "8.66",
+        "quantity": "99",
+        "bought": false
+      },
+      {
+        "quantity": "149",
+        "bought": false,
+        "riskFlag": false,
+        "quantity2": "199",
+        "price": "8.38"
+      },
+      {
+        "riskFlag": false,
+        "quantity": "99",
+        "bought": false,
+        "quantity2": "149",
+        "price": "8.10"
+      }
+    ],
+    "status": "ACTIVE",
+    "averagingRows": [
+      {
+        "price": "9.03",
+        "quantity2": "80",
+        "quantity": "69",
+        "bought": false,
+        "riskFlag": false
+      },
+      {
+        "bought": false,
+        "quantity2": "149",
+        "riskFlag": false,
+        "price": "8.84",
+        "quantity": "99"
+      },
+      {
+        "riskFlag": false,
+        "price": "8.66",
+        "bought": false,
+        "quantity": "149",
+        "quantity2": "199"
+      },
+      {
+        "riskFlag": false,
+        "bought": false,
+        "price": "8.47",
+        "quantity2": "149",
+        "quantity": "99"
+      }
+    ],
+    "companyName": "Blue Owl Capital",
+    "pyramidRowsSys2": [
+      {
+        "quantity": "",
+        "price": "9.49",
+        "quantity2": "",
+        "riskFlag": false,
+        "bought": false
+      },
+      {
+        "bought": false,
+        "riskFlag": false,
+        "quantity": "",
+        "quantity2": "",
+        "price": "9.76"
+      },
+      {
+        "riskFlag": false,
+        "quantity2": "",
+        "bought": false,
+        "quantity": "",
+        "price": "10.04"
+      },
+      {
+        "bought": false,
+        "riskFlag": false,
+        "price": "10.32",
+        "quantity": "",
+        "quantity2": ""
+      }
+    ],
+    "pyramidRows": [
+      {
+        "riskFlag": false,
+        "price": "9.39",
+        "bought": false,
+        "quantity": "",
+        "quantity2": ""
+      },
+      {
+        "bought": false,
+        "riskFlag": false,
+        "price": "9.58",
+        "quantity2": "",
+        "quantity": ""
+      },
+      {
+        "quantity2": "",
+        "price": "9.76",
+        "riskFlag": false,
+        "quantity": "",
+        "bought": false
+      },
+      {
+        "bought": false,
+        "riskFlag": false,
+        "quantity2": "",
+        "price": "9.95",
+        "quantity": ""
+      }
+    ],
+    "createdAt": {
+      "seconds": 1786545976,
+      "nanoseconds": 530000000
+    },
+    "symbol": "OWL",
+    "holdingQuantity": 6,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "tradeType": "simulated",
+    "averageCost": 9.21
+  },
+  {
+    "id": "rmBbBLKXiUZocZICGSGX",
+    "plannedBuyPercent": 10,
+    "holdingQuantity": 0,
+    "plannedBuyQty": 3,
+    "companyName": "Boston Scientific",
+    "tradeType": "real",
+    "finalPnL": 0,
+    "groupId": "BSX-1786548016526",
+    "holdingStatus": "買進操作",
+    "averageCost": 0,
+    "averagingRowsSys2": [
+      {
+        "quantity2": "1",
+        "riskFlag": false,
+        "price": "41.86",
+        "bought": false,
+        "quantity": "0"
+      },
+      {
+        "bought": false,
+        "quantity2": "1",
+        "quantity": "0",
+        "riskFlag": false,
+        "price": "40.56"
+      },
+      {
+        "riskFlag": false,
+        "quantity2": "2",
+        "price": "39.27",
+        "quantity": "0",
+        "bought": false
+      },
+      {
+        "bought": false,
+        "riskFlag": false,
+        "price": "37.98",
+        "quantity": "0",
+        "quantity2": "1"
+      }
+    ],
+    "createdAt": {
+      "seconds": 1786547634,
+      "nanoseconds": 633000000
+    },
+    "status": "ACTIVE",
+    "chartAnnotations": [
+      {
+        "color": "#000000",
+        "y2": 39.76,
+        "price": 48.33,
+        "strokeWidth": 8,
+        "x1": 0,
+        "type": "divider",
+        "y1": 39.76,
+        "id": "div-1789275133266-xmdgf7",
+        "y": 39.76,
+        "x2": 100
+      },
+      {
+        "x1": 0,
+        "y": 43.86,
+        "y2": 43.86,
+        "price": 47.5,
+        "color": "#3b82f6",
+        "type": "divider",
+        "x2": 100,
+        "id": "div-1789275136561-ii5ohc",
+        "y1": 43.86,
+        "strokeWidth": 8
+      },
+      {
+        "y2": 52.05,
+        "x1": 0,
+        "type": "divider",
+        "y": 52.05,
+        "id": "div-1789275140933-ytkrmg",
+        "price": 45.51,
+        "x2": 100,
+        "strokeWidth": 8,
+        "color": "#10b981",
+        "y1": 52.05
+      },
+      {
+        "x1": 0,
+        "price": 42.98,
+        "y2": 72.52,
+        "type": "divider",
+        "y": 72.52,
+        "color": "#eab308",
+        "x2": 100,
+        "strokeWidth": 8,
+        "id": "div-1789275153411-sz3hv9",
+        "y1": 72.52
+      }
+    ],
+    "refPnLPoint": "47.60",
+    "refPnLPointSys2": "47.60",
+    "currentPrice": 45.69,
+    "symbol": "BSX",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "averagingRows": [
+      {
+        "riskFlag": false,
+        "price": "42.29",
+        "bought": false,
+        "quantity": "0",
+        "quantity2": "1"
+      },
+      {
+        "riskFlag": false,
+        "bought": false,
+        "quantity2": "1",
+        "quantity": "0",
+        "price": "41.43"
+      },
+      {
+        "quantity2": "2",
+        "quantity": "0",
+        "price": "40.56",
+        "riskFlag": false,
+        "bought": false
+      },
+      {
+        "price": "39.70",
+        "riskFlag": false,
+        "quantity2": "1",
+        "quantity": "0",
+        "bought": false
+      }
+    ],
+    "includeCurrentHolding": true,
+    "updatedAt": {
+      "seconds": 1789656829,
+      "nanoseconds": 671000000
+    }
+  },
+  {
+    "id": "sgQmCLVwmzrAhkba2AuG",
+    "sortOrder": 6,
+    "companyName": "Match group",
+    "tradeType": "real",
+    "currentPrice": 45.73,
+    "updatedAt": {
+      "seconds": 1790704071,
+      "nanoseconds": 379000000
+    },
+    "chartAnnotations": [
+      {
+        "y2": 56.14,
+        "type": "divider",
+        "x1": 0,
+        "price": 38.83,
+        "y1": 56.14,
+        "id": "div-1788529292179-l1s2mx",
+        "strokeWidth": 8,
+        "x2": 100,
+        "y": 56.14,
+        "color": "#000000"
+      },
+      {
+        "id": "div-1788529296037-whx8hq",
+        "x2": 100,
+        "strokeWidth": 8,
+        "y": 68.43,
+        "y1": 68.43,
+        "y2": 68.43,
+        "color": "#3b82f6",
+        "type": "divider",
+        "x1": 0,
+        "price": 38.27
+      },
+      {
+        "color": "#10b981",
+        "id": "div-1788529301269-dvvo4s",
+        "x2": 100,
+        "y": 86.86,
+        "price": 36.39,
+        "strokeWidth": 8,
+        "y1": 86.86,
+        "y2": 86.86,
+        "type": "divider",
+        "x1": 0
+      },
+      {
+        "x1": 0,
+        "y": 13.14,
+        "y2": 13.14,
+        "color": "#ef4444",
+        "strokeWidth": 8,
+        "price": 42.57,
+        "x2": 100,
+        "id": "div-1789275557879-pr3ks7",
+        "y1": 13.14,
+        "type": "divider"
+      }
+    ],
+    "createdAt": {
+      "seconds": 1784559350,
+      "nanoseconds": 708000000
+    },
+    "holdingStatus": "候選名單",
+    "symbol": "MTCH",
+    "plannedBuyQty": 50,
+    "status": "ACTIVE",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2"
+  },
+  {
+    "id": "tmRzdnQDYTHkuAM1d3Aa",
+    "createdAt": {
+      "seconds": 1787150910,
+      "nanoseconds": 58000000
+    },
+    "tradeType": "simulated",
+    "status": "ACTIVE",
+    "chartAnnotations": [
+      {
+        "x1": 0,
+        "y": 62.29,
+        "y2": 62.29,
+        "strokeWidth": 8,
+        "x2": 100,
+        "color": "#000000",
+        "type": "divider",
+        "id": "div-1789274695411-0sjkrz",
+        "y1": 62.29,
+        "price": 146.64
+      },
+      {
+        "type": "divider",
+        "x2": 100,
+        "id": "div-1789274698083-sqtapw",
+        "y": 74.57,
+        "y1": 74.57,
+        "price": 138.25,
+        "strokeWidth": 8,
+        "x1": 0,
+        "y2": 74.57,
+        "color": "#3b82f6"
+      },
+      {
+        "x1": 0,
+        "y": 93,
+        "y2": 93,
+        "price": 126.01,
+        "type": "divider",
+        "color": "#10b981",
+        "x2": 100,
+        "id": "div-1789274702973-5qhoci",
+        "strokeWidth": 8,
+        "y1": 93
+      }
+    ],
+    "refPnLPoint": "148.00",
+    "includeCurrentHolding": true,
+    "averagingRows": [
+      {
+        "bought": false,
+        "quantity": "17",
+        "quantity2": "20",
+        "riskFlag": false,
+        "price": "143.56"
+      },
+      {
+        "riskFlag": false,
+        "price": "142.08",
+        "quantity": "24",
+        "bought": false,
+        "quantity2": "37"
+      },
+      {
+        "price": "139.12",
+        "quantity2": "49",
+        "riskFlag": false,
+        "quantity": "37",
+        "bought": false
+      },
+      {
+        "price": "136.16",
+        "riskFlag": false,
+        "quantity2": "37",
+        "quantity": "24",
+        "bought": false
+      }
+    ],
+    "updatedAt": {
+      "seconds": 1791987385,
+      "nanoseconds": 603000000
+    },
+    "plannedBuyPercent": 3,
+    "currentPrice": 123.69,
+    "symbol": "GLW",
+    "refPnLPointSys2": "148.00",
+    "plannedBuyQty": 244,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "companyName": "Corning Incorporated",
+    "averagingRowsSys2": [
+      {
+        "bought": false,
+        "quantity2": "20",
+        "quantity": "17",
+        "riskFlag": false,
+        "price": "143.56"
+      },
+      {
+        "price": "139.12",
+        "riskFlag": false,
+        "bought": false,
+        "quantity": "24",
+        "quantity2": "37"
+      },
+      {
+        "riskFlag": false,
+        "bought": false,
+        "price": "134.68",
+        "quantity": "37",
+        "quantity2": "49"
+      },
+      {
+        "bought": false,
+        "riskFlag": false,
+        "quantity2": "37",
+        "price": "130.24",
+        "quantity": "24"
+      }
+    ],
+    "holdingStatus": "買進操作"
+  },
+  {
+    "id": "tnlRXx5WPNNa2pWWbhgC",
+    "createdAt": {
+      "seconds": 1787151812,
+      "nanoseconds": 365000000
+    },
+    "updatedAt": {
+      "seconds": 1789275326,
+      "nanoseconds": 657000000
+    },
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "status": "ACTIVE",
+    "tradeType": "real",
+    "companyName": "Procter & Gamble",
+    "symbol": "PG",
+    "chartAnnotations": [
+      {
+        "type": "divider",
+        "price": 140.86,
+        "y1": 67.45,
+        "strokeWidth": 8,
+        "color": "#000000",
+        "id": "1787589867748",
+        "x2": 100,
+        "y2": 67.45,
+        "y": 67.45,
+        "x1": 0
+      },
+      {
+        "y1": 75.45,
+        "x2": 100,
+        "strokeWidth": 8,
+        "id": "1787589872743",
+        "y": 75.45,
+        "color": "#3b82f6",
+        "type": "divider",
+        "x1": 0,
+        "price": 138.25,
+        "y2": 75.45
+      },
+      {
+        "strokeWidth": 8,
+        "y2": 93,
+        "x1": 0,
+        "type": "divider",
+        "y": 93,
+        "price": 130,
+        "id": "div-1789275317935-sfy2ly",
+        "x2": 100,
+        "color": "#10b981",
+        "y1": 93
+      },
+      {
+        "strokeWidth": 8,
+        "x1": 0,
+        "type": "divider",
+        "y2": 41.16,
+        "y1": 41.16,
+        "price": 147.26,
+        "y": 41.16,
+        "x2": 100,
+        "id": "div-1789275327253-eghilb",
+        "color": "#ef4444"
+      }
+    ],
+    "currentPrice": 161.02
+  },
+  {
+    "id": "u5r9WEXdB0MsDokYzdiA",
+    "status": "COMPLETED",
+    "rating": 8,
+    "valueScore": 7,
+    "finalPnL": 226.19,
+    "tradeType": "simulated",
+    "holdingStatus": "觀察中",
+    "qualityScore": 8,
+    "createdAt": {
+      "seconds": 1780412126,
+      "nanoseconds": 149000000
+    },
+    "symbol": "SE",
+    "isOperationConfirmed": true,
+    "companyName": "SEA",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "buyRate": 8,
+    "sellRate": 2,
+    "currentPrice": 113.22,
+    "crashSimilarity": 5,
+    "chartAnnotations": [],
+    "updatedAt": {
+      "seconds": 1784126923,
+      "nanoseconds": 725000000
+    }
+  },
+  {
+    "id": "v39aauT7dpwUgozjM3Bj",
+    "currentPrice": 196.75,
+    "rating": 4,
+    "status": "ACTIVE",
+    "sortOrder": 26,
+    "companyName": "Palantir",
+    "valueScore": 1,
+    "updatedAt": {
+      "seconds": 1789275019,
+      "nanoseconds": 528000000
+    },
+    "qualityScore": 8,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "tradeType": "simulated",
+    "sellRate": 9,
+    "buyRate": 1,
+    "createdAt": {
+      "seconds": 1779092003,
+      "nanoseconds": 427000000
+    },
+    "crashSimilarity": 2,
+    "holdingStatus": "賣出操作",
+    "symbol": "PLTR",
+    "chartAnnotations": [
+      {
+        "x1": 0,
+        "y2": 19.19,
+        "y": 19.19,
+        "strokeWidth": 8,
+        "type": "divider",
+        "x2": 100,
+        "id": "1786850137176",
+        "price": 189.52,
+        "y1": 19.19,
+        "color": "#ef4444"
+      },
+      {
+        "strokeWidth": 8,
+        "x1": 0,
+        "type": "divider",
+        "color": "#000000",
+        "y2": 64.23360324037178,
+        "y1": 64.23360324037178,
+        "y": 64.23360324037178,
+        "x2": 100,
+        "id": "1787748616003"
+      },
+      {
+        "x1": 0,
+        "y": 71.83,
+        "color": "#3b82f6",
+        "y2": 71.83,
+        "price": 122.37,
+        "strokeWidth": 8,
+        "x2": 100,
+        "type": "divider",
+        "id": "1787748622287",
+        "y1": 71.83
+      },
+      {
+        "x2": 100,
+        "y": 83.44,
+        "color": "#10b981",
+        "id": "1787748626096",
+        "y1": 83.44,
+        "price": 104,
+        "x1": 0,
+        "y2": 83.44,
+        "type": "divider",
+        "strokeWidth": 8
+      }
+    ],
+    "isFavoriteHighlight": false
+  },
+  {
+    "id": "vYzFX4l3Q0TOf1fDVHo0",
+    "selectedSplitTrade": "",
+    "holdingQuantity": 71,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "chartAnnotations": [
+      {
+        "color": "#000000",
+        "x2": 100,
+        "y": 38.27,
+        "id": "div-1789274514978-jnart3",
+        "price": 86.5,
+        "y1": 38.27,
+        "x1": 0,
+        "type": "divider",
+        "y2": 38.27,
+        "strokeWidth": 8
+      },
+      {
+        "price": 85,
+        "type": "divider",
+        "id": "div-1789274518867-bg7hsr",
+        "x2": 100,
+        "color": "#3b82f6",
+        "y": 46.09,
+        "y1": 46.09,
+        "y2": 46.09,
+        "x1": 0,
+        "strokeWidth": 8
+      },
+      {
+        "strokeWidth": 8,
+        "color": "#10b981",
+        "y2": 53.91,
+        "x1": 0,
+        "price": 83.5,
+        "y1": 53.91,
+        "id": "div-1789274522974-xscdzg",
+        "type": "divider",
+        "x2": 100,
+        "y": 53.91
+      }
+    ],
+    "tradeType": "simulated",
+    "averagingRows": [
+      {
+        "quantity": "21",
+        "quantity2": "23",
+        "bought": false,
+        "price": "78.04",
+        "riskFlag": false
+      },
+      {
+        "riskFlag": false,
+        "price": "76.44",
+        "bought": false,
+        "quantity": "29",
+        "quantity2": "45"
+      },
+      {
+        "riskFlag": false,
+        "bought": false,
+        "quantity2": "59",
+        "price": "74.85",
+        "quantity": "44"
+      },
+      {
+        "bought": false,
+        "quantity": "29",
+        "quantity2": "45",
+        "riskFlag": false,
+        "price": "73.26"
+      }
+    ],
+    "createdAt": {
+      "seconds": 1788196458,
+      "nanoseconds": 948000000
+    },
+    "isOperationConfirmed": false,
+    "pyramidRows": [
+      {
+        "quantity": "",
+        "quantity2": "",
+        "price": "81.22",
+        "riskFlag": false,
+        "bought": false
+      },
+      {
+        "price": "82.81",
+        "quantity": "",
+        "bought": false,
+        "quantity2": "",
+        "riskFlag": false
+      },
+      {
+        "quantity2": "",
+        "riskFlag": false,
+        "bought": false,
+        "quantity": "",
+        "price": "84.41"
+      },
+      {
+        "bought": false,
+        "riskFlag": false,
+        "quantity": "",
+        "quantity2": "",
+        "price": "86.00"
+      }
+    ],
+    "holdingStatus": "觀察中",
+    "updatedAt": {
+      "seconds": 1791385605,
+      "nanoseconds": 961000000
+    },
+    "refPnLPointSys2": "82.14",
+    "averagingRowsSys2": [
+      {
+        "quantity2": "23",
+        "price": "77.24",
+        "quantity": "21",
+        "bought": false,
+        "riskFlag": false
+      },
+      {
+        "quantity2": "45",
+        "riskFlag": false,
+        "bought": false,
+        "price": "74.85",
+        "quantity": "29"
+      },
+      {
+        "quantity": "44",
+        "bought": false,
+        "price": "72.46",
+        "riskFlag": false,
+        "quantity2": "59"
+      },
+      {
+        "quantity2": "45",
+        "price": "70.07",
+        "bought": false,
+        "quantity": "29",
+        "riskFlag": false
+      }
+    ],
+    "symbol": "NEE",
+    "refPnLPoint": "82.14",
+    "currentPrice": 82.1,
+    "pyramidRowsSys2": [
+      {
+        "riskFlag": false,
+        "quantity2": "",
+        "price": "82.02",
+        "bought": false,
+        "quantity": ""
+      },
+      {
+        "riskFlag": false,
+        "quantity2": "",
+        "bought": false,
+        "quantity": "",
+        "price": "84.41"
+      },
+      {
+        "price": "86.80",
+        "bought": false,
+        "quantity": "",
+        "quantity2": "",
+        "riskFlag": false
+      },
+      {
+        "price": "89.18",
+        "riskFlag": false,
+        "bought": false,
+        "quantity": "",
+        "quantity2": ""
+      }
+    ],
+    "plannedBuyPercent": 2,
+    "plannedBuyQty": 293,
+    "groupId": "NEE-1790347759604",
+    "isDeviationConfirmed": false,
+    "includeCurrentHolding": true,
+    "status": "ACTIVE",
+    "isFavoriteHighlight": false,
+    "companyName": "NextEra Energy, Inc",
+    "averageCost": 79.62915492957747,
+    "isNew": false
+  },
+  {
+    "id": "vzu1urIkXhSwI1w5nUm9",
+    "chartAnnotations": [
+      {
+        "price": 744.97,
+        "x2": 100,
+        "type": "divider",
+        "id": "div-1790419058408-nzapkm",
+        "y": 50,
+        "color": "#000000",
+        "y1": 50,
+        "x1": 0,
+        "strokeWidth": 8,
+        "y2": 50
+      },
+      {
+        "color": "#3b82f6",
+        "x2": 100,
+        "id": "div-1790419063181-sqn85a",
+        "y": 64.33,
+        "price": 721.59,
+        "y1": 64.33,
+        "x1": 0,
+        "type": "divider",
+        "y2": 64.33,
+        "strokeWidth": 8
+      },
+      {
+        "y1": 85.83,
+        "id": "div-1790419068892-55gh4m",
+        "strokeWidth": 8,
+        "x2": 100,
+        "color": "#10b981",
+        "type": "divider",
+        "y2": 85.83,
+        "price": 690,
+        "x1": 0,
+        "y": 85.83
+      },
+      {
+        "strokeWidth": 8,
+        "color": "#ef4444",
+        "y2": 35.67,
+        "x1": 0,
+        "price": 759.66,
+        "y1": 35.67,
+        "id": "div-1790419184517-sz5wuw",
+        "type": "divider",
+        "x2": 100,
+        "y": 35.67
+      }
+    ],
+    "isNew": true,
+    "status": "ACTIVE",
+    "holdingStatus": "買進操作",
+    "updatedAt": {
+      "seconds": 1792934504,
+      "nanoseconds": 347000000
+    },
+    "groupId": "META-1792934505747",
+    "currentPrice": 642.62,
+    "companyName": "META",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "tradeType": "simulated",
+    "averageCost": 0,
+    "symbol": "META",
+    "createdAt": {
+      "seconds": 1790417636,
+      "nanoseconds": 540000000
+    },
+    "holdingQuantity": 0
+  },
+  {
+    "id": "w8OYEDTmHz7N7hbvlH6f",
+    "rating": 7,
+    "status": "COMPLETED",
+    "holdingStatus": "觀察中",
+    "buyRate": 7,
+    "sortOrder": 3,
+    "crashSimilarity": 5,
+    "isOperationConfirmed": false,
+    "symbol": "DIS",
+    "sellRate": 3,
+    "chartAnnotations": [],
+    "tags": [
+      "長線"
+    ],
+    "longTermOutlook": "觀察",
+    "currentPrice": 103.28,
+    "updatedAt": {
+      "seconds": 1786457346,
+      "nanoseconds": 678000000
+    },
+    "shortTermImpact": "看多",
+    "finalPnL": 189.79,
+    "valueScore": 7,
+    "groupId": "",
+    "isFavoriteHighlight": false,
+    "plannedBuyQty": 120,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "createdAt": {
+      "seconds": 1786457346,
+      "nanoseconds": 678000000
+    },
+    "qualityScore": 8,
+    "isDeviationConfirmed": false,
+    "tradeType": "simulated",
+    "recommendation": "推薦買進",
+    "companyName": "DISNEY",
+    "sentiment": 60
+  },
+  {
+    "id": "wAFORFSi5QyVB0fAhmYE",
+    "selectedSplitTrade": "",
+    "updatedAt": {
+      "seconds": 1792934311,
+      "nanoseconds": 843000000
+    },
+    "chartAnnotations": [
+      {
+        "x2": 100,
+        "y": 45.69,
+        "id": "div-1789274128735-1norod",
+        "y1": 45.69,
+        "x1": 0,
+        "strokeWidth": 8,
+        "color": "#000000",
+        "y2": 45.69,
+        "type": "divider",
+        "price": 217
+      },
+      {
+        "x2": 100,
+        "y": 51.44,
+        "id": "div-1789274140484-se2040",
+        "y1": 51.44,
+        "x1": 0,
+        "color": "#3b82f6",
+        "y2": 51.44,
+        "strokeWidth": 8,
+        "type": "divider",
+        "price": 212.36
+      },
+      {
+        "price": 187,
+        "type": "divider",
+        "y1": 88.76,
+        "color": "#10b981",
+        "id": "div-1789274148942-kj7w8k",
+        "x2": 100,
+        "strokeWidth": 8,
+        "y2": 88.76,
+        "y": 88.76,
+        "x1": 0
+      }
+    ],
+    "plannedBuyPercent": 10,
+    "pyramidRowsSys2": [
+      {
+        "riskFlag": false,
+        "bought": false,
+        "quantity": "",
+        "quantity2": "",
+        "price": "209.00"
+      },
+      {
+        "quantity": "",
+        "bought": false,
+        "quantity2": "",
+        "price": "215.09",
+        "riskFlag": false
+      },
+      {
+        "bought": false,
+        "quantity2": "",
+        "quantity": "",
+        "riskFlag": false,
+        "price": "221.17"
+      },
+      {
+        "bought": false,
+        "riskFlag": false,
+        "quantity2": "",
+        "price": "227.26",
+        "quantity": ""
+      }
+    ],
+    "longTermOutlook": "觀察",
+    "averagingRowsSys2": [
+      {
+        "riskFlag": false,
+        "price": "196.83",
+        "bought": false,
+        "quantity": "",
+        "quantity2": ""
+      },
+      {
+        "bought": false,
+        "riskFlag": false,
+        "quantity2": "",
+        "quantity": "",
+        "price": "190.74"
+      },
+      {
+        "riskFlag": false,
+        "bought": false,
+        "quantity2": "",
+        "price": "184.65",
+        "quantity": ""
+      },
+      {
+        "bought": false,
+        "riskFlag": false,
+        "price": "178.56",
+        "quantity": "",
+        "quantity2": ""
+      }
+    ],
+    "plannedBuyQty": 574,
+    "isFavoriteHighlight": false,
+    "refPnLPoint": "207.40",
+    "isNew": false,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "createdAt": {
+      "seconds": 1778574389,
+      "nanoseconds": 558000000
+    },
+    "averageCost": 202.91239837398376,
+    "valueScore": 2,
+    "tradeType": "simulated",
+    "isOperationConfirmed": false,
+    "sellRate": 6,
+    "groupId": "BA-1780500553777",
+    "crashSimilarity": 6,
+    "ringColor": "#38BDF8",
+    "companyName": "BOEING",
+    "status": "ACTIVE",
+    "rating": 4,
+    "holdingStatus": "觀察中",
+    "sortOrder": 0,
+    "qualityScore": 3,
+    "includeCurrentHolding": true,
+    "tradeDirection": "看漲",
+    "holdingQuantity": 246,
+    "shortTermImpact": "看多",
+    "refPnLPointSys2": "207.40",
+    "outerRingColor": "#38BDF8",
+    "averagingRows": [
+      {
+        "riskFlag": false,
+        "price": "198.85",
+        "quantity2": "",
+        "quantity": "",
+        "bought": false
+      },
+      {
+        "quantity2": "",
+        "price": "194.80",
+        "quantity": "",
+        "bought": false,
+        "riskFlag": false
+      },
+      {
+        "bought": false,
+        "riskFlag": false,
+        "quantity2": "",
+        "price": "190.74",
+        "quantity": ""
+      },
+      {
+        "quantity2": "",
+        "bought": false,
+        "quantity": "",
+        "riskFlag": false,
+        "price": "186.68"
+      }
+    ],
+    "buyRate": 4,
+    "symbol": "BA",
+    "isDeviationConfirmed": false,
+    "currentPrice": 188.35,
+    "innerRingColor": "#38BDF8",
+    "pyramidRows": [
+      {
+        "riskFlag": false,
+        "price": "206.97",
+        "quantity": "",
+        "quantity2": "",
+        "bought": false
+      },
+      {
+        "price": "211.03",
+        "riskFlag": false,
+        "quantity2": "",
+        "quantity": "",
+        "bought": false
+      },
+      {
+        "quantity": "",
+        "quantity2": "",
+        "bought": false,
+        "price": "215.09",
+        "riskFlag": false
+      },
+      {
+        "bought": false,
+        "riskFlag": false,
+        "price": "219.15",
+        "quantity": "",
+        "quantity2": ""
+      }
+    ]
+  },
+  {
+    "id": "wBSnKSGFpADse4pHfLIT",
+    "sortOrder": 2,
+    "valueScore": 7,
+    "symbol": "CRM",
+    "buyRate": 8,
+    "companyName": "CRM",
+    "isOperationConfirmed": false,
+    "recommendation": "推薦買進",
+    "shortTermImpact": "看多",
+    "finalPnL": 5363.6,
+    "status": "COMPLETED",
+    "rating": 8,
+    "currentPrice": 179.49,
+    "chartAnnotations": [],
+    "updatedAt": {
+      "seconds": 1785250566,
+      "nanoseconds": 958000000
+    },
+    "groupId": "CRM-1781796722343",
+    "isFavoriteHighlight": false,
+    "tags": [
+      "波段"
+    ],
+    "sellRate": 2,
+    "volatility": "低",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "longTermOutlook": "看多",
+    "isDeviationConfirmed": false,
+    "qualityScore": 8,
+    "tradeType": "simulated",
+    "createdAt": {
+      "seconds": 1785250566,
+      "nanoseconds": 958000000
+    },
+    "tradeDirection": "看漲",
+    "crashSimilarity": 8,
+    "holdingStatus": "觀察中"
+  },
+  {
+    "id": "wei2KXkWOz65t4I3npFL",
+    "qualityScore": 5,
+    "holdingStatus": "賣出操作",
+    "sellRate": 8,
+    "companyName": "Rocket Lab",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "createdAt": {
+      "seconds": 1779203993,
+      "nanoseconds": 686000000
+    },
+    "tradeDirection": "看跌",
+    "chartAnnotations": [],
+    "tradeType": "simulated",
+    "symbol": "RKLB",
+    "currentPrice": 147.85,
+    "crashSimilarity": 8,
+    "finalPnL": -418.35,
+    "rating": 2,
+    "buyRate": 2,
+    "updatedAt": {
+      "seconds": 1779988361,
+      "nanoseconds": 617000000
+    },
+    "status": "COMPLETED",
+    "valueScore": 2
+  },
+  {
+    "id": "xPnajFhyGuHK1bxAG4TN",
+    "groupId": "WMT-1787237438208",
+    "createdAt": {
+      "seconds": 1782752871,
+      "nanoseconds": 724000000
+    },
+    "plannedBuyQty": 0,
+    "status": "ACTIVE",
+    "tradeType": "simulated",
+    "holdingStatus": "候選名單",
+    "companyName": "Walmart",
+    "symbol": "WMT",
+    "updatedAt": {
+      "seconds": 1791296627,
+      "nanoseconds": 698000000
+    },
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "chartAnnotations": [
+      {
+        "strokeWidth": 8,
+        "color": "#000000",
+        "y1": 56.14,
+        "id": "div-1791296618609-iy6m8o",
+        "price": 113.06,
+        "x2": 100,
+        "type": "divider",
+        "y2": 56.14,
+        "x1": 0,
+        "y": 56.14
+      },
+      {
+        "strokeWidth": 8,
+        "id": "div-1791296622862-wupq4e",
+        "x2": 100,
+        "y": 68.43,
+        "y1": 68.43,
+        "y2": 68.43,
+        "x1": 0,
+        "color": "#3b82f6",
+        "type": "divider",
+        "price": 111.35
+      },
+      {
+        "x1": 0,
+        "y": 80.71,
+        "color": "#10b981",
+        "y2": 80.71,
+        "strokeWidth": 8,
+        "price": 108,
+        "x2": 100,
+        "id": "div-1791296626320-7j5q4w",
+        "y1": 80.71,
+        "type": "divider"
+      }
+    ],
+    "sortOrder": 9,
+    "isFavoriteHighlight": false,
+    "currentPrice": 119.89
+  },
+  {
+    "id": "xYC6uKwJ0YmKdVI9ARep",
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "refPnLPointSys2": "563.97",
+    "isFavoriteHighlight": true,
+    "averagingRows": [
+      {
+        "quantity2": "",
+        "bought": false,
+        "price": "547.91",
+        "quantity": "",
+        "riskFlag": false
+      },
+      {
+        "riskFlag": false,
+        "quantity2": "",
+        "quantity": "",
+        "bought": false,
+        "price": "536.72"
+      },
+      {
+        "price": "525.54",
+        "quantity": "",
+        "quantity2": "",
+        "riskFlag": false,
+        "bought": false
+      },
+      {
+        "price": "514.36",
+        "bought": false,
+        "quantity": "",
+        "quantity2": "",
+        "riskFlag": false
+      }
+    ],
+    "chartAnnotations": [
+      {
+        "y2": 49.49232853383836,
+        "x1": 0,
+        "strokeWidth": 8,
+        "y": 49.49232853383836,
+        "id": "1787585979232",
+        "color": "#000000",
+        "x2": 100,
+        "type": "divider",
+        "y1": 49.49232853383836
+      },
+      {
+        "id": "1787585988540",
+        "x2": 100,
+        "y": 55.449007070134925,
+        "type": "divider",
+        "y1": 55.449007070134925,
+        "color": "#3b82f6",
+        "y2": 55.449007070134925,
+        "x1": 0,
+        "strokeWidth": 8
+      },
+      {
+        "color": "#10b981",
+        "y1": 74.13131702488326,
+        "id": "1787585993182",
+        "x2": 100,
+        "type": "divider",
+        "strokeWidth": 8,
+        "y2": 74.13131702488326,
+        "y": 74.13131702488326,
+        "x1": 0
+      }
+    ],
+    "symbol": "META",
+    "createdAt": {
+      "seconds": 1787675617,
+      "nanoseconds": 817000000
+    },
+    "tradeType": "simulated",
+    "refPnLPoint": "563.97",
+    "averagingRowsSys2": [
+      {
+        "quantity": "",
+        "quantity2": "",
+        "price": "542.32",
+        "riskFlag": false,
+        "bought": false
+      },
+      {
+        "price": "525.54",
+        "riskFlag": false,
+        "bought": false,
+        "quantity2": "",
+        "quantity": ""
+      },
+      {
+        "quantity": "",
+        "quantity2": "",
+        "price": "508.77",
+        "riskFlag": false,
+        "bought": false
+      },
+      {
+        "quantity2": "",
+        "quantity": "",
+        "price": "492.00",
+        "riskFlag": false,
+        "bought": false
+      }
+    ],
+    "groupId": "META-1785420465449",
+    "status": "COMPLETED",
+    "holdingStatus": "觀察中",
+    "finalPnL": 32.03,
+    "averageCost": 0,
+    "includeCurrentHolding": true,
+    "currentPrice": 563.42,
+    "updatedAt": {
+      "seconds": 1791650418,
+      "nanoseconds": 795000000
+    },
+    "holdingQuantity": 0,
+    "sortOrder": 8,
+    "companyName": "META"
+  },
+  {
+    "id": "ymblm8X91aN2RS6Z12m4",
+    "recommendation": "推薦買進",
+    "isOperationConfirmed": false,
+    "finalPnL": 127.4,
+    "longTermOutlook": "看多",
+    "companyName": "MICROSOFT",
+    "qualityScore": 9,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "tags": [
+      "長線",
+      "短線"
+    ],
+    "createdAt": {
+      "seconds": 1778268507,
+      "nanoseconds": 208000000
+    },
+    "tradeType": "simulated",
+    "symbol": "MSFT",
+    "isFavoriteHighlight": true,
+    "sellRate": 2,
+    "buyRate": 8,
+    "holdingStatus": "平倉操作",
+    "currentPrice": 426.55,
+    "rating": 8,
+    "status": "COMPLETED",
+    "shortTermImpact": "看多",
+    "updatedAt": {
+      "seconds": 1779202232,
+      "nanoseconds": 448000000
+    },
+    "valueScore": 7,
+    "sortOrder": 7
+  },
+  {
+    "id": "zzckuwKAUTaKIqawWmus",
+    "refPnLPointSys2": "92.35",
+    "averagingRowsSys2": [
+      {
+        "riskFlag": false,
+        "quantity2": "52",
+        "price": "90.07",
+        "quantity": "46",
+        "bought": false
+      },
+      {
+        "quantity2": "98",
+        "riskFlag": false,
+        "bought": false,
+        "quantity": "65",
+        "price": "87.29"
+      },
+      {
+        "riskFlag": false,
+        "bought": false,
+        "price": "84.50",
+        "quantity": "98",
+        "quantity2": "131"
+      },
+      {
+        "bought": false,
+        "quantity": "65",
+        "quantity2": "98",
+        "price": "81.72",
+        "riskFlag": false
+      }
+    ],
+    "currentPrice": 123.33,
+    "companyName": "Everpure",
+    "isDeviationConfirmed": false,
+    "updatedAt": {
+      "seconds": 1790703573,
+      "nanoseconds": 232000000
+    },
+    "plannedBuyPercent": 5,
+    "includeCurrentHolding": true,
+    "averageCost": 0,
+    "status": "ACTIVE",
+    "averagingRows": [
+      {
+        "bought": false,
+        "riskFlag": false,
+        "quantity": "46",
+        "price": "91.00",
+        "quantity2": "52"
+      },
+      {
+        "quantity": "65",
+        "price": "89.15",
+        "quantity2": "98",
+        "bought": false,
+        "riskFlag": false
+      },
+      {
+        "quantity2": "131",
+        "quantity": "98",
+        "bought": false,
+        "riskFlag": false,
+        "price": "87.29"
+      },
+      {
+        "quantity2": "98",
+        "riskFlag": false,
+        "price": "85.43",
+        "bought": false,
+        "quantity": "65"
+      }
+    ],
+    "chartAnnotations": [
+      {
+        "id": "div-1789274585317-q2c9on",
+        "x2": 100,
+        "y": 41.4,
+        "y1": 41.4,
+        "y2": 41.4,
+        "color": "#000000",
+        "type": "divider",
+        "strokeWidth": 8,
+        "x1": 0,
+        "price": 108.46
+      },
+      {
+        "color": "#3b82f6",
+        "x1": 0,
+        "price": 99.4,
+        "y2": 54.3,
+        "y1": 54.3,
+        "y": 54.3,
+        "type": "divider",
+        "x2": 100,
+        "id": "div-1789274589327-zxhd93",
+        "strokeWidth": 8
+      },
+      {
+        "y2": 67.2,
+        "x1": 0,
+        "y": 67.2,
+        "color": "#10b981",
+        "id": "div-1789274593129-wsi827",
+        "x2": 100,
+        "strokeWidth": 8,
+        "type": "divider",
+        "price": 92.99,
+        "y1": 67.2
+      }
+    ],
+    "refPnLPoint": "92.35",
+    "plannedBuyQty": 652,
+    "symbol": "P",
+    "createdAt": {
+      "seconds": 1786898589,
+      "nanoseconds": 453000000
+    },
+    "holdingStatus": "候選名單",
+    "holdingQuantity": 0,
+    "userId": "H5HrLO6ndJQeDJWI0KlRYQkXYNH2",
+    "tradeType": "simulated",
+    "finalPnL": 0
+  }
+]

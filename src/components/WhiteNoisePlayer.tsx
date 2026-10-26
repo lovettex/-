@@ -529,10 +529,10 @@ export function WhiteNoisePlayer() {
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 8 }}
             transition={{ duration: 0.15 }}
-            className="absolute right-0 bottom-full mb-3 w-[340px] sm:w-[395px] bg-white/95 backdrop-blur-xl border border-zinc-250 shadow-[0_20px_60px_rgba(0,0,0,0.22)] rounded-3xl p-4 z-[1001] max-h-[75vh] flex flex-col text-zinc-800"
+            className="absolute right-0 bottom-full mb-3 w-[340px] sm:w-[395px] bg-white/95 backdrop-blur-xl border border-zinc-250 shadow-[0_20px_60px_rgba(0,0,0,0.22)] rounded-3xl p-4 z-[1001] max-h-[82vh] flex flex-col text-zinc-800 overflow-hidden"
           >
             {/* Modal Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-zinc-200">
+            <div className="flex items-center justify-between pb-3 border-b border-zinc-200 shrink-0">
               {/* Main Mode Tabs: 白噪音音景 vs PS5 動態背景 */}
               <div className="flex bg-zinc-100 p-0.5 rounded-xl border border-zinc-200">
                 <button
@@ -589,9 +589,9 @@ export function WhiteNoisePlayer() {
 
             {/* TAB 1: Soundscapes Catalog */}
             {mainTab === 'sounds' && (
-              <>
+              <div className="py-2 flex-1 min-h-0 flex flex-col overflow-hidden">
                 {/* Category Filter Tabs */}
-                <div className="flex items-center gap-1 py-2.5 overflow-x-auto scrollbar-hide no-scrollbar [scrollbar-width:none] [&::-webkit-scrollbar]:hidden border-b border-zinc-150">
+                <div className="flex items-center gap-1 py-2 overflow-x-auto scrollbar-hide no-scrollbar [scrollbar-width:none] [&::-webkit-scrollbar]:hidden border-b border-zinc-150 shrink-0">
                   {[
                     { id: 'all', label: '全部' },
                     { id: 'music', label: '🎵 平靜輕音樂' },
@@ -622,7 +622,7 @@ export function WhiteNoisePlayer() {
                   onMouseMove={(e) => handleDragMove(e, soundsListRef)}
                   onMouseUp={handleDragEnd}
                   onMouseLeave={handleDragEnd}
-                  className="overflow-y-auto scrollbar-hide no-scrollbar [scrollbar-width:none] [&::-webkit-scrollbar]:hidden space-y-1.5 py-2.5 pr-0.5 flex-1 max-h-[360px] cursor-grab active:cursor-grabbing select-none"
+                  className="overflow-y-auto scrollbar-hide no-scrollbar [scrollbar-width:none] [&::-webkit-scrollbar]:hidden space-y-1.5 py-2 pr-0.5 flex-1 min-h-0 cursor-grab active:cursor-grabbing select-none overscroll-contain"
                 >
                   {filteredTracks.map((track) => {
                     const globalIndex = AMBIENT_TRACKS.findIndex((t) => t.id === track.id);
@@ -691,14 +691,14 @@ export function WhiteNoisePlayer() {
                     );
                   })}
                 </div>
-              </>
+              </div>
             )}
 
             {/* TAB 2: PS5 Dynamic Background Themes (Galaxy GLSL & Classic 10) */}
             {mainTab === 'themes' && (
-              <div className="py-2.5 flex-1 flex flex-col gap-3">
+              <div className="py-2 flex-1 min-h-0 flex flex-col gap-2.5 overflow-hidden">
                 {/* Background On/Off Switch Banner */}
-                <div className="flex items-center justify-between p-2.5 bg-zinc-100/90 rounded-2xl border-2 border-zinc-300 shadow-2xs">
+                <div className="flex items-center justify-between p-2.5 bg-zinc-100/90 rounded-2xl border-2 border-zinc-300 shadow-2xs shrink-0">
                   <div className="flex items-center gap-2">
                     <div className="p-2 rounded-xl bg-indigo-100 text-indigo-900 border border-indigo-200">
                       <Tv className="w-4 h-4 stroke-[2.5]" />
@@ -726,7 +726,7 @@ export function WhiteNoisePlayer() {
                 </div>
 
                 {/* Animation Speed Adjustment Controller (High Contrast) */}
-                <div className="p-3 bg-gradient-to-br from-indigo-100/90 to-purple-100/80 rounded-2xl border-2 border-indigo-250 shadow-xs flex flex-col gap-2.5">
+                <div className="p-2.5 bg-gradient-to-br from-indigo-100/90 to-purple-100/80 rounded-2xl border-2 border-indigo-250 shadow-xs flex flex-col gap-2 shrink-0">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5">
                       <Gauge className="w-4 h-4 text-indigo-900 stroke-[2.5]" />
@@ -809,7 +809,7 @@ export function WhiteNoisePlayer() {
                   onMouseMove={(e) => handleDragMove(e, themesListRef)}
                   onMouseUp={handleDragEnd}
                   onMouseLeave={handleDragEnd}
-                  className="overflow-y-auto scrollbar-hide no-scrollbar [scrollbar-width:none] [&::-webkit-scrollbar]:hidden space-y-2 pr-0.5 max-h-[360px] cursor-grab active:cursor-grabbing select-none"
+                  className="overflow-y-auto scrollbar-hide no-scrollbar [scrollbar-width:none] [&::-webkit-scrollbar]:hidden space-y-2 pr-0.5 flex-1 min-h-0 cursor-grab active:cursor-grabbing select-none overscroll-contain"
                 >
                   {/* Tokyo Dynamic Speed Series Group Heading */}
                   {PS5_THEMES.filter((t) => t.category === 'tokyo').length > 0 && (
@@ -1061,7 +1061,7 @@ export function WhiteNoisePlayer() {
             )}
 
             {/* Bottom Quick Random Action Footer (High Contrast) */}
-            <div className="pt-2.5 border-t-2 border-zinc-200 flex items-center justify-between text-xs">
+            <div className="pt-2 border-t-2 border-zinc-200 flex items-center justify-between text-xs shrink-0 mt-auto">
               <span className="text-[11.5px] text-zinc-800 font-black truncate max-w-[200px]">
                 {state.isPlaying ? `正在撥放：${currentTrack.name}` : '目前處於關閉狀態'}
               </span>

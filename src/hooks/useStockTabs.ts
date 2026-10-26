@@ -1,11 +1,23 @@
 import { useState, useEffect, useCallback } from 'react';
-import { collection, query, onSnapshot, addDoc, serverTimestamp, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, query, onSnapshot, getDocs, addDoc, serverTimestamp, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db, OperationType, handleFirestoreError } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
 import { StockTab } from '../types';
 import { toast } from 'sonner';
 import { getTimestampMillis } from '../lib/dateUtils';
 import { safeLocalStorage } from '../lib/utils';
+import initialStockTabs from '../data/initialStockTabs.json';
+
+const sortTabs = (data: StockTab[]): StockTab[] => {
+  return [...data].sort((a, b) => {
+    const orderA = a.sortOrder !== undefined ? a.sortOrder : 999999;
+    const orderB = b.sortOrder !== undefined ? b.sortOrder : 999999;
+    if (orderA !== orderB) {
+      return orderA - orderB;
+    }
+    return getTimestampMillis(b.createdAt) - getTimestampMillis(a.createdAt);
+  });
+};
 
 const getCachedTabs = (userId?: string | null): StockTab[] => {
   try {
@@ -14,7 +26,7 @@ const getCachedTabs = (userId?: string | null): StockTab[] => {
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed as StockTab[];
+          return sortTabs(parsed as StockTab[]);
         }
       }
     }
@@ -22,11 +34,15 @@ const getCachedTabs = (userId?: string | null): StockTab[] => {
     if (shared) {
       const parsed = JSON.parse(shared);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed as StockTab[];
+        return sortTabs(parsed as StockTab[]);
       }
     }
   } catch (e) {
     // ignore json parse error
+  }
+  // Fall back to pre-bundled stock tabs (99 items) to eliminate any blank loading state on first visit
+  if (Array.isArray(initialStockTabs) && initialStockTabs.length > 0) {
+    return sortTabs(initialStockTabs as unknown as StockTab[]);
   }
   return [];
 };
@@ -72,9 +88,24 @@ export function useStockTabs() {
     }, 800);
 
     // Query all stock tabs in the shared workspace
-    const q = query(
-      collection(db, 'stockTabs')
-    );
+    const q = query(collection(db, 'stockTabs'));
+
+    // Dual-track fast fetch: execute direct getDocs in parallel with onSnapshot
+    getDocs(q).then((snapshot) => {
+      if (!snapshot.empty) {
+        clearTimeout(fallbackTimer);
+        const data = snapshot.docs.map(docSnap => ({
+          id: docSnap.id,
+          ...docSnap.data()
+        })) as StockTab[];
+        const sorted = sortTabs(data);
+        setTabs(sorted);
+        setLoading(false);
+        saveCachedTabs(user.uid, sorted);
+      }
+    }).catch((err) => {
+      console.warn("Fast getDocs notice:", err);
+    });
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       clearTimeout(fallbackTimer);
@@ -82,14 +113,7 @@ export function useStockTabs() {
         id: docSnap.id,
         ...docSnap.data()
       })) as StockTab[];
-      const sorted = data.sort((a, b) => {
-        const orderA = a.sortOrder !== undefined ? a.sortOrder : 999999;
-        const orderB = b.sortOrder !== undefined ? b.sortOrder : 999999;
-        if (orderA !== orderB) {
-          return orderA - orderB;
-        }
-        return getTimestampMillis(b.createdAt) - getTimestampMillis(a.createdAt);
-      });
+      const sorted = sortTabs(data);
       setTabs(sorted);
       setLoading(false);
       saveCachedTabs(user.uid, sorted);

@@ -1,6 +1,6 @@
 {
-  "summary":  "Comprehensive bug fix and iframe rendering optimization plan to eliminate the blank screen issue inside the AI Studio Preview Panel while preserving all 99 stock records, calculators, and trading logs.",
-  "updatedAt":  "2026-10-24T10:12:00.660425562Z",
+  "summary":  "Optimized PS5 Dynamic Background menu dialog and removed card black shadows/3D embossed effects in PS5 mode:\n1. PS5 Dynamic Background Menu Dialog:\n   - Added overflow-hidden to the dialog container and wrapped both the Soundscapes Catalog and PS5 Themes Catalog in flexible, scrollable containers (`min-h-0 flex-1 overflow-hidden`).\n   - Fixed theme card grid to `flex-1 min-h-0 overflow-y-auto overscroll-contain`, and set headers, controllers, and footers to `shrink-0`.\n   - Prevented theme items (such as the Kerr Black Hole card) from overflowing or spilling outside the dialog window border.\n2. Card Styling in PS5 Mode:\n   - Removed all heavy dark floating shadows (`box-shadow`, `feDropShadow`), bevel borders, and 3D extrusion (`transform: translateZ`) from price tags, cards, vector lines, and benchmark dividers.\n   - Cards and tags now display cleanly and flatly with crisp colors and zero black background shadows or raised/embossed bulging effects.",
+  "updatedAt":  "2026-10-25T16:10:18.649077689Z",
   "requestFeedback":  true,
   "userFacing":  true
 }
