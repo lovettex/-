@@ -81,6 +81,8 @@
     --sidebar-accent-foreground: #1a1b1e;
     --sidebar-border: rgba(0, 0, 0, 0.08);
     --sidebar-ring: #3b5bdb;
+    --up: #2fbf71;
+    --dn: #ef5350;
 }
 
 .dark {
@@ -137,15 +139,15 @@
   .glass-card {
     background-color: rgba(255, 255, 255, 0.98);
     backdrop-filter: blur(24px);
-    border: 3.2px solid #59804F !important;
-    border-radius: 0.75rem;
+    border: none !important;
+    border-radius: 1rem;
     box-shadow: none !important;
     transition: all 500ms ease-out;
   }
   .glass-card:hover {
     transform: translateY(-4px);
     background-color: rgba(255, 255, 255, 1);
-    border-color: #59804F !important;
+    border: none !important;
     box-shadow: none !important;
   }
 

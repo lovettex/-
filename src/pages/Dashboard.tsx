@@ -123,6 +123,7 @@ import { MiniVisualLinesModal } from "../components/MiniVisualLinesModal";
 import { syncSubTabDividersToCanvas, calculateCanvasYFromDividers } from "../utils/visualLinesSync";
 import { getVisualLinesDataSync, saveVisualLinesDataOptimistic } from "../utils/visualLinesStorage";
 import { ChartAnnotation } from "../types";
+import { ReturnRateStepFilter, getStepBracketBounds, getStepBracketLabel } from "../components/ReturnRateStepFilter";
 
 const EMPTY_CHART_ANNOTATIONS: ChartAnnotation[] = [];
 
@@ -1410,15 +1411,15 @@ export default function Dashboard() {
     "all" | "highlight" | "operation" | "deviation" | "group"
   >("all");
 
-  // 綜合未實現損益 漲跌幅度百分比門檻篩選 (2%, 3%, 4%, 6%, 8%, 9%, 10%, 12%)
-  const [pnlPercentFilter, setPnlPercentFilter] = useState<number | null>(null);
-  // 多空雙向切換: 'all' (雙向絕對值), 'gain' (獲利達標), 'loss' (虧損達標)
-  const [pnlDirectionFilter, setPnlDirectionFilter] = useState<"all" | "gain" | "loss">("all");
+  // 綜合未實現損益 階梯軸報酬率門檻篩選 (預設選中 5%)
+  const [pnlPercentFilter, setPnlPercentFilter] = useState<number | null>(5);
+  // 多空方向: 'gain' (獲利達標), 'loss' (虧損達標)，單選二選一
+  const [pnlDirectionFilter, setPnlDirectionFilter] = useState<"gain" | "loss">("gain");
 
   useEffect(() => {
     safeSessionStorage.setItem('preferredHoldingSubTab', activeHoldingSubTab);
     setActiveCardDefinitionFilter("all");
-    setPnlPercentFilter(null);
+    setPnlPercentFilter(5);
   }, [activeHoldingSubTab]);
 
   useEffect(() => {
@@ -4463,69 +4464,72 @@ export default function Dashboard() {
     return Math.round(rawPct * 100) / 100;
   }, [activeTabTrades]);
 
-  const PNL_PERCENT_BRACKETS = useMemo(() => [2, 3, 4, 6, 8, 9, 10, 12] as const, []);
 
-  const getPnlBracketBounds = useCallback(
-    (pct: number): { min: number; max: number } => {
-      const idx = PNL_PERCENT_BRACKETS.indexOf(pct as any);
-      const min = pct;
-      const max =
-        idx >= 0 && idx < PNL_PERCENT_BRACKETS.length - 1
-          ? PNL_PERCENT_BRACKETS[idx + 1]
-          : Infinity;
-      return { min, max };
-    },
-    [PNL_PERCENT_BRACKETS]
-  );
-
-  const getPnlBracketRangeLabel = useCallback(
-    (pct: number, direction: "all" | "gain" | "loss"): string => {
-      const { min, max } = getPnlBracketBounds(pct);
-      const prefix = direction === "gain" ? "+" : direction === "loss" ? "-" : "±";
-      if (max === Infinity) {
-        return `${prefix}${min}% 以上`;
-      }
-      return `${prefix}${min}% ~ <${prefix}${max}%`;
-    },
-    [getPnlBracketBounds]
-  );
-
-  const filteredSubTabVisibleTabs = useMemo(() => {
+  const baseCardFilteredTabs = useMemo(() => {
     let list = currentSubTabVisibleTabs;
     switch (activeCardDefinitionFilter) {
       case "highlight":
-        list = list.filter(t => !!t.isFavoriteHighlight);
-        break;
+        return list.filter(t => !!t.isFavoriteHighlight);
       case "operation":
-        list = list.filter(t => !!t.isOperationConfirmed);
-        break;
+        return list.filter(t => !!t.isOperationConfirmed);
       case "deviation":
-        list = list.filter(t => !!t.isDeviationConfirmed);
-        break;
+        return list.filter(t => !!t.isDeviationConfirmed);
       case "group":
-        list = list.filter(t => !!t.groupId);
-        break;
+        return list.filter(t => !!t.groupId);
       default:
-        break;
+        return list;
     }
+  }, [currentSubTabVisibleTabs, activeCardDefinitionFilter]);
+
+  const stepBracketCounts = useMemo(() => {
+    const counts: Record<string, number> = {
+      all: baseCardFilteredTabs.length,
+      "2": 0,
+      "3": 0,
+      "5": 0,
+      "8": 0,
+      "10": 0,
+      "15": 0,
+    };
+    baseCardFilteredTabs.forEach((tab) => {
+      const retPct = getTabReturnPercentage(tab);
+      for (const b of [2, 3, 5, 8, 10, 15]) {
+        const bounds = getStepBracketBounds(b);
+        if (bounds) {
+          if (pnlDirectionFilter === "gain") {
+            if (retPct >= bounds.min && retPct < bounds.max) {
+              counts[String(b)]++;
+            }
+          } else {
+            if (retPct <= -bounds.min && retPct > -bounds.max) {
+              counts[String(b)]++;
+            }
+          }
+        }
+      }
+    });
+    return counts;
+  }, [baseCardFilteredTabs, pnlDirectionFilter, getTabReturnPercentage]);
+
+  const filteredSubTabVisibleTabs = useMemo(() => {
+    let list = baseCardFilteredTabs;
 
     if (pnlPercentFilter !== null) {
-      const { min, max } = getPnlBracketBounds(pnlPercentFilter);
-      list = list.filter((t) => {
-        const retPct = getTabReturnPercentage(t);
-        if (pnlDirectionFilter === "gain") {
-          return retPct >= min && retPct < max;
-        } else if (pnlDirectionFilter === "loss") {
-          return retPct <= -min && retPct > -max;
-        } else {
-          const absPct = Math.abs(retPct);
-          return absPct >= min && absPct < max;
-        }
-      });
+      const bounds = getStepBracketBounds(pnlPercentFilter);
+      if (bounds) {
+        list = list.filter((t) => {
+          const retPct = getTabReturnPercentage(t);
+          if (pnlDirectionFilter === "gain") {
+            return retPct >= bounds.min && retPct < bounds.max;
+          } else {
+            return retPct <= -bounds.min && retPct > -bounds.max;
+          }
+        });
+      }
     }
 
     return list;
-  }, [currentSubTabVisibleTabs, activeCardDefinitionFilter, pnlPercentFilter, pnlDirectionFilter, getTabReturnPercentage, getPnlBracketBounds]);
+  }, [baseCardFilteredTabs, pnlPercentFilter, pnlDirectionFilter, getTabReturnPercentage]);
 
   visibleTabsRef.current = filteredSubTabVisibleTabs;
 
@@ -8304,175 +8308,19 @@ export default function Dashboard() {
                       </DialogContent>
                     </Dialog>
 
-                      {/* 綜合未實現損益 漲跌幅度百分比歸類篩選工具列 & 批次選取工具列 */}
-                      <div className="py-2.5 px-3 sm:px-6 max-w-6xl mx-auto w-full flex flex-col md:flex-row items-start md:items-center justify-between gap-2.5 border-t border-zinc-200/80 sm:border-t-0 select-none">
-                        {/* 左側：綜合未實現損益漲跌幅百分比歸類篩選開關按鈕 (2% 3% 4% 6% 8% 9% 10% 12%) & 多空雙向切換 */}
-                        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap w-full md:w-auto">
-                          {/* 多空雙向切換器 */}
-                          <div className="flex items-center p-0.5 bg-zinc-100 rounded-lg border border-zinc-250 shadow-xs shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                playClickSound();
-                                setPnlDirectionFilter("all");
-                              }}
-                              className={`px-2 py-0.5 rounded-md text-[11px] font-black transition-all cursor-pointer ${
-                                pnlDirectionFilter === "all"
-                                  ? "bg-zinc-800 text-white shadow-xs"
-                                  : "text-zinc-600 hover:text-zinc-900"
-                              }`}
-                               title="雙向區間 (以絕對值 |損益%| 篩選各百分比範圍)"
-                            >
-                              雙向 ±
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                playClickSound();
-                                setPnlDirectionFilter("gain");
-                              }}
-                              className={`px-2 py-0.5 rounded-md text-[11px] font-black transition-all cursor-pointer flex items-center gap-0.5 ${
-                                pnlDirectionFilter === "gain"
-                                  ? "bg-emerald-600 text-white shadow-xs"
-                                  : "text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50"
-                              }`}
-                              title="僅篩選獲利區間個股 (+損益% 落於該百分比區間)"
-                            >
-                              <span>▲</span>
-                              <span>獲利</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                playClickSound();
-                                setPnlDirectionFilter("loss");
-                              }}
-                              className={`px-2 py-0.5 rounded-md text-[11px] font-black transition-all cursor-pointer flex items-center gap-0.5 ${
-                                pnlDirectionFilter === "loss"
-                                  ? "bg-rose-600 text-white shadow-xs"
-                                  : "text-rose-700 hover:text-rose-900 hover:bg-rose-50"
-                              }`}
-                              title="僅篩選虧損區間個股 (-損益% 落於該百分比區間)"
-                            >
-                              <span>▼</span>
-                              <span>虧損</span>
-                            </button>
-                          </div>
-
-                          {/* 百分比區間按鈕列: 全部, 2%, 3%, 4%, 6%, 8%, 9%, 10%, 12% */}
-                          <div className="flex items-center gap-1 flex-wrap overflow-x-auto py-0.5 scrollbar-hide">
-                            <InteractiveButton
-                              noGlow
-                              as="button"
-                              onClick={() => {
-                                playClickSound();
-                                setPnlPercentFilter(null);
-                              }}
-                              className={`px-2.5 py-1 rounded-full text-[11px] font-black transition-all shadow-xs cursor-pointer border ${
-                                pnlPercentFilter === null
-                                  ? "bg-zinc-800 text-white border-zinc-800 shadow-xs"
-                                  : "bg-white hover:bg-zinc-50 border-zinc-250 text-zinc-600 hover:text-zinc-900"
-                              }`}
-                              title="顯示全部個股"
-                            >
-                              全部
-                            </InteractiveButton>
-                            {PNL_PERCENT_BRACKETS.map((pct) => {
-                              const isActive = pnlPercentFilter === pct;
-                              const rangeLabel = getPnlBracketRangeLabel(pct, pnlDirectionFilter);
-                              const activeColorClass =
-                                pnlDirectionFilter === "gain"
-                                  ? "bg-emerald-600 text-white border-emerald-600"
-                                  : pnlDirectionFilter === "loss"
-                                  ? "bg-rose-600 text-white border-rose-600"
-                                  : "bg-zinc-800 text-white border-zinc-800";
-                              const hoverBorderClass =
-                                pnlDirectionFilter === "gain"
-                                  ? "hover:border-emerald-400 hover:text-emerald-700 hover:bg-emerald-50/50"
-                                  : pnlDirectionFilter === "loss"
-                                  ? "hover:border-rose-400 hover:text-rose-700 hover:bg-rose-50/50"
-                                  : "hover:border-zinc-400 hover:text-zinc-900 hover:bg-zinc-50";
-
-                              return (
-                                <InteractiveButton
-                                  key={pct}
-                                  noGlow
-                                  as="button"
-                                  onClick={() => {
-                                    playClickSound();
-                                    // 點擊已選中的百分比按鈕時取消篩選 (返回全部)
-                                    setPnlPercentFilter(isActive ? null : pct);
-                                  }}
-                                  className={`px-2.5 py-1 rounded-full text-[11px] font-black transition-all shadow-xs cursor-pointer border tabular-nums ${
-                                    isActive
-                                      ? `${activeColorClass} shadow-xs font-black`
-                                      : `bg-white border-zinc-250 text-zinc-700 ${hoverBorderClass}`
-                                  }`}
-                                  title={`點擊${isActive ? "取消篩選" : `僅顯示未實現損益落於 ${rangeLabel} 區間之個股`}`}
-                                >
-                                  {pnlDirectionFilter === "gain" ? "+" : pnlDirectionFilter === "loss" ? "-" : "±"}{pct}%
-                                </InteractiveButton>
-                              );
-                            })}
-                          </div>
-
-                          {/* 若啟動篩選，顯示區間統計標籤 */}
-                          {pnlPercentFilter !== null && (
-                            <span className="text-[11px] font-black text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs animate-in fade-in select-none shrink-0">
-                              <span>區間 {getPnlBracketRangeLabel(pnlPercentFilter, pnlDirectionFilter)}:</span>
-                              <span className="tabular-nums font-extrabold">{filteredSubTabVisibleTabs.length}/{currentSubTabVisibleTabs.length}</span>
-                              <span>檔</span>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  playClickSound();
-                                  setPnlPercentFilter(null);
-                                }}
-                                className="ml-0.5 text-indigo-400 hover:text-indigo-800 font-bold cursor-pointer"
-                                title="清除篩選"
-                              >
-                                ✕
-                              </button>
-                            </span>
-                          )}
-                        </div>
-
-                        {/* 右側：全選與勾選統計工具按鈕 */}
-                        <div className="flex items-center gap-2 flex-wrap ml-auto shrink-0">
-                          {selectedCardIds.size > 0 && (
-                            <span className="text-[11px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 shadow-xs select-none">
-                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                              已勾選 {selectedCardIds.size} 檔
-                            </span>
-                          )}
-                          <InteractiveButton
-                            noGlow
-                            as="button"
-                            onClick={handleSelectAll}
-                            className="px-2.5 py-1 bg-white hover:bg-emerald-50 border border-zinc-250 hover:border-emerald-300 text-zinc-700 hover:text-emerald-700 rounded-full text-[11px] font-black flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
-                            title="全選目前子分頁個股卡片 (再次點擊全選所有子分頁)"
-                          >
-                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                            全選
-                          </InteractiveButton>
-                          <InteractiveButton
-                            noGlow
-                            as="button"
-                            onClick={handleDeselectAll}
-                            disabled={selectedCardIds.size === 0}
-                            className={`px-2.5 py-1 bg-white border border-zinc-250 rounded-full text-[11px] font-black flex items-center gap-1.5 transition-all shadow-xs cursor-pointer ${
-                              selectedCardIds.size === 0
-                                ? "opacity-50 cursor-not-allowed text-zinc-400 bg-zinc-50"
-                                : "hover:bg-rose-50 hover:border-rose-300 text-zinc-700 hover:text-rose-600"
-                            }`}
-                            title="取消勾選所有個股"
-                          >
-                            <Circle className="w-3.5 h-3.5 text-zinc-400" />
-                            取消全選
-                          </InteractiveButton>
-                        </div>
-                      </div>
+                      {/* 報酬篩選列（階梯軸樣式） */}
+                      <ReturnRateStepFilter
+                        direction={pnlDirectionFilter}
+                        onDirectionChange={setPnlDirectionFilter}
+                        selectedBracket={pnlPercentFilter}
+                        onBracketChange={setPnlPercentFilter}
+                        totalCount={baseCardFilteredTabs.length}
+                        matchedCount={filteredSubTabVisibleTabs.length}
+                        bracketCounts={stepBracketCounts}
+                        selectedCardCount={selectedCardIds.size}
+                        onSelectAll={handleSelectAll}
+                        onDeselectAll={handleDeselectAll}
+                      />
                     </div>
 
                   <div className="bg-transparent w-full">
@@ -8491,7 +8339,7 @@ export default function Dashboard() {
                               </div>
                               <p className="text-base font-bold text-white/50 tracking-wide">
                                 {pnlPercentFilter !== null
-                                  ? `尚無未實現損益落於 ${getPnlBracketRangeLabel(pnlPercentFilter, pnlDirectionFilter)} 範圍內的股票`
+                                  ? `尚無未實現損益落於 ${getStepBracketLabel(pnlPercentFilter, pnlDirectionFilter)} 範圍內的股票`
                                   : `尚無可見的${activeHoldingSubTab === "觀察中" && activeViewTab === "active" ? "虛擬交易" : activeHoldingSubTab}股票`}
                               </p>
                               {pnlPercentFilter !== null && (
@@ -8503,7 +8351,7 @@ export default function Dashboard() {
                                   }}
                                   className="mt-3 px-3 py-1 bg-white/10 hover:bg-white/20 text-white/80 hover:text-white text-xs font-bold rounded-lg border border-white/20 transition-all cursor-pointer"
                                 >
-                                  重設百分比篩選
+                                  重設篩選 (顯示全部)
                                 </button>
                               )}
                             </motion.div>
