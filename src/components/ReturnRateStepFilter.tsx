@@ -93,7 +93,7 @@ export function ReturnRateStepFilter({
 
   // 目前選中刻度之 index (0 ~ 6)
   const selectedIndex = PNL_STEP_TICKS.findIndex((t) => t.value === selectedBracket);
-  const activeIdx = selectedIndex !== -1 ? selectedIndex : 3; // 預設 5% 為 index 3
+  const activeIdx = selectedIndex !== -1 ? selectedIndex : 0; // 預設「全部」為 index 0
 
   // 第一行右側灰字狀態文字：級距範圍與符合檔數
   const conditionLabel = getStepBracketLabel(selectedBracket, direction);
@@ -124,6 +124,22 @@ export function ReturnRateStepFilter({
           background-color: #B2ED45 !important;
           border-color: #B2ED45 !important;
           animation: limeBreathing 1.8s infinite ease-in-out;
+        }
+
+        @keyframes grayBreathing {
+          0%, 100% {
+            box-shadow: 0 0 0 0 rgba(161, 161, 170, 0.75), 0 0 7px rgba(161, 161, 170, 0.6);
+            transform: scale(1);
+          }
+          50% {
+            box-shadow: 0 0 0 5px rgba(161, 161, 170, 0), 0 0 14px rgba(161, 161, 170, 0.9);
+            transform: scale(1.22);
+          }
+        }
+        .dot-gray-pulse {
+          background-color: #A1A1AA !important;
+          border-color: #A1A1AA !important;
+          animation: grayBreathing 1.8s infinite ease-in-out;
         }
       `}</style>
 
@@ -248,18 +264,32 @@ export function ReturnRateStepFilter({
             const isSelected = idx === activeIdx;
             const isLeft = idx < activeIdx;
 
+            // 各層級符合的標的數量
+            const count =
+              tick.value === null
+                ? (bracketCounts.all ?? totalCount)
+                : (bracketCounts[String(tick.value)] ?? 0);
+
+            // 所有 % 級有大於 0 的股票 (count > 0) 且非當前選中時，以淺灰色呼吸閃爍顯示
+            const hasStocks = tick.value !== null && count > 0;
+
             // 圓點狀態：
             // - 選中點：原點為 #B2ED45 顏色，並有動態呼吸效果提醒 (dot-lime-pulse)
+            // - 所有 % 級有大於 0 的股票：淺灰色呼吸閃爍提醒 (dot-gray-pulse)
             // - 選中點左側：空心圓，邊框為 #B2ED45
             // - 選中點右側：空心圓，邊框為 #D3E3BC
             let dotBorderColor = "#D3E3BC";
             let dotBgColor = "var(--background, #F5F5F5)";
-            let isPulse = false;
+            let pulseClass = "";
 
             if (isSelected) {
               dotBorderColor = "#B2ED45";
               dotBgColor = "#B2ED45";
-              isPulse = true;
+              pulseClass = "dot-lime-pulse";
+            } else if (hasStocks) {
+              dotBorderColor = "#A1A1AA";
+              dotBgColor = "#A1A1AA";
+              pulseClass = "dot-gray-pulse";
             } else if (isLeft) {
               dotBorderColor = "#B2ED45";
               dotBgColor = "var(--background, #F5F5F5)";
@@ -269,19 +299,13 @@ export function ReturnRateStepFilter({
             }
 
             // 標籤文字
-            const labelColor = isSelected ? "#000000" : "#71717a";
+            const labelColor = isSelected ? "#000000" : hasStocks ? "#27272a" : "#71717a";
             const displayLabel =
               tick.value === null
                 ? "全部"
                 : direction === "loss"
                 ? `-${tick.value}%`
                 : `${tick.value}%`;
-
-            // 各層級符合的標的數量
-            const count =
-              tick.value === null
-                ? (bracketCounts.all ?? totalCount)
-                : (bracketCounts[String(tick.value)] ?? 0);
 
             return (
               <button
@@ -294,11 +318,9 @@ export function ReturnRateStepFilter({
                 className="flex-1 flex flex-col items-center justify-start min-h-[44px] cursor-pointer group py-0.5"
                 style={{ width: "calc(100% / 7)" }}
               >
-                {/* 刻度小圓點：選中點為 #B2ED45 顏色且具有動態呼吸提醒 */}
+                {/* 刻度小圓點：選中點為 #B2ED45 綠呼吸；大於0檔股票則為淺灰色呼吸閃爍 */}
                 <div
-                  className={`w-2.5 h-2.5 rounded-full border transition-all duration-150 z-10 shrink-0 ${
-                    isPulse ? "dot-lime-pulse" : ""
-                  }`}
+                  className={`w-2.5 h-2.5 rounded-full border transition-all duration-150 z-10 shrink-0 ${pulseClass}`}
                   style={{
                     borderColor: dotBorderColor,
                     backgroundColor: dotBgColor,
@@ -310,7 +332,7 @@ export function ReturnRateStepFilter({
                   className="mt-[6px] text-[13.5px] sm:text-[14.5px] leading-none whitespace-nowrap transition-colors select-none font-mono"
                   style={{
                     color: labelColor,
-                    fontWeight: isSelected ? 900 : 600,
+                    fontWeight: isSelected ? 900 : hasStocks ? 750 : 600,
                   }}
                 >
                   {displayLabel}
@@ -319,7 +341,11 @@ export function ReturnRateStepFilter({
                 {/* 各層級符合的卡片張數額外資訊 (+2.5px) */}
                 <span
                   className={`text-[12px] sm:text-[12.5px] leading-tight font-mono whitespace-nowrap mt-1 ${
-                    isSelected ? "text-zinc-950 font-black" : "text-zinc-400 font-semibold"
+                    isSelected
+                      ? "text-zinc-950 font-black"
+                      : hasStocks
+                        ? "text-zinc-700 font-bold"
+                        : "text-zinc-400 font-semibold"
                   }`}
                 >
                   {count} 檔

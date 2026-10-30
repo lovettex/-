@@ -698,13 +698,13 @@ export function WhiteNoisePlayer() {
             {mainTab === 'themes' && (
               <div className="py-2 flex-1 min-h-0 flex flex-col gap-2.5 overflow-hidden">
                 {/* Background On/Off Switch Banner */}
-                <div className="flex items-center justify-between p-2.5 bg-zinc-100/90 rounded-2xl border-2 border-zinc-300 shadow-2xs shrink-0">
-                  <div className="flex items-center gap-2">
-                    <div className="p-2 rounded-xl bg-indigo-100 text-indigo-900 border border-indigo-200">
+                <div className="flex items-center justify-between p-3 bg-zinc-100/95 rounded-2xl border-2 border-zinc-300/90 shadow-2xs shrink-0 transition-all">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-xl bg-indigo-100 text-indigo-900 border border-indigo-200/80 shadow-2xs">
                       <Tv className="w-4 h-4 stroke-[2.5]" />
                     </div>
                     <div className="flex flex-col">
-                      <span className="font-black text-xs text-zinc-950">
+                      <span className="font-black text-xs text-zinc-950 tracking-tight">
                         PS5 動態背景 (共 {PS5_THEMES.length} 款主題)
                       </span>
                       <span className="text-[10.5px] text-zinc-700 font-bold">
@@ -715,10 +715,10 @@ export function WhiteNoisePlayer() {
                   <button
                     type="button"
                     onClick={handleToggleBg}
-                    className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer shadow-xs ${
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer active:scale-95 ${
                       state.bgEnabled
-                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white ring-2 ring-emerald-400/40'
-                        : 'bg-zinc-200 text-zinc-800 hover:bg-zinc-300 border border-zinc-300'
+                        ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_0_14px_rgba(16,185,129,0.4)] ring-2 ring-emerald-400/50'
+                        : 'bg-zinc-200 text-zinc-800 hover:bg-zinc-300 border border-zinc-300 shadow-2xs'
                     }`}
                   >
                     {state.bgEnabled ? '已啟用' : '已關閉'}
@@ -915,10 +915,10 @@ export function WhiteNoisePlayer() {
                         key={th.id}
                         type="button"
                         onClick={() => handleSelectTheme(th.id)}
-                        className={`w-full p-2.5 rounded-2xl border-2 text-left transition-all flex items-center justify-between gap-3 group cursor-pointer ${
+                        className={`w-full p-2.5 rounded-2xl border-2 text-left transition-all flex items-center justify-between gap-3 group cursor-pointer active:scale-[0.98] ${
                           isSelected
-                            ? 'border-indigo-600 bg-indigo-50/95 ring-2 ring-indigo-400/40 shadow-sm'
-                            : 'border-zinc-300 bg-white hover:bg-zinc-50 hover:border-zinc-400'
+                            ? 'border-indigo-600 bg-indigo-50/95 ring-2 ring-indigo-400/50 shadow-[0_4px_16px_rgba(99,102,241,0.18)]'
+                            : 'border-zinc-300/90 bg-white hover:bg-indigo-50/40 hover:border-indigo-300 shadow-2xs'
                         }`}
                       >
                         <div className="flex items-center gap-3 min-w-0">
@@ -995,10 +995,10 @@ export function WhiteNoisePlayer() {
                         key={th.id}
                         type="button"
                         onClick={() => handleSelectTheme(th.id)}
-                        className={`w-full p-2.5 rounded-2xl border-2 text-left transition-all flex items-center justify-between gap-3 group cursor-pointer ${
+                        className={`w-full p-2.5 rounded-2xl border-2 text-left transition-all flex items-center justify-between gap-3 group cursor-pointer active:scale-[0.98] ${
                           isSelected
-                            ? 'border-indigo-600 bg-indigo-50/90 ring-2 ring-indigo-400/40 shadow-sm'
-                            : 'border-zinc-300 bg-white hover:bg-zinc-50 hover:border-zinc-400'
+                            ? 'border-indigo-600 bg-indigo-50/95 ring-2 ring-indigo-400/50 shadow-[0_4px_16px_rgba(99,102,241,0.18)]'
+                            : 'border-zinc-300/90 bg-white hover:bg-indigo-50/40 hover:border-indigo-300 shadow-2xs'
                         }`}
                       >
                         <div className="flex items-center gap-3">

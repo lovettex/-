@@ -1,34 +1,116 @@
-# PS5 Dynamic Mode Card Styling & Menu Dialog Optimization
+# Primial 分批進場金字塔動態互動圖表專屬檢視與階梯軸篩選實作計畫
 
-## Requirements Addressed
-1. **Card Background & Embossed Effects in PS5 Mode**:
-   - When PS5 dynamic background is turned on, the card should not have dark/black shadows behind it, nor should it present an embossed/raised (凸起) effect (`卡片背影不需要有黑影也不需要呈現凸起的效果`).
-2. **PS5 Dynamic Background Menu Optimization**:
-   - The PS5 dynamic background dialog list should stay strictly inside the dialog window and not overflow or spill out (`列表內容保持在對話窗內. 不要超出`).
-3. **Constraint**:
-   - No other functional or visual features changed (`其他的不需要做任何變更`).
+本計畫旨在將「Primial 分批進場金字塔動態互動圖表」由原本卡片正面/背面的狹窄替換模式，升級為如截圖二所示的專屬滿版/全螢幕檢視介面。點擊工具列上的 Primial 圖層按鈕後，將開啟全螢幕清單，支援頂部內建的「獲利/虧損%分級階梯軸篩選」與快速導航，逐檔呈現高清晰度的金字塔互動圖表。
 
-## Changes Made
-1. **PS5 Theme / White Noise Menu (`src/components/WhiteNoisePlayer.tsx`)**:
-   - Added `overflow-hidden` to the modal container.
-   - Wrapped the Soundscapes catalog and PS5 Themes tab in `flex-1 min-h-0 flex flex-col overflow-hidden`.
-   - Made the banner and speed controller `shrink-0`.
-   - Converted the themes scroll container from fixed `max-h-[360px]` to `flex-1 min-h-0 overflow-y-auto overscroll-contain`.
-   - Docked the footer with `shrink-0 mt-auto`.
-   - Result: All cards and list items remain strictly enclosed inside the modal window and scroll smoothly without overflowing the bottom border.
+---
 
-2. **PS5 Mode Card & Tag Styling (`src/index.css` & `src/components/StockCardVisualizer.tsx`)**:
-   - In `src/index.css`:
-     - Removed `transform: translateZ(14px)` and `translateZ(20px)` from `[data-price-tag="true"]`.
-     - Removed dark floating `box-shadow` and beveled border highlights/shadows from price tags, CP, and AC tags.
-     - Removed drop-shadow filters from SVG benchmark lines, AC lines, CP lines, and axis text.
-     - Removed `box-shadow` from `.glass-card`, `.card-front`, `.card-back`, `.card-wrapper`, `[id^="stock-card-"]`, and `.slide-drawer-container`.
-   - In `src/components/StockCardVisualizer.tsx`:
-     - Removed `ps5Line3dShadow` and `ps5BenchmarkGlow` SVG filter definitions and usages.
-     - Removed `textShadow: "0 1px 2px rgba(0, 0, 0, 0.9)"` and `filter: drop-shadow` on axis text.
-     - Kept tags flat and clean with standard delicate borders.
+## User Review & Critical Decisions
 
-3. **Verification**:
-   - `tsc --noEmit` passed with 0 errors.
-   - `npm run build` compiled cleanly.
-   - Dev server running on port 3000.
+> [!IMPORTANT]
+> 依據您在澄清問題中的回覆確認：
+> 1. **預設顯示範圍**：預設顯示當前看板篩選下的所有股票，並支援個別勾選與快速跳轉切換。
+> 2. **階梯軸篩選呈現**：於 Primial 檢視頂部直接內建「獲利/虧損%分級階梯軸篩選列」，使用者在檢視金字塔圖表時可隨時即時切換獲利/虧損級距（2%、3%、5%、8%、10%、15%）與全選/取消全選。
+
+- **已確認決策 1**：點擊功能按鈕（或快捷鍵）直接開啟全螢幕專屬 Primial 檢視，原卡片輪播區維持標準的 `StockCardVisualizer` 視覺化卡片，不再將卡片內部壓縮變形。
+- **已確認決策 2**：頂部導航列包含「返回 (Esc / Alt+Z)」、「Primial 標題與選取檔數」、「個股跳轉膠囊標籤（顯示現價並點擊平滑置中滾動）」、「全域控制按鈕（行權價、攤平/突破、分隔線、支撐、壓力、全部展開/收合）」與「關閉按鈕」。
+- **已確認決策 3**：導航列下方內嵌輕量版 `ReturnRateStepFilter`，即時過濾展示的個股金字塔卡片。
+
+---
+
+## 1. Overview & Core Concept
+
+- **核心目標**：提供專注、寬廣且資訊層次豐富的「分批進場金字塔動態互動圖表」檢視環境，解決原卡片尺寸（646px × 617px）受限於輪播容器無法完整展現多批次階梯、歷史成交點與防線情資的問題。
+- **目標體驗**：
+  1. 使用者在主儀表板點擊圓形按鈕組中的 `Primial` 按鈕（或按快捷鍵 `Alt + Z`）。
+  2. 立即彈出滿版高對比的 Primial 專屬檢視層，預設載入目前所有追蹤個股。
+  3. 頂部提供獲利/虧損階梯軸篩選，可點擊「全部」、「2%」、「3%」、「5%」等篩選特定報酬率區間的個股金字塔。
+  4. 每一檔個股皆以全寬版的 `System2PlanningChart` 呈現，支援獨立展開/收合、目前價格與均價顯示、滑鼠懸停情資與 4 批拆分交易進度。
+
+---
+
+## 2. User Experience & Visual Design
+
+### 2.1 介面配置與視覺階層
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 頂部導航列 (Sticky Top Bar - #18181b / 深色高對比)                           │
+│  [← 返回]  [▤ Primial 分批進場金字塔 (已選取 N 檔)]  [PEP $132] [BAC $51]... │
+│  [— 行權價] [攤平 | 突破價位] | [分隔線] [支撐] [壓力] [全部收合] [✕ 關閉]     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ 階梯軸即時篩選列 (Return Rate Step Filter - 淺色乾淨底)                      │
+│  ▲ 獲利   ▼ 虧損  美股色彩                                                  │
+│  ○ 全部 ──── ○ 2% ──── ○ 3% ──── ● 5% ──── ○ 8% ──── ○ 10% ──── ○ 15%      │
+│  +5% ~ +8% · 2 檔               ☑ 已選 40 檔   全選   取消全選              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ 垂直滾動主內容區 (Scrollable Viewport - #f3f4f6 背景)                        │
+│                                                                             │
+│ ┌─ [個股卡片 1: PEP PepsiCo, Inc] ────────────────────────────────────────┐ │
+│ │ 頂部：代號名稱 + 現價 $132.78 + 平均成本 $131.05 + [展開/收合]            │ │
+│ │ 內容：完整的寬版 System2PlanningChart 4 批拆分與階梯互動畫布               │ │
+│ └─────────────────────────────────────────────────────────────────────────┘ │
+│                                                                             │
+│ ┌─ [個股卡片 2: BAC Bank of America Corp] ────────────────────────────────┐ │
+│ │ 頂部：代號名稱 + 現價 $51.15 + 平均成本 $51.37 + [展開/收合]              │ │
+│ │ 內容：完整的寬版 System2PlanningChart 4 批拆分與階梯互動畫布               │ │
+│ └─────────────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 2.2 互動動態與回饋
+- **快速錨點跳轉**：點擊頂部橫向滾動條的個股膠囊（如 `PEP $132.78`），畫面平滑滾動並垂直置中對應的個股金字塔卡片，並加上聚焦微亮光暈。
+- **階梯軸過濾連動**：點擊獲利/虧損階梯刻度時，下方金字塔卡片即時過濾並顯示過濾後的檔數，流暢不卡頓。
+- **全域按鈕連動**：點擊頂部的「行權價」、「攤平/突破價位」、「分隔線」、「支撐」、「壓力」，即時同步所有已展示個股圖表的防線標籤。
+
+---
+
+## 3. Key Product Decisions & Trade-Offs
+
+- **決策 1：獨立模態視圖 vs 卡片內翻轉**
+  - *選擇*：採全螢幕獨立模態視圖（`PrimialPyramidViewModal`）。
+  - *原因*：使用者截圖二清楚指出希望獲得如畫布一般的宏觀視野，卡片容器寬度與高度有限，無法提供足夠的 X 軸價位延伸解析度。
+- **決策 2：主看板卡片回復標準檢視**
+  - *選擇*：主看板卡片回到清晰的高效能 `StockCardVisualizer`，移除卡片內部被擠壓的圖表，點擊工具列 Primial 按鈕則開啟滿版檢視。
+  - *原因*：分工明確，主看板維持橫向快速卡片輪播，專屬檢視專注深度分批規劃。
+- **決策 3：階梯軸篩選之狀態管理**
+  - *選擇*：Primial 專屬檢視內建獨立且可由主看板繼承初始狀態的 `direction` 與 `selectedBracket`。
+  - *原因*：使用者開啟時可延續主頁面的選股條件，亦可在檢視中隨時切換而不干擾主看板背景狀態。
+
+---
+
+## 4. Technical Architecture & Data Strategy
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│ Dashboard.tsx                                                  │
+│   ├── isPrimialModalOpen: boolean                              │
+│   ├── Action Buttons Group (Pill)                              │
+│   │     └── [Layers Icon: Primial 分批進場金字塔動態互動圖表]  │
+│   └── PrimialPyramidViewModal (專屬獨立元件)                   │
+└───────────────────────────────┬────────────────────────────────┘
+                                │ renders
+                                ▼
+┌────────────────────────────────────────────────────────────────┐
+│ PrimialPyramidViewModal.tsx                                    │
+│   ├── Sticky Header (標題, 返回, 全域防線控制, 個股膠囊快速跳轉)│
+│   ├── Embedded ReturnRateStepFilter (獲利/虧損 % 階梯軸過濾)   │
+│   └── Virtualized / Optimized List of System2PlanningChart     │
+│         ├── calculateBatchPlanning                             │
+│         ├── getVisualPriceLevels                               │
+│         └── Accordion Collapse State                           │
+└────────────────────────────────────────────────────────────────┘
+```
+
+### 實作步驟：
+1. **建立 `src/components/PrimialPyramidViewModal.tsx`**：
+   - 包含完整的黑色頂部導航列（截圖二風格）。
+   - 整合 `ReturnRateStepFilter`，支援獲利/虧損切換與 2%、3%、5%、8%、10%、15% 及全選/取消全選。
+   - 計算各股的未實現損益率並進行篩選排序。
+   - 支援 `Alt + Z` 與 `Esc` 快捷鍵關閉。
+   - 提供頂部個股現價膠囊，點擊後 `scrollIntoView({ behavior: 'smooth', block: 'center' })`。
+2. **在 `src/pages/Dashboard.tsx` 整合**：
+   - 將工具列的 `isPrimialCardMode` 改為控制 `isPrimialModalOpen`。
+   - 移除卡片內部的小型替換邏輯，還原卡片輪播原生順暢度。
+   - 點擊按鈕時開啟 `PrimialPyramidViewModal`。
+3. **驗證與編譯**：
+   - 執行 `lint_applet` 與 `compile_applet` 確保無語法或類型錯誤。

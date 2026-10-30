@@ -108,6 +108,7 @@ interface System2PlanningChartProps {
   ) => void;
   isFullscreen?: boolean;
   onToggleFullscreen?: () => void;
+  hideHeader?: boolean;
 }
 
 export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
@@ -140,6 +141,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
   onBatchClick,
   isFullscreen = false,
   onToggleFullscreen,
+  hideHeader = false,
 }) => {
   const [internalExpanded, setInternalExpanded] = useState<boolean>(true);
   const isExpanded = propIsExpanded !== undefined ? propIsExpanded : internalExpanded;
@@ -1300,7 +1302,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
         // 繪製純文字標籤 (移至 X 軸下方，無外框純文字，帶微白柔和光暈保護文字)
         positionedItems.forEach((item) => {
           ctx.save();
-          ctx.font = 'bold 10px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+          ctx.font = 'bold 10.5px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
 
@@ -1333,7 +1335,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
 
         // 繪製 X 軸置底居中「股價」標題
         ctx.save();
-        ctx.font = 'bold 11px system-ui, sans-serif';
+        ctx.font = 'bold 11.5px system-ui, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
         ctx.fillStyle = '#64748b';
@@ -1362,9 +1364,9 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
             const pctText = step.size > 0 ? ` (${Math.round((step.bought / step.size) * 100)}%)` : '';
             const line2 = `已購 ${step.bought} / 預購 ${step.size} 股${pctText}`;
 
-            ctx.font = 'bold 12px monospace, system-ui, sans-serif';
+            ctx.font = 'bold 12.5px monospace, system-ui, sans-serif';
             const w1 = ctx.measureText(line1).width;
-            ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
+            ctx.font = 'bold 11.5px system-ui, -apple-system, sans-serif';
             const w2 = ctx.measureText(line2).width;
             const tagW = Math.max(w1, w2);
 
@@ -1426,7 +1428,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
             ctx.textAlign = 'center';
             ctx.textBaseline = 'bottom';
 
-            ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
+            ctx.font = 'bold 11.5px system-ui, -apple-system, sans-serif';
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
             ctx.lineWidth = 3.5;
             ctx.lineJoin = 'round';
@@ -1435,7 +1437,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
             ctx.fillText(line2, px, currentTagY);
 
             // 繪製文字 Line 1 (頂行)
-            ctx.font = 'bold 12px monospace, system-ui, sans-serif';
+            ctx.font = 'bold 12.5px monospace, system-ui, sans-serif';
             ctx.strokeText(line1, px, currentTagY - 14);
             ctx.fillStyle = step.isReached ? '#047857' : '#64748b';
             ctx.fillText(line1, px, currentTagY - 14);
@@ -1477,7 +1479,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
               if (isHovered) {
                 const label = `${isBuy ? '買' : '賣'} ${trade.quantity}股 @ $${trade.price.toFixed(2)}${trade.dateFormatted ? ` (${trade.dateFormatted})` : ''}`;
 
-                ctx.font = 'bold 11px monospace, system-ui, sans-serif';
+                ctx.font = 'bold 11.5px monospace, system-ui, sans-serif';
                 const textWidth = ctx.measureText(label).width;
                 const tagW = textWidth + 14;
                 const tagH = 22;
@@ -1740,7 +1742,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
           },
           ticks: {
             color: '#064e3b',
-            font: { size: 10.5, weight: 'bold' as const },
+            font: { size: 11, weight: 'bold' as const },
             callback: (value) => `$${Number(value).toFixed(2)}`,
             padding: 3,
           },
@@ -1769,120 +1771,122 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
       }`}
     >
       {/* 1. Header (Title, Purple Current Price, Orange Avg Price) */}
-      <div
-        className={`flex flex-col sm:flex-row sm:items-center justify-between border-b border-zinc-100 shrink-0 ${
-          isFullscreen ? "gap-1 pb-1" : compact ? "gap-1.5 pb-2" : "gap-4 pb-4"
-        }`}
-      >
-        <div>
-          {symbol ? (
-            <div className="flex items-baseline gap-2 flex-wrap">
-              <h3
-                className={`font-black tracking-tight text-zinc-950 font-mono leading-none ${
-                  isFullscreen || compact ? "text-xl sm:text-2xl" : "text-2xl sm:text-3xl"
-                }`}
-              >
-                {symbol}
-              </h3>
-              {companyName && (
-                <span className="text-zinc-500 text-xs sm:text-sm font-semibold tracking-wider truncate max-w-[200px] sm:max-w-[320px]">
-                  {companyName}
+      {!hideHeader && (
+        <div
+          className={`flex flex-col sm:flex-row sm:items-center justify-between border-b border-zinc-100 shrink-0 ${
+            isFullscreen ? "gap-1 pb-1" : compact ? "gap-1.5 pb-2" : "gap-4 pb-4"
+          }`}
+        >
+          <div>
+            {symbol ? (
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <h3
+                  className={`font-black tracking-tight text-zinc-950 font-mono leading-none ${
+                    isFullscreen || compact ? "text-xl sm:text-2xl" : "text-2xl sm:text-3xl"
+                  }`}
+                >
+                  {symbol}
+                </h3>
+                {companyName && (
+                  <span className="text-zinc-500 text-xs sm:text-sm font-semibold tracking-wider truncate max-w-[200px] sm:max-w-[320px]">
+                    {companyName}
+                  </span>
+                )}
+                <span className="text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-200/80 px-2 py-0.5 rounded-full ml-1">
+                  分批進場金字塔
                 </span>
-              )}
-              <span className="text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-200/80 px-2 py-0.5 rounded-full ml-1">
-                分批進場金字塔
-              </span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              <h3
-                className={`font-black tracking-tight text-zinc-900 ${
-                  isFullscreen || compact ? "text-base sm:text-lg" : "text-xl sm:text-2xl"
-                }`}
-              >
-                分批進場金字塔
-              </h3>
-              <span className="text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-200/80 px-2 py-0.5 rounded-full">
-                動態互動圖表
-              </span>
-            </div>
-          )}
-          {!compact && !isFullscreen && (
-            <p className="text-xs sm:text-sm text-zinc-500 mt-1">
-              以目前價格 ${currentPrice > 0 ? currentPrice.toFixed(2) : '--'} 為基準，沿價格下跌階梯逐批增加配置
-            </p>
-          )}
-        </div>
-
-        {/* Right side: 目前價格 (Purple) & 平均成本 (Orange) & Collapse */}
-        <div className="flex items-center gap-2 self-end sm:self-center flex-wrap">
-          {/* 目前價格 Card (Purple) */}
-          <div
-            className={`bg-purple-50/70 border border-purple-200/80 text-right flex flex-col justify-center items-end shadow-2xs ${
-              isFullscreen || compact
-                ? "px-2 py-0.5 sm:px-2.5 sm:py-1 min-w-[76px] sm:min-w-[84px] rounded-lg"
-                : "px-4 py-2 min-w-[120px] rounded-2xl"
-            }`}
-          >
-            <span className={`font-bold text-purple-700 flex items-center gap-1 ${isFullscreen || compact ? "text-[9px]" : "text-[10px]"}`}>
-              <span className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse" />
-              目前價格
-            </span>
-            <span
-              className={`font-black font-mono text-purple-700 leading-tight ${
-                isFullscreen || compact ? "text-base sm:text-lg" : "text-2xl sm:text-3xl"
-              }`}
-            >
-              ${currentPriceNum > 0 ? currentPriceNum.toFixed(2) : '--'}
-            </span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <h3
+                  className={`font-black tracking-tight text-zinc-900 ${
+                    isFullscreen || compact ? "text-base sm:text-lg" : "text-xl sm:text-2xl"
+                  }`}
+                >
+                  分批進場金字塔
+                </h3>
+                <span className="text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-200/80 px-2 py-0.5 rounded-full">
+                  動態互動圖表
+                </span>
+              </div>
+            )}
+            {!compact && !isFullscreen && (
+              <p className="text-xs sm:text-sm text-zinc-500 mt-1">
+                以目前價格 ${currentPrice > 0 ? currentPrice.toFixed(2) : '--'} 為基準，沿價格下跌階梯逐批增加配置
+              </p>
+            )}
           </div>
 
-          {/* 平均成本 Card (Orange) */}
-          {holdingAvgPriceNum > 0 && (
+          {/* Right side: 目前價格 (Purple) & 平均成本 (Orange) & Collapse */}
+          <div className="flex items-center gap-2 self-end sm:self-center flex-wrap">
+            {/* 目前價格 Card (Purple) */}
             <div
-              className={`bg-orange-50/70 border border-orange-200/80 text-right flex flex-col justify-center items-end shadow-2xs ${
+              className={`bg-purple-50/70 border border-purple-200/80 text-right flex flex-col justify-center items-end shadow-2xs ${
                 isFullscreen || compact
                   ? "px-2 py-0.5 sm:px-2.5 sm:py-1 min-w-[76px] sm:min-w-[84px] rounded-lg"
                   : "px-4 py-2 min-w-[120px] rounded-2xl"
               }`}
             >
-              <span className={`font-bold text-orange-700 flex items-center gap-1 ${isFullscreen || compact ? "text-[9px]" : "text-[10px]"}`}>
-                <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />
-                平均成本
+              <span className={`font-bold text-purple-700 flex items-center gap-1 ${isFullscreen || compact ? "text-[9px]" : "text-[10px]"}`}>
+                <span className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse" />
+                目前價格
               </span>
               <span
-                className={`font-black font-mono text-orange-600 leading-tight ${
+                className={`font-black font-mono text-purple-700 leading-tight ${
                   isFullscreen || compact ? "text-base sm:text-lg" : "text-2xl sm:text-3xl"
                 }`}
               >
-                ${holdingAvgPriceNum.toFixed(2)}
+                ${currentPriceNum > 0 ? currentPriceNum.toFixed(2) : '--'}
               </span>
             </div>
-          )}
 
-          {/* Fullscreen Toggle */}
-          {onToggleFullscreen && (
+            {/* 平均成本 Card (Orange) */}
+            {holdingAvgPriceNum > 0 && (
+              <div
+                className={`bg-orange-50/70 border border-orange-200/80 text-right flex flex-col justify-center items-end shadow-2xs ${
+                  isFullscreen || compact
+                    ? "px-2 py-0.5 sm:px-2.5 sm:py-1 min-w-[76px] sm:min-w-[84px] rounded-lg"
+                    : "px-4 py-2 min-w-[120px] rounded-2xl"
+                }`}
+              >
+                <span className={`font-bold text-orange-700 flex items-center gap-1 ${isFullscreen || compact ? "text-[9px]" : "text-[10px]"}`}>
+                  <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />
+                  平均成本
+                </span>
+                <span
+                  className={`font-black font-mono text-orange-600 leading-tight ${
+                    isFullscreen || compact ? "text-base sm:text-lg" : "text-2xl sm:text-3xl"
+                  }`}
+                >
+                  ${holdingAvgPriceNum.toFixed(2)}
+                </span>
+              </div>
+            )}
+
+            {/* Fullscreen Toggle */}
+            {onToggleFullscreen && (
+              <button
+                type="button"
+                onClick={onToggleFullscreen}
+                className="p-1.5 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-lg transition-colors cursor-pointer border border-zinc-200/80 shrink-0"
+                title={isFullscreen ? '縮小退出全螢幕 (Esc)' : '放大全螢幕顯示'}
+              >
+                {isFullscreen ? <Minimize2 className="w-4 h-4 text-amber-500" /> : <Maximize2 className="w-4 h-4" />}
+              </button>
+            )}
+
+            {/* Collapse / Expand Toggle */}
             <button
               type="button"
-              onClick={onToggleFullscreen}
+              onClick={handleToggleExpand}
               className="p-1.5 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-lg transition-colors cursor-pointer border border-zinc-200/80 shrink-0"
-              title={isFullscreen ? '縮小退出全螢幕 (Esc)' : '放大全螢幕顯示'}
+              title={isExpanded ? '收合圖表' : '展開圖表'}
             >
-              {isFullscreen ? <Minimize2 className="w-4 h-4 text-amber-500" /> : <Maximize2 className="w-4 h-4" />}
+              {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
             </button>
-          )}
-
-          {/* Collapse / Expand Toggle */}
-          <button
-            type="button"
-            onClick={handleToggleExpand}
-            className="p-1.5 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-lg transition-colors cursor-pointer border border-zinc-200/80 shrink-0"
-            title={isExpanded ? '收合圖表' : '展開圖表'}
-          >
-            {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-          </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {isExpanded && (
         <div className={isFullscreen ? "flex-1 flex flex-col min-h-0 space-y-1.5 pt-1 overflow-hidden" : compact ? "space-y-2 pt-1.5" : "space-y-3.5 pt-3"}>

@@ -716,7 +716,10 @@ function TokyoLiveWallpaper({ speedMultiplier = 0.5 }: { speedMultiplier?: numbe
   }, [speedMultiplier]);
 
   return (
-    <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden select-none">
+    <div
+      className="absolute inset-0 z-0 pointer-events-none overflow-hidden select-none"
+      style={{ contain: 'strict', isolation: 'isolate', transform: 'translate3d(0, 0, 0)', backfaceVisibility: 'hidden' }}
+    >
       <style>{`
         @keyframes breathe {
           from { transform: scale(1.02) translate3d(-.6%,0,0); }
@@ -738,20 +741,22 @@ function TokyoLiveWallpaper({ speedMultiplier = 0.5 }: { speedMultiplier?: numbe
           to { opacity: 1; }
         }
         .tokyo-par {
-          position: fixed;
+          position: absolute;
           inset: 0;
           will-change: transform;
           transition: transform .25s ease-out;
+          backface-visibility: hidden;
         }
         .tokyo-stage {
-          position: fixed;
+          position: absolute;
           inset: -4%;
           background: url(${porscheGt3RsBase64}) center/cover no-repeat;
           animation: breathe 18s ease-in-out infinite alternate;
           will-change: transform;
+          backface-visibility: hidden;
         }
         .tokyo-fog {
-          position: fixed;
+          position: absolute;
           inset: 0;
           pointer-events: none;
           mix-blend-mode: screen;
@@ -761,7 +766,7 @@ function TokyoLiveWallpaper({ speedMultiplier = 0.5 }: { speedMultiplier?: numbe
           animation: fog 22s ease-in-out infinite alternate;
         }
         .tokyo-sweep {
-          position: fixed;
+          position: absolute;
           inset: 0;
           pointer-events: none;
           mix-blend-mode: soft-light;
@@ -774,13 +779,12 @@ function TokyoLiveWallpaper({ speedMultiplier = 0.5 }: { speedMultiplier?: numbe
           bottom: -20%;
           width: 28%;
           left: -40%;
-          background: linear-gradient(100deg,transparent,rgba(255,255,255,.95) 50%,transparent);
+          background: linear-gradient(100deg,transparent,rgba(255,255,255,.75) 50%,transparent);
           transform: skewX(-18deg);
-          filter: blur(18px);
           animation: sweep 11s cubic-bezier(.5,0,.3,1) infinite;
         }
         .tokyo-floor {
-          position: fixed;
+          position: absolute;
           left: 0; right: 0; bottom: 0;
           height: 34%;
           pointer-events: none;
@@ -792,7 +796,7 @@ function TokyoLiveWallpaper({ speedMultiplier = 0.5 }: { speedMultiplier?: numbe
           animation: ripple 7s linear infinite;
         }
         .tokyo-vig {
-          position: fixed;
+          position: absolute;
           inset: 0;
           pointer-events: none;
           background: radial-gradient(120% 90% at 50% 50%,transparent 60%,rgba(60,66,80,.18));
@@ -806,7 +810,7 @@ function TokyoLiveWallpaper({ speedMultiplier = 0.5 }: { speedMultiplier?: numbe
         <div className="tokyo-floor" />
         <div className="tokyo-vig" />
       </div>
-      <canvas ref={canvasRef} className="fixed inset-0 w-full h-full pointer-events-none" />
+      <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none" />
     </div>
   );
 }
@@ -1079,31 +1083,33 @@ export function PS5DynamicBackground({
       ctx.fillRect(0, 0, width, height);
       ctx.restore();
 
-      // 2. PS5 Dynamic Fluid Wave Ribbons with Specular Crest Rim-Lights
+      // 2. PS5 Dynamic Fluid Wave Ribbons with Dual-Layer Specular Crest Rim-Lights
       if (theme.ribbonColors) {
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
 
-        const steps = 48;
+        const steps = 72;
         const stepWidth = width / steps;
 
         theme.ribbonColors.forEach((ribbon, rIdx) => {
           const t = elapsed * ribbon.speed + ribbon.phase;
-          const parallaxY = normMY * (22 + rIdx * 10);
+          const parallaxY = normMY * (26 + rIdx * 12);
           const parallaxPhase = normMX * (0.45 + rIdx * 0.15);
           const baseY = height * ribbon.yBase + parallaxY;
 
           const points: Array<{ x: number; y: number }> = [];
           for (let i = 0; i <= steps; i++) {
             const x = i * stepWidth;
+            // 4-harmonic natural fluid wave calculation
             const harmonic1 = Math.sin(x * ribbon.freq + t + parallaxPhase) * ribbon.amp;
-            const harmonic2 = Math.cos(x * ribbon.freq * 0.62 - t * 0.85) * (ribbon.amp * 0.48);
-            const harmonic3 = Math.sin(t * 0.55 + x * 0.00075 + rIdx) * (ribbon.amp * 0.32);
-            const y = baseY + harmonic1 + harmonic2 + harmonic3;
+            const harmonic2 = Math.cos(x * ribbon.freq * 0.58 - t * 0.75) * (ribbon.amp * 0.44);
+            const harmonic3 = Math.sin(t * 0.48 + x * 0.00065 + rIdx * 1.1) * (ribbon.amp * 0.28);
+            const harmonic4 = Math.cos(x * ribbon.freq * 1.32 + t * 1.05) * (ribbon.amp * 0.14);
+            const y = baseY + harmonic1 + harmonic2 + harmonic3 + harmonic4;
             points.push({ x, y });
           }
 
-          // A. Fill Volumetric Ribbon Body
+          // A. Fill Volumetric Ribbon Body with smooth 4-stop gradient
           ctx.beginPath();
           ctx.moveTo(0, height);
           ctx.lineTo(points[0].x, points[0].y);
@@ -1118,15 +1124,42 @@ export function PS5DynamicBackground({
           ctx.lineTo(width, height);
           ctx.closePath();
 
-          const ribbonGrad = ctx.createLinearGradient(0, baseY - ribbon.amp * 1.6, 0, height);
+          const ribbonGrad = ctx.createLinearGradient(0, baseY - ribbon.amp * 1.8, 0, height);
           ribbonGrad.addColorStop(0, ribbon.color1);
-          ribbonGrad.addColorStop(0.38, ribbon.glow);
-          ribbonGrad.addColorStop(1, ribbon.color2);
+          ribbonGrad.addColorStop(0.24, ribbon.glow);
+          ribbonGrad.addColorStop(0.65, ribbon.color2);
+          ribbonGrad.addColorStop(1, 'rgba(0, 0, 0, 0.95)');
 
           ctx.fillStyle = ribbonGrad;
           ctx.fill();
 
-          // B. Draw Signature PS5 Specular Crest Rim-Light along the Wave Top
+          // B. Signature PS5 Dual-Layer Specular Crest Rim-Light along the Wave Top
+          // Layer 1: Soft Ambient Caustic Halo
+          ctx.beginPath();
+          ctx.moveTo(points[0].x, points[0].y);
+          for (let i = 1; i < points.length; i++) {
+            const prev = points[i - 1];
+            const curr = points[i];
+            const midX = (prev.x + curr.x) * 0.5;
+            const midY = (prev.y + curr.y) * 0.5;
+            ctx.quadraticCurveTo(prev.x, prev.y, midX, midY);
+          }
+          ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
+
+          const haloGrad = ctx.createLinearGradient(0, 0, width, 0);
+          haloGrad.addColorStop(0, 'rgba(255, 255, 255, 0.02)');
+          haloGrad.addColorStop(0.3, ribbon.glow);
+          haloGrad.addColorStop(0.5 + Math.sin(t * 0.65) * 0.22, theme.particleGlow);
+          haloGrad.addColorStop(0.75, ribbon.glow);
+          haloGrad.addColorStop(1, 'rgba(255, 255, 255, 0.02)');
+
+          ctx.strokeStyle = haloGrad;
+          ctx.lineWidth = rIdx === 0 ? 4.2 : rIdx === 1 ? 3.0 : 2.0;
+          ctx.shadowColor = theme.accentColor;
+          ctx.shadowBlur = 22;
+          ctx.stroke();
+
+          // Layer 2: Razor-Crisp Specular Edge Line
           ctx.beginPath();
           ctx.moveTo(points[0].x, points[0].y);
           for (let i = 1; i < points.length; i++) {
@@ -1139,16 +1172,16 @@ export function PS5DynamicBackground({
           ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
 
           const crestGrad = ctx.createLinearGradient(0, 0, width, 0);
-          crestGrad.addColorStop(0, 'rgba(255, 255, 255, 0.05)');
+          crestGrad.addColorStop(0, 'rgba(255, 255, 255, 0.08)');
           crestGrad.addColorStop(0.25, ribbon.glow);
-          crestGrad.addColorStop(0.5 + Math.sin(t * 0.7) * 0.2, theme.particleColor);
-          crestGrad.addColorStop(0.8, ribbon.glow);
-          crestGrad.addColorStop(1, 'rgba(255, 255, 255, 0.05)');
+          crestGrad.addColorStop(0.5 + Math.sin(t * 0.7) * 0.2, '#ffffff');
+          crestGrad.addColorStop(0.78, theme.particleColor);
+          crestGrad.addColorStop(1, 'rgba(255, 255, 255, 0.08)');
 
           ctx.strokeStyle = crestGrad;
-          ctx.lineWidth = rIdx === 0 ? 2.2 : rIdx === 1 ? 1.6 : 1.1;
-          ctx.shadowColor = theme.accentColor;
-          ctx.shadowBlur = 14;
+          ctx.lineWidth = rIdx === 0 ? 1.7 : rIdx === 1 ? 1.3 : 0.95;
+          ctx.shadowColor = '#ffffff';
+          ctx.shadowBlur = 8;
           ctx.stroke();
           ctx.shadowBlur = 0;
         });
@@ -1156,13 +1189,15 @@ export function PS5DynamicBackground({
         ctx.restore();
       }
 
-      // 3. Dual-Layer Floating Stardust & Diamond Starlight Particles
+      // 3. Multi-Tier Floating Stardust, Breathing Bokeh & Diamond Stars
       ctx.save();
       ctx.globalCompositeOperation = 'screen';
 
       particlesRef.current.forEach((p, idx) => {
-        p.x += (p.vx + normMX * 0.25) * (0.7 + spd * 0.6);
-        p.y += p.vy * (0.7 + spd * 0.6);
+        // Natural curved particle flow drift
+        const driftHarmonic = Math.sin(p.alpha * 0.9 + elapsed * 0.0008) * 0.28;
+        p.x += (p.vx + normMX * 0.22 + driftHarmonic) * (0.65 + spd * 0.55);
+        p.y += p.vy * (0.65 + spd * 0.55);
 
         if (p.x < -20) p.x = width + 20;
         if (p.x > width + 20) p.x = -20;
@@ -1171,26 +1206,26 @@ export function PS5DynamicBackground({
 
         p.alpha += p.pulseSpeed;
         const twinkle = 0.5 + 0.5 * Math.sin(p.alpha);
-        const currentAlpha = 0.18 + twinkle * 0.65;
+        const currentAlpha = 0.2 + twinkle * 0.65;
 
-        const radGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.radius * 3.6);
+        const radGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.radius * 3.8);
         radGrad.addColorStop(0, '#ffffff');
-        radGrad.addColorStop(0.25, theme.particleColor);
-        radGrad.addColorStop(0.55, theme.particleGlow);
+        radGrad.addColorStop(0.22, theme.particleColor);
+        radGrad.addColorStop(0.52, theme.particleGlow);
         radGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
 
         ctx.fillStyle = radGrad;
-        ctx.globalAlpha = Math.max(0.05, Math.min(1, currentAlpha));
+        ctx.globalAlpha = Math.max(0.06, Math.min(1, currentAlpha));
         ctx.beginPath();
-        ctx.arc(p.x, p.y, p.radius * 3.6, 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, p.radius * 3.8, 0, Math.PI * 2);
         ctx.fill();
 
-        // Subtle 4-point star flare on every 5th bright particle
-        if (idx % 5 === 0 && twinkle > 0.72) {
-          const flareLen = p.radius * (3.2 + twinkle * 2.5);
-          ctx.strokeStyle = theme.particleColor;
-          ctx.lineWidth = 0.75;
-          ctx.globalAlpha = (twinkle - 0.7) * 1.8;
+        // Elegant 4-point diamond star flare on bright particles
+        if (idx % 4 === 0 && twinkle > 0.68) {
+          const flareLen = p.radius * (3.4 + twinkle * 2.8);
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 0.85;
+          ctx.globalAlpha = (twinkle - 0.65) * 2.0;
           ctx.beginPath();
           ctx.moveTo(p.x - flareLen, p.y);
           ctx.lineTo(p.x + flareLen, p.y);
@@ -1225,9 +1260,16 @@ export function PS5DynamicBackground({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.8, ease: 'easeInOut' }}
+          transition={{ duration: 0.6, ease: 'easeOut' }}
           className="fixed inset-0 z-0 pointer-events-none overflow-hidden select-none"
-          style={{ transform: 'translate3d(0, 0, 0)', backfaceVisibility: 'hidden', isolation: 'isolate' }}
+          style={{
+            contain: 'strict',
+            isolation: 'isolate',
+            transform: 'translate3d(0, 0, 0)',
+            WebkitTransform: 'translate3d(0, 0, 0)',
+            backfaceVisibility: 'hidden',
+            WebkitBackfaceVisibility: 'hidden',
+          }}
         >
           {/* Tokyo Series Mode: Porsche GT3 RS Live Wallpaper */}
           {theme.category === 'tokyo' && (
@@ -1241,11 +1283,21 @@ export function PS5DynamicBackground({
 
           {/* Classic Mode: 2D Canvas Wave Ribbons */}
           {theme.category === 'classic' && (
-            <canvas ref={classicCanvasRef} className="absolute inset-0 w-full h-full block pointer-events-none" style={{ transform: 'translate3d(0, 0, 0)', backfaceVisibility: 'hidden' }} />
+            <canvas
+              ref={classicCanvasRef}
+              className="absolute inset-0 w-full h-full block pointer-events-none"
+              style={{ transform: 'translate3d(0, 0, 0)', backfaceVisibility: 'hidden' }}
+            />
           )}
 
-          {/* Subtle cinematic overlay vignette */}
-          <div className="absolute inset-0 bg-radial from-transparent via-transparent to-black/45 pointer-events-none" />
+          {/* Signature PS5 upper ambient aurora glow & cinematic vignette (pure radial gradient without expensive CSS blur filter) */}
+          <div
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              background:
+                'radial-gradient(60% 25% at 50% 0%, rgba(34, 211, 238, 0.08) 0%, transparent 100%), radial-gradient(100% 100% at 50% 50%, transparent 55%, rgba(0, 0, 0, 0.38) 100%)',
+            }}
+          />
         </motion.div>
       </AnimatePresence>
 
@@ -1258,7 +1310,7 @@ export function PS5DynamicBackground({
             exit={{ opacity: 0, y: -10 }}
             className="fixed top-3.5 right-4 z-[990] hidden md:flex flex-col items-end gap-1.5 pointer-events-auto select-none"
           >
-            <div className="bg-black/92 backdrop-blur-2xl border-2 border-slate-600/90 p-3.5 rounded-2xl shadow-[0_16px_50px_rgba(0,0,0,0.85)] max-w-sm text-left text-xs font-mono text-white ring-1 ring-white/20">
+            <div className="bg-slate-950/96 border-2 border-slate-600/90 p-3.5 rounded-2xl shadow-[0_16px_50px_rgba(0,0,0,0.85)] max-w-sm text-left text-xs font-mono text-white ring-1 ring-white/20">
               <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-700">
                 <div className="flex items-center gap-2">
                   <div

@@ -124,6 +124,7 @@ import { syncSubTabDividersToCanvas, calculateCanvasYFromDividers } from "../uti
 import { getVisualLinesDataSync, saveVisualLinesDataOptimistic } from "../utils/visualLinesStorage";
 import { ChartAnnotation } from "../types";
 import { ReturnRateStepFilter, getStepBracketBounds, getStepBracketLabel } from "../components/ReturnRateStepFilter";
+import { PrimialPyramidViewModal } from "../components/PrimialPyramidViewModal";
 
 const EMPTY_CHART_ANNOTATIONS: ChartAnnotation[] = [];
 
@@ -669,6 +670,8 @@ export default function Dashboard() {
 
   const [isCinemaModeActive, setIsCinemaModeActive] = useState<boolean>(false);
   const [activeCinemaCardId, setActiveCinemaCardId] = useState<string | null>(null);
+  const [isPrimialModalOpen, setIsPrimialModalOpen] = useState<boolean>(false);
+  const [primialFocusTabId, setPrimialFocusTabId] = useState<string | null>(null);
 
   // HTML Upload & Preview States
   const [isUploadHtmlOpen, setIsUploadHtmlOpen] = useState(false);
@@ -1411,15 +1414,15 @@ export default function Dashboard() {
     "all" | "highlight" | "operation" | "deviation" | "group"
   >("all");
 
-  // 綜合未實現損益 階梯軸報酬率門檻篩選 (預設選中 5%)
-  const [pnlPercentFilter, setPnlPercentFilter] = useState<number | null>(5);
+  // 綜合未實現損益 階梯軸報酬率門檻篩選 (預設選中全部 null)
+  const [pnlPercentFilter, setPnlPercentFilter] = useState<number | null>(null);
   // 多空方向: 'gain' (獲利達標), 'loss' (虧損達標)，單選二選一
   const [pnlDirectionFilter, setPnlDirectionFilter] = useState<"gain" | "loss">("gain");
 
   useEffect(() => {
     safeSessionStorage.setItem('preferredHoldingSubTab', activeHoldingSubTab);
     setActiveCardDefinitionFilter("all");
-    setPnlPercentFilter(5);
+    setPnlPercentFilter(null);
   }, [activeHoldingSubTab]);
 
   useEffect(() => {
@@ -5061,7 +5064,7 @@ export default function Dashboard() {
         return;
       }
 
-      // 8. Alt + Z -> 全部翻頁
+      // 8. Alt + Z -> Primial 分批進場金字塔動態互動圖表 (開啟或關閉)
       if (
         e.altKey &&
         !e.ctrlKey &&
@@ -5070,7 +5073,14 @@ export default function Dashboard() {
         (e.key === "Z" || e.key === "z" || e.code === "KeyZ" || e.key === "Ω" || e.keyCode === 90 || e.which === 90)
       ) {
         e.preventDefault();
-        handleFlipAllCards();
+        setIsPrimialModalOpen((prev) => {
+          const next = !prev;
+          if (next) {
+            setPrimialFocusTabId(activeCardTabId || (orderedFilteredSubTabVisibleTabs[0]?.id ?? null));
+          }
+          return next;
+        });
+        playClickSound();
         return;
       }
 
@@ -5230,7 +5240,8 @@ export default function Dashboard() {
     scrollToElement,
     isAiAnalysisOpen,
     handleTabIndicatorClick,
-    isVisualLinesBoardOpen
+    isVisualLinesBoardOpen,
+    isPrimialModalOpen,
   ]);
 
   useEffect(() => {
@@ -5270,34 +5281,41 @@ export default function Dashboard() {
     };
   }, [activeCardTabId, orderedFilteredSubTabVisibleTabs]);
 
-  const handleCarouselScroll = () => {
+  const carouselScrollRafRef = useRef<number | null>(null);
+  const handleCarouselScroll = useCallback(() => {
     if (isProgrammaticScrollRef.current) return;
-    const carousel = carouselRef.current;
-    if (!carousel || orderedFilteredSubTabVisibleTabs.length === 0) return;
-    
-    const containerRect = carousel.getBoundingClientRect();
-    const containerCenter = containerRect.left + containerRect.width / 2;
-    
-    let closestTabId = null;
-    let minDistance = Infinity;
-    
-    orderedFilteredSubTabVisibleTabs.forEach((tab) => {
-      const el = document.getElementById(`stock-card-${tab.id}`);
-      if (el) {
-        const rect = el.getBoundingClientRect();
-        const cardCenter = rect.left + rect.width / 2;
-        const distance = Math.abs(cardCenter - containerCenter);
-        if (distance < minDistance) {
-          minDistance = distance;
-          closestTabId = tab.id;
+    if (carouselScrollRafRef.current !== null) return;
+    carouselScrollRafRef.current = requestAnimationFrame(() => {
+      carouselScrollRafRef.current = null;
+      if (isProgrammaticScrollRef.current) return;
+      const carousel = carouselRef.current;
+      if (!carousel || orderedFilteredSubTabVisibleTabs.length === 0) return;
+
+      const containerRect = carousel.getBoundingClientRect();
+      const containerCenter = containerRect.left + containerRect.width / 2;
+
+      let closestTabId: string | null = null;
+      let minDistance = Infinity;
+
+      for (let i = 0; i < orderedFilteredSubTabVisibleTabs.length; i++) {
+        const tab = orderedFilteredSubTabVisibleTabs[i];
+        const el = document.getElementById(`stock-card-${tab.id}`);
+        if (el) {
+          const rect = el.getBoundingClientRect();
+          const cardCenter = rect.left + rect.width / 2;
+          const distance = Math.abs(cardCenter - containerCenter);
+          if (distance < minDistance) {
+            minDistance = distance;
+            closestTabId = tab.id;
+          }
         }
       }
+
+      if (closestTabId && closestTabId !== activeCardTabId) {
+        setActiveCardTabId(closestTabId);
+      }
     });
-    
-    if (closestTabId && closestTabId !== activeCardTabId) {
-      setActiveCardTabId(closestTabId);
-    }
-  };
+  }, [orderedFilteredSubTabVisibleTabs, activeCardTabId]);
 
   const completedTabs = useMemo(() => tabs.filter((t) => t.status === "COMPLETED"), [tabs]);
 
@@ -7504,7 +7522,7 @@ export default function Dashboard() {
                       { key: "Shift + M", desc: "電影觀賞模式" },
                       { key: "Shift + D", desc: "AI 分析回傳" },
                       { key: "Shift + A", desc: "新增股票" },
-                      { key: "Alt + Z", desc: "全體卡片翻頁（正面/背面圖表切換）" },
+                      { key: "Alt + Z", desc: "Primial 分批進場金字塔動態互動圖表" },
                       { key: "Alt + W", desc: "動態視覺圖示標籤" },
                       { key: "Alt + Q", desc: "顯示 / 隱藏數據統計" },
                       { key: "Alt + ← / →", desc: "橫向滾動卡片" },
@@ -7792,6 +7810,28 @@ export default function Dashboard() {
                           >
                             <Printer className="w-4 h-4" />
                           </InteractiveButton>
+
+                          {/* 7. Primial 分批進場金字塔動態互動圖表 */}
+                          <InteractiveButton
+                            noGlow
+                            as="button"
+                            onClick={() => {
+                              setPrimialFocusTabId(activeCardTabId || (orderedFilteredSubTabVisibleTabs[0]?.id ?? null));
+                              setIsPrimialModalOpen(true);
+                              playClickSound();
+                            }}
+                            title="Primial 分批進場金字塔動態互動圖表 (Alt+Z)"
+                            className={`w-8 h-8 p-0 rounded-full transition-all duration-300 cursor-pointer flex items-center justify-center shrink-0 shadow-2xs hover:shadow-xs relative ${
+                              isPrimialModalOpen
+                                ? "bg-[#ABE2FF] hover:bg-[#93d7fc] text-zinc-950 border border-[#38bdf8] shadow-[0_0_12px_rgba(56,189,248,0.55)] scale-105"
+                                : "bg-white hover:bg-sky-50/80 border border-zinc-200/80 hover:border-sky-300 text-amber-600 hover:text-sky-700"
+                            }`}
+                          >
+                            <Layers className={`w-4 h-4 transition-transform duration-300 ${isPrimialModalOpen ? "scale-110 text-amber-600" : "text-amber-600"}`} />
+                            {isPrimialModalOpen && (
+                              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-sky-400 rounded-full animate-ping" />
+                            )}
+                          </InteractiveButton>
                         </div>
                       </div>
                     </div>
@@ -7928,6 +7968,25 @@ export default function Dashboard() {
                           >
                             <Printer className="w-3 h-3 text-purple-500" />
                             <span>匯出</span>
+                          </InteractiveButton>
+
+                          <InteractiveButton
+                            noGlow
+                            as="button"
+                            onClick={() => {
+                              setPrimialFocusTabId(activeCardTabId || (orderedFilteredSubTabVisibleTabs[0]?.id ?? null));
+                              setIsPrimialModalOpen(true);
+                              playClickSound();
+                            }}
+                            className={`px-2 py-1 border rounded-lg transition-all text-[11px] flex items-center gap-1 font-extrabold cursor-pointer shadow-2xs ${
+                              isPrimialModalOpen
+                                ? "bg-[#ABE2FF] text-zinc-950 border-[#38bdf8] shadow-[0_0_8px_rgba(56,189,248,0.45)]"
+                                : "bg-white border-zinc-200 text-zinc-700 hover:text-sky-700 hover:bg-sky-50"
+                            }`}
+                            title="Primial 分批進場金字塔動態互動圖表 (Alt+Z)"
+                          >
+                            <Layers className="w-3 h-3 text-amber-600" />
+                            <span>Primial</span>
                           </InteractiveButton>
                         </div>
                       </div>
@@ -8615,18 +8674,15 @@ export default function Dashboard() {
                                         style={{ perspective: "1200px" }}
                                       >
                                         <motion.div
-                                          layout
-                                          initial={{ opacity: 0, y: 20 }}
+                                          initial={{ opacity: 0, y: 12 }}
                                           animate={{
                                             opacity: 1,
                                             y: 0,
                                           }}
                                           transition={{
-                                            duration: 0.6,
-                                            type: "spring",
-                                            stiffness: 260,
-                                            damping: 20,
-                                            delay: idx * 0.05,
+                                            duration: 0.22,
+                                            ease: "easeOut",
+                                            delay: Math.min(idx * 0.015, 0.12),
                                           }}
                                           key={tab.id}
                                           className={`relative w-full h-full flex-1 flex flex-col cursor-pointer slide-drawer-container transition-all duration-300 ${isCardExpanded ? "h-[646px] min-h-[566px] sm:min-h-[646px] max-h-[calc(100dvh-56px)] sm:max-h-none" : "min-h-[135px] h-[135px]"} ${
@@ -8924,6 +8980,21 @@ export default function Dashboard() {
                                                       {tab.tradeType === "simulated" ? "SIM" : "LIVE"}
                                                     </div>
 
+                                                    {/* Primial 分批進場金字塔動態互動圖表 快速進入按鈕 */}
+                                                    <button
+                                                      type="button"
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setPrimialFocusTabId(tab.id);
+                                                        setIsPrimialModalOpen(true);
+                                                        playClickSound();
+                                                      }}
+                                                      className="p-1 text-amber-600 hover:text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200/80 rounded-full transition-all flex items-center justify-center shrink-0 w-7 h-7 shadow-2xs hover:scale-105 active:scale-95 cursor-pointer"
+                                                      title="進入 Primial 分批進場金字塔動態互動圖表 (Alt+Z)"
+                                                    >
+                                                      <Layers className="w-3.5 h-3.5 stroke-[2.2]" />
+                                                    </button>
+
                                                     {/* Expand / Collapse Button */}
                                                     {!isCinemaModeActive && (
                                                       <button
@@ -9160,7 +9231,7 @@ export default function Dashboard() {
                                             e.stopPropagation();
                                           }}
                                           style={{ pointerEvents: (flippedCards[tab.id] !== false) ? "auto" : "none" }}
-                                          className={`card-back absolute inset-0 glass-card bg-transparent rounded-2xl flex flex-col w-full h-full sm:hover:bg-white/[0.04] transition-all duration-500 overflow-hidden ${selectedCardIds.has(tab.id) ? "ring-2 ring-emerald-500 shadow-md ring-offset-1" : ""} ${
+                                          className={`card-back absolute inset-0 glass-card rounded-2xl flex flex-col w-full h-full ${isCinemaModeActive ? "" : "transition-all duration-500"} overflow-hidden ${selectedCardIds.has(tab.id) ? "ring-2 ring-emerald-500 shadow-md ring-offset-1" : ""} ${
                                             (activeTabStrategies[tab.id])?.observeChecked ? "card-breathe-observe" : (activeTabStrategies[tab.id])?.closeChecked ? "card-breathe-close" : (activeTabStrategies[tab.id])?.slChecked ? "card-breathe-sl" : (activeTabStrategies[tab.id])?.addChecked ? "card-breathe-add" : (activeTabStrategies[tab.id])?.tpChecked ? "card-breathe-tp" : ""
                                           }`}
                                         >
@@ -9199,6 +9270,20 @@ export default function Dashboard() {
                                                   <span className="w-1.5 h-1.5 rounded-full inline-block transition-colors duration-500" style={{ backgroundColor: textIndicatorColor }} />
                                                 </div>
                                                 <div className="flex items-center gap-2">
+                                                  <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      setPrimialFocusTabId(tab.id);
+                                                      setIsPrimialModalOpen(true);
+                                                      playClickSound();
+                                                    }}
+                                                    className="flex items-center gap-1 text-[9.5px] font-bold text-amber-900 bg-amber-400/30 hover:bg-amber-400/50 px-2 py-0.5 rounded-full transition-colors cursor-pointer border border-amber-500/30"
+                                                    title="進入 Primial 分批進場金字塔動態互動圖表 (Alt+Z)"
+                                                  >
+                                                    <Layers className="w-2.5 h-2.5 stroke-[2.5]" />
+                                                    <span>Primial</span>
+                                                  </button>
                                                   {tab.updatedAt && (
                                                     <span style={{ color: labelCol }} className="text-[9.5px] font-black tracking-wider opacity-80 transition-colors duration-500 font-bold">
                                                       {formatTimestamp(tab.updatedAt, "yyyy/MM/dd HH:mm")}
@@ -12118,6 +12203,35 @@ export default function Dashboard() {
           </motion.div>
         </AnimatePresence>
       )}
+
+      {/* Primial 分批進場金字塔動態互動圖表 全螢幕清單視圖 */}
+      <PrimialPyramidViewModal
+        isOpen={isPrimialModalOpen}
+        onClose={() => setIsPrimialModalOpen(false)}
+        allTabs={visibleActiveTabs}
+        currentHoldingSubTab={activeHoldingSubTab}
+        onSelectHoldingSubTab={(subTab) => {
+          setActiveHoldingSubTab(subTab as any);
+        }}
+        currentViewTab={activeViewTab}
+        onSelectViewTab={(viewTab) => {
+          handleViewTabChange(viewTab);
+        }}
+        tradesMap={activeTabTrades}
+        strategiesMap={activeTabStrategies}
+        ordersMap={activeTabOrders}
+        totalCapital={totalCapital}
+        virtualCapital={virtualCapital}
+        maxStrategyRiskPool60={maxStrategyRiskPool60}
+        initialDirection={pnlDirectionFilter}
+        initialSelectedBracket={pnlPercentFilter}
+        initialStockId={primialFocusTabId}
+        initialStockSymbol={visibleActiveTabs.find((t) => t.id === primialFocusTabId)?.symbol}
+        onNavigateToDetail={(tabId) => {
+          playClickSound();
+          navigate(`/tab/${tabId}`);
+        }}
+      />
     </div>
   );
 }

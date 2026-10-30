@@ -37,10 +37,6 @@ export const scrollToMainTabs = (behavior: ScrollBehavior = 'smooth') => {
 
 export const enterFullscreen = async (): Promise<boolean> => {
   if (typeof window === 'undefined') return false;
-  // If running inside an iframe (like AI Studio preview environment), fullscreen request is restricted by policy
-  if (window.self !== window.top) {
-    return false;
-  }
   const elem = document.documentElement as any;
   if (isAlreadyFullscreen()) {
     scrollToMainTabs('smooth');
@@ -61,16 +57,13 @@ export const enterFullscreen = async (): Promise<boolean> => {
     setTimeout(() => scrollToMainTabs('smooth'), 450);
     return true;
   } catch (err) {
-    console.warn('Enter fullscreen error:', err);
+    console.warn('Enter fullscreen request notice:', err);
     return false;
   }
 };
 
 export const exitFullscreen = async (): Promise<boolean> => {
   if (typeof window === 'undefined') return false;
-  if (window.self !== window.top) {
-    return false;
-  }
   const doc = document as any;
   if (!isAlreadyFullscreen()) return false;
   try {
@@ -85,7 +78,7 @@ export const exitFullscreen = async (): Promise<boolean> => {
     }
     return true;
   } catch (err) {
-    console.warn('Exit fullscreen error:', err);
+    console.warn('Exit fullscreen notice:', err);
     return false;
   }
 };
@@ -103,12 +96,24 @@ export function useAutoFullscreen() {
   const startPosRef = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
-    // If inside an iframe (e.g. preview environment), skip automatic fullscreen interception
-    if (typeof window !== 'undefined' && window.self !== window.top) {
-      return;
-    }
-
     let isDisposed = false;
+    let hasAttemptedFirstClick = false;
+
+    // 1. 當網頁打開時，點擊任何一處就自動開啟全螢幕模式 (F11)
+    const handleFirstClickAnywhere = async () => {
+      if (hasAttemptedFirstClick || isDisposed) return;
+      hasAttemptedFirstClick = true;
+      if (!isAlreadyFullscreen()) {
+        try {
+          await enterFullscreen();
+        } catch {
+          // ignore
+        }
+      }
+    };
+
+    window.addEventListener('click', handleFirstClickAnywhere, { capture: true, once: true });
+    window.addEventListener('pointerdown', handleFirstClickAnywhere, { capture: true, once: true });
 
     // 嚴格判斷是否為「純網頁背景」（排除任何卡片、列表、表格、圖表、彈窗、選單、工具列及文字反白）
     const isPureBackgroundElement = (target: HTMLElement | null): boolean => {
@@ -260,6 +265,8 @@ export function useAutoFullscreen() {
     return () => {
       isDisposed = true;
       cancelLongPress();
+      window.removeEventListener('click', handleFirstClickAnywhere, { capture: true } as any);
+      window.removeEventListener('pointerdown', handleFirstClickAnywhere, { capture: true } as any);
       window.removeEventListener('dblclick', handleBackgroundDblClick);
       window.removeEventListener('wheel', cancelLongPress, { capture: true } as any);
       window.removeEventListener('scroll', cancelLongPress, { capture: true } as any);

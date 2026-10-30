@@ -136,11 +136,11 @@ function resolveGlobalLayout<T extends { id: string; price?: number; rawY: numbe
   }
 
   // 2. 迭代彈性調整：兼顧同欄位避碰與全域價格由大到小單調性
-  for (let iter = 0; iter < 100; iter++) {
+  for (let iter = 0; iter < 35; iter++) {
     // A. 彈簧回拉至原始比例位置
     for (let i = 0; i < n; i++) {
       if (!result[i].isFixed) {
-        result[i].y += (result[i].rawY - result[i].y) * 0.1;
+        result[i].y += (result[i].rawY - result[i].y) * 0.15;
       }
     }
 
@@ -261,7 +261,7 @@ export const priceCache = new Map<string, { price: number; timestamp: number }>(
 export const prefetchStockPrice = (symbol: string) => {
   if (!symbol) return;
   const cached = priceCache.get(symbol);
-  if (cached && Date.now() - cached.timestamp < 30000) return;
+  if (cached && Date.now() - cached.timestamp < 60000) return;
   
   fetch(`/api/stock/${symbol}`).then(res => res.json()).then(data => {
     const fetchedPrice = data?.chart?.result?.[0]?.meta?.regularMarketPrice;
@@ -277,19 +277,23 @@ export const useStockPrice = (symbol?: string, initialPrice: number = 0) => {
 
   React.useEffect(() => {
     if (!symbol) return;
-    
-    const cached = priceCache.get(symbol);
-    if (cached && Date.now() - cached.timestamp < 30000) {
-       setPrice(cached.price);
-       setIsLoading(false);
-       // We still want to refresh in background but not show loading state
-    } else if (initialPrice > 0) {
-       setPrice(initialPrice);
-       setIsLoading(false);
-    } else {
-       setIsLoading(true);
+
+    // If parent already provided a valid price (from Firestore / imported prices), use it immediately without firing 30+ background API requests
+    if (initialPrice > 0) {
+      setPrice(initialPrice);
+      setIsLoading(false);
+      priceCache.set(symbol, { price: initialPrice, timestamp: Date.now() });
+      return;
     }
 
+    const cached = priceCache.get(symbol);
+    if (cached && Date.now() - cached.timestamp < 60000) {
+      setPrice(cached.price);
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
     let isMounted = true;
     const fetchPrice = async () => {
       try {
@@ -298,15 +302,15 @@ export const useStockPrice = (symbol?: string, initialPrice: number = 0) => {
         const data = await res.json();
         const fetchedPrice = data?.chart?.result?.[0]?.meta?.regularMarketPrice;
         if (fetchedPrice && isMounted && typeof fetchedPrice === 'number') {
-           setPrice(fetchedPrice);
-           priceCache.set(symbol, { price: fetchedPrice, timestamp: Date.now() });
-           setIsLoading(false);
+          setPrice(fetchedPrice);
+          priceCache.set(symbol, { price: fetchedPrice, timestamp: Date.now() });
+          setIsLoading(false);
         }
       } catch (e) {
-         if (isMounted) setIsLoading(false);
+        if (isMounted) setIsLoading(false);
       }
     };
-    
+
     fetchPrice();
     return () => { isMounted = false; };
   }, [symbol, initialPrice]);

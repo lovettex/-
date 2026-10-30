@@ -1,6 +1,6 @@
 {
-  "summary":  "Optimized PS5 Dynamic Background menu dialog and removed card black shadows/3D embossed effects in PS5 mode:\n1. PS5 Dynamic Background Menu Dialog:\n   - Added overflow-hidden to the dialog container and wrapped both the Soundscapes Catalog and PS5 Themes Catalog in flexible, scrollable containers (`min-h-0 flex-1 overflow-hidden`).\n   - Fixed theme card grid to `flex-1 min-h-0 overflow-y-auto overscroll-contain`, and set headers, controllers, and footers to `shrink-0`.\n   - Prevented theme items (such as the Kerr Black Hole card) from overflowing or spilling outside the dialog window border.\n2. Card Styling in PS5 Mode:\n   - Removed all heavy dark floating shadows (`box-shadow`, `feDropShadow`), bevel borders, and 3D extrusion (`transform: translateZ`) from price tags, cards, vector lines, and benchmark dividers.\n   - Cards and tags now display cleanly and flatly with crisp colors and zero black background shadows or raised/embossed bulging effects.",
-  "updatedAt":  "2026-10-25T16:10:18.649077689Z",
+  "summary":  "規劃建立專屬的「Primial 分批進場金字塔動態互動圖表」全螢幕/滿版清單檢視（PrimialPyramidViewModal），取代原本卡片內置替換的方式。此檢視頂部整合專屬功能導航列（包含行權價、攤平/突破價位、卡片分隔線、支撐、壓力、全部展開/收合及個股快速跳轉膠囊標籤），並在頂部內建「獲利/虧損%分級階梯軸篩選列」，即時篩選與切換個股；主體垂直滾動展示寬版金字塔互動圖表，與主看板卡片保持獨立與聯動。",
+  "updatedAt":  "2026-10-29T17:02:04.753132376Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

@@ -3612,16 +3612,19 @@ export default function StockTabDetail() {
                     {/* 子分頁 1: 籌碼試算與規劃 */}
                     <TabsContent value="calc" className="pt-2 space-y-3 outline-none">
                       {/* Primial 分批進場金字塔快捷功能工具列 (完全對齊 Primial 頁面上的功能按鈕) */}
-                      <div className="w-full bg-[#18181b] border border-zinc-800/90 rounded-2xl px-3.5 sm:px-4 py-2 sm:py-2.5 flex flex-wrap items-center justify-between gap-2.5 shadow-md">
+                      <div 
+                        className="w-[calc(100%+2rem)] sm:w-[calc(100%+2.75rem)] -mx-4 sm:-mx-5.5 bg-[#ABE2FF] border-y border-[#89d1f7] rounded-none px-4 sm:px-5.5 py-2 sm:py-2.5 flex flex-wrap items-center justify-between gap-2.5 shadow-xs"
+                        style={{ backgroundColor: "#ABE2FF" }}
+                      >
                         {/* 左側：Primial 標籤與提示 */}
                         <div className="flex items-center gap-2">
-                          <span className="text-xs sm:text-sm font-black text-white tracking-tight flex items-center gap-1.5">
-                            <Layers className="w-4 h-4 text-amber-400" />
+                          <span className="text-xs sm:text-sm font-black text-zinc-950 tracking-tight flex items-center gap-1.5">
+                            <Layers className="w-4 h-4 text-amber-600" />
                             <span>Primial</span>
-                            <span className="hidden sm:inline text-xs font-bold text-zinc-400">分批進場金字塔動態互動圖表</span>
+                            <span className="hidden sm:inline text-xs font-bold text-zinc-800">分批進場金字塔動態互動圖表</span>
                           </span>
                           {tab?.symbol && (
-                            <span className="px-2 py-0.5 bg-amber-400/15 border border-amber-400/30 text-amber-300 text-[11px] font-mono font-black rounded-full">
+                            <span className="px-2 py-0.5 bg-amber-400/25 border border-amber-500/40 text-amber-950 text-[11px] font-mono font-black rounded-full shadow-2xs">
                               {tab.symbol}
                             </span>
                           )}
@@ -3636,36 +3639,36 @@ export default function StockTabDetail() {
                             className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-black transition-all cursor-pointer border active:scale-95 shrink-0 select-none ${
                               pyramidShowStrikePrices
                                 ? "bg-zinc-950 text-white border-zinc-400 shadow-[0_0_8px_rgba(255,255,255,0.25)] ring-1 ring-zinc-400"
-                                : "bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white border-zinc-700/60"
+                                : "bg-[#E0F2FE] hover:bg-[#CFEBFC] text-black hover:text-black border-[#7BC4ED] shadow-2xs"
                             }`}
                             title="開啟/關閉期權行權價與合約金額黑色虛線 (預設關閉)"
                           >
-                            <span className="w-2.5 h-0 border-t-2 border-dashed border-zinc-300 shrink-0" />
+                            <span className="w-2.5 h-0 border-t-2 border-dashed border-zinc-700 shrink-0" />
                             <span>行權價</span>
                             <span
                               className={`w-1.5 h-1.5 rounded-full ${
-                                pyramidShowStrikePrices ? "bg-white shadow-[0_0_6px_#ffffff]" : "bg-zinc-500"
+                                pyramidShowStrikePrices ? "bg-white shadow-[0_0_6px_#ffffff]" : "bg-zinc-400"
                               }`}
                             />
                           </button>
 
                           {/* 攤平 | 突破價位 (快捷按鍵: Alt+T / Alt+B) */}
-                          <div className="flex items-center bg-zinc-900/90 border border-zinc-700/80 rounded-full p-0.5 shadow-xs shrink-0 select-none">
+                          <div className="flex items-center bg-[#E0F2FE] border border-[#7BC4ED] rounded-full p-0.5 shadow-2xs shrink-0 select-none">
                             <button
                               type="button"
                               onClick={() => handleTogglePyramidCalcMode("averaging")}
                               className={`flex items-center gap-1 px-2.5 sm:px-3 py-1 rounded-full text-xs font-black transition-all cursor-pointer border active:scale-95 select-none ${
                                 pyramidCalcMode === "averaging"
                                   ? "bg-emerald-600 text-white border-emerald-400/60 shadow-[0_0_8px_rgba(16,185,129,0.4)]"
-                                  : "bg-transparent hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border-transparent"
+                                  : "bg-transparent hover:bg-[#CFEBFC] text-black hover:text-black border-transparent"
                               }`}
                               title="向下分批攤平價位試算 (-3%, -6%, -9%, -12%) [快捷鍵 Alt + T]"
                             >
                               <span>攤平</span>
-                              <span className="text-[10px] font-mono opacity-80 font-normal">Alt+T</span>
+                              <span className={`text-[10px] font-mono font-normal ${pyramidCalcMode === "averaging" ? "opacity-80 text-white" : "text-zinc-600"}`}>Alt+T</span>
                               <span
                                 className={`w-1.5 h-1.5 rounded-full ${
-                                  pyramidCalcMode === "averaging" ? "bg-emerald-300 shadow-[0_0_6px_#6ee7b7]" : "bg-zinc-600"
+                                  pyramidCalcMode === "averaging" ? "bg-emerald-300 shadow-[0_0_6px_#6ee7b7]" : "bg-zinc-400"
                                 }`}
                               />
                             </button>
@@ -3676,21 +3679,21 @@ export default function StockTabDetail() {
                               className={`flex items-center gap-1 px-2.5 sm:px-3 py-1 rounded-full text-xs font-black transition-all cursor-pointer border active:scale-95 select-none ${
                                 pyramidCalcMode === "breakout"
                                   ? "bg-indigo-600 text-white border-indigo-400/60 shadow-[0_0_8px_rgba(99,102,241,0.4)]"
-                                  : "bg-transparent hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border-transparent"
+                                  : "bg-transparent hover:bg-[#CFEBFC] text-black hover:text-black border-transparent"
                               }`}
                               title="向上突破加碼價位試算 (+2%, +4%, +6%, +8%) [快捷鍵 Alt + B]"
                             >
                               <span>突破價位</span>
-                              <span className="text-[10px] font-mono opacity-80 font-normal">Alt+B</span>
+                              <span className={`text-[10px] font-mono font-normal ${pyramidCalcMode === "breakout" ? "opacity-80 text-white" : "text-zinc-600"}`}>Alt+B</span>
                               <span
                                 className={`w-1.5 h-1.5 rounded-full ${
-                                  pyramidCalcMode === "breakout" ? "bg-indigo-300 shadow-[0_0_6px_#a5b4fc]" : "bg-zinc-600"
+                                  pyramidCalcMode === "breakout" ? "bg-indigo-300 shadow-[0_0_6px_#a5b4fc]" : "bg-zinc-400"
                                 }`}
                               />
                             </button>
                           </div>
 
-                          <div className="h-4 w-[1px] bg-zinc-700 hidden sm:block" />
+                          <div className="h-4 w-[1px] bg-[#7BC4ED]/60 hidden sm:block" />
 
                           {/* 卡片分隔線 (Alt + D) */}
                           <button
@@ -3699,38 +3702,46 @@ export default function StockTabDetail() {
                             className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-black transition-all cursor-pointer border active:scale-95 shrink-0 select-none ${
                               pyramidShowCardDividers
                                 ? "bg-indigo-500/20 text-indigo-300 border-indigo-400/60 shadow-[0_0_8px_rgba(99,102,241,0.3)] ring-1 ring-indigo-400/50"
-                                : "bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white border-zinc-700/60"
+                                : "bg-[#E0F2FE] hover:bg-[#CFEBFC] text-black hover:text-black border-[#7BC4ED] shadow-2xs"
                             }`}
                             title="快速打開/關閉卡片分隔線 (Alt + D)"
                           >
-                            <Split className={`w-3.5 h-3.5 ${pyramidShowCardDividers ? "text-indigo-400" : "text-zinc-400"}`} />
+                            <Split className={`w-3.5 h-3.5 ${pyramidShowCardDividers ? "text-indigo-400" : "text-zinc-700"}`} />
                             <span className="hidden sm:inline">分隔線</span>
                             <span className="sm:hidden">分</span>
-                            <span className="text-[10px] font-mono text-zinc-400 font-normal">Alt+D</span>
+                            <span className={`text-[10px] font-mono font-normal ${pyramidShowCardDividers ? "text-zinc-400" : "text-zinc-600"}`}>Alt+D</span>
                             <span
                               className={`w-1.5 h-1.5 rounded-full ${
-                                pyramidShowCardDividers ? "bg-indigo-400 shadow-[0_0_6px_#818cf8]" : "bg-zinc-500"
+                                pyramidShowCardDividers ? "bg-indigo-400 shadow-[0_0_6px_#818cf8]" : "bg-zinc-400"
                               }`}
                             />
                           </button>
 
-                          {/* 支撐 (Alt + R) */}
+                          {/* 支撐 (Alt + R) - 背景與其他按鈕保持一致 */}
                           <button
                             type="button"
                             onClick={handleTogglePyramidSupport}
                             className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-black transition-all cursor-pointer border active:scale-95 shrink-0 select-none ${
                               pyramidLevelTypes.support
-                                ? "bg-amber-500/20 text-amber-300 border-amber-400/60 shadow-[0_0_8px_rgba(245,158,11,0.3)] ring-1 ring-amber-400/50"
-                                : "bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white border-zinc-700/60"
+                                ? "bg-[#E0F2FE] text-amber-900 border-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.25)] ring-1 ring-amber-400"
+                                : "bg-[#E0F2FE] hover:bg-[#CFEBFC] text-black hover:text-black border-[#7BC4ED] shadow-2xs"
                             }`}
+                            style={
+                              pyramidLevelTypes.support
+                                ? {
+                                    textShadow: "0 0 1px #64748b, -0.5px 0 0.5px #64748b, 0.5px 0 0.5px #64748b, 0 -0.5px 0.5px #64748b, 0 0.5px 0.5px #64748b",
+                                    WebkitTextStroke: "0.4px #64748b",
+                                  }
+                                : undefined
+                            }
                             title="快速打開/關閉支撐防線 (Alt + R)"
                           >
-                            <span className="w-2.5 h-0 border-t-2 border-dashed border-amber-400 shrink-0" />
-                            <span>支撐</span>
-                            <span className="text-[10px] font-mono text-zinc-400 font-normal">Alt+R</span>
+                            <span className="w-2.5 h-0 border-t-2 border-dashed border-amber-500 shrink-0" />
+                            <span style={pyramidLevelTypes.support ? { WebkitTextStroke: "0.35px #64748b" } : undefined}>支撐</span>
+                            <span className={`text-[10px] font-mono font-bold ${pyramidLevelTypes.support ? "text-amber-800" : "text-zinc-600"}`}>Alt+R</span>
                             <span
                               className={`w-1.5 h-1.5 rounded-full ${
-                                pyramidLevelTypes.support ? "bg-amber-400 shadow-[0_0_6px_#fbbf24]" : "bg-zinc-500"
+                                pyramidLevelTypes.support ? "bg-amber-500 shadow-[0_0_6px_#f59e0b]" : "bg-zinc-400"
                               }`}
                             />
                           </button>
@@ -3741,17 +3752,17 @@ export default function StockTabDetail() {
                             onClick={handleTogglePyramidResistance}
                             className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-black transition-all cursor-pointer border active:scale-95 shrink-0 select-none ${
                               pyramidLevelTypes.resistance
-                                ? "bg-rose-500/20 text-rose-300 border-rose-400/60 shadow-[0_0_8px_rgba(244,63,94,0.3)] ring-1 ring-rose-400/50"
-                                : "bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white border-zinc-700/60"
+                                ? "bg-[#E0F2FE] text-rose-800 border-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.25)] ring-1 ring-rose-400"
+                                : "bg-[#E0F2FE] hover:bg-[#CFEBFC] text-black hover:text-black border-[#7BC4ED] shadow-2xs"
                             }`}
                             title="快速打開/關閉壓力防線 (Alt + P)"
                           >
-                            <span className="w-2.5 h-0 border-t-2 border-dashed border-rose-400 shrink-0" />
+                            <span className="w-2.5 h-0 border-t-2 border-dashed border-rose-500 shrink-0" />
                             <span>壓力</span>
-                            <span className="text-[10px] font-mono text-zinc-400 font-normal">Alt+P</span>
+                            <span className={`text-[10px] font-mono font-bold ${pyramidLevelTypes.resistance ? "text-rose-800" : "text-zinc-600"}`}>Alt+P</span>
                             <span
                               className={`w-1.5 h-1.5 rounded-full ${
-                                pyramidLevelTypes.resistance ? "bg-rose-400 shadow-[0_0_6px_#fb7185]" : "bg-zinc-500"
+                                pyramidLevelTypes.resistance ? "bg-rose-500 shadow-[0_0_6px_#fb7185]" : "bg-zinc-400"
                               }`}
                             />
                           </button>

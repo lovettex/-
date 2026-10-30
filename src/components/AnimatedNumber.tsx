@@ -2,7 +2,9 @@ import React, { useEffect, useRef } from 'react';
 import { motion, useSpring, useTransform } from 'motion/react';
 import { playTickSound } from '../lib/audio';
 
-export function AnimatedNumber({ 
+let lastGlobalTickTime = 0;
+
+export const AnimatedNumber = React.memo(function AnimatedNumber({ 
   value, 
   prefix = "", 
   suffix = "", 
@@ -17,7 +19,7 @@ export function AnimatedNumber({
   className?: string;
   showPlus?: boolean;
 }) {
-  const spring = useSpring(value, { mass: 0.8, stiffness: 75, damping: 15 });
+  const spring = useSpring(value, { mass: 0.35, stiffness: 210, damping: 26 });
   const display = useTransform(spring, (current) => {
     const isNegative = current < 0;
     const absValue = Math.abs(current);
@@ -30,15 +32,23 @@ export function AnimatedNumber({
   });
 
   const isMounted = useRef(false);
+  const prevValueRef = useRef(value);
 
   useEffect(() => {
+    if (prevValueRef.current === value && isMounted.current) return;
+    prevValueRef.current = value;
     spring.set(value);
     if (isMounted.current) {
-      playTickSound();
+      const now = performance.now();
+      if (now - lastGlobalTickTime > 90) {
+        lastGlobalTickTime = now;
+        playTickSound();
+      }
     } else {
       isMounted.current = true;
     }
   }, [value, spring]);
 
   return <motion.span className={className}>{display}</motion.span>;
-}
+});
+
