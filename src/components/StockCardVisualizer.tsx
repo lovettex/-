@@ -2402,7 +2402,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
       };
     }) : [];
 
-    const buyTrades = isHoldingActive ? (liveTrades || [])
+    const buyTrades = (liveTrades || [])
       .filter((t) => t.type === 'BUY' && typeof t.price === 'number' && t.price > 0 && typeof t.quantity === 'number' && t.quantity > 0)
       .map((t, idx) => ({
         id: t.id || `buy-${idx}`,
@@ -2413,10 +2413,27 @@ export const StockCardVisualizer: React.FC<Props> = ({
         purpose: t.purpose || '',
         notes: t.notes || '',
         fees: t.fees || 0,
-      })) : [];
+        tradeType: 'BUY' as const,
+        isSell: false,
+      }));
+
+    const sellTrades = (liveTrades || [])
+      .filter((t) => t.type === 'SELL' && typeof t.price === 'number' && t.price > 0 && typeof t.quantity === 'number' && t.quantity > 0)
+      .map((t, idx) => ({
+        id: t.id || `sell-${idx}`,
+        price: t.price,
+        quantity: t.quantity,
+        dateFormatted: formatTimestamp(t.tradeDate, 'yyyy-MM-dd') || '未知日期',
+        batch: t.batch || '',
+        purpose: t.purpose || '',
+        notes: t.notes || '',
+        fees: t.fees || 0,
+        tradeType: 'SELL' as const,
+        isSell: true,
+      }));
 
     const pyramidPrices = pyramidStepItems.map((s) => s.price).filter((p) => p > 0);
-    const tradePrices = buyTrades.map((t) => t.price).filter((p) => p > 0);
+    const tradePrices = [...buyTrades, ...sellTrades].map((t) => t.price).filter((p) => p > 0);
 
     const allPrices = [
       dynamicPrice,
@@ -2532,8 +2549,8 @@ export const StockCardVisualizer: React.FC<Props> = ({
       })),
     ];
 
-    // 第三欄位：歷史買入標籤 (持有數量 > 0 且有交易時顯示)
-    const buyTradeItemsRaw = (isHoldingActive ? (buyTrades || []) : [])
+    // 第三欄位：歷史買賣交易標籤 (買入藍色、賣出淡粉色)
+    const allTradeItemsRaw = (isHoldingActive || buyTrades.length > 0 || sellTrades.length > 0 ? [...buyTrades, ...sellTrades] : [])
       .filter((t: any) => t.price > 0)
       .map((t: any, idx: number) => ({
         ...t,
@@ -2541,6 +2558,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
         price: t.price,
         rawY: getYPct(t.price),
         column: 3,
+        isSell: Boolean(t.isSell || t.tradeType === 'SELL' || t.type === 'SELL'),
       }));
 
     // 第四欄位（持有 > 0 時）或 第三欄位（持有 = 0 時）：現價、均本與攤平交易標籤
@@ -2596,7 +2614,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
     const allLabelsToResolve = [
       ...col1Items,
       ...col2Items,
-      ...buyTradeItemsRaw,
+      ...allTradeItemsRaw,
       ...col4ItemsRaw,
     ];
 
@@ -2617,8 +2635,10 @@ export const StockCardVisualizer: React.FC<Props> = ({
       col1Labels,
       col2Labels,
       buyTradeLabels,
+      tradeLabels: buyTradeLabels,
       col4Labels,
       buyTrades,
+      sellTrades,
       planResult,
       effPlannedQty,
       currentHoldingQty,
@@ -2648,6 +2668,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
     buyTradeLabels,
     col4Labels,
     buyTrades,
+    sellTrades,
     planResult,
     effPlannedQty,
     currentHoldingQty,
@@ -3698,25 +3719,31 @@ export const StockCardVisualizer: React.FC<Props> = ({
             )}
           </div>
 
-          {isHoldingActive ? (
+          {isHoldingActive || (buyTradeLabels && buyTradeLabels.length > 0) ? (
             <>
-              {/* Column 3: 歷史買入標籤 (保持 3px 間距) */}
+              {/* Column 3: 歷史買入 / 賣出標籤 (保持 3px 間距) */}
               <div className={mode === 'cursor' ? "pointer-events-auto" : "pointer-events-none"}>
                 {buyTradeLabels && buyTradeLabels.map((trade: any, idx: number) => {
                   if (!trade.price || trade.price <= 0) return null;
                   const isHovered = (hoveredDetail?.type === 'trade' && hoveredDetail?.data?.id === trade.id) || hoveredLabel?.id === trade.id;
+                  const isSell = Boolean(trade.isSell || trade.tradeType === 'SELL' || trade.type === 'SELL');
+
                   return (
                     <div
-                      key={`buy-trade-badge-${trade.id || idx}`}
+                      key={`trade-badge-${trade.id || idx}`}
                       style={{
                         top: `${trade.y}%`,
                         transform: "translateY(-50%)",
                       }}
                       className={`absolute z-30 transition-all duration-150 cursor-pointer select-none whitespace-nowrap hover:scale-110 hover:z-40 active:scale-95 left-[138px] xs:left-[156px] sm:left-[180px] md:left-[215px] lg:left-[263px] ${
-                        isHovered ? "scale-110 ring-2 ring-blue-400 shadow-lg z-40" : ""
+                        isHovered 
+                          ? isSell
+                            ? "scale-110 ring-2 ring-pink-400 shadow-lg z-40"
+                            : "scale-110 ring-2 ring-blue-400 shadow-lg z-40" 
+                          : ""
                       }`}
                       onMouseEnter={() => {
-                        setHoveredDetail({ type: 'trade', data: trade });
+                        setHoveredDetail({ type: 'trade', data: { ...trade, isSell } });
                         setHoveredLabel(trade);
                       }}
                       onMouseLeave={() => {
@@ -3724,11 +3751,21 @@ export const StockCardVisualizer: React.FC<Props> = ({
                         setHoveredLabel(null);
                       }}
                     >
-                      <div className="flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2 py-0.5 rounded-md bg-blue-600/95 hover:bg-blue-500 text-white border border-blue-400 text-[10.5px] sm:text-[13px] font-mono font-bold shadow-xs leading-tight">
-                        <span>🔷</span>
-                        <span>${trade.price.toFixed(1)}</span>
-                        <span className="text-[9.5px] sm:text-[12px] opacity-95">({trade.quantity}股)</span>
-                      </div>
+                      {isSell ? (
+                        /* 淡粉色 歷史賣出標籤 */
+                        <div className="flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2 py-0.5 rounded-md bg-pink-100/95 hover:bg-pink-200 text-pink-900 border border-pink-300/90 text-[10.5px] sm:text-[13px] font-mono font-bold shadow-xs leading-tight">
+                          <span>🔻</span>
+                          <span>${trade.price.toFixed(1)}</span>
+                          <span className="text-[9.5px] sm:text-[12px] text-pink-700/90 font-bold">({trade.quantity}股)</span>
+                        </div>
+                      ) : (
+                        /* 藍色 歷史買入標籤 */
+                        <div className="flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2 py-0.5 rounded-md bg-blue-600/95 hover:bg-blue-500 text-white border border-blue-400 text-[10.5px] sm:text-[13px] font-mono font-bold shadow-xs leading-tight">
+                          <span>🔷</span>
+                          <span>${trade.price.toFixed(1)}</span>
+                          <span className="text-[9.5px] sm:text-[12px] opacity-95">({trade.quantity}股)</span>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -3986,23 +4023,30 @@ export const StockCardVisualizer: React.FC<Props> = ({
           ) : hoveredDetail?.type === 'trade' ? (
             <div className="flex items-center justify-between w-full gap-2 animate-fadeIn">
               <div className="flex items-center gap-1.5 shrink-0">
-                <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-blue-600/95 text-white border border-blue-400/40 flex items-center gap-1">
-                  <span>🔷</span>
-                  <span>歷史買入</span>
-                </span>
+                {hoveredDetail.data.isSell ? (
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-pink-100 text-pink-900 border border-pink-300 flex items-center gap-1">
+                    <span>🔻</span>
+                    <span>歷史賣出</span>
+                  </span>
+                ) : (
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-blue-600/95 text-white border border-blue-400/40 flex items-center gap-1">
+                    <span>🔷</span>
+                    <span>歷史買入</span>
+                  </span>
+                )}
                 <span className="font-mono text-zinc-100 font-bold tabular-nums">
                   {hoveredDetail.data.dateFormatted}
                 </span>
               </div>
               <div className="flex items-center gap-2 truncate text-zinc-100 font-medium">
-                <span>買入價 <strong className="font-mono text-cyan-300 font-bold tabular-nums">${hoveredDetail.data.price?.toFixed(2)}</strong></span>
+                <span>{hoveredDetail.data.isSell ? '賣出價' : '買入價'} <strong className={`font-mono font-bold tabular-nums ${hoveredDetail.data.isSell ? 'text-pink-300' : 'text-cyan-300'}`}>${hoveredDetail.data.price?.toFixed(2)}</strong></span>
                 <span className="w-[1px] h-3 bg-white/15 shrink-0" />
                 <span>數量 <strong className="font-mono text-white font-bold tabular-nums">{hoveredDetail.data.quantity}</strong> 股</span>
                 <span className="w-[1px] h-3 bg-white/15 shrink-0" />
                 <span>總額 <strong className="font-mono text-emerald-300 font-bold tabular-nums">${(hoveredDetail.data.price * hoveredDetail.data.quantity).toLocaleString(undefined, { maximumFractionDigits: 0 })}</strong></span>
               </div>
               <div className="shrink-0 text-[10px] text-zinc-100 bg-white/[0.08] px-2 py-0.5 rounded-md border border-white/15 font-medium">
-                {hoveredDetail.data.batch || '一般進場'}{hoveredDetail.data.purpose ? ` · ${hoveredDetail.data.purpose}` : ''}
+                {hoveredDetail.data.batch || (hoveredDetail.data.isSell ? '獲利了結/減倉' : '一般進場')}{hoveredDetail.data.purpose ? ` · ${hoveredDetail.data.purpose}` : ''}
               </div>
             </div>
           ) : hoveredDetail?.type === 'price' || hoveredDetail?.type === 'order' ? (
@@ -4070,8 +4114,16 @@ export const StockCardVisualizer: React.FC<Props> = ({
                       <strong className="text-cyan-300 font-extrabold font-mono tabular-nums">{buyTrades?.length || 0}</strong>
                       <span className="text-zinc-300 text-[10px]">筆</span>
                     </div>
+                    {sellTrades && sellTrades.length > 0 && (
+                      <div className="flex items-center gap-1 bg-pink-500/20 border border-pink-400/40 rounded-md px-1.5 py-0.5">
+                        <span className="text-[10px]">🔻</span>
+                        <span className="text-pink-200 text-[10.5px]">歷史賣出</span>
+                        <strong className="text-pink-300 font-extrabold font-mono tabular-nums">{sellTrades.length}</strong>
+                        <span className="text-pink-200 text-[10px]">筆</span>
+                      </div>
+                    )}
                     <span className="text-zinc-400 text-[10px] hidden lg:inline tracking-tight">
-                      懸停階梯或買入點檢視詳細細節
+                      懸停階梯或買賣點檢視詳細細節
                     </span>
                   </div>
                 </div>

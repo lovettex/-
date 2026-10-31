@@ -1350,6 +1350,9 @@ export default function Dashboard() {
   const [completedResultFilter, setCompletedResultFilter] = useState<"all" | "win" | "lose">("all");
   const [completedSearchQuery, setCompletedSearchQuery] = useState<string>("");
 
+  // Top Hero Banner dynamic auto-hide on scroll down and reveal on mouse wheel up
+  const [isTopBannerVisible, setIsTopBannerVisible] = useState(true);
+
   // Lenis Smooth Scroll Engine Instance
   const lenisRef = useRef<Lenis | null>(null);
 
@@ -1362,20 +1365,86 @@ export default function Dashboard() {
     });
     lenisRef.current = lenis;
 
+    const onLenisScroll = (e: any) => {
+      const scroll = typeof e.scroll === "number" ? e.scroll : window.scrollY;
+      const direction = e.direction; // 1: scrolling down, -1: scrolling up
+
+      if (scroll <= 25) {
+        setIsTopBannerVisible(true);
+        return;
+      }
+
+      if (direction === 1 && scroll > 60) {
+        setIsTopBannerVisible(false);
+      } else if (direction === -1) {
+        setIsTopBannerVisible(true);
+      }
+    };
+
+    lenis.on('scroll', onLenisScroll);
+
     function raf(time: number) {
       lenis.raf(time);
       requestAnimationFrame(raf);
     }
     const rafId = requestAnimationFrame(raf);
 
+    // Direct wheel event for instant responsiveness to mouse wheel up/down
+    let lastWheelTime = 0;
+    const onWheel = (e: WheelEvent) => {
+      const now = Date.now();
+      if (now - lastWheelTime < 35) return;
+      lastWheelTime = now;
+
+      // Don't trigger if inside an active open modal or dropdown
+      if ((e.target as HTMLElement)?.closest?.('[role="dialog"], .radix-dialog-content, [data-radix-portal]')) {
+        return;
+      }
+
+      const currentScroll = typeof lenis.scroll === "number" ? lenis.scroll : window.scrollY;
+
+      if (e.deltaY < -4) {
+        // Mouse wheel scrolled UP -> immediately reveal top banner
+        setIsTopBannerVisible(true);
+      } else if (e.deltaY > 8 && currentScroll > 60) {
+        // Mouse wheel scrolled DOWN -> dynamically hide top banner
+        setIsTopBannerVisible(false);
+      }
+    };
+
+    window.addEventListener('wheel', onWheel, { passive: true });
+
+    // Fallback native scroll listener (handles mobile touch drag & keyboard navigation)
+    let lastNativeY = window.scrollY;
+    const onNativeScroll = () => {
+      const currentY = window.scrollY;
+      if (currentY <= 25) {
+        setIsTopBannerVisible(true);
+        lastNativeY = currentY;
+        return;
+      }
+      const diff = currentY - lastNativeY;
+      if (diff > 12 && currentY > 60) {
+        setIsTopBannerVisible(false);
+      } else if (diff < -10) {
+        setIsTopBannerVisible(true);
+      }
+      lastNativeY = currentY;
+    };
+
+    window.addEventListener('scroll', onNativeScroll, { passive: true });
+
     return () => {
       cancelAnimationFrame(rafId);
+      window.removeEventListener('wheel', onWheel);
+      window.removeEventListener('scroll', onNativeScroll);
+      lenis.off('scroll', onLenisScroll);
       lenis.destroy();
       lenisRef.current = null;
     };
   }, []);
 
-  const scrollToElement = useCallback((target: string | HTMLElement, offset = -20) => {
+  const scrollToElement = useCallback((target: string | HTMLElement, offset = -60) => {
     if (lenisRef.current) {
       lenisRef.current.scrollTo(target, {
         offset,
@@ -5615,8 +5684,108 @@ export default function Dashboard() {
 
   return (
     <div className="w-full pb-12 mt-0 transition-all duration-300">
-      {/* 1. Full-width Dynamic High-Contrast Emerald & Obsidian Ribbon Header (Desktop: sm and above) */}
-      <ScrollIn className="hidden sm:block">
+      {/* Shared Add Stock Dialog */}
+      <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+        <DialogContent className="glass-panel border-zinc-200/80 shadow-2xl bg-white/95 backdrop-blur-3xl text-zinc-800 outline-none w-[95vw] max-w-[400px] h-auto max-h-[90vh] overflow-y-auto !rounded-3xl p-5 sm:p-6 p-safe">
+          <DialogHeader>
+            <DialogTitle className="font-bold text-2xl tracking-tight text-zinc-900 mb-2">
+              新增股票分頁
+            </DialogTitle>
+          </DialogHeader>
+          <form
+            onSubmit={handleAddSubmit}
+            className="space-y-5 outline-none"
+          >
+            <div className="space-y-2">
+              <Label
+                htmlFor="symbol_dashboard"
+                className="font-medium text-zinc-700 text-base sm:text-sm"
+              >
+                股票代號 (Ticker)
+              </Label>
+              <Input
+                id="symbol_dashboard"
+                value={newSymbol}
+                onChange={(e) =>
+                  setNewSymbol(e.target.value.toUpperCase())
+                }
+                placeholder="例如：AAPL"
+                required
+                className="bg-zinc-50 border-zinc-200 text-zinc-800 placeholder-zinc-400 focus-visible:ring-emerald-500/20 focus-visible:border-emerald-500 h-[48px] text-base"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label
+                htmlFor="company_dashboard"
+                className="font-medium text-zinc-700 text-base sm:text-sm"
+              >
+                公司名稱 (選填)
+              </Label>
+              <Input
+                id="company_dashboard"
+                value={newCompany}
+                onChange={(e) => setNewCompany(e.target.value)}
+                placeholder="例如：Apple Inc."
+                className="bg-zinc-50 border-zinc-200 text-zinc-800 placeholder-zinc-400 focus-visible:ring-emerald-500/20 focus-visible:border-emerald-500 h-[48px] text-base"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="font-medium text-zinc-700 text-base sm:text-sm">
+                交易模式
+              </Label>
+              <Select
+                value={newTradeType}
+                onValueChange={(val: any) => setNewTradeType(val)}
+              >
+                <SelectTrigger className="w-full bg-zinc-50 border-zinc-200 text-zinc-800 focus-visible:ring-emerald-500/20 focus-visible:border-emerald-500 h-[48px] text-base">
+                  <SelectValue placeholder="選擇交易模式" />
+                </SelectTrigger>
+                <SelectContent className="bg-white border-zinc-200 text-zinc-800 outline-none rounded-xl shadow-lg">
+                  <SelectItem
+                    value="simulated"
+                    className="font-medium focus:bg-zinc-100 focus:text-zinc-900 cursor-pointer text-zinc-700 px-4 text-base sm:text-sm py-3 sm:py-1"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Gamepad2 className="h-5 w-5 sm:h-4 sm:w-4 text-amber-600" />
+                      模擬交易 (Simulated)
+                    </div>
+                  </SelectItem>
+                  <SelectItem
+                    value="real"
+                    className="font-medium focus:bg-zinc-100 focus:text-zinc-900 cursor-pointer text-zinc-700 px-4 text-base sm:text-sm py-3 sm:py-1"
+                  >
+                    <div className="flex items-center gap-3">
+                      <ShieldCheck className="h-5 w-5 sm:h-4 sm:w-4 text-emerald-600" />
+                      真實交易 (Real)
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <DialogFooter className="pt-4 pb-2">
+              <button
+                type="submit"
+                className="glass-btn-emerald w-full py-3.5 sm:py-2.5 rounded-xl font-bold text-base sm:text-sm shadow-md"
+              >
+                確認新增
+              </button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Sticky Header Container: Anchors directly to top edge */}
+      <div className="sticky top-0 z-30 w-full transition-all duration-300">
+        {/* Dynamic Collapsible Upper Section: Hero Banner + Mobile Hero + Telemetry Console (Hides on scroll down, reveals on mouse wheel up) */}
+        <div
+          className={`transition-all duration-300 ease-in-out transform origin-top ${
+            isTopBannerVisible
+              ? "max-h-[1600px] opacity-100 translate-y-0 pointer-events-auto"
+              : "max-h-0 opacity-0 -translate-y-4 pointer-events-none overflow-hidden"
+          }`}
+        >
+          {/* 1. Full-width Dynamic High-Contrast Emerald & Obsidian Ribbon Header (Desktop: sm and above) */}
+          <ScrollIn className="hidden sm:block">
         <div className="portfolio-hero-banner -mx-2 sm:-mx-4 md:-mx-6 bg-gradient-to-r from-[#032b22] via-[#064235] to-[#043328] text-white pt-[16px] pb-[18px] px-4 sm:px-6 md:px-8 flex flex-col gap-4 text-left border-b border-emerald-400/30 rounded-none shadow-[0_12px_32px_-8px_rgba(3,43,34,0.55)] relative z-10 select-none overflow-hidden">
           {/* Subtle animated ambient light flares */}
           <div className="pointer-events-none absolute -top-24 -left-20 w-96 h-96 rounded-full bg-emerald-400/15 blur-3xl animate-pulse" />
@@ -6172,98 +6341,8 @@ export default function Dashboard() {
         </div>
       </ScrollIn>
 
-      {/* Shared Add Stock Dialog */}
-      <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
-        <DialogContent className="glass-panel border-zinc-200/80 shadow-2xl bg-white/95 backdrop-blur-3xl text-zinc-800 outline-none w-[95vw] max-w-[400px] h-auto max-h-[90vh] overflow-y-auto !rounded-3xl p-5 sm:p-6 p-safe">
-          <DialogHeader>
-            <DialogTitle className="font-bold text-2xl tracking-tight text-zinc-900 mb-2">
-              新增股票分頁
-            </DialogTitle>
-          </DialogHeader>
-          <form
-            onSubmit={handleAddSubmit}
-            className="space-y-5 outline-none"
-          >
-            <div className="space-y-2">
-              <Label
-                htmlFor="symbol_dashboard"
-                className="font-medium text-zinc-700 text-base sm:text-sm"
-              >
-                股票代號 (Ticker)
-              </Label>
-              <Input
-                id="symbol_dashboard"
-                value={newSymbol}
-                onChange={(e) =>
-                  setNewSymbol(e.target.value.toUpperCase())
-                }
-                placeholder="例如：AAPL"
-                required
-                className="bg-zinc-50 border-zinc-200 text-zinc-800 placeholder-zinc-400 focus-visible:ring-emerald-500/20 focus-visible:border-emerald-500 h-[48px] text-base"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label
-                htmlFor="company_dashboard"
-                className="font-medium text-zinc-700 text-base sm:text-sm"
-              >
-                公司名稱 (選填)
-              </Label>
-              <Input
-                id="company_dashboard"
-                value={newCompany}
-                onChange={(e) => setNewCompany(e.target.value)}
-                placeholder="例如：Apple Inc."
-                className="bg-zinc-50 border-zinc-200 text-zinc-800 placeholder-zinc-400 focus-visible:ring-emerald-500/20 focus-visible:border-emerald-500 h-[48px] text-base"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className="font-medium text-zinc-700 text-base sm:text-sm">
-                交易模式
-              </Label>
-              <Select
-                value={newTradeType}
-                onValueChange={(val: any) => setNewTradeType(val)}
-              >
-                <SelectTrigger className="w-full bg-zinc-50 border-zinc-200 text-zinc-800 focus-visible:ring-emerald-500/20 focus-visible:border-emerald-500 h-[48px] text-base">
-                  <SelectValue placeholder="選擇交易模式" />
-                </SelectTrigger>
-                <SelectContent className="bg-white border-zinc-200 text-zinc-800 outline-none rounded-xl shadow-lg">
-                  <SelectItem
-                    value="simulated"
-                    className="font-medium focus:bg-zinc-100 focus:text-zinc-900 cursor-pointer text-zinc-700 px-4 text-base sm:text-sm py-3 sm:py-1"
-                  >
-                    <div className="flex items-center gap-3">
-                      <Gamepad2 className="h-5 w-5 sm:h-4 sm:w-4 text-amber-600" />
-                      模擬交易 (Simulated)
-                    </div>
-                  </SelectItem>
-                  <SelectItem
-                    value="real"
-                    className="font-medium focus:bg-zinc-100 focus:text-zinc-900 cursor-pointer text-zinc-700 px-4 text-base sm:text-sm py-3 sm:py-1"
-                  >
-                    <div className="flex items-center gap-3">
-                      <ShieldCheck className="h-5 w-5 sm:h-4 sm:w-4 text-emerald-600" />
-                      真實交易 (Real)
-                    </div>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <DialogFooter className="pt-4 pb-2">
-              <button
-                type="submit"
-                className="glass-btn-emerald w-full py-3.5 sm:py-2.5 rounded-xl font-bold text-base sm:text-sm shadow-md"
-              >
-                確認新增
-              </button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* 2. Main content container, aligned nicely with responsive layout */}
-      <div className={`space-y-4 sm:space-y-6 mx-auto mt-4 sm:mt-6 px-2 sm:px-4 ${activeViewTab === "notes" || activeViewTab === "completed" ? "w-full max-w-full lg:max-w-[98%] xl:max-w-[1920px]" : "max-w-[1600px]"}`}>
+          {/* Desktop & Mobile Unified Financial Telemetry Console */}
+          <div className={`mx-auto mt-2 sm:mt-3 px-2 sm:px-4 ${activeViewTab === "notes" || activeViewTab === "completed" ? "w-full max-w-full lg:max-w-[98%] xl:max-w-[1920px]" : "max-w-[1600px]"}`}>
       {/* Desktop & Mobile Unified Financial Telemetry Console */}
       <div className="chips-summary-panel rounded-2xl bg-white/95 backdrop-blur-xl border border-zinc-200/90 shadow-[0_8px_28px_-6px_rgba(0,0,0,0.08),inset_0_1px_0_rgba(255,255,255,1)] overflow-hidden transition-all duration-300 mb-3 select-none">
         {/* Top Control Bar: Segmented Mode Switcher + Collapsed Quick Ticker + Collapse Toggle */}
@@ -6856,47 +6935,62 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+          </div>
+        </div>
 
-{/* Tab Row (No bottom border, pill styling for selected tab with Lenis smooth scroll and motion layout transition) */}
-      <div 
-        id="main-view-tabs"
-        className="flex flex-row snap-x flex-nowrap w-full gap-2 sm:gap-3 mb-4 sm:mb-6 mt-4 sm:mt-5 overflow-x-auto pt-2 pb-px scrollbar-hide scroll-mt-2"
-      >
-        {[
-          { id: "active", label: "持有中", icon: Activity, count: visibleActiveTabs.filter((t) => t.tradeType === "simulated").length },
-          { id: "real", label: "真實交易", icon: ShieldCheck, count: visibleActiveTabs.filter((t) => t.tradeType === "real").length },
-          { id: "completed", label: "已完成", icon: TrendingUp, count: completedTabs.length },
-          { id: "notes", label: "操作備註", icon: FileText, count: null },
-        ].map((tabItem) => {
-          const isActive = activeViewTab === tabItem.id;
-          const Icon = tabItem.icon;
-
-          return (
-            <button
-              key={tabItem.id}
-              onClick={() => handleViewTabChange(tabItem.id as any)}
-              className={`h-[38px] snap-start flex-shrink-0 flex items-center justify-center gap-2 px-4 py-2 font-bold text-sm tracking-wide rounded-full transition-colors duration-300 relative overflow-hidden cursor-pointer select-none border-none outline-none ${
-                isActive
-                  ? "text-[#085041]"
-                  : "bg-transparent text-[#888780] hover:text-[#2C2C2A]"
-              }`}
+        {/* Persistent Sticky Tab Row: Directly anchors to top edge when upper banner collapses */}
+        <div 
+          className={`w-full -mx-2 sm:-mx-4 md:-mx-6 px-2 sm:px-4 md:px-6 transition-all duration-200 ${
+            !isTopBannerVisible
+              ? "bg-[#f5f5f7]/95 dark:bg-zinc-950/95 backdrop-blur-xl border-b border-zinc-200/80 dark:border-zinc-800 shadow-[0_4px_16px_rgba(0,0,0,0.06)] py-1.5"
+              : "bg-transparent py-1 sm:py-2"
+          }`}
+        >
+          <div className={`mx-auto px-2 sm:px-4 ${activeViewTab === "notes" || activeViewTab === "completed" ? "w-full max-w-full lg:max-w-[98%] xl:max-w-[1920px]" : "max-w-[1600px]"}`}>
+            <div 
+              id="main-view-tabs"
+              className="flex flex-row snap-x flex-nowrap w-full gap-2 sm:gap-3 overflow-x-auto py-0.5 scrollbar-hide scroll-mt-2 items-center"
             >
-              {isActive && (
-                <motion.div
-                  layoutId="mainActiveViewTabBg"
-                  className="absolute inset-0 bg-[#085041]/10 rounded-full z-0"
-                  transition={{ type: "spring", stiffness: 380, damping: 30 }}
-                />
-              )}
-              <span className="relative z-10 flex items-center gap-2">
-                <Icon className="w-4 h-4" />
-                {tabItem.label} {tabItem.count !== null && `(${tabItem.count})`}
-              </span>
-            </button>
-          );
-        })}
+              {[
+                { id: "active", label: "持有中", icon: Activity, count: visibleActiveTabs.filter((t) => t.tradeType === "simulated").length },
+                { id: "real", label: "真實交易", icon: ShieldCheck, count: visibleActiveTabs.filter((t) => t.tradeType === "real").length },
+                { id: "completed", label: "已完成", icon: TrendingUp, count: completedTabs.length },
+                { id: "notes", label: "操作備註", icon: FileText, count: null },
+              ].map((tabItem) => {
+                const isActive = activeViewTab === tabItem.id;
+                const Icon = tabItem.icon;
+
+                return (
+                  <button
+                    key={tabItem.id}
+                    onClick={() => handleViewTabChange(tabItem.id as any)}
+                    className={`h-[38px] snap-start flex-shrink-0 flex items-center justify-center gap-2 px-4 py-2 font-bold text-sm tracking-wide rounded-full transition-colors duration-300 relative overflow-hidden cursor-pointer select-none border-none outline-none ${
+                      isActive
+                        ? "text-[#085041]"
+                        : "bg-transparent text-[#888780] hover:text-[#2C2C2A]"
+                    }`}
+                  >
+                    {isActive && (
+                      <motion.div
+                        layoutId="mainActiveViewTabBg"
+                        className="absolute inset-0 bg-[#085041]/10 rounded-full z-0"
+                        transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                      />
+                    )}
+                    <span className="relative z-10 flex items-center gap-2">
+                      <Icon className="w-4 h-4" />
+                      {tabItem.label} {tabItem.count !== null && `(${tabItem.count})`}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
       </div>
 
+      {/* Main content cards container below sticky header */}
+      <div className={`space-y-4 sm:space-y-6 mx-auto mt-2 sm:mt-4 px-2 sm:px-4 ${activeViewTab === "notes" || activeViewTab === "completed" ? "w-full max-w-full lg:max-w-[98%] xl:max-w-[1920px]" : "max-w-[1600px]"}`}>
       <div className="space-y-6">
         {/* Search Dialog */}
         <Dialog open={isSearchOpen} onOpenChange={setIsSearchOpen}>
