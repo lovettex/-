@@ -694,21 +694,21 @@ export function WhiteNoisePlayer() {
               </div>
             )}
 
-            {/* TAB 2: PS5 Dynamic Background Themes (Galaxy GLSL & Classic 10) */}
+            {/* TAB 2: Interactive Video Background Theme */}
             {mainTab === 'themes' && (
               <div className="py-2 flex-1 min-h-0 flex flex-col gap-2.5 overflow-hidden">
                 {/* Background On/Off Switch Banner */}
                 <div className="flex items-center justify-between p-3 bg-zinc-100/95 rounded-2xl border-2 border-zinc-300/90 shadow-2xs shrink-0 transition-all">
                   <div className="flex items-center gap-2.5">
-                    <div className="p-2 rounded-xl bg-indigo-100 text-indigo-900 border border-indigo-200/80 shadow-2xs">
+                    <div className="p-2 rounded-xl bg-purple-100 text-purple-900 border border-purple-200/80 shadow-2xs">
                       <Tv className="w-4 h-4 stroke-[2.5]" />
                     </div>
                     <div className="flex flex-col">
                       <span className="font-black text-xs text-zinc-950 tracking-tight">
-                        PS5 動態背景 (共 {PS5_THEMES.length} 款主題)
+                        互動視線追蹤動態背景 ({PS5_THEMES.length} 款主題)
                       </span>
                       <span className="text-[10.5px] text-zinc-700 font-bold">
-                        {PS5_THEMES.filter((t) => t.category === 'tokyo').length} 款動感急速東京 + {PS5_THEMES.filter((t) => t.category === 'galaxy').length} 款 GLSL 宇宙物理 + {PS5_THEMES.filter((t) => t.category === 'classic').length} 款經典流光
+                        1920×1080 24fps 游標視線追蹤互動影格
                       </span>
                     </div>
                   </div>
@@ -725,84 +725,7 @@ export function WhiteNoisePlayer() {
                   </button>
                 </div>
 
-                {/* Animation Speed Adjustment Controller (High Contrast) */}
-                <div className="p-2.5 bg-gradient-to-br from-indigo-100/90 to-purple-100/80 rounded-2xl border-2 border-indigo-250 shadow-xs flex flex-col gap-2 shrink-0">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5">
-                      <Gauge className="w-4 h-4 text-indigo-900 stroke-[2.5]" />
-                      <span className="text-xs font-black text-indigo-950">動畫流速調整</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[11px] font-mono font-black text-indigo-950 bg-white px-2 py-0.5 rounded-md border-2 border-indigo-300 shadow-2xs">
-                        {state.bgSpeed}x
-                      </span>
-                      <span className="text-[10.5px] font-black text-indigo-950 bg-indigo-200/90 border border-indigo-300/80 px-2 py-0.5 rounded-md">
-                        {state.bgSpeed <= 0.3
-                          ? '極慢冥想'
-                          : state.bgSpeed <= 0.6
-                          ? '慢速放鬆 (預設)'
-                          : state.bgSpeed <= 0.85
-                          ? '舒適舒緩'
-                          : state.bgSpeed <= 1.1
-                          ? '標準流光'
-                          : '活力躍動'}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Preset Speed Buttons (High Contrast) */}
-                  <div className="grid grid-cols-5 gap-1.5">
-                    {[
-                      { speed: 0.25, label: '0.25x', tag: '極慢' },
-                      { speed: 0.5, label: '0.5x', tag: '放鬆' },
-                      { speed: 0.75, label: '0.75x', tag: '舒緩' },
-                      { speed: 1.0, label: '1.0x', tag: '標準' },
-                      { speed: 1.25, label: '1.25x', tag: '活力' },
-                    ].map((item) => {
-                      const isSelected = Math.abs(state.bgSpeed - item.speed) < 0.03;
-                      return (
-                        <button
-                          key={item.speed}
-                          type="button"
-                          onClick={() => handleSetSpeed(item.speed)}
-                          className={`py-1.5 px-1 rounded-xl text-[11px] font-black transition-all flex flex-col items-center justify-center cursor-pointer border-2 ${
-                            isSelected
-                              ? 'bg-indigo-700 text-white border-indigo-800 shadow-md ring-2 ring-indigo-400'
-                              : 'bg-white text-zinc-950 border-zinc-300 hover:bg-indigo-50 hover:border-indigo-400'
-                          }`}
-                        >
-                          <span className="leading-tight">{item.label}</span>
-                          <span
-                            className={`text-[9.5px] font-bold leading-none mt-0.5 ${
-                              isSelected ? 'text-indigo-100' : 'text-zinc-600'
-                            }`}
-                          >
-                            {item.tag}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* Continuous Range Slider */}
-                  <div className="flex items-center gap-2 pt-0.5 px-0.5">
-                    <span className="text-[10.5px] font-black text-zinc-800 shrink-0">極慢 (0.15x)</span>
-                    <input
-                      type="range"
-                      min="0.15"
-                      max="1.5"
-                      step="0.05"
-                      value={state.bgSpeed}
-                      onChange={(e) => {
-                        whiteNoiseEngine.setBgSpeed(parseFloat(e.target.value));
-                      }}
-                      className="w-full accent-indigo-700 cursor-pointer h-2 bg-zinc-300 rounded-lg"
-                    />
-                    <span className="text-[10.5px] font-black text-zinc-800 shrink-0">快 (1.5x)</span>
-                  </div>
-                </div>
-
-                {/* Theme Cards Grid (Scrollable with mouse wheel & drag-and-scroll up and down, scrollbar hidden) */}
+                {/* Theme Cards List */}
                 <div
                   ref={themesListRef}
                   onMouseDown={(e) => handleDragStart(e, themesListRef)}
@@ -811,105 +734,20 @@ export function WhiteNoisePlayer() {
                   onMouseLeave={handleDragEnd}
                   className="overflow-y-auto scrollbar-hide no-scrollbar [scrollbar-width:none] [&::-webkit-scrollbar]:hidden space-y-2 pr-0.5 flex-1 min-h-0 cursor-grab active:cursor-grabbing select-none overscroll-contain"
                 >
-                  {/* Tokyo Dynamic Speed Series Group Heading */}
-                  {PS5_THEMES.filter((t) => t.category === 'tokyo').length > 0 && (
-                    <>
-                      <div className="flex items-center justify-between pt-1 pb-0.5 px-1">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-sm">🏎️</span>
-                          <span className="text-xs font-black text-rose-950 uppercase tracking-wider">
-                            動感急速東京系列 ({PS5_THEMES.filter((t) => t.category === 'tokyo').length}款)
-                          </span>
-                        </div>
-                        <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-rose-200 text-rose-950 border border-rose-300">
-                          寫真景深倒影
-                        </span>
-                      </div>
-
-                      {PS5_THEMES.filter((t) => t.category === 'tokyo').map((th) => {
-                        const isSelected = th.id === state.bgThemeId;
-                        return (
-                          <button
-                            key={th.id}
-                            type="button"
-                            onClick={() => handleSelectTheme(th.id)}
-                            className={`w-full p-2.5 rounded-2xl border-2 text-left transition-all flex items-center justify-between gap-3 group cursor-pointer ${
-                              isSelected
-                                ? 'border-rose-600 bg-rose-50/95 ring-2 ring-rose-400/40 shadow-sm'
-                                : 'border-zinc-300 bg-white hover:bg-zinc-50 hover:border-zinc-400'
-                            }`}
-                          >
-                            <div className="flex items-center gap-3 min-w-0">
-                              {/* Theme Color Preview Swatch */}
-                              <div
-                                className="w-10 h-10 rounded-xl shadow-xs flex items-center justify-center relative overflow-hidden border-2 border-white/60 shrink-0 ring-1 ring-zinc-400/30"
-                                style={{
-                                  background: `linear-gradient(135deg, ${th.bgGradient[1]} 0%, ${th.bgGradient[0]} 100%)`,
-                                }}
-                              >
-                                <div
-                                  className="w-4 h-4 rounded-full blur-[2px] opacity-90 ring-1 ring-white"
-                                  style={{ backgroundColor: th.iconColor }}
-                                />
-                                {isSelected && (
-                                  <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
-                                    <Check className="w-5 h-5 text-white stroke-[3.5] drop-shadow-md" />
-                                  </div>
-                                )}
-                              </div>
-
-                              <div className="flex flex-col min-w-0">
-                                <div className="flex items-center gap-1.5">
-                                  <span
-                                    className={`text-[12.5px] font-black truncate ${
-                                      isSelected ? 'text-rose-950' : 'text-zinc-950'
-                                    }`}
-                                  >
-                                    {th.name}
-                                  </span>
-                                  <span className="text-[10px] text-zinc-600 font-mono font-bold hidden sm:inline truncate">
-                                    {th.nameEn}
-                                  </span>
-                                </div>
-
-                                {/* Sci Concept & Formula Pill */}
-                                <div className="flex flex-col mt-0.5 gap-0.5">
-                                  <span className="text-[10.5px] text-rose-900 font-black truncate">
-                                    ✦ {th.sciConcept}
-                                  </span>
-                                  <span className="text-[9.5px] text-zinc-800 font-mono font-black truncate bg-zinc-100/90 border border-zinc-250 px-1.5 py-0.2 rounded inline-block w-fit">
-                                    {th.sciFormula}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-
-                            {isSelected && (
-                              <span className="shrink-0 text-[10.5px] font-black text-rose-950 bg-rose-200 border border-rose-300 px-2 py-0.5 rounded-md">
-                                目前套用
-                              </span>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </>
-                  )}
-
-                  {/* Galaxy Series Group Heading */}
                   <div className="flex items-center justify-between pt-1 pb-0.5 px-1">
                     <div className="flex items-center gap-1.5">
-                      <Sparkles className="w-4 h-4 text-indigo-700 stroke-[2.5]" />
-                      <span className="text-xs font-black text-indigo-950 uppercase tracking-wider">
-                        🌌 Galaxy GLSL 科學天文與光影 ({PS5_THEMES.filter((t) => t.category === 'galaxy').length}款)
+                      <Eye className="w-4 h-4 text-purple-700 stroke-[2.5]" />
+                      <span className="text-xs font-black text-purple-950 uppercase tracking-wider">
+                        互動游標 Scrubbing 動態背景主題
                       </span>
                     </div>
-                    <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-indigo-200 text-indigo-950 border border-indigo-300">
-                      GLSL 著色器模擬
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-purple-200 text-purple-950 border border-purple-300">
+                      Native & Gaze Scrub
                     </span>
                   </div>
 
-                  {PS5_THEMES.filter((t) => t.category === 'galaxy').map((th) => {
-                    const isSelected = th.id === state.bgThemeId;
+                  {PS5_THEMES.map((th) => {
+                    const isSelected = th.id === state.bgThemeId || PS5_THEMES.length === 1;
                     return (
                       <button
                         key={th.id}
@@ -917,12 +755,11 @@ export function WhiteNoisePlayer() {
                         onClick={() => handleSelectTheme(th.id)}
                         className={`w-full p-2.5 rounded-2xl border-2 text-left transition-all flex items-center justify-between gap-3 group cursor-pointer active:scale-[0.98] ${
                           isSelected
-                            ? 'border-indigo-600 bg-indigo-50/95 ring-2 ring-indigo-400/50 shadow-[0_4px_16px_rgba(99,102,241,0.18)]'
-                            : 'border-zinc-300/90 bg-white hover:bg-indigo-50/40 hover:border-indigo-300 shadow-2xs'
+                            ? 'border-purple-600 bg-purple-50/95 ring-2 ring-purple-400/50 shadow-[0_4px_16px_rgba(168,85,247,0.18)]'
+                            : 'border-zinc-300/90 bg-white hover:bg-purple-50/40 hover:border-purple-300 shadow-2xs'
                         }`}
                       >
                         <div className="flex items-center gap-3 min-w-0">
-                          {/* Theme Color Preview Swatch */}
                           <div
                             className="w-10 h-10 rounded-xl shadow-xs flex items-center justify-center relative overflow-hidden border-2 border-white/60 shrink-0 ring-1 ring-zinc-400/30"
                             style={{
@@ -930,11 +767,11 @@ export function WhiteNoisePlayer() {
                             }}
                           >
                             <div
-                              className="w-4 h-4 rounded-full blur-[2px] opacity-90 ring-1 ring-white"
+                              className="w-4 h-4 rounded-full blur-[1px] opacity-90 ring-1 ring-white"
                               style={{ backgroundColor: th.iconColor }}
                             />
                             {isSelected && (
-                              <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
+                              <div className="absolute inset-0 bg-purple-950/25 flex items-center justify-center">
                                 <Check className="w-5 h-5 text-white stroke-[3.5] drop-shadow-md" />
                               </div>
                             )}
@@ -944,7 +781,7 @@ export function WhiteNoisePlayer() {
                             <div className="flex items-center gap-1.5">
                               <span
                                 className={`text-[12.5px] font-black truncate ${
-                                  isSelected ? 'text-indigo-950' : 'text-zinc-950'
+                                  isSelected ? 'text-purple-950' : 'text-zinc-950'
                                 }`}
                               >
                                 {th.name}
@@ -954,9 +791,8 @@ export function WhiteNoisePlayer() {
                               </span>
                             </div>
 
-                            {/* Sci Concept & Formula Pill (High Contrast) */}
                             <div className="flex flex-col mt-0.5 gap-0.5">
-                              <span className="text-[10.5px] text-indigo-900 font-black truncate">
+                              <span className="text-[10.5px] text-purple-900 font-black truncate">
                                 ✦ {th.sciConcept}
                               </span>
                               <span className="text-[9.5px] text-zinc-800 font-mono font-black truncate bg-zinc-100/90 border border-zinc-250 px-1.5 py-0.2 rounded inline-block w-fit">
@@ -967,89 +803,7 @@ export function WhiteNoisePlayer() {
                         </div>
 
                         {isSelected && (
-                          <span className="shrink-0 text-[10.5px] font-black text-indigo-950 bg-indigo-200 border border-indigo-300 px-2 py-0.5 rounded-md">
-                            目前套用
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
-
-                  {/* Classic PS5 Themes Group Heading */}
-                  <div className="flex items-center justify-between pt-3 pb-0.5 px-1 border-t-2 border-zinc-200 mt-3">
-                    <div className="flex items-center gap-1.5">
-                      <Tv className="w-4 h-4 text-zinc-800 stroke-[2.5]" />
-                      <span className="text-xs font-black text-zinc-950 uppercase tracking-wider">
-                        🎮 PS5 經典流光主題 (10款)
-                      </span>
-                    </div>
-                    <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-zinc-200 text-zinc-900 border border-zinc-300">
-                      動態流波
-                    </span>
-                  </div>
-
-                  {PS5_THEMES.filter((t) => t.category === 'classic').map((th) => {
-                    const isSelected = th.id === state.bgThemeId;
-                    return (
-                      <button
-                        key={th.id}
-                        type="button"
-                        onClick={() => handleSelectTheme(th.id)}
-                        className={`w-full p-2.5 rounded-2xl border-2 text-left transition-all flex items-center justify-between gap-3 group cursor-pointer active:scale-[0.98] ${
-                          isSelected
-                            ? 'border-indigo-600 bg-indigo-50/95 ring-2 ring-indigo-400/50 shadow-[0_4px_16px_rgba(99,102,241,0.18)]'
-                            : 'border-zinc-300/90 bg-white hover:bg-indigo-50/40 hover:border-indigo-300 shadow-2xs'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          {/* Theme Color Preview Swatch */}
-                          <div
-                            className="w-9 h-9 rounded-xl shadow-xs flex items-center justify-center relative overflow-hidden border-2 border-white/60 shrink-0 ring-1 ring-zinc-400/30"
-                            style={{
-                              background: `linear-gradient(135deg, ${th.bgGradient[1]} 0%, ${th.bgGradient[0]} 100%)`,
-                            }}
-                          >
-                            <div
-                              className="w-4 h-4 rounded-full blur-[2px] opacity-85 ring-1 ring-white"
-                              style={{ backgroundColor: th.iconColor }}
-                            />
-                            {isSelected && (
-                              <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
-                                <Check className="w-5 h-5 text-white stroke-[3.5] drop-shadow-md" />
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="flex flex-col">
-                            <div className="flex items-center gap-1.5">
-                              <span
-                                className={`text-[12.5px] font-black ${
-                                  isSelected ? 'text-indigo-950' : 'text-zinc-950'
-                                }`}
-                              >
-                                {th.name}
-                              </span>
-                              <span className="text-[10px] text-zinc-600 font-mono font-bold">
-                                {th.nameEn}
-                              </span>
-                            </div>
-                            {/* Color Dots Palette */}
-                            {th.ribbonColors && (
-                              <div className="flex items-center gap-1 mt-1">
-                                {th.ribbonColors.slice(0, 3).map((r, i) => (
-                                  <span
-                                    key={i}
-                                    className="w-2.5 h-2.5 rounded-full ring-1 ring-black/20"
-                                    style={{ backgroundColor: r.color1 }}
-                                  />
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        {isSelected && (
-                          <span className="text-[10.5px] font-black text-indigo-950 bg-indigo-200 border border-indigo-300 px-2 py-0.5 rounded-md">
+                          <span className="shrink-0 text-[10.5px] font-black text-purple-950 bg-purple-200 border border-purple-300 px-2 py-0.5 rounded-md">
                             目前套用
                           </span>
                         )}

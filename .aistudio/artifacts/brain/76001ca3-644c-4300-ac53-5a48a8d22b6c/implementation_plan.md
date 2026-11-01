@@ -114,3 +114,14 @@
    - 點擊按鈕時開啟 `PrimialPyramidViewModal`。
 3. **驗證與編譯**：
    - 執行 `lint_applet` 與 `compile_applet` 確保無語法或類型錯誤。
+
+---
+
+## 5. 個股卡片側邊分頁（New 與 Original）直接刪除功能
+
+- **功能需求**：個股卡片側邊 tab（New 與 Original 分頁）支援如同「Add ETFs」的直接刪除功能（懸停/行動端顯示紅色圓形 `×` 刪除按鈕）。
+- **實作邏輯**：
+  - 於 `Dashboard.tsx` 實作 `handleDeleteSubTab(tabToDelete, fallbackTab, labelName)`。
+  - 當點擊 `New` 分頁的 `×` 按鈕時，刪除該分頁 document，自動切換至 `Original`，並解除區塊雙版本狀態（`New` 分頁隨即自動隱藏）。
+  - 當點擊 `Original` 分頁的 `×` 按鈕時，若存在 `New` 分頁則自動切換至 `New`；若為唯一分頁則刪除該卡片。
+  - 視覺完全比照 ETF 分頁側邊 tab 的紅色圓形 `×` 按鈕樣式（包含 `hover:opacity-100`、`-ml-2 z-20` 及音效與 Toast 提示）。

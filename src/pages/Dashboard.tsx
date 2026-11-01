@@ -23,13 +23,15 @@ import {
   doc,
   setDoc,
   updateDoc,
+  addDoc,
   onSnapshot,
   serverTimestamp,
   Timestamp,
 } from "firebase/firestore";
 import { db, auth } from "../lib/firebase";
 import { useAuth } from "../lib/AuthContext";
-import { formatTimestamp, getTimestampDate } from "../lib/dateUtils";
+import { formatTimestamp, getTimestampDate, getTimestampMillis } from "../lib/dateUtils";
+
 import { whiteNoiseEngine } from "../lib/whiteNoiseEngine";
 import { toast } from "sonner";
 import {
@@ -316,12 +318,12 @@ export default function Dashboard() {
       return true;
     }
     const s = whiteNoiseEngine.getState();
-    return !!(s.isPlaying && s.bgEnabled);
+    return !!s.bgEnabled;
   });
 
   useEffect(() => {
     const unsubscribe = whiteNoiseEngine.subscribe((state) => {
-      setIsPs5ModeActive(!!(state.isPlaying && state.bgEnabled));
+      setIsPs5ModeActive(!!state.bgEnabled);
     });
     return () => {
       unsubscribe();
@@ -1350,8 +1352,8 @@ export default function Dashboard() {
   const [completedResultFilter, setCompletedResultFilter] = useState<"all" | "win" | "lose">("all");
   const [completedSearchQuery, setCompletedSearchQuery] = useState<string>("");
 
-  // Top Hero Banner dynamic auto-hide on scroll down and reveal on mouse wheel up
-  const [isTopBannerVisible, setIsTopBannerVisible] = useState(true);
+  // 上方區塊保持正常顯示，不隱藏、不折疊、不閃爍
+  const [isTopBannerVisible] = useState(true);
 
   // Lenis Smooth Scroll Engine Instance
   const lenisRef = useRef<Lenis | null>(null);
@@ -1365,80 +1367,14 @@ export default function Dashboard() {
     });
     lenisRef.current = lenis;
 
-    const onLenisScroll = (e: any) => {
-      const scroll = typeof e.scroll === "number" ? e.scroll : window.scrollY;
-      const direction = e.direction; // 1: scrolling down, -1: scrolling up
-
-      if (scroll <= 25) {
-        setIsTopBannerVisible(true);
-        return;
-      }
-
-      if (direction === 1 && scroll > 60) {
-        setIsTopBannerVisible(false);
-      } else if (direction === -1) {
-        setIsTopBannerVisible(true);
-      }
-    };
-
-    lenis.on('scroll', onLenisScroll);
-
     function raf(time: number) {
       lenis.raf(time);
       requestAnimationFrame(raf);
     }
     const rafId = requestAnimationFrame(raf);
 
-    // Direct wheel event for instant responsiveness to mouse wheel up/down
-    let lastWheelTime = 0;
-    const onWheel = (e: WheelEvent) => {
-      const now = Date.now();
-      if (now - lastWheelTime < 35) return;
-      lastWheelTime = now;
-
-      // Don't trigger if inside an active open modal or dropdown
-      if ((e.target as HTMLElement)?.closest?.('[role="dialog"], .radix-dialog-content, [data-radix-portal]')) {
-        return;
-      }
-
-      const currentScroll = typeof lenis.scroll === "number" ? lenis.scroll : window.scrollY;
-
-      if (e.deltaY < -4) {
-        // Mouse wheel scrolled UP -> immediately reveal top banner
-        setIsTopBannerVisible(true);
-      } else if (e.deltaY > 8 && currentScroll > 60) {
-        // Mouse wheel scrolled DOWN -> dynamically hide top banner
-        setIsTopBannerVisible(false);
-      }
-    };
-
-    window.addEventListener('wheel', onWheel, { passive: true });
-
-    // Fallback native scroll listener (handles mobile touch drag & keyboard navigation)
-    let lastNativeY = window.scrollY;
-    const onNativeScroll = () => {
-      const currentY = window.scrollY;
-      if (currentY <= 25) {
-        setIsTopBannerVisible(true);
-        lastNativeY = currentY;
-        return;
-      }
-      const diff = currentY - lastNativeY;
-      if (diff > 12 && currentY > 60) {
-        setIsTopBannerVisible(false);
-      } else if (diff < -10) {
-        setIsTopBannerVisible(true);
-      }
-      lastNativeY = currentY;
-    };
-
-    window.addEventListener('scroll', onNativeScroll, { passive: true });
-
     return () => {
       cancelAnimationFrame(rafId);
-      window.removeEventListener('wheel', onWheel);
-      window.removeEventListener('scroll', onNativeScroll);
-      lenis.off('scroll', onLenisScroll);
       lenis.destroy();
       lenisRef.current = null;
     };
@@ -4605,40 +4541,234 @@ export default function Dashboard() {
 
   visibleTabsRef.current = filteredSubTabVisibleTabs;
 
-  const renderGroups = useMemo(() => {
-    const groups: { isGroup: boolean; id: string; tabs: any[] }[] = [];
-    const processedGroupIds = new Set<string>();
-    
-    filteredSubTabVisibleTabs.forEach((tab) => {
-      const shouldGroup = tab.groupId && !isMobile;
-      if (shouldGroup) {
-        if (!processedGroupIds.has(tab.groupId!)) {
-          processedGroupIds.add(tab.groupId!);
-          // 當啟用百分比區間篩選時，僅顯示符合該百分比區間的同群組個股，避免帶出其他區間的卡片
-          const allGroupTabs =
-            pnlPercentFilter !== null
-              ? filteredSubTabVisibleTabs.filter(t => t.groupId === tab.groupId)
-              : effectiveVisibleActiveTabs.filter(t => t.groupId === tab.groupId);
-          groups.push({
-            isGroup: allGroupTabs.length > 1,
-            id: tab.groupId!,
-            tabs: allGroupTabs
-          });
-        }
-      } else {
-        groups.push({
-          isGroup: false,
-          id: tab.id,
-          tabs: [tab]
+  // 側邊分頁 (Side Tabs) 狀態管理
+  const [cardSubTabSelection, setCardSubTabSelection] = useState<Record<string, string>>({});
+  const [isAddEtfModalOpen, setIsAddEtfModalOpen] = useState(false);
+  const [addEtfTargetTab, setAddEtfTargetTab] = useState<any | null>(null);
+  const [newEtfSymbolInput, setNewEtfSymbolInput] = useState("");
+
+  const handleSelectSubTab = useCallback((groupId: string, targetTabId: string) => {
+    playClickSound();
+    setCardSubTabSelection((prev) => ({
+      ...prev,
+      [groupId]: targetTabId,
+    }));
+    setActiveCardTabId(targetTabId);
+  }, [playClickSound]);
+
+  const handleCreateNewVersion = useCallback(async (originalTab: any) => {
+    if (!originalTab || !user) return;
+    try {
+      playClickSound();
+      const targetGroupId = originalTab.groupId || `${originalTab.symbol}-${Date.now()}`;
+      if (!originalTab.groupId) {
+        await updateTab(originalTab.id, { groupId: targetGroupId });
+      }
+
+      const newTabDoc: any = {
+        userId: user.uid,
+        symbol: originalTab.symbol,
+        companyName: originalTab.companyName || "",
+        status: "ACTIVE",
+        holdingStatus: originalTab.holdingStatus || activeHoldingSubTab,
+        tradeType: originalTab.tradeType || "simulated",
+        groupId: targetGroupId,
+        isNew: true,
+        currentPrice: originalTab.currentPrice || 0,
+        plannedBuyQty: originalTab.plannedBuyQty || 0,
+        plannedBuyPercent: originalTab.plannedBuyPercent || 0,
+        holdingQuantity: originalTab.holdingQuantity || 0,
+        averageCost: originalTab.averageCost || 0,
+        averagingRows: originalTab.averagingRows || [],
+        averagingRowsSys2: originalTab.averagingRowsSys2 || [],
+        pyramidRows: originalTab.pyramidRows || [],
+        pyramidRowsSys2: originalTab.pyramidRowsSys2 || [],
+        chartAnnotations: originalTab.chartAnnotations || [],
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+
+      const docRef = await addDoc(collection(db, "stockTabs"), newTabDoc);
+
+      const strat = activeTabStrategies[originalTab.id];
+      if (strat) {
+        await setDoc(doc(db, "strategies", docRef.id), {
+          ...strat,
+          updatedAt: serverTimestamp(),
         });
       }
+
+      setCardSubTabSelection((prev) => ({
+        ...prev,
+        [targetGroupId]: docRef.id,
+        [originalTab.symbol]: docRef.id,
+      }));
+      setActiveCardTabId(docRef.id);
+      playSuccessSound();
+      toast.success(`已為 ${originalTab.symbol} 建立 New 新版本卡片！`);
+    } catch (e) {
+      console.error("Create new version error:", e);
+      toast.error("建立新版本卡片失敗");
+    }
+  }, [user, activeHoldingSubTab, updateTab, activeTabStrategies, playClickSound, playSuccessSound]);
+
+  const handleAddEtf = useCallback(async (targetTab: any, rawSymbol: string) => {
+    if (!targetTab || !user) return;
+    const etfSym = rawSymbol.trim().toUpperCase();
+    if (!etfSym) {
+      toast.error("請輸入有效的 ETF 代號");
+      return;
+    }
+    try {
+      playAddStockSound();
+      const targetGroupId = targetTab.groupId || `${targetTab.symbol}-${Date.now()}`;
+      if (!targetTab.groupId) {
+        await updateTab(targetTab.id, { groupId: targetGroupId });
+      }
+
+      // Check if an ETF tab already exists in tabs
+      const existingEtfTab = tabs.find((t) => (t.symbol || "").trim().toUpperCase() === etfSym);
+      let activeId = "";
+
+      if (existingEtfTab) {
+        await updateTab(existingEtfTab.id, {
+          groupId: targetGroupId,
+          holdingStatus: targetTab.holdingStatus || activeHoldingSubTab,
+          tags: Array.from(new Set([...(existingEtfTab.tags || []), "ETF"])),
+        });
+        activeId = existingEtfTab.id;
+      } else {
+        const newDocRef = await addDoc(collection(db, "stockTabs"), {
+          userId: user.uid,
+          symbol: etfSym,
+          companyName: `${etfSym} ETF`,
+          status: "ACTIVE",
+          holdingStatus: targetTab.holdingStatus || activeHoldingSubTab,
+          tradeType: targetTab.tradeType || "simulated",
+          groupId: targetGroupId,
+          tags: ["ETF"],
+          isNew: false,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        activeId = newDocRef.id;
+        prefetchStockPrice(etfSym);
+      }
+
+      const currentEtfs = Array.isArray(targetTab.etfSymbols) ? targetTab.etfSymbols : [];
+      if (!currentEtfs.includes(etfSym)) {
+        await updateTab(targetTab.id, {
+          etfSymbols: [...currentEtfs, etfSym],
+        });
+      }
+
+      setCardSubTabSelection((prev) => ({
+        ...prev,
+        [targetGroupId]: activeId,
+        [targetTab.symbol]: activeId,
+        [targetTab.id]: activeId,
+      }));
+      setActiveCardTabId(activeId);
+
+      setIsAddEtfModalOpen(false);
+      setNewEtfSymbolInput("");
+      playSuccessSound();
+      toast.success(`已成功為 ${targetTab.symbol} 新增關聯 ETF 分頁：${etfSym}`);
+    } catch (err) {
+      console.error("Error adding ETF:", err);
+      toast.error("新增 ETF 失敗");
+    }
+  }, [user, tabs, activeHoldingSubTab, updateTab, playAddStockSound, playSuccessSound]);
+
+  const handleRemoveEtf = useCallback(async (parentTab: any, etfTab: any) => {
+    try {
+      playClickSound();
+      await updateTab(etfTab.id, { groupId: "" });
+      if (parentTab && Array.isArray(parentTab.etfSymbols)) {
+        await updateTab(parentTab.id, {
+          etfSymbols: parentTab.etfSymbols.filter((s: string) => s !== etfTab.symbol),
+        });
+      }
+      setCardSubTabSelection((prev) => ({
+        ...prev,
+        [parentTab.groupId || parentTab.id]: parentTab.id,
+        [parentTab.symbol]: parentTab.id,
+      }));
+      setActiveCardTabId(parentTab.id);
+      toast.success(`已解除關聯 ETF：${etfTab.symbol}`);
+    } catch (e) {
+      toast.error("解除 ETF 關聯失敗");
+    }
+  }, [updateTab, playClickSound]);
+
+  const handleDeleteSubTab = useCallback(async (tabToDelete: any, fallbackTab?: any, labelName: string = "分頁") => {
+    if (!tabToDelete) return;
+    try {
+      playClickSound();
+      const sym = tabToDelete.symbol || "";
+      await deleteTab(tabToDelete.id);
+      if (fallbackTab) {
+        setCardSubTabSelection((prev) => ({
+          ...prev,
+          [fallbackTab.groupId || fallbackTab.id]: fallbackTab.id,
+          [sym]: fallbackTab.id,
+        }));
+        setActiveCardTabId(fallbackTab.id);
+      } else {
+        setCardSubTabSelection((prev) => {
+          const next = { ...prev };
+          if (tabToDelete.groupId) delete next[tabToDelete.groupId];
+          if (tabToDelete.id) delete next[tabToDelete.id];
+          if (sym) delete next[sym];
+          return next;
+        });
+      }
+      playSuccessSound();
+      toast.success(`已刪除 【${sym}】 的 ${labelName}`);
+    } catch (e) {
+      console.error("Delete sub tab error:", e);
+      toast.error(`刪除 ${labelName} 失敗`);
+    }
+  }, [deleteTab, playClickSound, playSuccessSound]);
+
+  const renderGroups = useMemo(() => {
+    const groups: { isGroup: boolean; id: string; symbol: string; tabs: any[] }[] = [];
+    const processedTabIds = new Set<string>();
+    
+    filteredSubTabVisibleTabs.forEach((tab) => {
+      if (processedTabIds.has(tab.id)) return;
+
+      const sym = (tab.symbol || "").trim().toUpperCase();
+
+      // Find all tabs that belong to this stock entity in current category:
+      // 1. Same groupId if tab.groupId exists
+      // 2. Same symbol in filteredSubTabVisibleTabs
+      // 3. Or linked ETFs sharing groupId
+      const matchingTabs = filteredSubTabVisibleTabs.filter((t) => {
+        if (processedTabIds.has(t.id)) return false;
+        if (tab.groupId && t.groupId === tab.groupId) return true;
+        if ((t.symbol || "").trim().toUpperCase() === sym) return true;
+        return false;
+      });
+
+      // Mark all matching tabs as processed
+      matchingTabs.forEach((t) => processedTabIds.add(t.id));
+
+      const groupId = tab.groupId || `group-${sym}-${tab.id}`;
+      groups.push({
+        isGroup: matchingTabs.length > 1,
+        id: groupId,
+        symbol: sym,
+        tabs: matchingTabs,
+      });
     });
     return groups;
-  }, [filteredSubTabVisibleTabs, effectiveVisibleActiveTabs, isMobile, pnlPercentFilter]);
+  }, [filteredSubTabVisibleTabs]);
 
   const orderedFilteredSubTabVisibleTabs = useMemo(() => {
     return renderGroups.flatMap((g) => g.tabs);
   }, [renderGroups]);
+
 
   const handleToggleCardSelected = useCallback((tabId: string) => {
     playClickSound();
@@ -4951,6 +5081,91 @@ export default function Dashboard() {
       });
     }
   }, []);
+
+  // 底部股票代號導覽列滑鼠拖曳橫向滾動 (Drag and Scroll) 與滾輪橫向滾動
+  const bottomNavScrollRef = useRef<HTMLDivElement>(null);
+  const isDraggingBottomNavRef = useRef(false);
+  const dragBottomNavStartXRef = useRef(0);
+  const dragBottomNavScrollLeftRef = useRef(0);
+  const bottomNavHasDraggedRef = useRef(false);
+  const [isBottomNavDragging, setIsBottomNavDragging] = useState(false);
+
+  const handleBottomNavMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0 || !bottomNavScrollRef.current) return;
+    isDraggingBottomNavRef.current = true;
+    dragBottomNavStartXRef.current = e.pageX;
+    dragBottomNavScrollLeftRef.current = bottomNavScrollRef.current.scrollLeft;
+    bottomNavHasDraggedRef.current = false;
+
+    const onGlobalMouseMove = (moveEvent: MouseEvent) => {
+      if (!isDraggingBottomNavRef.current || !bottomNavScrollRef.current) return;
+      const walk = moveEvent.pageX - dragBottomNavStartXRef.current;
+
+      if (Math.abs(walk) > 4) {
+        bottomNavHasDraggedRef.current = true;
+        setIsBottomNavDragging(true);
+      }
+
+      if (bottomNavHasDraggedRef.current) {
+        moveEvent.preventDefault();
+        bottomNavScrollRef.current.scrollLeft = dragBottomNavScrollLeftRef.current - walk;
+      }
+    };
+
+    const onGlobalMouseUp = () => {
+      window.removeEventListener("mousemove", onGlobalMouseMove);
+      window.removeEventListener("mouseup", onGlobalMouseUp);
+      isDraggingBottomNavRef.current = false;
+      setTimeout(() => {
+        setIsBottomNavDragging(false);
+        bottomNavHasDraggedRef.current = false;
+      }, 80);
+    };
+
+    window.addEventListener("mousemove", onGlobalMouseMove);
+    window.addEventListener("mouseup", onGlobalMouseUp);
+  };
+
+  const handleBottomNavTouchStart = (e: React.TouchEvent) => {
+    if (!bottomNavScrollRef.current || e.touches.length === 0) return;
+    isDraggingBottomNavRef.current = true;
+    dragBottomNavStartXRef.current = e.touches[0].pageX;
+    dragBottomNavScrollLeftRef.current = bottomNavScrollRef.current.scrollLeft;
+    bottomNavHasDraggedRef.current = false;
+  };
+
+  const handleBottomNavTouchMove = (e: React.TouchEvent) => {
+    if (!isDraggingBottomNavRef.current || !bottomNavScrollRef.current || e.touches.length === 0) return;
+    const currentX = e.touches[0].pageX;
+    const walk = currentX - dragBottomNavStartXRef.current;
+
+    if (Math.abs(walk) > 4) {
+      bottomNavHasDraggedRef.current = true;
+      if (!isBottomNavDragging) setIsBottomNavDragging(true);
+    }
+
+    if (bottomNavHasDraggedRef.current) {
+      bottomNavScrollRef.current.scrollLeft = dragBottomNavScrollLeftRef.current - walk;
+    }
+  };
+
+  const handleBottomNavTouchEnd = () => {
+    if (!isDraggingBottomNavRef.current) return;
+    isDraggingBottomNavRef.current = false;
+    setTimeout(() => {
+      setIsBottomNavDragging(false);
+      bottomNavHasDraggedRef.current = false;
+    }, 80);
+  };
+
+  const handleBottomNavWheel = (e: React.WheelEvent) => {
+    if (!bottomNavScrollRef.current) return;
+    const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+    if (Math.abs(delta) > 0) {
+      e.preventDefault();
+      bottomNavScrollRef.current.scrollLeft += delta;
+    }
+  };
 
   const lastHKeyPressTimeRef = useRef<number>(0);
 
@@ -5325,18 +5540,14 @@ export default function Dashboard() {
           });
 
           // Smoothly scroll the tabs bar container to keep the active tab visible
-          const container = el.parentElement;
-          if (container) {
-            const containerScrollLeft = container.scrollLeft;
-            const containerWidth = container.clientWidth;
-            const elLeft = el.offsetLeft;
-            const elWidth = el.offsetWidth;
-            
-            if (elLeft < containerScrollLeft) {
-              container.scrollTo({ left: elLeft - 24, behavior: "smooth" });
-            } else if (elLeft + elWidth > containerScrollLeft + containerWidth) {
-              container.scrollTo({ left: elLeft + elWidth - containerWidth + 24, behavior: "smooth" });
-            }
+          if (bottomNavScrollRef.current && !isDraggingBottomNavRef.current) {
+            const container = bottomNavScrollRef.current;
+            const scrollLeft =
+              el.offsetLeft - container.clientWidth / 2 + el.offsetWidth / 2;
+            container.scrollTo({
+              left: Math.max(0, scrollLeft),
+              behavior: "smooth",
+            });
           }
         }
       }
@@ -5348,7 +5559,7 @@ export default function Dashboard() {
       cancelAnimationFrame(animId);
       window.removeEventListener("resize", updateIndicator);
     };
-  }, [activeCardTabId, orderedFilteredSubTabVisibleTabs]);
+  }, [activeCardTabId, orderedFilteredSubTabVisibleTabs, activeTabStrategies]);
 
   const carouselScrollRafRef = useRef<number | null>(null);
   const handleCarouselScroll = useCallback(() => {
@@ -5774,16 +5985,8 @@ export default function Dashboard() {
         </DialogContent>
       </Dialog>
 
-      {/* Sticky Header Container: Anchors directly to top edge */}
-      <div className="sticky top-0 z-30 w-full transition-all duration-300">
-        {/* Dynamic Collapsible Upper Section: Hero Banner + Mobile Hero + Telemetry Console (Hides on scroll down, reveals on mouse wheel up) */}
-        <div
-          className={`transition-all duration-300 ease-in-out transform origin-top ${
-            isTopBannerVisible
-              ? "max-h-[1600px] opacity-100 translate-y-0 pointer-events-auto"
-              : "max-h-0 opacity-0 -translate-y-4 pointer-events-none overflow-hidden"
-          }`}
-        >
+      {/* Upper Section: Hero Banner + Mobile Hero + Telemetry Console (保持正常顯示，不隱藏、不折疊、不閃爍) */}
+      <div className="w-full">
           {/* 1. Full-width Dynamic High-Contrast Emerald & Obsidian Ribbon Header (Desktop: sm and above) */}
           <ScrollIn className="hidden sm:block">
         <div className="portfolio-hero-banner -mx-2 sm:-mx-4 md:-mx-6 bg-gradient-to-r from-[#032b22] via-[#064235] to-[#043328] text-white pt-[16px] pb-[18px] px-4 sm:px-6 md:px-8 flex flex-col gap-4 text-left border-b border-emerald-400/30 rounded-none shadow-[0_12px_32px_-8px_rgba(3,43,34,0.55)] relative z-10 select-none overflow-hidden">
@@ -6938,13 +7141,9 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Persistent Sticky Tab Row: Directly anchors to top edge when upper banner collapses */}
+        {/* Persistent Sticky Tab Row: Directly anchors to top edge */}
         <div 
-          className={`w-full -mx-2 sm:-mx-4 md:-mx-6 px-2 sm:px-4 md:px-6 transition-all duration-200 ${
-            !isTopBannerVisible
-              ? "bg-[#f5f5f7]/95 dark:bg-zinc-950/95 backdrop-blur-xl border-b border-zinc-200/80 dark:border-zinc-800 shadow-[0_4px_16px_rgba(0,0,0,0.06)] py-1.5"
-              : "bg-transparent py-1 sm:py-2"
-          }`}
+          className="ps5-sticky-tabs-row sticky top-0 z-30 w-full -mx-2 sm:-mx-4 md:-mx-6 px-2 sm:px-4 md:px-6 bg-[#f5f5f7]/95 dark:bg-zinc-950/95 backdrop-blur-xl border-b border-zinc-200/80 dark:border-zinc-800 shadow-[0_4px_16px_rgba(0,0,0,0.06)] py-1.5 transition-all"
         >
           <div className={`mx-auto px-2 sm:px-4 ${activeViewTab === "notes" || activeViewTab === "completed" ? "w-full max-w-full lg:max-w-[98%] xl:max-w-[1920px]" : "max-w-[1600px]"}`}>
             <div 
@@ -6987,7 +7186,6 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
-      </div>
 
       {/* Main content cards container below sticky header */}
       <div className={`space-y-4 sm:space-y-6 mx-auto mt-2 sm:mt-4 px-2 sm:px-4 ${activeViewTab === "notes" || activeViewTab === "completed" ? "w-full max-w-full lg:max-w-[98%] xl:max-w-[1920px]" : "max-w-[1600px]"}`}>
@@ -7496,8 +7694,104 @@ export default function Dashboard() {
           </DialogContent>
         </Dialog>
 
+        {/* 新增關聯 ETF 對話窗 (可增加多個 ETF) */}
+        <Dialog open={isAddEtfModalOpen} onOpenChange={setIsAddEtfModalOpen}>
+          <DialogContent className="max-w-md bg-white border border-zinc-200 shadow-2xl rounded-2xl p-6 text-zinc-900">
+            <DialogHeader>
+              <DialogTitle className="text-lg font-black flex items-center gap-2 text-zinc-950">
+                <TrendingUp className="w-5 h-5 text-indigo-600" />
+                為 【{addEtfTargetTab?.symbol}】 新增關聯 ETF 分頁
+              </DialogTitle>
+              <DialogDescription className="text-xs text-zinc-500 font-medium">
+                可增加多個 ETF（如 XLP, SPY, QQQ, VOO, VDC...），新增後會在個股卡片側邊分頁顯示，點選即可隨時切換對照。
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-2">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-bold text-zinc-700">ETF 代號</Label>
+                <div className="flex gap-2">
+                  <Input
+                    value={newEtfSymbolInput}
+                    onChange={(e) => setNewEtfSymbolInput(e.target.value.toUpperCase())}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && newEtfSymbolInput.trim()) {
+                        e.preventDefault();
+                        handleAddEtf(addEtfTargetTab, newEtfSymbolInput);
+                      }
+                    }}
+                    placeholder="例如：XLP, SPY, QQQ, VDC..."
+                    className="font-mono uppercase font-bold text-sm tracking-wider"
+                    autoFocus
+                  />
+                  <Button
+                    type="button"
+                    onClick={() => handleAddEtf(addEtfTargetTab, newEtfSymbolInput)}
+                    disabled={!newEtfSymbolInput.trim()}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs px-4 rounded-xl cursor-pointer"
+                  >
+                    新增
+                  </Button>
+                </div>
+              </div>
+
+              {/* 快速推薦 ETF 標籤 */}
+              <div className="space-y-2">
+                <span className="text-[11px] font-black text-zinc-500 tracking-wider uppercase">
+                  常用美股大盤與板塊 ETF 快捷選取
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { sym: "SPY", name: "標普500" },
+                    { sym: "QQQ", name: "那斯達克" },
+                    { sym: "DIA", name: "道瓊" },
+                    { sym: "IWM", name: "羅素2000" },
+                    { sym: "XLP", name: "必需消費 (WMT板塊)" },
+                    { sym: "VDC", name: "先鋒必需消費" },
+                    { sym: "XLK", name: "科技股" },
+                    { sym: "SOXX", name: "半導體" },
+                    { sym: "SMH", name: "半導體" },
+                    { sym: "XLF", name: "金融股" },
+                    { sym: "XLE", name: "能源股" },
+                    { sym: "XLV", name: "醫療保健" },
+                    { sym: "XLI", name: "工業股" },
+                  ].map((item) => (
+                    <button
+                      key={item.sym}
+                      type="button"
+                      onClick={() => handleAddEtf(addEtfTargetTab, item.sym)}
+                      className="px-2.5 py-1 rounded-lg bg-zinc-100 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-300 border border-zinc-200/80 text-zinc-700 text-xs font-bold transition-all cursor-pointer flex items-center gap-1 active:scale-95"
+                    >
+                      <span className="font-mono font-black">{item.sym}</span>
+                      <span className="text-[10px] text-zinc-400 font-normal">({item.name})</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <DialogFooter className="pt-2 border-t border-zinc-100 flex items-center justify-between sm:justify-between w-full">
+              <span className="text-[11px] text-zinc-400 font-medium">
+                支援多次點選連續新增多檔 ETF
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setIsAddEtfModalOpen(false);
+                  setNewEtfSymbolInput("");
+                }}
+                className="rounded-xl text-xs font-bold cursor-pointer"
+              >
+                關閉
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         {/* System Help & Keyboard Shortcuts Dialog */}
         <Dialog open={isHelpOpen} onOpenChange={setIsHelpOpen}>
+
           <DialogContent className="border border-white/10 bg-[#0F0F12]/95 backdrop-blur-2xl text-white w-[92vw] sm:max-w-lg max-h-[90vh] flex flex-col p-5 sm:p-6 rounded-2xl shadow-2xl overflow-hidden scrollbar-hide [&::-webkit-scrollbar]:hidden [scrollbar-width:none] [-ms-overflow-style:none]">
             <DialogHeader className="space-y-3 pb-3 border-b border-white/10 shrink-0">
               <div className="flex items-center justify-between">
@@ -7862,9 +8156,9 @@ export default function Dashboard() {
                             as="button"
                             onClick={() => setIsManageHiddenOpen(true)}
                             title="管理持有中股票"
-                            className="w-8 h-8 p-0 bg-white hover:bg-zinc-50 border border-zinc-200/80 hover:border-zinc-300 text-zinc-700 hover:text-zinc-900 rounded-full transition-all cursor-pointer flex items-center justify-center shrink-0 shadow-2xs hover:shadow-xs"
+                            className="w-8 h-8 p-0 bg-white hover:bg-cyan-50/80 border border-zinc-200/80 hover:border-cyan-300 text-cyan-500 hover:text-cyan-600 rounded-full transition-all cursor-pointer flex items-center justify-center shrink-0 shadow-2xs hover:shadow-xs"
                           >
-                            <Settings2 className="w-4 h-4" />
+                            <Settings2 className="w-4 h-4 text-cyan-500" />
                           </InteractiveButton>
 
                           {/* 5. 放大卡片 (電影觀賞模式) */}
@@ -8026,9 +8320,10 @@ export default function Dashboard() {
                             noGlow
                             as="button"
                             onClick={() => setIsManageHiddenOpen(true)}
-                            className="px-2 py-1 bg-white border border-zinc-200 text-zinc-700 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg transition-all text-[11px] flex items-center gap-1 font-extrabold cursor-pointer shadow-2xs"
+                            className="px-2 py-1 bg-white border border-zinc-200 hover:border-cyan-300 text-zinc-700 hover:text-cyan-700 hover:bg-cyan-50/80 rounded-lg transition-all text-[11px] flex items-center gap-1 font-extrabold cursor-pointer shadow-2xs"
+                            title="管理持有中股票"
                           >
-                            <Settings2 className="w-3 h-3 text-zinc-500" />
+                            <Settings2 className="w-3 h-3 text-cyan-500" />
                             <span>管理</span>
                           </InteractiveButton>
 
@@ -8156,8 +8451,9 @@ export default function Dashboard() {
                     >
                       <DialogContent data-lenis-prevent className="border border-zinc-200 shadow-2xl bg-white text-zinc-800 outline-none w-11/12 sm:max-w-3xl max-h-[85vh] overflow-y-auto overscroll-y-contain overflow-x-hidden !rounded-2xl p-6">
                         <DialogHeader>
-                          <DialogTitle className="font-black text-xl text-zinc-900 border-b border-zinc-200 pb-3">
-                            管理持有中股票
+                          <DialogTitle className="font-black text-xl text-zinc-900 border-b border-zinc-200 pb-3 flex items-center gap-2">
+                            <Settings2 className="w-5 h-5 text-cyan-500 shrink-0" />
+                            <span>管理持有中股票</span>
                           </DialogTitle>
                         </DialogHeader>
                         <div className="space-y-6 py-4">
@@ -8234,42 +8530,97 @@ export default function Dashboard() {
                             })}
                           </div>
 
-                          <div className="space-y-4">
-                            {(() => {
-                              const dialogEffectiveHiddenActiveTabs = hiddenActiveTabs.filter(
-                                (t) => t.tradeType === manageTradeType
-                              );
-                              const dialogEffectiveActiveTabs = activeTabs.filter(
-                                (t) => t.tradeType === manageTradeType
-                              );
+                          {(() => {
+                            const dialogEffectiveHiddenActiveTabs = hiddenActiveTabs.filter(
+                              (t) => t.tradeType === manageTradeType
+                            );
+                            const dialogEffectiveActiveTabs = activeTabs.filter(
+                              (t) => t.tradeType === manageTradeType
+                            );
 
-                              const categoryTabs = activeManageTab === "持股監控"
-                                ? dialogEffectiveHiddenActiveTabs
-                                : dialogEffectiveActiveTabs.filter(
-                                    (t) => getDisplayHoldingStatus(t.holdingStatus) === activeManageTab
-                                  );
-
-                              if (categoryTabs.length === 0) {
-                                return (
-                                  <div className="text-center text-zinc-400 py-12 text-sm font-black bg-zinc-50 border border-zinc-200 border-dashed rounded-xl">
-                                    {activeManageTab === "持股監控"
-                                      ? "目前無隱藏的個股名單"
-                                      : `此分類下沒有${manageTradeType === "real" ? "真實交易" : "持有中"}股票`}
-                                  </div>
+                            const categoryTabs = activeManageTab === "持股監控"
+                              ? dialogEffectiveHiddenActiveTabs
+                              : dialogEffectiveActiveTabs.filter(
+                                  (t) => getDisplayHoldingStatus(t.holdingStatus) === activeManageTab
                                 );
-                              }
-                              return categoryTabs.map((tab) => {
-                                const idx = dialogEffectiveActiveTabs.findIndex(t => t.id === tab.id);
-                                const isChecked = selectedCardIds.has(tab.id);
-                                return (
-                                  <div
-                                    className={`flex flex-col gap-3.5 p-4 rounded-xl border transition-all relative overflow-hidden shadow-xs ${
-                                      isChecked
-                                        ? "border-emerald-300 bg-emerald-50/30 ring-1 ring-emerald-400/40"
-                                        : "border-zinc-200 bg-zinc-50/55 hover:bg-zinc-50"
-                                    }`}
-                                    key={tab.id}
-                                  >
+
+                            return (
+                              <>
+                                {/* 該 tab 所有股票名稱(膠囊狀)，由左到右到達右側邊緣自動下一行顯示，點選後能立即 scroll 到該位置 */}
+                                {categoryTabs.length > 0 && (
+                                  <div className="w-full bg-zinc-50/95 border border-zinc-200/90 rounded-xl p-2.5 sm:p-3 shadow-2xs">
+                                    <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-zinc-200/60 text-[11px] font-bold text-zinc-500">
+                                      <span className="flex items-center gap-1.5">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 shrink-0" />
+                                        <span>本分類股票快速導航 ({categoryTabs.length} 檔)</span>
+                                      </span>
+                                      <span className="text-[10px] text-zinc-400 font-normal hidden sm:inline">點選膠囊立即跳轉至卡片</span>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-1.5 w-full max-w-full">
+                                      {categoryTabs.map((tab) => {
+                                        const isChecked = selectedCardIds.has(tab.id);
+                                        const stockName = tab.companyName || (tab as any).name || "";
+                                        return (
+                                          <button
+                                            key={`tab-capsule-${tab.id}`}
+                                            type="button"
+                                            onClick={() => {
+                                              playClickSound();
+                                              const el = document.getElementById(`manage-stock-card-${tab.id}`);
+                                              if (el) {
+                                                el.scrollIntoView({ behavior: "smooth", block: "start" });
+                                                el.classList.add("ring-2", "ring-cyan-400", "scale-[1.01]", "bg-cyan-50/40");
+                                                setTimeout(() => {
+                                                  el.classList.remove("ring-2", "ring-cyan-400", "scale-[1.01]", "bg-cyan-50/40");
+                                                }, 1400);
+                                              }
+                                            }}
+                                            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono font-bold border transition-all cursor-pointer shadow-2xs hover:scale-105 active:scale-95 shrink-0 select-none ${
+                                              isChecked
+                                                ? "bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100 ring-1 ring-emerald-300/60"
+                                                : "bg-white text-zinc-700 border-zinc-250 hover:bg-cyan-50/80 hover:text-cyan-800 hover:border-cyan-300"
+                                            }`}
+                                            title={`點選快速滾動至 ${tab.symbol}${stockName ? ` (${stockName})` : ""}`}
+                                          >
+                                            {isChecked ? (
+                                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                                            ) : (
+                                              <span className="w-1.5 h-1.5 rounded-full bg-zinc-300 shrink-0" />
+                                            )}
+                                            <span className="font-black text-xs">{tab.symbol}</span>
+                                            {stockName && (
+                                              <span className="text-[10px] font-sans font-normal text-zinc-400 truncate max-w-[80px] sm:max-w-[120px]">
+                                                {stockName}
+                                              </span>
+                                            )}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+
+                                <div className="space-y-4">
+                                  {categoryTabs.length === 0 ? (
+                                    <div className="text-center text-zinc-400 py-12 text-sm font-black bg-zinc-50 border border-zinc-200 border-dashed rounded-xl">
+                                      {activeManageTab === "持股監控"
+                                        ? "目前無隱藏的個股名單"
+                                        : `此分類下沒有${manageTradeType === "real" ? "真實交易" : "持有中"}股票`}
+                                    </div>
+                                  ) : (
+                                    categoryTabs.map((tab) => {
+                                      const idx = dialogEffectiveActiveTabs.findIndex(t => t.id === tab.id);
+                                      const isChecked = selectedCardIds.has(tab.id);
+                                      return (
+                                        <div
+                                          id={`manage-stock-card-${tab.id}`}
+                                          className={`flex flex-col gap-3.5 p-4 rounded-xl border transition-all relative overflow-hidden shadow-xs scroll-mt-3 ${
+                                            isChecked
+                                              ? "border-emerald-300 bg-emerald-50/30 ring-1 ring-emerald-400/40"
+                                              : "border-zinc-200 bg-zinc-50/55 hover:bg-zinc-50"
+                                          }`}
+                                          key={tab.id}
+                                        >
                                     <div className="flex items-center justify-between z-10 w-full relative border-b border-zinc-200 pb-2">
                                       <div className="flex items-center gap-2.5">
                                         <button
@@ -8449,9 +8800,12 @@ export default function Dashboard() {
                                     </div>
                                   </div>
                                 );
-                              });
-                            })()}
+                              })
+                            )}
                           </div>
+                        </>
+                      );
+                    })()}
                           {activeTabs.length === 0 && (
                             <div className="text-zinc-400 text-center py-8 font-black bg-zinc-50 rounded-2xl border border-dashed border-zinc-200">
                               目前無持有中股票
@@ -9535,21 +9889,189 @@ export default function Dashboard() {
 
                                   renderCardRef.current = renderCard;
 
-                                  return group.isGroup ? (
+                                  const sym = group.symbol;
+                                  const sameSymbolTabs = group.tabs.filter((t: any) => (t.symbol || "").trim().toUpperCase() === sym);
+                                  const etfTabs = group.tabs.filter((t: any) => (t.symbol || "").trim().toUpperCase() !== sym || t.tags?.includes("ETF"));
+
+                                  // 僅當在該層級分類目錄中有設定為區塊的兩個相同股票名稱時，才顯示 New 分頁
+                                  const hasMultipleVersions = sameSymbolTabs.length > 1;
+
+                                  let originalTab: any = null;
+                                  let newTab: any = null;
+
+                                  if (hasMultipleVersions) {
+                                    const newCandidate = sameSymbolTabs.find((t: any) => t.isNew);
+                                    if (newCandidate) {
+                                      newTab = newCandidate;
+                                      originalTab = sameSymbolTabs.find((t: any) => t.id !== newCandidate.id);
+                                    } else {
+                                      const sorted = [...sameSymbolTabs].sort((a: any, b: any) => getTimestampMillis(a.createdAt) - getTimestampMillis(b.createdAt));
+                                      originalTab = sorted[0];
+                                      newTab = sorted[1];
+                                    }
+                                  } else {
+                                    // 該類別中沒有兩個相同的股票名稱：僅顯示 Original
+                                    originalTab = sameSymbolTabs[0] || group.tabs[0];
+                                    newTab = null;
+                                  }
+
+                                  const currentSubTabId =
+                                    cardSubTabSelection[group.id] ||
+                                    cardSubTabSelection[sym] ||
+                                    (hasMultipleVersions
+                                      ? (selectedCardIds.has(newTab?.id)
+                                          ? newTab.id
+                                          : selectedCardIds.has(originalTab?.id)
+                                            ? originalTab.id
+                                            : (newTab?.id || originalTab?.id || group.tabs[0]?.id))
+                                      : (originalTab?.id || group.tabs[0]?.id));
+
+                                  const displayTab = group.tabs.find((t: any) => t.id === currentSubTabId) || (hasMultipleVersions ? (newTab || originalTab) : originalTab) || group.tabs[0];
+
+                                  return (
                                     <div
                                       key={group.id}
-                                      className="relative flex p-1.5 sm:p-2 bg-gradient-to-r from-white/[0.04] to-white/[0.01] rounded-[36px] shrink-0 gap-4 group/box transition-all"
-                                      style={{ border: "0.8px solid #D9FF00", boxShadow: "none" }}
+                                      className="relative flex flex-row items-start shrink-0 group/cardunit"
                                     >
-                                      <div className="absolute -top-2 left-1/2 -translate-x-1/2 bg-white/10 px-3 py-0.5 rounded-full text-[10px] font-bold text-white/50 opacity-0 group-hover/box:opacity-100 transition-opacity whitespace-nowrap pointer-events-none border border-white/10">
-                                        連動區塊
+                                      {/* Main Stock Card */}
+                                      <div className="flex-1 min-w-0">
+                                        {renderCard(displayTab, groupIdx)}
                                       </div>
-                                      {group.tabs.map((tabItem: any, tabIdx: number) => renderCard(tabItem, tabIdx))}
+
+                                      {/* Side Tabs (側邊分頁) Rail */}
+                                      <div
+                                        onClick={(e) => e.stopPropagation()}
+                                        onMouseDown={(e) => e.stopPropagation()}
+                                        onTouchStart={(e) => e.stopPropagation()}
+                                        className="flex flex-col gap-1.5 pt-3.5 -ml-1 sm:-ml-1.5 z-40 shrink-0 select-none"
+                                      >
+                                        {/* Tab: New (僅在同一層級分類中有兩個相同的股票名稱時顯示) */}
+                                        {hasMultipleVersions && newTab && (
+                                          <div className="relative group/newtab flex items-center">
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleSelectSubTab(group.id, newTab.id);
+                                              }}
+                                              className={`relative flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-r-xl border text-left transition-all cursor-pointer shadow-xs ${
+                                                displayTab.id === newTab.id
+                                                  ? "bg-gradient-to-r from-amber-50 to-orange-50 text-orange-950 border-orange-300 ring-1 ring-orange-400/50 shadow-md translate-x-1 font-black z-10"
+                                                  : "bg-white/95 hover:bg-orange-50/60 text-zinc-600 hover:text-orange-900 border-zinc-250 font-bold"
+                                              }`}
+                                              title={`切換至 ${sym} (New 更新版本)`}
+                                            >
+                                              <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse shrink-0" />
+                                              <span className="text-xs tracking-tight">New</span>
+                                            </button>
+
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleDeleteSubTab(newTab, originalTab, "New 分頁");
+                                              }}
+                                              className="opacity-0 group-hover/newtab:opacity-100 max-sm:opacity-80 -ml-2 z-20 p-0.5 rounded-full bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200 transition-opacity cursor-pointer shadow-xs"
+                                              title={`刪除 ${sym} 的 New 分頁`}
+                                            >
+                                              <X className="w-2.5 h-2.5 stroke-[2.5]" />
+                                            </button>
+                                          </div>
+                                        )}
+
+                                        {/* Tab: Original (始終顯示) */}
+                                        {originalTab ? (
+                                          <div className="relative group/origtab flex items-center">
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleSelectSubTab(group.id, originalTab.id);
+                                              }}
+                                              className={`relative flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-r-xl border text-left transition-all cursor-pointer shadow-xs ${
+                                                displayTab.id === originalTab.id
+                                                  ? "bg-white text-zinc-950 border-zinc-300 ring-1 ring-zinc-400/50 shadow-md translate-x-1 font-black z-10"
+                                                  : "bg-white/95 hover:bg-zinc-100 text-zinc-600 hover:text-zinc-900 border-zinc-250 font-bold"
+                                              }`}
+                                              title={`切換至 ${sym} (Original 原版)`}
+                                            >
+                                              <span className="text-[11px] text-zinc-500 font-normal">⌂</span>
+                                              <span className="text-xs tracking-tight">Original</span>
+                                            </button>
+
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleDeleteSubTab(originalTab, newTab, "Original 分頁");
+                                              }}
+                                              className="opacity-0 group-hover/origtab:opacity-100 max-sm:opacity-80 -ml-2 z-20 p-0.5 rounded-full bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200 transition-opacity cursor-pointer shadow-xs"
+                                              title={`刪除 ${sym} 的 Original 分頁`}
+                                            >
+                                              <X className="w-2.5 h-2.5 stroke-[2.5]" />
+                                            </button>
+                                          </div>
+                                        ) : null}
+
+                                        {/* ETF Tabs */}
+                                        {etfTabs.map((etf: any) => (
+                                          <div
+                                            key={etf.id}
+                                            className="relative group/etftab flex items-center"
+                                          >
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleSelectSubTab(group.id, etf.id);
+                                              }}
+                                              className={`relative flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-r-xl border text-left transition-all cursor-pointer shadow-xs ${
+                                                displayTab.id === etf.id
+                                                  ? "bg-indigo-50 text-indigo-950 border-indigo-300 ring-1 ring-indigo-400/50 shadow-md translate-x-1 font-black z-10"
+                                                  : "bg-white/95 hover:bg-indigo-50/50 text-zinc-600 hover:text-indigo-900 border-zinc-250 font-bold"
+                                              }`}
+                                              title={`切換至關聯 ETF：${etf.symbol}`}
+                                            >
+                                              <span className="text-[9.5px] px-1 py-0.2 rounded bg-indigo-100 text-indigo-800 font-black">
+                                                ETF
+                                              </span>
+                                              <span className="text-xs tracking-tight font-black">{etf.symbol}</span>
+                                            </button>
+
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleRemoveEtf(originalTab || displayTab, etf);
+                                              }}
+                                              className="opacity-0 group-hover/etftab:opacity-100 max-sm:opacity-80 -ml-2 z-20 p-0.5 rounded-full bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200 transition-opacity cursor-pointer shadow-xs"
+                                              title={`解除關聯 ${etf.symbol}`}
+                                            >
+                                              <X className="w-2.5 h-2.5 stroke-[2.5]" />
+                                            </button>
+                                          </div>
+                                        ))}
+
+                                        {/* Add ETFs Button */}
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setAddEtfTargetTab(originalTab || displayTab);
+                                            setIsAddEtfModalOpen(true);
+                                          }}
+                                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-r-xl border border-dashed border-zinc-300 bg-white/70 hover:bg-indigo-50/60 text-zinc-500 hover:text-indigo-600 text-xs font-bold transition-all cursor-pointer shadow-2xs hover:border-indigo-400"
+                                          title="新增關聯 ETF (可增加多個，如 XLP, SPY, QQQ...)"
+                                        >
+                                          <Plus className="w-3 h-3 text-indigo-500 stroke-[2.5]" />
+                                          <span className="whitespace-nowrap">Add ETFs</span>
+                                        </button>
+                                      </div>
                                     </div>
-                                  ) : (
-                                    renderCard(group.tabs[0], groupIdx)
                                   );
+
                                 })}
+
                               </div>
                             </div>
 
@@ -9557,61 +10079,170 @@ export default function Dashboard() {
                             {orderedFilteredSubTabVisibleTabs.length > 0 && (
                               <div className="block mt-4 sm:mt-6 px-4 md:px-8 w-full stock-card-bottom-nav">
                                 <div className="flex justify-center w-full">
-                                  <div className="relative max-w-4xl pb-2">
-                                    <div className="flex flex-row items-center justify-center gap-6 overflow-x-auto scrollbar-hide relative pb-1.5 stock-card-bottom-nav-inner">
-                                      {orderedFilteredSubTabVisibleTabs.map((tab) => {
-                                        const isSelected = (activeCardTabId || orderedFilteredSubTabVisibleTabs[0].id) === tab.id;
-                                        return (
-                                          <button
-                                            key={tab.id}
-                                            ref={(el) => {
-                                              tabRefs.current[tab.id] = el;
-                                            }}
-                                            onClick={() => handleTabIndicatorClick(tab.id)}
-                                            className={`stock-card-indicator-btn px-2 py-1 text-sm font-medium transition-all duration-200 cursor-pointer outline-none shrink-0 ${isSelected ? "is-selected font-bold" : "font-normal"}`}
-                                            style={
-                                              isPs5ModeActive
-                                                ? {
-                                                    color: "#ffffff",
-                                                    WebkitTextFillColor: "#ffffff",
-                                                    WebkitTextStroke: "1px #000000",
-                                                    textShadow:
-                                                      "-1px -1px 0 #000000, 1px -1px 0 #000000, -1px 1px 0 #000000, 1px 1px 0 #000000, 0 1px 2px rgba(0,0,0,0.9)",
-                                                    fontWeight: isSelected ? 800 : 600,
-                                                    opacity: isSelected ? 1 : 0.85,
-                                                  }
-                                                : {
-                                                    color: isSelected ? "#1a1a1a" : "#999999",
-                                                    fontWeight: isSelected ? 500 : 400,
-                                                  }
-                                            }
-                                          >
-                                            {tab.symbol}
-                                          </button>
-                                        );
-                                      })}
-                                      <div
-                                        className="bottom-nav-track absolute bottom-0 left-0 right-0"
-                                        style={{
-                                          height: "1.5px",
-                                          backgroundColor: isPs5ModeActive ? "rgba(255, 255, 255, 0.4)" : "#e0e0e0",
-                                        }}
-                                      />
-                                      <div
-                                        className="bottom-nav-indicator absolute bottom-0"
-                                        style={{
-                                          height: "2px",
-                                          backgroundColor: isPs5ModeActive ? "#ffffff" : "#1a1a1a",
-                                          boxShadow: isPs5ModeActive
-                                            ? "0 0 6px rgba(0,0,0,0.9), 0 0 10px rgba(255,255,255,0.7)"
-                                            : "none",
-                                          borderRadius: "2px",
-                                          left: `${indicatorStyle.left}px`,
-                                          width: `${indicatorStyle.width}px`,
-                                          transition:
-                                            "left 0.3s cubic-bezier(0.16, 1, 0.3, 1), width 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
-                                        }}
-                                      />
+                                  <div className="relative max-w-[92rem] w-full pb-2">
+                                    <div
+                                      ref={bottomNavScrollRef}
+                                      onMouseDown={handleBottomNavMouseDown}
+                                      onTouchStart={handleBottomNavTouchStart}
+                                      onTouchMove={handleBottomNavTouchMove}
+                                      onTouchEnd={handleBottomNavTouchEnd}
+                                      onWheel={handleBottomNavWheel}
+                                      className={`w-full overflow-x-auto scrollbar-hide no-scrollbar select-none stock-card-bottom-nav-inner ${
+                                        isBottomNavDragging ? "cursor-grabbing" : "cursor-grab"
+                                      }`}
+                                      style={{
+                                        display: "flex",
+                                        justifyContent: "safe center",
+                                      }}
+                                    >
+                                      <div className="flex flex-row items-center gap-5 sm:gap-6 min-w-max px-6 relative py-1.5 pb-2.5">
+                                        {orderedFilteredSubTabVisibleTabs.map((tab) => {
+                                          const isSelected = (activeCardTabId || orderedFilteredSubTabVisibleTabs[0].id) === tab.id;
+                                          const strat = activeTabStrategies[tab.id] || (tab as any).strategy || {};
+
+                                          // 擷取策略標記狀態 (加碼、止盈、止損、平倉、觀察、選取)
+                                          const stratBadges: Array<{
+                                            key: string;
+                                            label: string;
+                                            dotClass: string;
+                                            lightClass: string;
+                                            ps5Class: string;
+                                          }> = [];
+
+                                          if (strat.addChecked) {
+                                            stratBadges.push({
+                                              key: "add",
+                                              label: "加碼",
+                                              dotClass: "bg-emerald-500",
+                                              lightClass: "bg-emerald-50 text-emerald-700 border-emerald-300/80 shadow-2xs",
+                                              ps5Class: "bg-emerald-950/80 text-emerald-300 border-emerald-500/50",
+                                            });
+                                          }
+                                          if (strat.tpChecked) {
+                                            stratBadges.push({
+                                              key: "tp",
+                                              label: "止盈",
+                                              dotClass: "bg-blue-500",
+                                              lightClass: "bg-blue-50 text-blue-700 border-blue-300/80 shadow-2xs",
+                                              ps5Class: "bg-blue-950/80 text-blue-300 border-blue-500/50",
+                                            });
+                                          }
+                                          if (strat.slChecked) {
+                                            stratBadges.push({
+                                              key: "sl",
+                                              label: "止損",
+                                              dotClass: "bg-rose-500",
+                                              lightClass: "bg-rose-50 text-rose-700 border-rose-300/80 shadow-2xs",
+                                              ps5Class: "bg-rose-950/80 text-rose-300 border-rose-500/50",
+                                            });
+                                          }
+                                          if (strat.closeChecked) {
+                                            stratBadges.push({
+                                              key: "close",
+                                              label: "平倉",
+                                              dotClass: "bg-amber-500",
+                                              lightClass: "bg-amber-50 text-amber-800 border-amber-300/80 shadow-2xs",
+                                              ps5Class: "bg-amber-950/80 text-amber-300 border-amber-500/50",
+                                            });
+                                          }
+                                          if (strat.observeChecked) {
+                                            stratBadges.push({
+                                              key: "observe",
+                                              label: "觀察",
+                                              dotClass: "bg-zinc-400",
+                                              lightClass: "bg-zinc-100 text-zinc-700 border-zinc-300/80 shadow-2xs",
+                                              ps5Class: "bg-zinc-800/80 text-zinc-300 border-zinc-600/50",
+                                            });
+                                          }
+                                          if (strat.notesHighlighted) {
+                                            stratBadges.push({
+                                              key: "highlight",
+                                              label: "選取",
+                                              dotClass: "bg-violet-500",
+                                              lightClass: "bg-violet-50 text-violet-700 border-violet-300/80 shadow-2xs",
+                                              ps5Class: "bg-violet-950/80 text-violet-300 border-violet-500/50",
+                                            });
+                                          }
+
+                                          return (
+                                            <button
+                                              key={tab.id}
+                                              ref={(el) => {
+                                                tabRefs.current[tab.id] = el;
+                                              }}
+                                              onClick={() => {
+                                                if (bottomNavHasDraggedRef.current) return;
+                                                handleTabIndicatorClick(tab.id);
+                                              }}
+                                              className={`stock-card-indicator-btn px-2.5 py-1 text-sm font-medium transition-all duration-200 cursor-pointer outline-none shrink-0 inline-flex items-center gap-1.5 rounded-md hover:bg-zinc-100/60 ${
+                                                isSelected ? "is-selected font-bold" : "font-normal"
+                                              }`}
+                                              style={
+                                                isPs5ModeActive
+                                                  ? {
+                                                      color: "#ffffff",
+                                                      WebkitTextFillColor: "#ffffff",
+                                                      WebkitTextStroke: "1px #000000",
+                                                      textShadow:
+                                                        "-1px -1px 0 #000000, 1px -1px 0 #000000, -1px 1px 0 #000000, 1px 1px 0 #000000, 0 1px 2px rgba(0,0,0,0.9)",
+                                                      fontWeight: isSelected ? 800 : 600,
+                                                      opacity: isSelected ? 1 : 0.85,
+                                                    }
+                                                  : {
+                                                      color: isSelected ? "#1a1a1a" : "#71717a",
+                                                      fontWeight: isSelected ? 600 : 400,
+                                                    }
+                                              }
+                                            >
+                                              <span className="tracking-tight">{tab.symbol}</span>
+                                              {stratBadges.length > 0 && (
+                                                <span className="inline-flex items-center gap-1 pointer-events-none">
+                                                  {stratBadges.map((badge) => (
+                                                    <span
+                                                      key={badge.key}
+                                                      className={`inline-flex items-center gap-1 px-1.5 py-[2px] text-[10px] leading-none font-bold rounded-full border transition-all ${
+                                                        isPs5ModeActive ? badge.ps5Class : badge.lightClass
+                                                      }`}
+                                                      style={
+                                                        isPs5ModeActive
+                                                          ? {
+                                                              textShadow: "0 1px 2px rgba(0,0,0,0.8)",
+                                                            }
+                                                          : undefined
+                                                      }
+                                                    >
+                                                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${badge.dotClass}`} />
+                                                      <span>{badge.label}</span>
+                                                    </span>
+                                                  ))}
+                                                </span>
+                                              )}
+                                            </button>
+                                          );
+                                        })}
+                                        <div
+                                          className="bottom-nav-track absolute bottom-0 left-0 right-0"
+                                          style={{
+                                            height: "1.5px",
+                                            backgroundColor: isPs5ModeActive ? "rgba(255, 255, 255, 0.4)" : "#e0e0e0",
+                                          }}
+                                        />
+                                        <div
+                                          className="bottom-nav-indicator absolute bottom-0"
+                                          style={{
+                                            height: "2px",
+                                            backgroundColor: isPs5ModeActive ? "#ffffff" : "#1a1a1a",
+                                            boxShadow: isPs5ModeActive
+                                              ? "0 0 6px rgba(0,0,0,0.9), 0 0 10px rgba(255,255,255,0.7)"
+                                              : "none",
+                                            borderRadius: "2px",
+                                            left: `${indicatorStyle.left}px`,
+                                            width: `${indicatorStyle.width}px`,
+                                            transition:
+                                              "left 0.3s cubic-bezier(0.16, 1, 0.3, 1), width 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
+                                          }}
+                                        />
+                                      </div>
                                     </div>
                                   </div>
                                 </div>
@@ -12303,6 +12934,7 @@ export default function Dashboard() {
         isOpen={isPrimialModalOpen}
         onClose={() => setIsPrimialModalOpen(false)}
         allTabs={visibleActiveTabs}
+        selectedCardIds={selectedCardIds}
         currentHoldingSubTab={activeHoldingSubTab}
         onSelectHoldingSubTab={(subTab) => {
           setActiveHoldingSubTab(subTab as any);

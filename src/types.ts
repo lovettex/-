@@ -30,6 +30,7 @@ export interface StockTab {
   isFavoriteHighlight?: boolean;
   isDeviationConfirmed?: boolean;
   isNew?: boolean;
+  etfSymbols?: string[];
   chartAnnotations?: ChartAnnotation[];
   plannedBuyQty?: number;
   plannedBuyPercent?: number;

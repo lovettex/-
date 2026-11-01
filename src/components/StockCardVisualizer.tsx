@@ -2402,8 +2402,17 @@ export const StockCardVisualizer: React.FC<Props> = ({
       };
     }) : [];
 
+    const isSellTrade = (t: any) => {
+      const typeStr = String(t.type || t.tradeType || t.direction || '').toUpperCase();
+      return typeStr === 'SELL' || t.isSell === true;
+    };
+    const isBuyTrade = (t: any) => {
+      const typeStr = String(t.type || t.tradeType || t.direction || '').toUpperCase();
+      return (typeStr === 'BUY' || !typeStr) && !isSellTrade(t);
+    };
+
     const buyTrades = (liveTrades || [])
-      .filter((t) => t.type === 'BUY' && typeof t.price === 'number' && t.price > 0 && typeof t.quantity === 'number' && t.quantity > 0)
+      .filter((t) => isBuyTrade(t) && typeof t.price === 'number' && t.price > 0 && typeof t.quantity === 'number' && t.quantity > 0)
       .map((t, idx) => ({
         id: t.id || `buy-${idx}`,
         price: t.price,
@@ -2418,7 +2427,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
       }));
 
     const sellTrades = (liveTrades || [])
-      .filter((t) => t.type === 'SELL' && typeof t.price === 'number' && t.price > 0 && typeof t.quantity === 'number' && t.quantity > 0)
+      .filter((t) => isSellTrade(t) && typeof t.price === 'number' && t.price > 0 && typeof t.quantity === 'number' && t.quantity > 0)
       .map((t, idx) => ({
         id: t.id || `sell-${idx}`,
         price: t.price,

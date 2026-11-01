@@ -325,6 +325,16 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
     return Math.max(0, numHolding, netTradeShares, propBatchesBought, checkedRowsBought);
   }, [holdingQty, trades, batches, averagingRowsSys2, pyramidRows, calcMode]);
 
+  // Filter & sort past stock trades (exclude option purchase records so options ONLY display as black dashed lines)
+  const validTrades = useMemo(() => {
+    return (trades || [])
+      .filter((t) => !t?.isOptionTrade && typeof t.price === 'number' && t.price > 0 && typeof t.quantity === 'number' && t.quantity > 0)
+      .map((t) => ({
+        ...t,
+        dateFormatted: formatTimestamp(t.tradeDate, 'yyyy-MM-dd') || '未知日期',
+      }));
+  }, [trades]);
+
   // Compute calculated values for each pyramid step
   const stepItems = useMemo(() => {
     const baseRef = currentPrice > 0 ? currentPrice : (holdingAvgPrice > 0 ? holdingAvgPrice : 100);
@@ -340,7 +350,11 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
       }, 0);
       if (sumRows > 0) effPlannedQty = sumRows;
     }
-    if (effPlannedQty <= 0 && effectiveHoldingShares > 0) {
+    const buyTradesTotal = (validTrades || []).filter((t: any) => t.type === 'BUY').reduce((acc: number, t: any) => acc + (Number(t.quantity) || 0), 0);
+    const benchmarkHolding = Math.max(effectiveHoldingShares, buyTradesTotal);
+    if (benchmarkHolding > 0 && benchmarkHolding > effPlannedQty) {
+      effPlannedQty = Math.max(effPlannedQty, benchmarkHolding, Math.ceil(benchmarkHolding / 0.15));
+    } else if (effPlannedQty <= 0 && effectiveHoldingShares > 0) {
       effPlannedQty = Math.max(effectiveHoldingShares, Math.ceil(effectiveHoldingShares / 0.15));
     }
 
@@ -457,17 +471,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
         split2,
       };
     });
-  }, [stepConfigs, averagingRowsSys2, pyramidRows, calcMode, batches, currentPrice, currentPriceNum, holdingAvgPrice, plannedQty, effectiveHoldingShares, trades, usableCapital]);
-
-  // Filter & sort past stock trades (exclude option purchase records so options ONLY display as black dashed lines)
-  const validTrades = useMemo(() => {
-    return (trades || [])
-      .filter((t) => !t?.isOptionTrade && typeof t.price === 'number' && t.price > 0 && typeof t.quantity === 'number' && t.quantity > 0)
-      .map((t) => ({
-        ...t,
-        dateFormatted: formatTimestamp(t.tradeDate, 'yyyy-MM-dd') || '未知日期',
-      }));
-  }, [trades]);
+  }, [stepConfigs, averagingRowsSys2, pyramidRows, calcMode, batches, currentPrice, currentPriceNum, holdingAvgPrice, plannedQty, effectiveHoldingShares, trades, validTrades, usableCapital]);
 
   // 期權購買紀錄：優先讀取交易紀錄中的期權部位 (isOptionTrade)，若無則讀取已儲存之期權計算器紀錄 (optionsCalcData)
   // 在金字塔圖表上只顯示黑色虛線，上方標籤依序為：行權價 -> 正上方顯示合約金額 (×100股) -> 正上方顯示當前損益金額
@@ -745,12 +749,15 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
     stepItems.forEach((s) => {
       const val = yAxisMode === 'shares' ? s.size : s.percent;
       if (val > maxVal) maxVal = val;
-      const bVal = yAxisMode === 'shares' ? s.bought : (s.size > 0 ? (s.bought / s.size) * s.percent : 0);
+      const bVal = yAxisMode === 'shares' ? Math.min(s.bought, s.size * 1.5) : (s.size > 0 ? (s.bought / s.size) * s.percent : 0);
       if (bVal > maxVal) maxVal = bVal;
     });
     if (showTrades && yAxisMode === 'shares') {
+      const maxStepVal = maxVal > 0 ? maxVal : 50;
       validTrades.forEach((t) => {
-        if (t.quantity > maxVal) maxVal = t.quantity;
+        // 限制過去交易單筆極端股數不拉爆 Y 軸上限，保持金字塔階梯圖形完整優雅
+        const cappedQty = Math.min(t.quantity, maxStepVal * 1.35);
+        if (cappedQty > maxVal) maxVal = cappedQty;
       });
     }
     return maxVal > 0 ? maxVal * 1.35 : 50; // give ample headroom for multi-line text annotations
@@ -801,7 +808,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
         label: `歷史買入交易 (${buyTrades.length} 筆)`,
         data: buyTrades.map((t) => ({
           x: t.price,
-          y: yAxisMode === 'shares' ? t.quantity : 15,
+          y: yAxisMode === 'shares' ? Math.min(t.quantity, maxYValue * 0.8) : 15,
         })),
         showLine: false,
         pointStyle: 'circle' as const, // 圓形藍點
@@ -824,7 +831,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
         label: `歷史賣出交易 (${sellTrades.length} 筆)`,
         data: sellTrades.map((t) => ({
           x: t.price,
-          y: yAxisMode === 'shares' ? t.quantity : 15,
+          y: yAxisMode === 'shares' ? Math.min(t.quantity, maxYValue * 0.8) : 15,
         })),
         showLine: false,
         pointStyle: 'circle' as const,
@@ -1361,7 +1368,8 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
             const pctSign = step.addPct !== undefined ? `+${step.addPct}%` : `-${step.dropPct}%`;
             const line1 = `$${step.price.toFixed(2)}  ${pctSign} (${step.percent}%)`;
             // Text Line 2: "已購 X / 預購 Y 股 (進度%)"
-            const pctText = step.size > 0 ? ` (${Math.round((step.bought / step.size) * 100)}%)` : '';
+            const progressRatio = step.size > 0 ? Math.min(100, Math.round((step.bought / step.size) * 100)) : 0;
+            const pctText = step.size > 0 ? ` (${progressRatio}%)` : '';
             const line2 = `已購 ${step.bought} / 預購 ${step.size} 股${pctText}`;
 
             ctx.font = 'bold 12.5px monospace, system-ui, sans-serif';
@@ -1456,7 +1464,8 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
           ctx.save();
           validTrades.forEach((trade, idx) => {
             const tx = xScale.getPixelForValue(trade.price);
-            const yVal = yAxisMode === 'shares' ? trade.quantity : 15;
+            const maxStepVal = drawDataRef.current?.sortedStepItems ? Math.max(...drawDataRef.current.sortedStepItems.map(s => Math.max(s.size, s.bought)), 10) : 50;
+            const yVal = yAxisMode === 'shares' ? Math.min(trade.quantity, maxStepVal * 1.25) : 15;
             const ty = yScale.getPixelForValue(yVal);
 
             if (tx >= chartArea.left - 15 && tx <= chartArea.right + 15) {

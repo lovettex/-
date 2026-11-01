@@ -22,24 +22,16 @@ export const isAlreadyFullscreen = (): boolean => {
 };
 
 export const scrollToMainTabs = (behavior: ScrollBehavior = 'smooth') => {
-  const tabElement = document.getElementById('main-view-tabs');
-  if (tabElement) {
-    const rect = tabElement.getBoundingClientRect();
-    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-    // 將 tab 的頂部位置精準對齊視窗頂部邊緣 (留 6px 極微間隔保持俐落)
-    const targetY = Math.max(0, rect.top + scrollTop - 6);
-    window.scrollTo({
-      top: targetY,
-      behavior,
-    });
-  }
+  window.scrollTo({
+    top: 0,
+    behavior,
+  });
 };
 
 export const enterFullscreen = async (): Promise<boolean> => {
   if (typeof window === 'undefined') return false;
   const elem = document.documentElement as any;
   if (isAlreadyFullscreen()) {
-    scrollToMainTabs('smooth');
     return true;
   }
   try {
@@ -52,9 +44,6 @@ export const enterFullscreen = async (): Promise<boolean> => {
     } else if (elem.msRequestFullscreen) {
       await elem.msRequestFullscreen();
     }
-    setTimeout(() => scrollToMainTabs('smooth'), 80);
-    setTimeout(() => scrollToMainTabs('smooth'), 220);
-    setTimeout(() => scrollToMainTabs('smooth'), 450);
     return true;
   } catch (err) {
     console.warn('Enter fullscreen request notice:', err);
@@ -171,9 +160,9 @@ export function useAutoFullscreen() {
       }
 
       if (isAlreadyFullscreen()) {
-        // 全螢幕下雙擊背景：校正置頂對齊 Tab 列
-        scrollToMainTabs('smooth');
-        toast.info('畫面已校正對齊 Tab 導覽列', { duration: 1500 });
+        // 全螢幕下雙擊背景：平滑置頂回到頂部
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        toast.info('畫面已平滑回到頂部', { duration: 1500 });
       } else {
         // 進入全螢幕模式
         enterFullscreen();
@@ -247,14 +236,9 @@ export function useAutoFullscreen() {
     window.addEventListener('mouseleave', cancelLongPress, { passive: true });
     window.addEventListener('contextmenu', cancelLongPress, { passive: true });
 
-    // 5. 監聽全螢幕變化事件：若進入全螢幕，即自動平滑捲動對齊「持有中 | 真實交易 | 已完成 | 操作備註」等 Tab
+    // 5. 監聽全螢幕變化事件：取消長按計時，維持畫面穩定不閃爍
     const onFullscreenChange = () => {
       cancelLongPress();
-      if (isAlreadyFullscreen()) {
-        setTimeout(() => scrollToMainTabs('smooth'), 80);
-        setTimeout(() => scrollToMainTabs('smooth'), 220);
-        setTimeout(() => scrollToMainTabs('smooth'), 450);
-      }
     };
 
     document.addEventListener('fullscreenchange', onFullscreenChange);

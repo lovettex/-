@@ -416,7 +416,14 @@ export function calculateBatchPlanning(params: BatchPlanningParams): {
     }, 0);
     if (rowsSum > 0) effPlanned = rowsSum;
   }
-  if (effPlanned <= 0 && holdingQty > 0) {
+  // 若已持有股數或實際已購買股數大於目前推算的預購總股數，則目標總股數自動依實際持股智慧校準，避免出現已購大於預購數萬趴的失真情況
+  const tradeBuySharesSum = Array.isArray(trades)
+    ? trades.filter((t: any) => t.type === 'BUY' && !t.isOptionTrade).reduce((sum: number, t: any) => sum + (Number(t.quantity) || 0), 0)
+    : 0;
+  const benchmarkBought = Math.max(holdingQty || 0, tradeBuySharesSum);
+  if (benchmarkBought > 0 && benchmarkBought > effPlanned) {
+    effPlanned = Math.max(effPlanned, benchmarkBought, Math.ceil(benchmarkBought / 0.15));
+  } else if (effPlanned <= 0 && holdingQty > 0) {
     effPlanned = Math.max(holdingQty, Math.ceil(holdingQty / 0.15));
   }
 

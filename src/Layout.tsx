@@ -5,10 +5,8 @@ import { ActivitySquare } from 'lucide-react';
 import { Premium3DGrid } from './components/Premium3DGrid';
 import { WhiteNoisePlayer } from './components/WhiteNoisePlayer';
 import { whiteNoiseEngine, WhiteNoiseState } from './lib/whiteNoiseEngine';
+import { PS5DynamicBackground } from './components/PS5DynamicBackground';
 
-const PS5DynamicBackground = lazy(() =>
-  import('./components/PS5DynamicBackground').then((m) => ({ default: m.PS5DynamicBackground }))
-);
 const CrawlerSpider = lazy(() =>
   import('./components/CrawlerSpider').then((m) => ({ default: m.CrawlerSpider }))
 );
@@ -41,6 +39,17 @@ export default function Layout() {
     return () => unsubscribe();
   }, []);
 
+  useEffect(() => {
+    if (ambientState.bgEnabled) {
+      document.body.classList.add('ps5-theme-active');
+    } else {
+      document.body.classList.remove('ps5-theme-active');
+    }
+    return () => {
+      document.body.classList.remove('ps5-theme-active');
+    };
+  }, [ambientState.bgEnabled]);
+
   if (authLoading) {
     return (
       <div className="min-h-screen w-full flex flex-col items-center justify-center py-10 text-zinc-800 relative bg-[#f5f5f7]">
@@ -56,9 +65,21 @@ export default function Layout() {
   if (!user) {
     return (
       <div className="min-h-screen w-full flex flex-col items-center justify-center px-4 py-10 relative text-zinc-800 bg-[#f5f5f7]">
-        <Premium3DGrid />
+        {ambientState.bgEnabled ? (
+          <PS5DynamicBackground
+            isActive={true}
+            themeId={ambientState.bgThemeId}
+            speedMultiplier={ambientState.bgSpeed}
+          />
+        ) : (
+          <Premium3DGrid />
+        )}
 
-        <div className="w-full max-w-[420px] p-8 sm:p-10 bg-white/75 backdrop-blur-xl border border-white/60 shadow-[0_20px_50px_rgba(0,0,0,0.04)] rounded-[2.5rem] flex flex-col items-center text-center space-y-8 relative z-10">
+        <div
+          className={`w-full max-w-[420px] p-8 sm:p-10 backdrop-blur-xl border border-white/60 shadow-[0_20px_50px_rgba(0,0,0,0.04)] rounded-[2.5rem] flex flex-col items-center text-center space-y-8 relative z-10 transition-colors duration-300 ${
+            ambientState.bgEnabled ? 'bg-white/75' : 'bg-white/95'
+          }`}
+        >
           <div className="space-y-5 flex flex-col items-center">
             <div className="inline-flex justify-center items-center bg-zinc-100 p-4 border border-zinc-200/80 shadow-[0_10px_35px_rgba(16,185,129,0.12)] rounded-2xl backdrop-blur-xl hover:scale-105 transition-transform duration-300">
               <ActivitySquare className="h-12 w-12 text-emerald-600" />
@@ -110,16 +131,14 @@ export default function Layout() {
 
   return (
     <div className="flex min-h-screen text-zinc-800 relative w-full overflow-x-hidden">
-      <Premium3DGrid />
-      
-      {ambientState.isPlaying && ambientState.bgEnabled && (
-        <Suspense fallback={null}>
-          <PS5DynamicBackground
-            isActive={true}
-            themeId={ambientState.bgThemeId}
-            speedMultiplier={ambientState.bgSpeed}
-          />
-        </Suspense>
+      {ambientState.bgEnabled ? (
+        <PS5DynamicBackground
+          isActive={true}
+          themeId={ambientState.bgThemeId}
+          speedMultiplier={ambientState.bgSpeed}
+        />
+      ) : (
+        <Premium3DGrid />
       )}
 
       {isCrawlerActive && (

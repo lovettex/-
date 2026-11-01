@@ -316,7 +316,7 @@ class WhiteNoiseEngine {
     isMuted: false,
     randomMode: true,
     bgEnabled: true,
-    bgThemeId: 'galaxy-kepler',
+    bgThemeId: 'fullpage-loop-video',
     bgSpeed: 0.5,
   };
 
@@ -339,8 +339,12 @@ class WhiteNoiseEngine {
             this.state.currentTrackIndex = idx;
           }
         }
-        const savedBgTheme = localStorage.getItem('ambient_bg_theme');
-        if (savedBgTheme) {
+        const savedBgTheme = localStorage.getItem('ambient_bg_theme_v3');
+        if (
+          savedBgTheme === 'fullpage-loop-video' ||
+          savedBgTheme === 'native-scrub-video' ||
+          savedBgTheme === 'lavender-gaze-heart'
+        ) {
           this.state.bgThemeId = savedBgTheme;
         }
         const savedBgEnabled = localStorage.getItem('ambient_bg_enabled');
@@ -370,7 +374,7 @@ class WhiteNoiseEngine {
   public setBgTheme(themeId: string) {
     this.state.bgThemeId = themeId;
     try {
-      localStorage.setItem('ambient_bg_theme', themeId);
+      localStorage.setItem('ambient_bg_theme_v3', themeId);
     } catch {}
     this.notify();
   }

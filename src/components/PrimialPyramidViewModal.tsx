@@ -30,6 +30,7 @@ export interface PrimialPyramidViewModalProps {
   isOpen: boolean;
   onClose: () => void;
   allTabs: any[];
+  selectedCardIds?: Set<string>;
   currentHoldingSubTab?: string;
   onSelectHoldingSubTab?: (subTab: string) => void;
   currentViewTab?: string;
@@ -61,10 +62,59 @@ const getDisplayHoldingStatus = (
   return "候選名單";
 };
 
+// 判斷該卡片在個股卡片上是否有打勾
+const isTabCardChecked = (tab: any, cardSelection?: Set<string>): boolean => {
+  if (!tab) return false;
+  if (cardSelection && cardSelection.has(tab.id)) return true;
+  if (tab.isSelected === true || tab.checked === true || tab.isChecked === true) return true;
+  return false;
+};
+
+// 若剛好有兩個相同的股票名稱在同一目錄下，顯示個股卡片有打勾的既可
+const filterDuplicateSameSymbolTabs = (tabs: any[], cardSelection?: Set<string>): any[] => {
+  const groups = new Map<string, any[]>();
+  tabs.forEach((tab) => {
+    const sym = (tab?.symbol || "").trim().toUpperCase();
+    if (!sym) return;
+    if (!groups.has(sym)) {
+      groups.set(sym, []);
+    }
+    groups.get(sym)!.push(tab);
+  });
+
+  const result: any[] = [];
+  const seen = new Set<string>();
+  tabs.forEach((tab) => {
+    const sym = (tab?.symbol || "").trim().toUpperCase();
+    if (!sym || seen.has(sym)) return;
+    seen.add(sym);
+
+    const group = groups.get(sym)!;
+    if (group.length <= 1) {
+      result.push(group[0]);
+    } else {
+      // 優先尋找個股卡片有打勾的
+      const checkedTab = group.find((t) => isTabCardChecked(t, cardSelection));
+      if (checkedTab) {
+        result.push(checkedTab);
+      } else {
+        // 若都未打勾，則優先保留有實際持股或交易記錄的卡片，次之保留首檔
+        const withHolding = group.find(
+          (t) => (t.holdingQuantity && t.holdingQuantity > 0) || (t.trades && t.trades.length > 0)
+        );
+        result.push(withHolding || group[0]);
+      }
+    }
+  });
+
+  return result;
+};
+
 export const PrimialPyramidViewModal: React.FC<PrimialPyramidViewModalProps> = ({
   isOpen,
   onClose,
   allTabs = [],
+  selectedCardIds,
   currentHoldingSubTab = "候選名單",
   onSelectHoldingSubTab,
   currentViewTab = "active",
@@ -405,44 +455,50 @@ export const PrimialPyramidViewModal: React.FC<PrimialPyramidViewModalProps> = (
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, onClose, activeDirectory, handleSwitchDirectory]);
 
-  // 依當前選擇的目錄（上一層級）過濾股票清單
+  // 依當前選擇的目錄（上一層級）過濾股票清單（若剛好有兩個相同的股票名稱在同一目錄下，顯示個股卡片有打勾的既可）
   const directoryTabs = useMemo(() => {
     const validTabs = (allTabs || []).filter(
       (t) => t && t.status === "ACTIVE" && t.symbol && !t.isHidden
     );
 
+    let rawList: any[] = [];
     if (activeDirectory.type === "all") {
-      if (activeDirectory.subTab === "全部") return validTabs;
-      return validTabs.filter(
-        (t) => getDisplayHoldingStatus(t.holdingStatus) === activeDirectory.subTab
-      );
-    }
-
-    if (activeDirectory.type === "virtual") {
+      if (activeDirectory.subTab === "全部") rawList = validTabs;
+      else {
+        rawList = validTabs.filter(
+          (t) => getDisplayHoldingStatus(t.holdingStatus) === activeDirectory.subTab
+        );
+      }
+    } else if (activeDirectory.type === "virtual") {
       const virtualTabs = validTabs.filter(
         (t) => t.tradeType === "simulated" || !t.tradeType
       );
-      if (activeDirectory.subTab === "全部") return virtualTabs;
-      return virtualTabs.filter(
-        (t) => getDisplayHoldingStatus(t.holdingStatus) === activeDirectory.subTab
-      );
-    }
-
-    if (activeDirectory.type === "real") {
+      if (activeDirectory.subTab === "全部") rawList = virtualTabs;
+      else {
+        rawList = virtualTabs.filter(
+          (t) => getDisplayHoldingStatus(t.holdingStatus) === activeDirectory.subTab
+        );
+      }
+    } else if (activeDirectory.type === "real") {
       const realTabs = validTabs.filter((t) => t.tradeType === "real");
-      if (activeDirectory.subTab === "全部") return realTabs;
-      return realTabs.filter(
-        (t) => getDisplayHoldingStatus(t.holdingStatus) === activeDirectory.subTab
-      );
+      if (activeDirectory.subTab === "全部") rawList = realTabs;
+      else {
+        rawList = realTabs.filter(
+          (t) => getDisplayHoldingStatus(t.holdingStatus) === activeDirectory.subTab
+        );
+      }
+    } else {
+      rawList = validTabs;
     }
 
-    return validTabs;
-  }, [allTabs, activeDirectory]);
+    return filterDuplicateSameSymbolTabs(rawList, selectedCardIds);
+  }, [allTabs, activeDirectory, selectedCardIds]);
 
-  // 目錄統計數字 (方便在選單中顯示檔數)
+  // 目錄統計數字 (方便在選單中顯示檔數，同步採用去重後的真實可顯示檔數)
   const directoryCounts = useMemo(() => {
-    const validTabs = (allTabs || []).filter(
-      (t) => t && t.status === "ACTIVE" && t.symbol && !t.isHidden
+    const validTabs = filterDuplicateSameSymbolTabs(
+      (allTabs || []).filter((t) => t && t.status === "ACTIVE" && t.symbol && !t.isHidden),
+      selectedCardIds
     );
     const virtualTabs = validTabs.filter(
       (t) => t.tradeType === "simulated" || !t.tradeType
@@ -472,7 +528,7 @@ export const PrimialPyramidViewModal: React.FC<PrimialPyramidViewModalProps> = (
         "賣出操作": getCount(realTabs, "賣出操作"),
       },
     };
-  }, [allTabs]);
+  }, [allTabs, selectedCardIds]);
 
   const currentDirectoryLabel = useMemo(() => {
     if (activeDirectory.type === "all") {
@@ -522,9 +578,9 @@ export const PrimialPyramidViewModal: React.FC<PrimialPyramidViewModalProps> = (
       const currentPrice = Number(tab.currentPrice || 0);
       const stats = calculateStats(trades, currentPrice);
       const effectiveHoldingQty =
-        trades.length > 0 ? stats.totalQuantity : tab.holdingQuantity || 0;
+        stats.totalQuantity !== 0 ? stats.totalQuantity : tab.holdingQuantity || 0;
       const effectiveAvgPrice =
-        trades.length > 0 && stats.averagePrice > 0
+        stats.totalQuantity !== 0 && stats.averagePrice > 0
           ? stats.averagePrice
           : tab.averageCost || 0;
 
@@ -538,8 +594,14 @@ export const PrimialPyramidViewModal: React.FC<PrimialPyramidViewModalProps> = (
       const totalCostBasis =
         stockHoldingCost +
         (optionSummary.hasOptionRecords ? optionSummary.totalHoldingCost : 0);
+      const stockUnrealizedPnL =
+        stats.unrealizedPnL !== 0
+          ? stats.unrealizedPnL
+          : effectiveHoldingQty > 0 && effectiveAvgPrice > 0 && currentPrice > 0
+          ? (currentPrice - effectiveAvgPrice) * effectiveHoldingQty
+          : 0;
       const totalCombinedPnL =
-        (stats.unrealizedPnL || 0) +
+        stockUnrealizedPnL +
         (optionSummary.hasOptionRecords ? optionSummary.totalCurrentPnL : 0);
 
       let returnPercentage = 0;
@@ -552,9 +614,10 @@ export const PrimialPyramidViewModal: React.FC<PrimialPyramidViewModalProps> = (
         optionSummary.hasOptionRecords &&
         optionSummary.totalHoldingCost > 0
       ) {
-        returnPercentage =
-          (optionSummary.totalCurrentPnL / optionSummary.totalHoldingCost) * 100;
+        returnPercentage = optionSummary.totalRoiPct;
       }
+
+      const calculatedUnrealizedPnL = totalCombinedPnL;
 
       const isSimulated = tab.tradeType === "simulated";
       const usableCapital = isSimulated ? virtualCapital : totalCapital;
@@ -606,7 +669,13 @@ export const PrimialPyramidViewModal: React.FC<PrimialPyramidViewModalProps> = (
         if (rowsSum > 0) plannedQty = rowsSum;
       }
 
-      if (plannedQty <= 0 && effectiveHoldingQty > 0) {
+      const buyTradesSum = (trades || [])
+        .filter((t: any) => t.type === 'BUY' && !t.isOptionTrade)
+        .reduce((sum: number, t: any) => sum + (Number(t.quantity) || 0), 0);
+      const benchmarkHold = Math.max(effectiveHoldingQty, buyTradesSum);
+      if (benchmarkHold > 0 && benchmarkHold > plannedQty) {
+        plannedQty = Math.max(plannedQty, benchmarkHold, Math.ceil(benchmarkHold / 0.15));
+      } else if (plannedQty <= 0 && effectiveHoldingQty > 0) {
         plannedQty = Math.max(effectiveHoldingQty, Math.ceil(effectiveHoldingQty / 0.15));
       }
 
@@ -639,7 +708,7 @@ export const PrimialPyramidViewModal: React.FC<PrimialPyramidViewModalProps> = (
         holdingAvgPrice: effectiveAvgPrice,
         holdingQty: effectiveHoldingQty,
         returnPercentage,
-        unrealizedPnL: totalCombinedPnL,
+        unrealizedPnL: calculatedUnrealizedPnL,
         trades,
         strategy,
         plannedOrders,
@@ -668,6 +737,15 @@ export const PrimialPyramidViewModal: React.FC<PrimialPyramidViewModalProps> = (
   const bracketCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     const stepValues = [2, 3, 5, 8, 10, 15];
+
+    let allDirectionCount = 0;
+    stockDataMap.forEach((data) => {
+      const ret = data.returnPercentage;
+      if (direction === "gain" ? ret >= 0 : ret < 0) {
+        allDirectionCount++;
+      }
+    });
+    counts.all = allDirectionCount;
 
     stepValues.forEach((val) => {
       const bounds = getStepBracketBounds(val);
@@ -1378,6 +1456,64 @@ export const PrimialPyramidViewModal: React.FC<PrimialPyramidViewModalProps> = (
                 {filteredTabs.map((stock) => {
                   const isSelected =
                     (activeJumpId || filteredTabs[0]?.id) === stock.id;
+                  const strat = stock.strategy || {};
+
+                  // 擷取策略標記狀態 (加碼、止盈、止損、平倉、觀察、選取)
+                  const stratBadges: Array<{
+                    key: string;
+                    label: string;
+                    dotClass: string;
+                    lightClass: string;
+                  }> = [];
+
+                  if (strat.addChecked) {
+                    stratBadges.push({
+                      key: "add",
+                      label: "加碼",
+                      dotClass: "bg-emerald-500",
+                      lightClass: "bg-emerald-50 text-emerald-700 border-emerald-300/80 shadow-2xs",
+                    });
+                  }
+                  if (strat.tpChecked) {
+                    stratBadges.push({
+                      key: "tp",
+                      label: "止盈",
+                      dotClass: "bg-blue-500",
+                      lightClass: "bg-blue-50 text-blue-700 border-blue-300/80 shadow-2xs",
+                    });
+                  }
+                  if (strat.slChecked) {
+                    stratBadges.push({
+                      key: "sl",
+                      label: "止損",
+                      dotClass: "bg-rose-500",
+                      lightClass: "bg-rose-50 text-rose-700 border-rose-300/80 shadow-2xs",
+                    });
+                  }
+                  if (strat.closeChecked) {
+                    stratBadges.push({
+                      key: "close",
+                      label: "平倉",
+                      dotClass: "bg-amber-500",
+                      lightClass: "bg-amber-50 text-amber-800 border-amber-300/80 shadow-2xs",
+                    });
+                  }
+                  if (strat.observeChecked) {
+                    stratBadges.push({
+                      key: "observe",
+                      label: "觀察",
+                      dotClass: "bg-zinc-400",
+                      lightClass: "bg-zinc-100 text-zinc-700 border-zinc-300/80 shadow-2xs",
+                    });
+                  }
+                  if (strat.notesHighlighted) {
+                    stratBadges.push({
+                      key: "highlight",
+                      label: "選取",
+                      dotClass: "bg-violet-500",
+                      lightClass: "bg-violet-50 text-violet-700 border-violet-300/80 shadow-2xs",
+                    });
+                  }
 
                   return (
                     <button
@@ -1390,14 +1526,27 @@ export const PrimialPyramidViewModal: React.FC<PrimialPyramidViewModalProps> = (
                         if (hasDraggedBeyondThresholdRef.current) return;
                         handleJumpToStock(stock.id);
                       }}
-                      className={`px-2 py-1 text-sm sm:text-base transition-all duration-200 cursor-pointer outline-none shrink-0 relative select-none ${
+                      className={`px-2.5 py-1 text-sm sm:text-base transition-all duration-200 cursor-pointer outline-none shrink-0 relative select-none inline-flex items-center gap-1.5 rounded-md hover:bg-zinc-100/60 ${
                         isSelected
                           ? "text-zinc-950 font-black tracking-wide"
                           : "text-zinc-400 hover:text-zinc-700 font-semibold tracking-wide"
                       }`}
                       title={`快速切換至 ${stock.cleanSym}`}
                     >
-                      {stock.cleanSym}
+                      <span>{stock.cleanSym}</span>
+                      {stratBadges.length > 0 && (
+                        <span className="inline-flex items-center gap-1 pointer-events-none">
+                          {stratBadges.map((badge) => (
+                            <span
+                              key={badge.key}
+                              className={`inline-flex items-center gap-1 px-1.5 py-[2px] text-[10px] leading-none font-bold rounded-full border transition-all ${badge.lightClass}`}
+                            >
+                              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${badge.dotClass}`} />
+                              <span>{badge.label}</span>
+                            </span>
+                          ))}
+                        </span>
+                      )}
                     </button>
                   );
                 })}
@@ -1526,17 +1675,26 @@ export const PrimialPyramidViewModal: React.FC<PrimialPyramidViewModalProps> = (
 
                   {/* 右側：損益報酬率標籤 + 現價與均價小卡 + 展開/收合按鈕 */}
                   <div className="flex items-center gap-2 shrink-0">
-                    {/* 報酬率徽章 */}
-                    <span
-                      className={`text-xs font-mono font-black px-2.5 py-1 rounded-lg border shadow-2xs ${
-                        stock.returnPercentage >= 0
+                    {/* 未實現損益金額與報酬率徽章 (對齊截圖二) */}
+                    <div
+                      className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-xl border shadow-2xs font-mono font-black text-xs ${
+                        stock.unrealizedPnL > 0
                           ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                          : "bg-rose-50 text-rose-700 border-rose-200"
+                          : stock.unrealizedPnL < 0
+                          ? "bg-rose-50 text-rose-700 border-rose-200"
+                          : "bg-emerald-50/80 text-emerald-700 border-emerald-200"
                       }`}
+                      title={`未實現損益: ${stock.unrealizedPnL >= 0 ? "+" : "-"}$${Math.abs(stock.unrealizedPnL).toFixed(2)} (${stock.returnPercentage >= 0 ? "+" : ""}${stock.returnPercentage.toFixed(2)}%)`}
                     >
-                      {stock.returnPercentage >= 0 ? "+" : ""}
-                      {stock.returnPercentage.toFixed(2)}%
-                    </span>
+                      <span className="text-[10px] font-bold text-zinc-500 font-sans hidden xs:inline">未實現</span>
+                      <span className="tabular-nums">
+                        {stock.unrealizedPnL > 0 ? "+" : stock.unrealizedPnL < 0 ? "-" : "+"}
+                        ${Math.abs(stock.unrealizedPnL).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                      <span className="text-[10.5px] opacity-90 tabular-nums">
+                        ({stock.returnPercentage >= 0 ? "+" : ""}{stock.returnPercentage.toFixed(2)}%)
+                      </span>
+                    </div>
 
                     {/* 目前價格膠囊 */}
                     {stock.currentPrice > 0 && (
