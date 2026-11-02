@@ -103,11 +103,13 @@ async function startServer() {
 
   // HTML Files Listing Endpoint
   app.get("/api/html-files", async (req, res) => {
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
     try {
-      const { userId, symbol } = req.query;
+      const { symbol } = req.query;
 
-      let files;
-      if (symbol) {
+      let files = [];
+      if (symbol && typeof symbol === "string" && symbol.trim()) {
+        const cleanSymbol = symbol.trim().toUpperCase();
         files = await db.select({
           id: uploadedHtmlFiles.id,
           userId: uploadedHtmlFiles.userId,
@@ -116,7 +118,7 @@ async function startServer() {
           createdAt: uploadedHtmlFiles.createdAt,
         })
         .from(uploadedHtmlFiles)
-        .where(eq(uploadedHtmlFiles.symbol, symbol as string))
+        .where(eq(uploadedHtmlFiles.symbol, cleanSymbol))
         .orderBy(desc(uploadedHtmlFiles.createdAt));
       } else {
         files = await db.select({
@@ -133,7 +135,7 @@ async function startServer() {
       res.json(files);
     } catch (err: any) {
       console.error("Error querying HTML files:", err);
-      res.status(500).json({ error: "查詢 HTML 檔案時出錯: " + err.message });
+      res.status(500).json({ error: "查詢 HTML 檔案時出錯: " + err.message, files: [] });
     }
   });
 
@@ -905,6 +907,12 @@ async function startServer() {
       console.error("AI prompt search error:", error);
       res.status(500).json({ error: error.message || "AI 搜尋分析失敗，請稍後再試。" });
     }
+  });
+
+  // Catch-all to prevent unmatched /api/* routes from falling through to Vite SPA index.html
+  app.all('/api/*', (req, res) => {
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.status(404).json({ error: `API route not found: ${req.method} ${req.originalUrl}` });
   });
 
   // Vite middleware for development

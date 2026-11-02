@@ -1080,14 +1080,27 @@ export default function Dashboard() {
       const fetchAiHtmlFiles = async (symbol: string) => {
         if (!user || !symbol) return;
         try {
-          const url = `/api/html-files?userId=${user.uid}&symbol=${encodeURIComponent(symbol.trim().toUpperCase())}`;
-          const response = await fetch(url);
+          const cleanSymbol = symbol.trim().toUpperCase();
+          const url = `/api/html-files?userId=${encodeURIComponent(user.uid)}&symbol=${encodeURIComponent(cleanSymbol)}`;
+          const response = await fetch(url, {
+            headers: {
+              "Accept": "application/json",
+            },
+          });
           if (response.ok) {
-            const data = await response.json();
-            setAiHtmlFiles(data);
+            const contentType = response.headers.get("content-type") || "";
+            if (contentType.includes("application/json")) {
+              const data = await response.json();
+              setAiHtmlFiles(Array.isArray(data) ? data : []);
+            } else {
+              console.warn("Expected JSON from /api/html-files, got:", contentType);
+              setAiHtmlFiles([]);
+            }
+          } else {
+            setAiHtmlFiles([]);
           }
         } catch (error) {
-          console.error("Failed to fetch AI HTML files:", error);
+          console.warn("Notice: Failed to fetch AI HTML files:", error);
         }
       };
       
@@ -1185,24 +1198,37 @@ export default function Dashboard() {
         setAiUploadContent("");
         
         // Refresh the file list
-        const url = `/api/html-files?userId=${user.uid}&symbol=${encodeURIComponent(cleanSymbol)}`;
-        const listRes = await fetch(url);
+        const url = `/api/html-files?userId=${encodeURIComponent(user.uid)}&symbol=${encodeURIComponent(cleanSymbol)}`;
+        const listRes = await fetch(url, {
+          headers: { "Accept": "application/json" }
+        });
         if (listRes.ok) {
-          const data = await listRes.json();
-          setAiHtmlFiles(data);
-          if (data.length > 0) {
-            const latestFile = data[0];
-            setSelectedPreviewUrl(`/api/html-files/${latestFile.id}/content`);
-            setSelectedPreviewLinkTitle(latestFile.fileName);
-            setAiMobileActiveTab("preview");
+          const contentType = listRes.headers.get("content-type") || "";
+          if (contentType.includes("application/json")) {
+            const data = await listRes.json();
+            const safeData = Array.isArray(data) ? data : [];
+            setAiHtmlFiles(safeData);
+            if (safeData.length > 0) {
+              const latestFile = safeData[0];
+              setSelectedPreviewUrl(`/api/html-files/${latestFile.id}/content`);
+              setSelectedPreviewLinkTitle(latestFile.fileName);
+              setAiMobileActiveTab("preview");
+            }
           }
         }
         setAiLeftTab("preview");
         setAiMobileActiveTab("preview");
         playClickSound();
       } else {
-        const err = await response.json();
-        throw new Error(err.error || "上傳失敗");
+        let errMessage = "上傳失敗";
+        try {
+          const contentType = response.headers.get("content-type") || "";
+          if (contentType.includes("application/json")) {
+            const err = await response.json();
+            errMessage = err.error || errMessage;
+          }
+        } catch (_) {}
+        throw new Error(errMessage);
       }
     } catch (error: any) {
       console.error("Failed to upload HTML file:", error);
@@ -5020,17 +5046,27 @@ export default function Dashboard() {
   const fetchUploadedHtmlFiles = async (symbolFilter?: string) => {
     if (!user) return;
     try {
-      let url = `/api/html-files?userId=${user.uid}`;
+      let url = `/api/html-files?userId=${encodeURIComponent(user.uid)}`;
       if (symbolFilter) {
         url += `&symbol=${encodeURIComponent(symbolFilter.trim().toUpperCase())}`;
       }
-      const response = await fetch(url);
+      const response = await fetch(url, {
+        headers: { "Accept": "application/json" }
+      });
       if (response.ok) {
-        const data = await response.json();
-        setHtmlFilesList(data);
+        const contentType = response.headers.get("content-type") || "";
+        if (contentType.includes("application/json")) {
+          const data = await response.json();
+          setHtmlFilesList(Array.isArray(data) ? data : []);
+        } else {
+          console.warn("Expected JSON from /api/html-files, got:", contentType);
+          setHtmlFilesList([]);
+        }
+      } else {
+        setHtmlFilesList([]);
       }
     } catch (error) {
-      console.error("Failed to fetch HTML files:", error);
+      console.warn("Notice: Failed to fetch HTML files:", error);
     }
   };
 
@@ -10146,12 +10182,12 @@ export default function Dashboard() {
                                         {renderCard(displayTab, groupIdx)}
                                       </div>
 
-                                      {/* Side Tabs (側邊分頁) Rail */}
+                                      {/* Side Tabs (側邊分頁) Rail - 動態化折疊/展開 */}
                                       <div
                                         onClick={(e) => e.stopPropagation()}
                                         onMouseDown={(e) => e.stopPropagation()}
                                         onTouchStart={(e) => e.stopPropagation()}
-                                        className="flex flex-col gap-1.5 pt-3.5 -ml-1 sm:-ml-1.5 z-40 shrink-0 select-none"
+                                        className="group/siderail flex flex-col gap-1.5 pt-3.5 -ml-1 sm:-ml-1.5 z-40 shrink-0 select-none"
                                       >
                                         {/* Tab: New (僅在同一層級分類中有兩個相同的股票名稱時顯示) */}
                                         {hasMultipleVersions && newTab && (
@@ -10162,7 +10198,7 @@ export default function Dashboard() {
                                                 e.stopPropagation();
                                                 handleSelectSubTab(group.id, newTab.id, sym);
                                               }}
-                                              className={`relative flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-r-xl border text-left transition-all cursor-pointer shadow-xs ${
+                                              className={`relative flex items-center px-2 group-hover/siderail:px-2.5 sm:group-hover/siderail:px-3 py-1.5 rounded-r-xl border text-left transition-all duration-200 cursor-pointer shadow-xs ${
                                                 displayTab.id === newTab.id
                                                   ? "bg-gradient-to-r from-amber-50 to-orange-50 text-orange-950 border-orange-300 ring-1 ring-orange-400/50 shadow-md translate-x-1 font-black z-10"
                                                   : "bg-white/95 hover:bg-orange-50/60 text-zinc-600 hover:text-orange-900 border-zinc-250 font-bold"
@@ -10170,7 +10206,9 @@ export default function Dashboard() {
                                               title={`切換至 ${sym} (New 更新版本)`}
                                             >
                                               <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse shrink-0" />
-                                              <span className="text-xs tracking-tight">New</span>
+                                              <span className="overflow-hidden whitespace-nowrap max-w-0 opacity-0 group-hover/siderail:max-w-[70px] group-hover/siderail:opacity-100 group-hover/siderail:ml-1.5 group-hover/newtab:max-w-[70px] group-hover/newtab:opacity-100 group-hover/newtab:ml-1.5 transition-all duration-250 ease-out text-xs tracking-tight">
+                                                New
+                                              </span>
                                             </button>
 
                                             <button
@@ -10179,7 +10217,7 @@ export default function Dashboard() {
                                                 e.stopPropagation();
                                                 handleDeleteSubTab(newTab, originalTab, "New 分頁");
                                               }}
-                                              className="opacity-0 group-hover/newtab:opacity-100 max-sm:opacity-80 -ml-2 z-20 p-0.5 rounded-full bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200 transition-opacity cursor-pointer shadow-xs"
+                                              className="opacity-0 group-hover/newtab:opacity-100 max-sm:opacity-80 pointer-events-none group-hover/newtab:pointer-events-auto -ml-2 z-20 p-0.5 rounded-full bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200 transition-opacity cursor-pointer shadow-xs"
                                               title={`刪除 ${sym} 的 New 分頁`}
                                             >
                                               <X className="w-2.5 h-2.5 stroke-[2.5]" />
@@ -10196,15 +10234,17 @@ export default function Dashboard() {
                                                 e.stopPropagation();
                                                 handleSelectSubTab(group.id, originalTab.id, sym);
                                               }}
-                                              className={`relative flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-r-xl border text-left transition-all cursor-pointer shadow-xs ${
+                                              className={`relative flex items-center px-2 group-hover/siderail:px-2.5 sm:group-hover/siderail:px-3 py-1.5 rounded-r-xl border text-left transition-all duration-200 cursor-pointer shadow-xs ${
                                                 displayTab.id === originalTab.id
                                                   ? "bg-white text-zinc-950 border-zinc-300 ring-1 ring-zinc-400/50 shadow-md translate-x-1 font-black z-10"
                                                   : "bg-white/95 hover:bg-zinc-100 text-zinc-600 hover:text-zinc-900 border-zinc-250 font-bold"
                                               }`}
                                               title={`切換至 ${sym} (Original 原版)`}
                                             >
-                                              <span className="text-[11px] text-zinc-500 font-normal">⌂</span>
-                                              <span className="text-xs tracking-tight">Original</span>
+                                              <span className="text-[11px] text-zinc-500 font-normal shrink-0">⌂</span>
+                                              <span className="overflow-hidden whitespace-nowrap max-w-0 opacity-0 group-hover/siderail:max-w-[80px] group-hover/siderail:opacity-100 group-hover/siderail:ml-1.5 group-hover/origtab:max-w-[80px] group-hover/origtab:opacity-100 group-hover/origtab:ml-1.5 transition-all duration-250 ease-out text-xs tracking-tight">
+                                                Original
+                                              </span>
                                             </button>
 
                                             <button
@@ -10213,7 +10253,7 @@ export default function Dashboard() {
                                                 e.stopPropagation();
                                                 handleDeleteSubTab(originalTab, newTab, "Original 分頁");
                                               }}
-                                              className="opacity-0 group-hover/origtab:opacity-100 max-sm:opacity-80 -ml-2 z-20 p-0.5 rounded-full bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200 transition-opacity cursor-pointer shadow-xs"
+                                              className="opacity-0 group-hover/origtab:opacity-100 max-sm:opacity-80 pointer-events-none group-hover/origtab:pointer-events-auto -ml-2 z-20 p-0.5 rounded-full bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200 transition-opacity cursor-pointer shadow-xs"
                                               title={`刪除 ${sym} 的 Original 分頁`}
                                             >
                                               <X className="w-2.5 h-2.5 stroke-[2.5]" />
@@ -10221,7 +10261,7 @@ export default function Dashboard() {
                                           </div>
                                         ) : null}
 
-                                        {/* ETF Tabs */}
+                                        {/* ETF Tabs: 平常只顯示股票代號，滑鼠經過才顯示完整分頁 (含 ETF 標籤) */}
                                         {etfTabs.map((etf: any) => (
                                           <div
                                             key={etf.id}
@@ -10233,17 +10273,17 @@ export default function Dashboard() {
                                                 e.stopPropagation();
                                                 handleSelectSubTab(group.id, etf.id, sym);
                                               }}
-                                              className={`relative flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-r-xl border text-left transition-all cursor-pointer shadow-xs ${
+                                              className={`relative flex items-center px-2 group-hover/siderail:px-2.5 sm:group-hover/siderail:px-3 py-1.5 rounded-r-xl border text-left transition-all duration-200 cursor-pointer shadow-xs ${
                                                 displayTab.id === etf.id
                                                   ? "bg-indigo-50 text-indigo-950 border-indigo-300 ring-1 ring-indigo-400/50 shadow-md translate-x-1 font-black z-10"
                                                   : "bg-white/95 hover:bg-indigo-50/50 text-zinc-600 hover:text-indigo-900 border-zinc-250 font-bold"
                                               }`}
                                               title={`切換至關聯 ETF：${etf.symbol}`}
                                             >
-                                              <span className="text-[9.5px] px-1 py-0.2 rounded bg-indigo-100 text-indigo-800 font-black">
+                                              <span className="overflow-hidden whitespace-nowrap max-w-0 opacity-0 group-hover/siderail:max-w-[42px] group-hover/siderail:opacity-100 group-hover/siderail:mr-1.5 group-hover/etftab:max-w-[42px] group-hover/etftab:opacity-100 group-hover/etftab:mr-1.5 transition-all duration-250 ease-out text-[9.5px] px-0 group-hover/siderail:px-1 group-hover/etftab:px-1 py-0.2 rounded bg-indigo-100 text-indigo-800 font-black shrink-0">
                                                 ETF
                                               </span>
-                                              <span className="text-xs tracking-tight font-black">{etf.symbol}</span>
+                                              <span className="text-xs tracking-tight font-black shrink-0">{etf.symbol}</span>
                                             </button>
 
                                             <button
@@ -10252,7 +10292,7 @@ export default function Dashboard() {
                                                 e.stopPropagation();
                                                 handleRemoveEtf(originalTab || displayTab, etf);
                                               }}
-                                              className="opacity-0 group-hover/etftab:opacity-100 max-sm:opacity-80 -ml-2 z-20 p-0.5 rounded-full bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200 transition-opacity cursor-pointer shadow-xs"
+                                              className="opacity-0 group-hover/etftab:opacity-100 max-sm:opacity-80 pointer-events-none group-hover/etftab:pointer-events-auto -ml-2 z-20 p-0.5 rounded-full bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200 transition-opacity cursor-pointer shadow-xs"
                                               title={`解除關聯 ${etf.symbol}`}
                                             >
                                               <X className="w-2.5 h-2.5 stroke-[2.5]" />
@@ -10260,7 +10300,7 @@ export default function Dashboard() {
                                           </div>
                                         ))}
 
-                                        {/* Add ETFs Button */}
+                                        {/* Add ETFs Button: 平常只顯示 + icon，滑鼠經過才顯示完整按鈕 */}
                                         <button
                                           type="button"
                                           onClick={(e) => {
@@ -10268,11 +10308,13 @@ export default function Dashboard() {
                                             setAddEtfTargetTab(originalTab || displayTab);
                                             setIsAddEtfModalOpen(true);
                                           }}
-                                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-r-xl border border-dashed border-zinc-300 bg-white/70 hover:bg-indigo-50/60 text-zinc-500 hover:text-indigo-600 text-xs font-bold transition-all cursor-pointer shadow-2xs hover:border-indigo-400"
+                                          className="flex items-center px-2 group-hover/siderail:px-2.5 py-1.5 rounded-r-xl border border-dashed border-zinc-300 bg-white/70 hover:bg-indigo-50/60 text-zinc-500 hover:text-indigo-600 text-xs font-bold transition-all duration-200 cursor-pointer shadow-2xs hover:border-indigo-400"
                                           title="新增關聯 ETF (可增加多個，如 XLP, SPY, QQQ...)"
                                         >
-                                          <Plus className="w-3 h-3 text-indigo-500 stroke-[2.5]" />
-                                          <span className="whitespace-nowrap">Add ETFs</span>
+                                          <Plus className="w-3.5 h-3.5 text-indigo-500 stroke-[2.5] shrink-0" />
+                                          <span className="overflow-hidden whitespace-nowrap max-w-0 opacity-0 group-hover/siderail:max-w-[80px] group-hover/siderail:opacity-100 group-hover/siderail:ml-1 transition-all duration-250 ease-out whitespace-nowrap">
+                                            Add ETFs
+                                          </span>
                                         </button>
                                       </div>
                                     </div>
