@@ -4547,12 +4547,78 @@ export default function Dashboard() {
   const [addEtfTargetTab, setAddEtfTargetTab] = useState<any | null>(null);
   const [newEtfSymbolInput, setNewEtfSymbolInput] = useState("");
 
-  const handleSelectSubTab = useCallback((groupId: string, targetTabId: string) => {
+  // 自動修復與健全性檢查：修復個股若誤標為 ETF 或自關聯問題，並同步同代號版本的 groupId
+  useEffect(() => {
+    if (!tabs || tabs.length === 0 || !user) return;
+    tabs.forEach((tab) => {
+      const sym = (tab.symbol || "").trim().toUpperCase();
+      if (!sym) return;
+      let needsUpdate = false;
+      const updates: any = {};
+
+      // 1. 若個股自己的 etfSymbols 包含了自身代號，予以移除
+      if (Array.isArray(tab.etfSymbols) && tab.etfSymbols.some((s: string) => s.trim().toUpperCase() === sym)) {
+        updates.etfSymbols = tab.etfSymbols.filter((s: string) => s.trim().toUpperCase() !== sym);
+        needsUpdate = true;
+      }
+
+      // 2. 若真實個股卡片（如 TSLA Original）誤被加上 "ETF" 標籤，立即移除 "ETF" 標籤
+      if (tab.tags?.includes("ETF")) {
+        const isParentStockCard =
+          tab.isNew ||
+          (tab.holdingQuantity && tab.holdingQuantity > 0) ||
+          (tab.averagingRows && tab.averagingRows.length > 0) ||
+          (tab.companyName && !tab.companyName.includes("ETF")) ||
+          (tab.companyName !== `${sym} ETF`);
+
+        if (isParentStockCard) {
+          updates.tags = (tab.tags || []).filter((tg: string) => tg !== "ETF");
+          needsUpdate = true;
+        }
+      }
+
+      // 3. 確保同類別/真實或模擬下的同代號多個版本（Original 與 New）共享相同的 groupId
+      const currentTabStatus = getDisplayHoldingStatus(tab.holdingStatus);
+      const currentTradeType = tab.tradeType || "simulated";
+      const sameStockSubTabs = tabs.filter(
+        (t) =>
+          (t.symbol || "").trim().toUpperCase() === sym &&
+          getDisplayHoldingStatus(t.holdingStatus) === currentTabStatus &&
+          (t.tradeType || "simulated") === currentTradeType &&
+          !t.tags?.includes("ETF")
+      );
+      if (sameStockSubTabs.length > 1) {
+        const commonGroupId = sameStockSubTabs.find((t) => t.groupId)?.groupId || `group-${sym}-${sameStockSubTabs[0].id}`;
+        if (tab.groupId !== commonGroupId) {
+          updates.groupId = commonGroupId;
+          needsUpdate = true;
+        }
+      }
+
+      // 4. 若個股已設定關聯 ETF（etfSymbols），確保擁有明確的 groupId 以供關聯群組化
+      if (Array.isArray(tab.etfSymbols) && tab.etfSymbols.length > 0 && !tab.groupId) {
+        updates.groupId = `group-${sym}-${tab.id}`;
+        needsUpdate = true;
+      }
+
+      if (needsUpdate) {
+        updateTab(tab.id, updates).catch((err) => console.warn("Auto-repair error:", err));
+      }
+    });
+  }, [tabs, user, updateTab]);
+
+  const handleSelectSubTab = useCallback((groupId: string, targetTabId: string, symbol?: string) => {
     playClickSound();
-    setCardSubTabSelection((prev) => ({
-      ...prev,
-      [groupId]: targetTabId,
-    }));
+    setCardSubTabSelection((prev) => {
+      const next = {
+        ...prev,
+        [groupId]: targetTabId,
+      };
+      if (symbol) {
+        next[symbol] = targetTabId;
+      }
+      return next;
+    });
     setActiveCardTabId(targetTabId);
   }, [playClickSound]);
 
@@ -4619,21 +4685,77 @@ export default function Dashboard() {
       toast.error("請輸入有效的 ETF 代號");
       return;
     }
+
+    const parentSym = (targetTab.symbol || "").trim().toUpperCase();
+    if (etfSym === parentSym) {
+      toast.error(`不能將個股自身 【${parentSym}】 作為關聯 ETF 新增`);
+      return;
+    }
+
     try {
       playAddStockSound();
-      const targetGroupId = targetTab.groupId || `${targetTab.symbol}-${Date.now()}`;
-      if (!targetTab.groupId) {
-        await updateTab(targetTab.id, { groupId: targetGroupId });
+      const targetHoldingStatus = getDisplayHoldingStatus(targetTab.holdingStatus || activeHoldingSubTab);
+      const targetTradeType = targetTab.tradeType || (activeViewTab === "real" ? "real" : "simulated");
+
+      // 尋找此股票的所有同類別同交易類型版本（包含 targetTab 本身，排除 ETF 標籤）
+      const sameStockTabs = tabs.filter((t) => {
+        if (t.id === targetTab.id) return true;
+        const sSym = (t.symbol || "").trim().toUpperCase();
+        if (sSym !== parentSym) return false;
+        if (t.tags?.includes("ETF")) return false;
+        const sStatus = getDisplayHoldingStatus(t.holdingStatus);
+        const sTrade = t.tradeType || "simulated";
+        return sStatus === targetHoldingStatus && sTrade === targetTradeType;
+      });
+
+      const existingGroupId = targetTab.groupId || sameStockTabs.find((t) => t.groupId)?.groupId;
+      const targetGroupId = existingGroupId || `group-${parentSym}-${targetTab.id || Date.now()}`;
+
+      // 1. 同步目標 groupId 與 etfSymbols 至該個股所有版本（Original 與 New，且必定包含 targetTab）
+      for (const sTab of sameStockTabs) {
+        const currentEtfs = Array.isArray(sTab.etfSymbols) ? sTab.etfSymbols : [];
+        const nextEtfs = currentEtfs.includes(etfSym) ? currentEtfs : [...currentEtfs, etfSym];
+        const updates: any = {};
+        if (sTab.groupId !== targetGroupId) {
+          updates.groupId = targetGroupId;
+        }
+        if (!currentEtfs.includes(etfSym)) {
+          updates.etfSymbols = nextEtfs;
+        }
+        if (Object.keys(updates).length > 0) {
+          await updateTab(sTab.id, updates);
+        }
       }
 
-      // Check if an ETF tab already exists in tabs
-      const existingEtfTab = tabs.find((t) => (t.symbol || "").trim().toUpperCase() === etfSym);
+      // 備援防禦：若 targetTab 因任何屬性差異未在 sameStockTabs 內，直接強制更新 targetTab
+      if (!sameStockTabs.some((t) => t.id === targetTab.id)) {
+        const currentEtfs = Array.isArray(targetTab.etfSymbols) ? targetTab.etfSymbols : [];
+        const nextEtfs = currentEtfs.includes(etfSym) ? currentEtfs : [...currentEtfs, etfSym];
+        await updateTab(targetTab.id, {
+          groupId: targetGroupId,
+          etfSymbols: nextEtfs,
+        });
+      }
+
+      // 2. 檢查是否已存在該關聯 ETF 標籤分頁（同群組、同父股或同代號）
+      const existingEtfTab = tabs.find((t) => {
+        const tSym = (t.symbol || "").trim().toUpperCase();
+        if (tSym !== etfSym) return false;
+        if (!t.tags?.includes("ETF")) return false;
+        const matchesGroup = t.groupId === targetGroupId || t.parentTabId === targetTab.id || (t.parentSymbol || "").toUpperCase() === parentSym;
+        const matchesTrade = (t.tradeType || "simulated") === targetTradeType;
+        return matchesGroup && matchesTrade;
+      });
+
       let activeId = "";
 
       if (existingEtfTab) {
         await updateTab(existingEtfTab.id, {
           groupId: targetGroupId,
-          holdingStatus: targetTab.holdingStatus || activeHoldingSubTab,
+          parentTabId: targetTab.id,
+          parentSymbol: parentSym,
+          holdingStatus: targetHoldingStatus,
+          tradeType: targetTradeType,
           tags: Array.from(new Set([...(existingEtfTab.tags || []), "ETF"])),
         });
         activeId = existingEtfTab.id;
@@ -4643,9 +4765,11 @@ export default function Dashboard() {
           symbol: etfSym,
           companyName: `${etfSym} ETF`,
           status: "ACTIVE",
-          holdingStatus: targetTab.holdingStatus || activeHoldingSubTab,
-          tradeType: targetTab.tradeType || "simulated",
+          holdingStatus: targetHoldingStatus,
+          tradeType: targetTradeType,
           groupId: targetGroupId,
+          parentTabId: targetTab.id,
+          parentSymbol: parentSym,
           tags: ["ETF"],
           isNew: false,
           createdAt: serverTimestamp(),
@@ -4655,17 +4779,11 @@ export default function Dashboard() {
         prefetchStockPrice(etfSym);
       }
 
-      const currentEtfs = Array.isArray(targetTab.etfSymbols) ? targetTab.etfSymbols : [];
-      if (!currentEtfs.includes(etfSym)) {
-        await updateTab(targetTab.id, {
-          etfSymbols: [...currentEtfs, etfSym],
-        });
-      }
-
+      // 立即設定當前卡片分頁選取至新增加的 ETF 分頁
       setCardSubTabSelection((prev) => ({
         ...prev,
         [targetGroupId]: activeId,
-        [targetTab.symbol]: activeId,
+        [parentSym]: activeId,
         [targetTab.id]: activeId,
       }));
       setActiveCardTabId(activeId);
@@ -4673,33 +4791,50 @@ export default function Dashboard() {
       setIsAddEtfModalOpen(false);
       setNewEtfSymbolInput("");
       playSuccessSound();
-      toast.success(`已成功為 ${targetTab.symbol} 新增關聯 ETF 分頁：${etfSym}`);
+      toast.success(`已成功為 ${parentSym} 新增關聯 ETF 分頁：${etfSym}`);
     } catch (err) {
       console.error("Error adding ETF:", err);
       toast.error("新增 ETF 失敗");
     }
-  }, [user, tabs, activeHoldingSubTab, updateTab, playAddStockSound, playSuccessSound]);
+  }, [user, tabs, activeHoldingSubTab, activeViewTab, updateTab, playAddStockSound, playSuccessSound]);
 
   const handleRemoveEtf = useCallback(async (parentTab: any, etfTab: any) => {
     try {
       playClickSound();
-      await updateTab(etfTab.id, { groupId: "" });
-      if (parentTab && Array.isArray(parentTab.etfSymbols)) {
-        await updateTab(parentTab.id, {
-          etfSymbols: parentTab.etfSymbols.filter((s: string) => s !== etfTab.symbol),
-        });
+      // 直接刪除該附屬 ETF tab，避免遺留成為孤立卡片
+      await deleteTab(etfTab.id).catch(() => updateTab(etfTab.id, { groupId: "", parentSymbol: "", parentTabId: "" }));
+      const parentSym = (parentTab.symbol || "").trim().toUpperCase();
+      const parentHoldingStatus = getDisplayHoldingStatus(parentTab.holdingStatus);
+      const parentTradeType = parentTab.tradeType || "simulated";
+
+      // 同步解除所有同代號版本的 etfSymbols 關聯
+      const sameStockTabs = tabs.filter(
+        (t) =>
+          (t.id === parentTab.id) ||
+          ((t.symbol || "").trim().toUpperCase() === parentSym &&
+           getDisplayHoldingStatus(t.holdingStatus) === parentHoldingStatus &&
+           (t.tradeType || "simulated") === parentTradeType)
+      );
+
+      for (const sTab of sameStockTabs) {
+        if (Array.isArray(sTab.etfSymbols)) {
+          await updateTab(sTab.id, {
+            etfSymbols: sTab.etfSymbols.filter((s: string) => s !== etfTab.symbol),
+          });
+        }
       }
+
       setCardSubTabSelection((prev) => ({
         ...prev,
         [parentTab.groupId || parentTab.id]: parentTab.id,
         [parentTab.symbol]: parentTab.id,
       }));
       setActiveCardTabId(parentTab.id);
-      toast.success(`已解除關聯 ETF：${etfTab.symbol}`);
+      toast.success(`已刪除關聯 ETF：${etfTab.symbol}`);
     } catch (e) {
       toast.error("解除 ETF 關聯失敗");
     }
-  }, [updateTab, playClickSound]);
+  }, [tabs, updateTab, deleteTab, playClickSound]);
 
   const handleDeleteSubTab = useCallback(async (tabToDelete: any, fallbackTab?: any, labelName: string = "分頁") => {
     if (!tabToDelete) return;
@@ -4734,36 +4869,104 @@ export default function Dashboard() {
   const renderGroups = useMemo(() => {
     const groups: { isGroup: boolean; id: string; symbol: string; tabs: any[] }[] = [];
     const processedTabIds = new Set<string>();
-    
-    filteredSubTabVisibleTabs.forEach((tab) => {
+
+    // 1. 先排序：非 ETF 的一般個股卡片優先處理，確保群組 symbol 必定錨定在該股票代號（如 GOOGL, TSLA）而非 ETF 代號（如 SPY, TSLR）
+    const sortedTabs = [...filteredSubTabVisibleTabs].sort((a, b) => {
+      const aIsEtf = a.tags?.includes("ETF") ? 1 : 0;
+      const bIsEtf = b.tags?.includes("ETF") ? 1 : 0;
+      return aIsEtf - bIsEtf;
+    });
+
+    sortedTabs.forEach((tab) => {
       if (processedTabIds.has(tab.id)) return;
 
       const sym = (tab.symbol || "").trim().toUpperCase();
+      const isEtf = tab.tags?.includes("ETF");
 
-      // Find all tabs that belong to this stock entity in current category:
-      // 1. Same groupId if tab.groupId exists
-      // 2. Same symbol in filteredSubTabVisibleTabs
-      // 3. Or linked ETFs sharing groupId
-      const matchingTabs = filteredSubTabVisibleTabs.filter((t) => {
-        if (processedTabIds.has(t.id)) return false;
-        if (tab.groupId && t.groupId === tab.groupId) return true;
-        if ((t.symbol || "").trim().toUpperCase() === sym) return true;
-        return false;
-      });
+      if (!isEtf) {
+        // 先收集此股票在目前可見清單中的所有版本（Original, New）
+        const stockSiblings = filteredSubTabVisibleTabs.filter((t) => {
+          if (processedTabIds.has(t.id)) return false;
+          const tSym = (t.symbol || "").trim().toUpperCase();
+          return tSym === sym && !t.tags?.includes("ETF");
+        });
 
-      // Mark all matching tabs as processed
-      matchingTabs.forEach((t) => processedTabIds.add(t.id));
+        // 收集群組 ID、設定的 etfSymbols 以及所有本股分頁 ID
+        const groupIds = new Set<string>(
+          [tab.groupId, ...stockSiblings.map((t) => t.groupId)].filter(Boolean) as string[]
+        );
+        const etfSymbolsSet = new Set<string>(
+          [
+            ...(Array.isArray(tab.etfSymbols) ? tab.etfSymbols : []),
+            ...stockSiblings.flatMap((t) => (Array.isArray(t.etfSymbols) ? t.etfSymbols : [])),
+          ].map((s) => s.trim().toUpperCase())
+        );
+        const stockTabIds = new Set<string>([tab.id, ...stockSiblings.map((t) => t.id)]);
 
-      const groupId = tab.groupId || `group-${sym}-${tab.id}`;
-      groups.push({
-        isGroup: matchingTabs.length > 1,
-        id: groupId,
-        symbol: sym,
-        tabs: matchingTabs,
-      });
+        // 找出關聯的 ETF（包含在 filteredSubTabVisibleTabs 中或從全域 tabs 補足屬於此卡片側邊 rail 的 ETF）
+        const matchingEtfTabs = filteredSubTabVisibleTabs.filter((t) => {
+          if (processedTabIds.has(t.id)) return false;
+          if (!t.tags?.includes("ETF")) return false;
+          const tSym = (t.symbol || "").trim().toUpperCase();
+
+          if (t.groupId && groupIds.has(t.groupId)) return true;
+          if (etfSymbolsSet.has(tSym)) return true;
+          if ((t.parentSymbol || "").trim().toUpperCase() === sym) return true;
+          if (t.parentTabId && stockTabIds.has(t.parentTabId)) return true;
+          return false;
+        });
+
+        const allGroupTabs = [...stockSiblings, ...matchingEtfTabs];
+        allGroupTabs.forEach((t) => processedTabIds.add(t.id));
+
+        const primaryStockTab = stockSiblings[0] || tab;
+        const groupId = primaryStockTab.groupId || Array.from(groupIds)[0] || `group-${sym}-${primaryStockTab.id}`;
+
+        // 排序 matchingTabs：本股版本排在前面（Original, New），關聯 ETF 排在後面
+        const sortedMatchingTabs = [...allGroupTabs].sort((a, b) => {
+          const aIsEtf = a.tags?.includes("ETF") || (a.symbol || "").trim().toUpperCase() !== sym ? 1 : 0;
+          const bIsEtf = b.tags?.includes("ETF") || (b.symbol || "").trim().toUpperCase() !== sym ? 1 : 0;
+          return aIsEtf - bIsEtf;
+        });
+
+        groups.push({
+          isGroup: sortedMatchingTabs.length > 1,
+          id: groupId,
+          symbol: sym,
+          tabs: sortedMatchingTabs,
+        });
+      } else {
+        // 若該 tab 是 ETF，檢查它是否已關聯到某個股票（例如有 parentSymbol 或 groupId 屬於某股票），絕不單獨渲染成一張股票卡片！
+        const parentSym = (tab.parentSymbol || "").trim().toUpperCase();
+        const hasParentInTabs = parentSym && tabs.some((t) => (t.symbol || "").trim().toUpperCase() === parentSym && !t.tags?.includes("ETF"));
+        const hasMatchingGroupInTabs = tab.groupId && tabs.some((t) => !t.tags?.includes("ETF") && t.groupId === tab.groupId);
+        if (hasParentInTabs || hasMatchingGroupInTabs) {
+          // 這是附屬於某股票的 ETF 側邊分頁，標記為已處理，不建立獨立卡片
+          processedTabIds.add(tab.id);
+          return;
+        }
+
+        // 真正獨立的 ETF（無任何關聯主股）
+        processedTabIds.add(tab.id);
+        const matchingTabs = filteredSubTabVisibleTabs.filter((t) => {
+          if (processedTabIds.has(t.id)) return false;
+          const tSym = (t.symbol || "").trim().toUpperCase();
+          if (tab.groupId && t.groupId === tab.groupId) return true;
+          if (tSym === sym) return true;
+          return false;
+        });
+        matchingTabs.forEach((t) => processedTabIds.add(t.id));
+
+        groups.push({
+          isGroup: matchingTabs.length > 0,
+          id: tab.groupId || `group-etf-${sym}-${tab.id}`,
+          symbol: sym,
+          tabs: [tab, ...matchingTabs],
+        });
+      }
     });
     return groups;
-  }, [filteredSubTabVisibleTabs]);
+  }, [filteredSubTabVisibleTabs, tabs]);
 
   const orderedFilteredSubTabVisibleTabs = useMemo(() => {
     return renderGroups.flatMap((g) => g.tabs);
@@ -9890,8 +10093,13 @@ export default function Dashboard() {
                                   renderCardRef.current = renderCard;
 
                                   const sym = group.symbol;
-                                  const sameSymbolTabs = group.tabs.filter((t: any) => (t.symbol || "").trim().toUpperCase() === sym);
-                                  const etfTabs = group.tabs.filter((t: any) => (t.symbol || "").trim().toUpperCase() !== sym || t.tags?.includes("ETF"));
+                                  // 本股所有版本（Original 與 New，排除關聯 ETF 標籤）
+                                  let sameSymbolTabs = group.tabs.filter((t: any) => (t.symbol || "").trim().toUpperCase() === sym && !t.tags?.includes("ETF"));
+                                  if (sameSymbolTabs.length === 0) {
+                                    sameSymbolTabs = group.tabs.filter((t: any) => (t.symbol || "").trim().toUpperCase() === sym);
+                                  }
+                                  // 關聯 ETF：代號不同於本股之 ETF（如 TSLR, SPY 等）
+                                  const etfTabs = group.tabs.filter((t: any) => (t.symbol || "").trim().toUpperCase() !== sym);
 
                                   // 僅當在該層級分類目錄中有設定為區塊的兩個相同股票名稱時，才顯示 New 分頁
                                   const hasMultipleVersions = sameSymbolTabs.length > 1;
@@ -9952,7 +10160,7 @@ export default function Dashboard() {
                                               type="button"
                                               onClick={(e) => {
                                                 e.stopPropagation();
-                                                handleSelectSubTab(group.id, newTab.id);
+                                                handleSelectSubTab(group.id, newTab.id, sym);
                                               }}
                                               className={`relative flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-r-xl border text-left transition-all cursor-pointer shadow-xs ${
                                                 displayTab.id === newTab.id
@@ -9986,7 +10194,7 @@ export default function Dashboard() {
                                               type="button"
                                               onClick={(e) => {
                                                 e.stopPropagation();
-                                                handleSelectSubTab(group.id, originalTab.id);
+                                                handleSelectSubTab(group.id, originalTab.id, sym);
                                               }}
                                               className={`relative flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-r-xl border text-left transition-all cursor-pointer shadow-xs ${
                                                 displayTab.id === originalTab.id
@@ -10023,7 +10231,7 @@ export default function Dashboard() {
                                               type="button"
                                               onClick={(e) => {
                                                 e.stopPropagation();
-                                                handleSelectSubTab(group.id, etf.id);
+                                                handleSelectSubTab(group.id, etf.id, sym);
                                               }}
                                               className={`relative flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-r-xl border text-left transition-all cursor-pointer shadow-xs ${
                                                 displayTab.id === etf.id

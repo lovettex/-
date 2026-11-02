@@ -11,15 +11,20 @@ import { eq, desc, and } from "drizzle-orm";
 async function generateContentWithRetry(ai: GoogleGenAI, params: any, maxRetries = 4, initialDelay = 1000) {
   let attempt = 0;
   const originalModel = params.model;
-  // Recommended fallback models for text and multimodal tasks when gemini-3.8-flash is overloaded
-  const fallbackList = ["gemini-3.8-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
+  // Recommended reliable models for text, vision, and tool-use tasks
+  const fallbackList = ["gemini-2.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
   
+  // Normalize gemini-3.8-flash to gemini-2.5-flash to avoid 503 high demand spikes on attempt 1
+  if (params.model === "gemini-3.8-flash") {
+    params.model = "gemini-2.5-flash";
+  }
+
   while (true) {
     try {
       return await ai.models.generateContent(params);
     } catch (error: any) {
       attempt++;
-      console.error(`Gemini API attempt ${attempt} failed with model ${params.model}:`, error);
+      console.warn(`Gemini API attempt ${attempt} notice with model ${params.model}:`, error?.message || error);
       
       const errStr = String(error?.message || error || "");
       const isTransient = 
@@ -52,13 +57,15 @@ async function generateContentWithRetry(ai: GoogleGenAI, params: any, maxRetries
         const currentIndex = fallbackList.indexOf(params.model);
         if (currentIndex !== -1 && currentIndex < fallbackList.length - 1) {
           const nextModel = fallbackList[currentIndex + 1];
-          console.warn(`Attempt ${attempt} failed on ${params.model}. Falling back to ${nextModel} for the next attempt.`);
+          console.info(`Attempt ${attempt} retrying with fallback model ${nextModel}...`);
           params.model = nextModel;
         }
+      } else {
+        params.model = "gemini-2.5-flash";
       }
       
       const delay = initialDelay * Math.pow(2, attempt - 1);
-      console.log(`Retrying in ${delay}ms...`);
+      console.info(`Retrying in ${delay}ms...`);
       await new Promise(resolve => setTimeout(resolve, delay));
     }
   }
@@ -299,7 +306,7 @@ async function startServer() {
 `;
 
       const response = await generateContentWithRetry(ai, {
-        model: "gemini-3.8-flash",
+        model: "gemini-2.5-flash",
         contents: [
           {
             inlineData: {
@@ -590,7 +597,7 @@ async function startServer() {
       `;
 
       const response = await generateContentWithRetry(ai, {
-        model: "gemini-3.8-flash",
+        model: "gemini-2.5-flash",
         contents: prompt,
         config: {
           tools: [{ googleSearch: {} }]
@@ -627,7 +634,7 @@ async function startServer() {
       });
 
       const response = await generateContentWithRetry(ai, {
-        model: "gemini-3.8-flash",
+        model: "gemini-2.5-flash",
         contents: [
           {
             role: "user",
@@ -886,7 +893,7 @@ async function startServer() {
       });
 
       const response = await generateContentWithRetry(ai, {
-        model: "gemini-3.8-flash",
+        model: "gemini-2.5-flash",
         contents: prompt,
         config: {
           tools: [{ googleSearch: {} }]

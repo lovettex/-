@@ -124,4 +124,15 @@
   - 於 `Dashboard.tsx` 實作 `handleDeleteSubTab(tabToDelete, fallbackTab, labelName)`。
   - 當點擊 `New` 分頁的 `×` 按鈕時，刪除該分頁 document，自動切換至 `Original`，並解除區塊雙版本狀態（`New` 分頁隨即自動隱藏）。
   - 當點擊 `Original` 分頁的 `×` 按鈕時，若存在 `New` 分頁則自動切換至 `New`；若為唯一分頁則刪除該卡片。
-  - 視覺完全比照 ETF 分頁側邊 tab 的紅色圓形 `×` 按鈕樣式（包含 `hover:opacity-100`、`-ml-2 z-20` 及音效與 Toast 提示）。
+---
+
+## 6. Add ETFs 關聯同步保護與 Original 資料遺失修復
+
+- **問題成因分析**：
+  1. **符號混淆與群組錨定錯誤**：當在含有多版本（Original 與 New）的個股卡片點擊「Add ETFs」時，若關聯 ETF（例如 `TSLR`）先被載入，原 `renderGroups` 將整組卡片的 `symbol` 誤取為 `TSLR`，導致本股 TSLA 被判定為 ETF（呈現 `[ETF] TSLA`），且同代號版本數被歸為 1，進而隱藏 `New` 分頁並使 `Original` 指向錯誤對象。
+  2. **版本間 groupId 與 etfSymbols 未同步**：原 `handleAddEtf` 僅在當前觸發的 tab 上寫入 `groupId` 與 `etfSymbols`，未同步至同股票的另一個版本，造成兩個版本脫鉤。
+  3. **自身代號防呆缺失**：若新增 ETF 輸入個股自身代號（如在 TSLA 下新增 TSLA），會檢索現有分頁並誤覆蓋該真實個股的 `tags` 為 `["ETF"]`。
+- **修復方案**：
+  1. **個股主權優先分組（Primary Stock Anchor）**：在 `renderGroups` 中先處理非 ETF 的真實個股卡片，確保群組的 `symbol` 必定固定在主股代號（如 `TSLA`），同代號所有版本（Original, New）優先歸組，關聯 ETF 僅作為附屬分頁（`etfTabs`），代號不同於本股者才列為 ETF。
+  2. **多版本雙向同步**：新增與解除 ETF 關聯時，自動同步更新該個股在該子分類下的所有版本（Original 與 New）的 `groupId` 與 `etfSymbols`。
+  3. **防呆阻擋與自動修復機制**：禁止將個股自身代號加入為關聯 ETF；加入 `useEffect` 健全性自動檢查，自動拔除本股卡片上誤加的 `ETF` 標籤並對齊 `groupId`，即刻還原使用者原有的 Original 與 New 完整數據。
