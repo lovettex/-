@@ -366,10 +366,10 @@ body.ps5-theme-active .glass-header {
 }
 
 /* Generic non-button webpage containers with white/light backgrounds inside main -> 75% background opacity */
-body.ps5-theme-active main div.bg-white:not(button):not([role="button"]):not([data-price-tag="true"]),
-body.ps5-theme-active main div[class*="bg-white/"]:not(button):not([role="button"]):not([data-price-tag="true"]),
-body.ps5-theme-active main section.bg-white,
-body.ps5-theme-active main section[class*="bg-white/"] {
+body.ps5-theme-active main div.bg-white:not(button):not([role="button"]):not([data-price-tag="true"]):not(.portfolio-hero-banner *),
+body.ps5-theme-active main div[class*="bg-white/"]:not(button):not([role="button"]):not([data-price-tag="true"]):not(.portfolio-hero-banner *):not([class*="hover:bg-white"]):not([class*="group-hover:bg-white"]):not(.telemetry-metric-item),
+body.ps5-theme-active main section.bg-white:not(.portfolio-hero-banner *),
+body.ps5-theme-active main section[class*="bg-white/"]:not(.portfolio-hero-banner *) {
   background-color: rgba(255, 255, 255, 0.75) !important;
 }
 
@@ -454,6 +454,21 @@ body.ps5-theme-active .portfolio-hero-banner {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
   border-bottom: 1px solid rgba(52, 211, 153, 0.4) !important;
+}
+
+/* Ensure Portfolio Overview (交易總覽) telemetry dock and items never turn into pale white frosted shapes */
+body.ps5-theme-active .portfolio-hero-banner .bg-black\/40 {
+  background-color: rgba(0, 0, 0, 0.4) !important;
+}
+
+body.ps5-theme-active .portfolio-hero-banner div[class*="hover:bg-white"],
+body.ps5-theme-active .portfolio-hero-banner .telemetry-metric-item {
+  background-color: transparent !important;
+}
+
+body.ps5-theme-active .portfolio-hero-banner div[class*="hover:bg-white"]:hover,
+body.ps5-theme-active .portfolio-hero-banner .telemetry-metric-item:hover {
+  background-color: rgba(255, 255, 255, 0.06) !important;
 }
 
 /* 3. Navigation Bar & Tabs Dock at 75% Background Opacity */

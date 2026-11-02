@@ -6275,7 +6275,7 @@ export default function Dashboard() {
             <div className="flex-1 bg-black/40 backdrop-blur-xl px-3 sm:px-4 py-2 rounded-2xl w-full border border-white/15 shadow-[0_8px_28px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.12)]">
               <div className="flex flex-wrap lg:flex-nowrap items-center justify-between gap-x-2 xl:gap-x-3 gap-y-2.5">
                 {/* Metric 0: Bank Account Water Level */}
-                <div className="flex flex-col text-left shrink-0 px-2.5 py-1 rounded-xl hover:bg-white/[0.06] transition-colors">
+                <div className="telemetry-metric-item flex flex-col text-left shrink-0 px-2.5 py-1 rounded-xl hover:bg-white/[0.06] transition-colors">
                   <div className="flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0 shadow-[0_0_6px_rgba(52,211,153,0.8)]" />
                     <span className="text-[11px] text-emerald-200 font-bold tracking-wide whitespace-nowrap">銀行帳戶水位</span>
@@ -6348,7 +6348,7 @@ export default function Dashboard() {
                 <div className="hidden lg:block h-7 w-[1px] bg-gradient-to-b from-transparent via-white/20 to-transparent shrink-0" />
 
                 {/* Metric 1: Total Capital */}
-                <div className="flex flex-col text-left shrink-0 px-2.5 py-1 rounded-xl hover:bg-white/[0.06] transition-colors">
+                <div className="telemetry-metric-item flex flex-col text-left shrink-0 px-2.5 py-1 rounded-xl hover:bg-white/[0.06] transition-colors">
                   <div className="flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-teal-300 shrink-0" />
                     <span className="text-[11px] text-emerald-200 font-bold tracking-wide whitespace-nowrap">目前的總資金</span>
@@ -6369,6 +6369,8 @@ export default function Dashboard() {
                           if (e.key === "Enter") {
                             const val = editCapitalVal === "" ? 0 : parseFloat(editCapitalVal);
                             handleUpdateTotalCapital(val);
+                            setIsEditingCapital(false);
+                          } else if (e.key === "Escape") {
                             setIsEditingCapital(false);
                           }
                         }}
@@ -6396,7 +6398,7 @@ export default function Dashboard() {
                 <div className="hidden lg:block h-7 w-[1px] bg-gradient-to-b from-transparent via-white/20 to-transparent shrink-0" />
 
                 {/* Metric 1.5: Virtual Total Capital */}
-                <div className="flex flex-col text-left shrink-0 px-2.5 py-1 rounded-xl hover:bg-white/[0.06] transition-colors">
+                <div className="telemetry-metric-item flex flex-col text-left shrink-0 px-2.5 py-1 rounded-xl hover:bg-white/[0.06] transition-colors">
                   <div className="flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0 shadow-[0_0_6px_rgba(251,191,36,0.7)]" />
                     <span className="text-[11px] text-amber-200 font-bold tracking-wide whitespace-nowrap">模擬交易總資金</span>
@@ -6444,7 +6446,7 @@ export default function Dashboard() {
                 <div className="hidden lg:block h-7 w-[1px] bg-gradient-to-b from-transparent via-white/20 to-transparent shrink-0" />
 
                 {/* Metric 2: Remaining Balance */}
-                <div className="flex flex-col text-left shrink-0 px-2.5 py-1 rounded-xl hover:bg-white/[0.06] transition-colors">
+                <div className="telemetry-metric-item flex flex-col text-left shrink-0 px-2.5 py-1 rounded-xl hover:bg-white/[0.06] transition-colors">
                   <div className="flex items-center gap-1.5">
                     <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${remainingBalance < 0 ? "bg-rose-400 animate-pulse shadow-[0_0_8px_rgba(251,113,133,0.9)]" : "bg-emerald-400"}`} />
                     <span className="text-[11px] text-emerald-200 font-bold tracking-wide whitespace-nowrap">剩餘額度</span>
@@ -6462,7 +6464,7 @@ export default function Dashboard() {
                 <div className="hidden lg:block h-7 w-[1px] bg-gradient-to-b from-transparent via-white/20 to-transparent shrink-0" />
 
                 {/* Metric 3: Real Cost */}
-                <div className="flex flex-col text-left shrink-0 px-2.5 py-1 rounded-xl hover:bg-white/[0.06] transition-colors">
+                <div className="telemetry-metric-item flex flex-col text-left shrink-0 px-2.5 py-1 rounded-xl hover:bg-white/[0.06] transition-colors">
                   <div className="flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-cyan-300 shrink-0" />
                     <span className="text-[11px] text-cyan-200 font-bold tracking-wide whitespace-nowrap">真實交易總持有成本</span>
@@ -6476,7 +6478,7 @@ export default function Dashboard() {
                 <div className="hidden lg:block h-7 w-[1px] bg-gradient-to-b from-transparent via-white/20 to-transparent shrink-0" />
 
                 {/* Metric 3.5: Virtual Cost */}
-                <div className="flex flex-col text-left shrink-0 px-2.5 py-1 rounded-xl hover:bg-white/[0.06] transition-colors">
+                <div className="telemetry-metric-item flex flex-col text-left shrink-0 px-2.5 py-1 rounded-xl hover:bg-white/[0.06] transition-colors">
                   <div className="flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-indigo-300 shrink-0" />
                     <span className="text-[11px] text-indigo-200 font-bold tracking-wide whitespace-nowrap">模擬交易總持有成本</span>
