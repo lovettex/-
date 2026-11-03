@@ -340,8 +340,12 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
     const baseRef = currentPrice > 0 ? currentPrice : (holdingAvgPrice > 0 ? holdingAvgPrice : 100);
     const activeRows = calcMode === 'breakout' ? (pyramidRows || averagingRowsSys2) : averagingRowsSys2;
 
-    // 若尚未提供 plannedQty，但已有持股或 activeRows，智慧推算預估目標總股數
-    let effPlannedQty = plannedQty && plannedQty > 0 ? plannedQty : 0;
+    // 若尚未提供 plannedQty，但已有 batches prop，優先使用 batches 中的總預購股數
+    const propPlannedTotal = (batches || []).reduce((sum, b) => sum + (Number(b?.size) || 0), 0);
+    let effPlannedQty = plannedQty && plannedQty > 0
+      ? plannedQty
+      : (propPlannedTotal > 0 ? propPlannedTotal : 0);
+
     if (effPlannedQty <= 0 && activeRows && activeRows.length > 0) {
       const sumRows = activeRows.reduce((acc, r) => {
         const q1 = r?.quantity ? parseFloat(r.quantity) : 0;
@@ -352,10 +356,8 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
     }
     const buyTradesTotal = (validTrades || []).filter((t: any) => t.type === 'BUY').reduce((acc: number, t: any) => acc + (Number(t.quantity) || 0), 0);
     const benchmarkHolding = Math.max(effectiveHoldingShares, buyTradesTotal);
-    if (benchmarkHolding > 0 && benchmarkHolding > effPlannedQty) {
-      effPlannedQty = Math.max(effPlannedQty, benchmarkHolding, Math.ceil(benchmarkHolding / 0.15));
-    } else if (effPlannedQty <= 0 && effectiveHoldingShares > 0) {
-      effPlannedQty = Math.max(effectiveHoldingShares, Math.ceil(effectiveHoldingShares / 0.15));
+    if (effPlannedQty <= 0 && benchmarkHolding > 0) {
+      effPlannedQty = Math.max(benchmarkHolding, Math.ceil(benchmarkHolding / 0.15));
     }
 
     // 使用集中化 calculations 模組計算四批次規劃與已購數量，確保各元件數值完全一致
@@ -407,31 +409,19 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
         stepPrice = Math.round(baseRef * (1 - ((cfg as any).dropPct || (cfg.index + 1) * 3) / 100) * 100) / 100;
       }
 
-      // 優先採用 batch props，若未設定則以集中計算結果為基準
-      const s1Size = (batch?.split1?.size && batch.split1.size > 0)
-        ? batch.split1.size
-        : safePlanBatch.split1.size;
-      const s2Size = (batch?.split2?.size && batch.split2.size > 0)
-        ? batch.split2.size
-        : safePlanBatch.split2.size;
-      const targetQty = (batch?.size && batch.size > 0)
-        ? batch.size
-        : (s1Size + s2Size > 0 ? s1Size + s2Size : safePlanBatch.size);
+      // 優先完全參照傳入之 batch prop（若已由個股頁面或模態視窗集中計算提供，直接採用權威數據）
+      const hasPropBatch = Boolean(batch && typeof batch.size === 'number' && batch.size > 0);
+      const targetQty = hasPropBatch
+        ? batch!.size
+        : (safePlanBatch.size > 0 ? safePlanBatch.size : (safePlanBatch.split1.size + safePlanBatch.split2.size));
 
-      const s1Bought = (batch?.split1?.bought !== undefined && batch.split1.bought > 0)
-        ? Math.max(batch.split1.bought, safePlanBatch.split1.bought)
-        : safePlanBatch.split1.bought;
-      const s2Bought = (batch?.split2?.bought !== undefined && batch.split2.bought > 0)
-        ? Math.max(batch.split2.bought, safePlanBatch.split2.bought)
-        : safePlanBatch.split2.bought;
+      const boughtQty = hasPropBatch && batch!.bought !== undefined
+        ? batch!.bought
+        : safePlanBatch.bought;
 
-      const boughtQty = (batch?.bought !== undefined && batch.bought > 0)
-        ? Math.max(batch.bought, s1Bought + s2Bought, safePlanBatch.bought)
-        : Math.max(s1Bought + s2Bought, safePlanBatch.bought);
-
-      const remainingQty = Math.max(0, targetQty - boughtQty);
-      const s1Remaining = Math.max(0, s1Size - s1Bought);
-      const s2Remaining = Math.max(0, s2Size - s2Bought);
+      const remainingQty = hasPropBatch && batch!.remaining !== undefined
+        ? batch!.remaining
+        : Math.max(0, targetQty - boughtQty);
 
       const isReached = calcMode === 'breakout'
         ? ((currentPrice > 0 && currentPrice >= stepPrice) || (targetQty > 0 && boughtQty >= targetQty) || boughtQty > 0 || Boolean(row?.bought))
@@ -439,23 +429,23 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
 
       const stepCost = stepPrice * (targetQty > 0 ? targetQty : boughtQty);
 
-      const split1 = {
-        name: batch?.split1?.name || safePlanBatch.split1.name,
-        shortLabel: batch?.split1?.shortLabel || safePlanBatch.split1.shortLabel,
-        percent: safePlanBatch.split1.percent,
-        size: s1Size,
-        bought: s1Bought,
-        remaining: s1Remaining,
-      };
+      const split1 = (hasPropBatch && batch!.split1) ? {
+        name: batch!.split1.name || safePlanBatch.split1.name,
+        shortLabel: batch!.split1.shortLabel || safePlanBatch.split1.shortLabel,
+        percent: batch!.split1.percent || safePlanBatch.split1.percent,
+        size: batch!.split1.size,
+        bought: batch!.split1.bought,
+        remaining: batch!.split1.remaining,
+      } : safePlanBatch.split1;
 
-      const split2 = {
-        name: batch?.split2?.name || safePlanBatch.split2.name,
-        shortLabel: batch?.split2?.shortLabel || safePlanBatch.split2.shortLabel,
-        percent: safePlanBatch.split2.percent,
-        size: s2Size,
-        bought: s2Bought,
-        remaining: s2Remaining,
-      };
+      const split2 = (hasPropBatch && batch!.split2) ? {
+        name: batch!.split2.name || safePlanBatch.split2.name,
+        shortLabel: batch!.split2.shortLabel || safePlanBatch.split2.shortLabel,
+        percent: batch!.split2.percent || safePlanBatch.split2.percent,
+        size: batch!.split2.size,
+        bought: batch!.split2.bought,
+        remaining: batch!.split2.remaining,
+      } : safePlanBatch.split2;
 
       return {
         ...cfg,
@@ -520,9 +510,11 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
   const buyTrades = useMemo(() => validTrades.filter((t) => t.type === 'BUY'), [validTrades]);
   const sellTrades = useMemo(() => validTrades.filter((t) => t.type === 'SELL'), [validTrades]);
 
-  // Overall statistics
   const totalPlannedShares = useMemo(() => stepItems.reduce((acc, s) => acc + s.size, 0), [stepItems]);
-  const totalBoughtShares = useMemo(() => stepItems.reduce((acc, s) => acc + s.bought, 0), [stepItems]);
+  const totalBoughtShares = useMemo(() => {
+    const sumStepBought = stepItems.reduce((acc, s) => acc + s.bought, 0);
+    return effectiveHoldingShares > 0 ? Math.min(sumStepBought, effectiveHoldingShares) : sumStepBought;
+  }, [stepItems, effectiveHoldingShares]);
   const totalTradesCount = validTrades.length + optionPurchaseRecords.length;
 
   // 視覺關鍵防線（琥珀黃:支撐、警示紅:止損、玫瑰粉:壓力、翡翠綠:止盈）

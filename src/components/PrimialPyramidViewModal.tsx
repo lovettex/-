@@ -620,9 +620,8 @@ export const PrimialPyramidViewModal: React.FC<PrimialPyramidViewModalProps> = (
       const calculatedUnrealizedPnL = totalCombinedPnL;
 
       const isSimulated = tab.tradeType === "simulated";
-      const usableCapital = isSimulated ? virtualCapital : totalCapital;
-      const currentRiskPool =
-        maxStrategyRiskPool60 && maxStrategyRiskPool60 > 0 ? maxStrategyRiskPool60 : 100000;
+      const effectiveCapital = (isSimulated ? virtualCapital : totalCapital) || totalCapital || 1000000;
+      const currentRiskPool = (effectiveCapital * 2) * 0.6;
 
       const { sys2: defaultSys2 } = generateAveragingDownRows(
         effectiveAvgPrice > 0 ? effectiveAvgPrice : currentPrice
@@ -649,15 +648,17 @@ export const PrimialPyramidViewModal: React.FC<PrimialPyramidViewModalProps> = (
 
       const activeRows = pyramidCalcMode === "breakout" ? pyramidRows : averagingRowsSys2;
 
-      let plannedQty = 0;
       const plannedPercent =
         tab?.plannedBuyPercent !== undefined && tab?.plannedBuyPercent !== null && !isNaN(Number(tab.plannedBuyPercent))
           ? Number(tab.plannedBuyPercent)
           : 0;
-      if (currentPrice > 0 && plannedPercent > 0) {
-        plannedQty = Math.floor((currentRiskPool * (plannedPercent / 100)) / currentPrice);
-      } else if (tab?.plannedBuyQty && Number(tab.plannedBuyQty) > 0) {
+
+      // 嚴格對齊個股頁面 StockTabDetail 預計購買總股數規劃
+      let plannedQty = 0;
+      if (tab?.plannedBuyQty && Number(tab.plannedBuyQty) > 0) {
         plannedQty = Number(tab.plannedBuyQty);
+      } else if (currentPrice > 0 && plannedPercent > 0) {
+        plannedQty = Math.floor((currentRiskPool * (plannedPercent / 100)) / currentPrice);
       }
 
       if (plannedQty <= 0 && activeRows && activeRows.length > 0) {
@@ -669,30 +670,28 @@ export const PrimialPyramidViewModal: React.FC<PrimialPyramidViewModalProps> = (
         if (rowsSum > 0) plannedQty = rowsSum;
       }
 
-      const buyTradesSum = (trades || [])
-        .filter((t: any) => t.type === 'BUY' && !t.isOptionTrade)
-        .reduce((sum: number, t: any) => sum + (Number(t.quantity) || 0), 0);
-      const benchmarkHold = Math.max(effectiveHoldingQty, buyTradesSum);
-      if (benchmarkHold > 0 && benchmarkHold > plannedQty) {
-        plannedQty = Math.max(plannedQty, benchmarkHold, Math.ceil(benchmarkHold / 0.15));
-      } else if (plannedQty <= 0 && effectiveHoldingQty > 0) {
+      if (plannedQty <= 0 && effectiveHoldingQty > 0) {
         plannedQty = Math.max(effectiveHoldingQty, Math.ceil(effectiveHoldingQty / 0.15));
       }
 
+      const usableStockCapital = currentRiskPool * (plannedPercent / 100);
+
       const planResult = calculateBatchPlanning({
         plannedQty,
-        usableCapital,
+        usableCapital: usableStockCapital,
         currentPrice,
         holdingQty: effectiveHoldingQty,
         trades,
         averagingRowsSys2: activeRows,
-        plannedBuyQty: tab?.plannedBuyQty ? Number(tab.plannedBuyQty) : undefined,
+        plannedBuyQty: tab?.plannedBuyQty ? Number(tab.plannedBuyQty) : plannedQty,
         plannedBuyPercent:
           tab?.plannedBuyPercent !== undefined && tab?.plannedBuyPercent !== null
             ? Number(tab.plannedBuyPercent)
             : undefined,
         tradeType: tab?.tradeType,
-        maxStrategyRiskPool60,
+        totalCapital,
+        virtualCapital,
+        maxStrategyRiskPool60: currentRiskPool,
       });
 
       const batches = planResult?.batches || [];
@@ -712,7 +711,7 @@ export const PrimialPyramidViewModal: React.FC<PrimialPyramidViewModalProps> = (
         trades,
         strategy,
         plannedOrders,
-        usableCapital,
+        usableCapital: usableStockCapital,
         plannedQty: planResult?.plannedQty || plannedQty,
         batches,
         averagingRowsSys2,

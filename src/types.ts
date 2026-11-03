@@ -192,6 +192,8 @@ export interface StrategyConfig {
   tpChecked?: boolean;
   slChecked?: boolean;
   addChecked?: boolean;
+  addAveragingChecked?: boolean; // 攤平加碼
+  addBreakoutChecked?: boolean;  // 突破加碼
   closeChecked?: boolean;
   observeChecked?: boolean;
   notesHighlighted?: boolean;

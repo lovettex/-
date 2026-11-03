@@ -53,6 +53,8 @@ interface Props {
     tpChecked?: boolean;
     slChecked?: boolean;
     addChecked?: boolean;
+    addAveragingChecked?: boolean;
+    addBreakoutChecked?: boolean;
     closeChecked?: boolean;
     observeChecked?: boolean;
     breakoutResistanceChecked?: boolean;

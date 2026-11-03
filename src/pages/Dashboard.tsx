@@ -1993,9 +1993,13 @@ export default function Dashboard() {
   const handleUpdateAddChecked = async (tabId: string, checked: boolean) => {
     try {
       const currentStrategy = activeTabStrategies[tabId] || {};
+      const newAveraging = checked ? (currentStrategy.addAveragingChecked || currentStrategy.addBreakoutChecked ? (currentStrategy.addAveragingChecked ?? false) : true) : false;
+      const newBreakout = checked ? (currentStrategy.addBreakoutChecked ?? false) : false;
       const updatedStrategy = { 
         ...currentStrategy, 
         addChecked: checked, 
+        addAveragingChecked: newAveraging,
+        addBreakoutChecked: newBreakout,
         updatedAt: serverTimestamp() 
       };
       
@@ -2005,10 +2009,59 @@ export default function Dashboard() {
       }));
       
       const docRef = doc(db, `stockTabs/${tabId}/strategy`, 'main');
-      await setDoc(docRef, { addChecked: checked, updatedAt: serverTimestamp() }, { merge: true });
+      await setDoc(docRef, {
+        addChecked: checked,
+        addAveragingChecked: newAveraging,
+        addBreakoutChecked: newBreakout,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
     } catch (error) {
       console.error(error);
       toast.error("更新加碼狀態失敗");
+    }
+  };
+
+  const handleUpdateAddSubOption = async (
+    tabId: string,
+    optionType: "averaging" | "breakout",
+    checked: boolean
+  ) => {
+    try {
+      const currentStrategy = activeTabStrategies[tabId] || {};
+      const currentAveraging = currentStrategy.addAveragingChecked ?? (currentStrategy.addChecked && !currentStrategy.addBreakoutChecked);
+      const currentBreakout = currentStrategy.addBreakoutChecked ?? false;
+
+      const newAveraging = optionType === "averaging" ? checked : currentAveraging;
+      const newBreakout = optionType === "breakout" ? checked : currentBreakout;
+      const overallAddChecked = Boolean(newAveraging || newBreakout);
+
+      const updatedStrategy = {
+        ...currentStrategy,
+        addChecked: overallAddChecked,
+        addAveragingChecked: newAveraging,
+        addBreakoutChecked: newBreakout,
+        updatedAt: serverTimestamp(),
+      };
+
+      setActiveTabStrategies((prev) => ({
+        ...prev,
+        [tabId]: updatedStrategy,
+      }));
+
+      const docRef = doc(db, `stockTabs/${tabId}/strategy`, "main");
+      await setDoc(
+        docRef,
+        {
+          addChecked: overallAddChecked,
+          addAveragingChecked: newAveraging,
+          addBreakoutChecked: newBreakout,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+    } catch (error) {
+      console.error(error);
+      toast.error("更新加碼細項失敗");
     }
   };
 
@@ -2143,6 +2196,8 @@ export default function Dashboard() {
         tpChecked: false,
         slChecked: false,
         addChecked: false,
+        addAveragingChecked: false,
+        addBreakoutChecked: false,
         closeChecked: false,
         observeChecked: false,
         selectedSplitTrade: "",
@@ -2177,6 +2232,8 @@ export default function Dashboard() {
         tpChecked: false,
         slChecked: false,
         addChecked: false,
+        addAveragingChecked: false,
+        addBreakoutChecked: false,
         closeChecked: false,
         observeChecked: false,
         selectedSplitTrade: "",
@@ -2477,12 +2534,6 @@ export default function Dashboard() {
     return "simulated";
   });
   const [isMobileCinemaSidebarOpen, setIsMobileCinemaSidebarOpen] = useState(false);
-
-  useEffect(() => {
-    if (isManageHiddenOpen) {
-      setManageTradeType(activeViewTab === "real" ? "real" : "simulated");
-    }
-  }, [isManageHiddenOpen, activeViewTab]);
 
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -4573,7 +4624,7 @@ export default function Dashboard() {
   const [addEtfTargetTab, setAddEtfTargetTab] = useState<any | null>(null);
   const [newEtfSymbolInput, setNewEtfSymbolInput] = useState("");
 
-  // 自動修復與健全性檢查：修復個股若誤標為 ETF 或自關聯問題，並同步同代號版本的 groupId
+  // 自動修復與健全性檢查：修復個股若誤標為 ETF 或自關聯問題，並同步同代號版本的 groupId 與關聯 ETF
   useEffect(() => {
     if (!tabs || tabs.length === 0 || !user) return;
     tabs.forEach((tab) => {
@@ -4588,36 +4639,54 @@ export default function Dashboard() {
         needsUpdate = true;
       }
 
-      // 2. 若真實個股卡片（如 TSLA Original）誤被加上 "ETF" 標籤，立即移除 "ETF" 標籤
-      if (tab.tags?.includes("ETF")) {
-        const isParentStockCard =
-          tab.isNew ||
-          (tab.holdingQuantity && tab.holdingQuantity > 0) ||
-          (tab.averagingRows && tab.averagingRows.length > 0) ||
-          (tab.companyName && !tab.companyName.includes("ETF")) ||
-          (tab.companyName !== `${sym} ETF`);
+      // 判斷此 tab 是否為附屬於某股票的關聯 ETF
+      const isAssociatedEtf =
+        (!!tab.parentSymbol && tab.parentSymbol.trim().toUpperCase() !== sym) ||
+        (!!tab.parentTabId && tab.parentTabId !== tab.id) ||
+        tabs.some(
+          (pt) =>
+            (pt.symbol || "").trim().toUpperCase() !== sym &&
+            Array.isArray(pt.etfSymbols) &&
+            pt.etfSymbols.some((s: string) => s.trim().toUpperCase() === sym)
+        );
 
-        if (isParentStockCard) {
+      // 2. 若為從屬關聯 ETF，確保其必定帶有 "ETF" 標籤；若非從屬關聯的主股卡片誤標 "ETF"，才進行清除
+      if (isAssociatedEtf) {
+        if (!tab.tags?.includes("ETF")) {
+          updates.tags = Array.from(new Set([...(tab.tags || []), "ETF"]));
+          needsUpdate = true;
+        }
+      } else {
+        // 主個股卡片（如 TSLA, INTC），若其 symbol 與 parentSymbol 相同或無 parent，且誤標了 "ETF"，則移除 "ETF"
+        const isParentStock =
+          (tab.isNew || (tab.holdingQuantity && tab.holdingQuantity > 0) || (tab.averagingRows && tab.averagingRows.length > 0)) &&
+          !tab.parentSymbol &&
+          !tab.parentTabId;
+        if (isParentStock && tab.tags?.includes("ETF")) {
           updates.tags = (tab.tags || []).filter((tg: string) => tg !== "ETF");
           needsUpdate = true;
         }
       }
 
       // 3. 確保同類別/真實或模擬下的同代號多個版本（Original 與 New）共享相同的 groupId
-      const currentTabStatus = getDisplayHoldingStatus(tab.holdingStatus);
-      const currentTradeType = tab.tradeType || "simulated";
-      const sameStockSubTabs = tabs.filter(
-        (t) =>
-          (t.symbol || "").trim().toUpperCase() === sym &&
-          getDisplayHoldingStatus(t.holdingStatus) === currentTabStatus &&
-          (t.tradeType || "simulated") === currentTradeType &&
-          !t.tags?.includes("ETF")
-      );
-      if (sameStockSubTabs.length > 1) {
-        const commonGroupId = sameStockSubTabs.find((t) => t.groupId)?.groupId || `group-${sym}-${sameStockSubTabs[0].id}`;
-        if (tab.groupId !== commonGroupId) {
-          updates.groupId = commonGroupId;
-          needsUpdate = true;
+      if (!isAssociatedEtf) {
+        const currentTabStatus = getDisplayHoldingStatus(tab.holdingStatus);
+        const currentTradeType = tab.tradeType || "simulated";
+        const sameStockSubTabs = tabs.filter(
+          (t) =>
+            (t.symbol || "").trim().toUpperCase() === sym &&
+            getDisplayHoldingStatus(t.holdingStatus) === currentTabStatus &&
+            (t.tradeType || "simulated") === currentTradeType &&
+            !t.parentSymbol &&
+            !t.parentTabId &&
+            !t.tags?.includes("ETF")
+        );
+        if (sameStockSubTabs.length > 1) {
+          const commonGroupId = sameStockSubTabs.find((t) => t.groupId)?.groupId || `group-${sym}-${sameStockSubTabs[0].id}`;
+          if (tab.groupId !== commonGroupId) {
+            updates.groupId = commonGroupId;
+            needsUpdate = true;
+          }
         }
       }
 
@@ -4625,6 +4694,45 @@ export default function Dashboard() {
       if (Array.isArray(tab.etfSymbols) && tab.etfSymbols.length > 0 && !tab.groupId) {
         updates.groupId = `group-${sym}-${tab.id}`;
         needsUpdate = true;
+      }
+
+      // 5. 若此 tab 為關聯 ETF，確保其 holdingStatus 與 tradeType 與父股同步，並確保其 groupId 與父股一致
+      if (isAssociatedEtf) {
+        // 優先以 parentTabId 精準對齊特定父股，若無則依 parentSymbol 與 groupId 或同 tradeType 的母股對齊
+        let parentStock = tab.parentTabId ? tabs.find((t) => t.id === tab.parentTabId) : null;
+        if (!parentStock && tab.groupId) {
+          parentStock = tabs.find(
+            (t) =>
+              t.groupId === tab.groupId &&
+              (t.symbol || "").trim().toUpperCase() === (tab.parentSymbol || "").trim().toUpperCase() &&
+              !t.parentSymbol && !t.parentTabId
+          );
+        }
+        if (!parentStock) {
+          parentStock = tabs.find(
+            (t) =>
+              (t.symbol || "").trim().toUpperCase() === (tab.parentSymbol || "").trim().toUpperCase() &&
+              (t.tradeType || "simulated") === (tab.tradeType || "simulated") &&
+              !t.parentSymbol && !t.parentTabId
+          );
+        }
+        if (parentStock) {
+          if (parentStock.groupId && tab.groupId !== parentStock.groupId) {
+            updates.groupId = parentStock.groupId;
+            needsUpdate = true;
+          }
+          const parentStatus = getDisplayHoldingStatus(parentStock.holdingStatus);
+          const currentStatus = getDisplayHoldingStatus(tab.holdingStatus);
+          if (parentStatus && currentStatus !== parentStatus) {
+            updates.holdingStatus = parentStatus;
+            needsUpdate = true;
+          }
+          const parentTrade = parentStock.tradeType || "simulated";
+          if (tab.tradeType !== parentTrade) {
+            updates.tradeType = parentTrade;
+            needsUpdate = true;
+          }
+        }
       }
 
       if (needsUpdate) {
@@ -4767,7 +4875,6 @@ export default function Dashboard() {
       const existingEtfTab = tabs.find((t) => {
         const tSym = (t.symbol || "").trim().toUpperCase();
         if (tSym !== etfSym) return false;
-        if (!t.tags?.includes("ETF")) return false;
         const matchesGroup = t.groupId === targetGroupId || t.parentTabId === targetTab.id || (t.parentSymbol || "").toUpperCase() === parentSym;
         const matchesTrade = (t.tradeType || "simulated") === targetTradeType;
         return matchesGroup && matchesTrade;
@@ -4896,10 +5003,28 @@ export default function Dashboard() {
     const groups: { isGroup: boolean; id: string; symbol: string; tabs: any[] }[] = [];
     const processedTabIds = new Set<string>();
 
-    // 1. 先排序：非 ETF 的一般個股卡片優先處理，確保群組 symbol 必定錨定在該股票代號（如 GOOGL, TSLA）而非 ETF 代號（如 SPY, TSLR）
+    const isAssociatedEtfTab = (t: any): boolean => {
+      if (!t) return false;
+      const tSym = (t.symbol || "").trim().toUpperCase();
+      if (t.tags?.includes("ETF")) return true;
+      if (t.parentSymbol && t.parentSymbol.trim().toUpperCase() !== tSym) return true;
+      if (t.parentTabId && t.parentTabId !== t.id) return true;
+      if ((t.companyName || "").includes("ETF")) return true;
+      // 檢查是否被任何非此代號的股票的 etfSymbols 列為關聯
+      const isReferencedAsEtf = tabs.some(
+        (parent) =>
+          (parent.symbol || "").trim().toUpperCase() !== tSym &&
+          Array.isArray(parent.etfSymbols) &&
+          parent.etfSymbols.some((s: string) => s.trim().toUpperCase() === tSym)
+      );
+      if (isReferencedAsEtf) return true;
+      return false;
+    };
+
+    // 1. 先排序：非 ETF 的一般個股卡片優先處理，確保群組 symbol 必定錨定在該股票代號（如 GOOGL, TSLA, INTC）而非 ETF 代號（如 SPY, TSLR, INTW）
     const sortedTabs = [...filteredSubTabVisibleTabs].sort((a, b) => {
-      const aIsEtf = a.tags?.includes("ETF") ? 1 : 0;
-      const bIsEtf = b.tags?.includes("ETF") ? 1 : 0;
+      const aIsEtf = isAssociatedEtfTab(a) ? 1 : 0;
+      const bIsEtf = isAssociatedEtfTab(b) ? 1 : 0;
       return aIsEtf - bIsEtf;
     });
 
@@ -4907,14 +5032,14 @@ export default function Dashboard() {
       if (processedTabIds.has(tab.id)) return;
 
       const sym = (tab.symbol || "").trim().toUpperCase();
-      const isEtf = tab.tags?.includes("ETF");
+      const isEtf = isAssociatedEtfTab(tab);
 
       if (!isEtf) {
         // 先收集此股票在目前可見清單中的所有版本（Original, New）
         const stockSiblings = filteredSubTabVisibleTabs.filter((t) => {
           if (processedTabIds.has(t.id)) return false;
           const tSym = (t.symbol || "").trim().toUpperCase();
-          return tSym === sym && !t.tags?.includes("ETF");
+          return tSym === sym && !isAssociatedEtfTab(t);
         });
 
         // 收集群組 ID、設定的 etfSymbols 以及所有本股分頁 ID
@@ -4930,16 +5055,30 @@ export default function Dashboard() {
         const stockTabIds = new Set<string>([tab.id, ...stockSiblings.map((t) => t.id)]);
 
         // 找出關聯的 ETF（包含在 filteredSubTabVisibleTabs 中或從全域 tabs 補足屬於此卡片側邊 rail 的 ETF）
-        const matchingEtfTabs = filteredSubTabVisibleTabs.filter((t) => {
-          if (processedTabIds.has(t.id)) return false;
-          if (!t.tags?.includes("ETF")) return false;
-          const tSym = (t.symbol || "").trim().toUpperCase();
+        const candidateEtfTabs = [
+          ...filteredSubTabVisibleTabs,
+          ...tabs.filter(
+            (t) => (t.tradeType || "simulated") === (tab.tradeType || "simulated")
+          ),
+        ];
 
-          if (t.groupId && groupIds.has(t.groupId)) return true;
-          if (etfSymbolsSet.has(tSym)) return true;
-          if ((t.parentSymbol || "").trim().toUpperCase() === sym) return true;
-          if (t.parentTabId && stockTabIds.has(t.parentTabId)) return true;
-          return false;
+        const matchingEtfTabs: any[] = [];
+        const seenEtfIds = new Set<string>();
+
+        candidateEtfTabs.forEach((t) => {
+          if (processedTabIds.has(t.id) || seenEtfIds.has(t.id)) return;
+          const tSym = (t.symbol || "").trim().toUpperCase();
+          if (tSym === sym) return; // 本股自身不作為關聯 ETF
+
+          const matchesParentId = t.parentTabId && stockTabIds.has(t.parentTabId);
+          const matchesParentSym = (t.parentSymbol || "").trim().toUpperCase() === sym;
+          const matchesEtfSymbol = etfSymbolsSet.has(tSym);
+          const matchesGroup = t.groupId && groupIds.has(t.groupId);
+
+          if (matchesParentId || matchesGroup || matchesEtfSymbol || (matchesParentSym && isAssociatedEtfTab(t))) {
+            matchingEtfTabs.push(t);
+            seenEtfIds.add(t.id);
+          }
         });
 
         const allGroupTabs = [...stockSiblings, ...matchingEtfTabs];
@@ -4950,8 +5089,8 @@ export default function Dashboard() {
 
         // 排序 matchingTabs：本股版本排在前面（Original, New），關聯 ETF 排在後面
         const sortedMatchingTabs = [...allGroupTabs].sort((a, b) => {
-          const aIsEtf = a.tags?.includes("ETF") || (a.symbol || "").trim().toUpperCase() !== sym ? 1 : 0;
-          const bIsEtf = b.tags?.includes("ETF") || (b.symbol || "").trim().toUpperCase() !== sym ? 1 : 0;
+          const aIsEtf = isAssociatedEtfTab(a) || (a.symbol || "").trim().toUpperCase() !== sym ? 1 : 0;
+          const bIsEtf = isAssociatedEtfTab(b) || (b.symbol || "").trim().toUpperCase() !== sym ? 1 : 0;
           return aIsEtf - bIsEtf;
         });
 
@@ -4962,12 +5101,21 @@ export default function Dashboard() {
           tabs: sortedMatchingTabs,
         });
       } else {
-        // 若該 tab 是 ETF，檢查它是否已關聯到某個股票（例如有 parentSymbol 或 groupId 屬於某股票），絕不單獨渲染成一張股票卡片！
+        // 若該 tab 是關聯 ETF，檢查它是否已關聯到某個股票（例如有 parentSymbol 或 parentTabId 或 groupId 或被列為 etfSymbols），絕不單獨渲染成一張股票卡片！
         const parentSym = (tab.parentSymbol || "").trim().toUpperCase();
-        const hasParentInTabs = parentSym && tabs.some((t) => (t.symbol || "").trim().toUpperCase() === parentSym && !t.tags?.includes("ETF"));
-        const hasMatchingGroupInTabs = tab.groupId && tabs.some((t) => !t.tags?.includes("ETF") && t.groupId === tab.groupId);
+        const hasParentInTabs =
+          (parentSym && tabs.some((t) => (t.symbol || "").trim().toUpperCase() === parentSym && !isAssociatedEtfTab(t))) ||
+          (tab.parentTabId && tabs.some((t) => t.id === tab.parentTabId)) ||
+          tabs.some(
+            (t) =>
+              (t.symbol || "").trim().toUpperCase() !== sym &&
+              Array.isArray(t.etfSymbols) &&
+              t.etfSymbols.some((s: string) => s.trim().toUpperCase() === sym)
+          );
+        const hasMatchingGroupInTabs = tab.groupId && tabs.some((t) => !isAssociatedEtfTab(t) && t.groupId === tab.groupId);
+
         if (hasParentInTabs || hasMatchingGroupInTabs) {
-          // 這是附屬於某股票的 ETF 側邊分頁，標記為已處理，不建立獨立卡片
+          // 這是附屬於某股票的 ETF 側邊分頁，標記為已處理，絕不建立獨立卡片！
           processedTabIds.add(tab.id);
           return;
         }
@@ -5406,6 +5554,49 @@ export default function Dashboard() {
     }
   };
 
+  // 打開管理持有中股票對話窗，並自動切換至目前所處卡片的交易模式與目錄
+  const handleOpenManageHoldings = useCallback(() => {
+    playClickSound();
+    const currentCard =
+      tabs.find((t) => t.id === activeCardTabId) ||
+      orderedFilteredSubTabVisibleTabs[0] ||
+      tabs.find((t) => t.status === "ACTIVE");
+
+    const targetTradeType: "simulated" | "real" =
+      currentCard?.tradeType === "real" || activeViewTab === "real"
+        ? "real"
+        : "simulated";
+
+    let targetHoldingStatus = currentCard?.holdingStatus
+      ? getDisplayHoldingStatus(currentCard.holdingStatus)
+      : activeHoldingSubTab;
+
+    const validTabs = [
+      "觀察中",
+      "候選名單",
+      "買進操作",
+      "賣出操作",
+      "平倉操作",
+      "乖離名單",
+      "持股監控",
+    ] as const;
+
+    if (!validTabs.includes(targetHoldingStatus as any)) {
+      targetHoldingStatus = "觀察中";
+    }
+
+    setManageTradeType(targetTradeType);
+    setActiveManageTab(targetHoldingStatus as any);
+    setIsManageHiddenOpen(true);
+  }, [
+    tabs,
+    activeCardTabId,
+    orderedFilteredSubTabVisibleTabs,
+    activeViewTab,
+    activeHoldingSubTab,
+    playClickSound,
+  ]);
+
   const lastHKeyPressTimeRef = useRef<number>(0);
 
   // Keyboard shortcuts handling
@@ -5635,6 +5826,19 @@ export default function Dashboard() {
         return;
       }
 
+      // 10.5. Alt + I / Alt + i -> 打開管理持有中股票對話窗 (定位目前所處卡片目錄)
+      if (
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        (e.key === "I" || e.key === "i" || e.code === "KeyI" || e.key === "ˆ")
+      ) {
+        e.preventDefault();
+        handleOpenManageHoldings();
+        return;
+      }
+
       // 10. Ctrl + Shift + 1/2/3/4 -> 真實交易 Sub Tabs (觀察中 / 候選名單 / 買進操作 / 賣出操作)
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey) {
         let selectedRealTab: "觀察中" | "候選名單" | "買進操作" | "賣出操作" | null = null;
@@ -5765,6 +5969,7 @@ export default function Dashboard() {
     handleTabIndicatorClick,
     isVisualLinesBoardOpen,
     isPrimialModalOpen,
+    handleOpenManageHoldings,
   ]);
 
   useEffect(() => {
@@ -7660,8 +7865,15 @@ export default function Dashboard() {
                           onClick={(e) => e.stopPropagation()}
                           className="h-3.5 w-3.5 rounded border border-zinc-300 bg-white checked:bg-sky-500 checked:border-sky-500 text-sky-600 focus:ring-0 cursor-pointer accent-sky-500 transition-all shrink-0 mb-1"
                         />
-                        <span className={`text-[11px] font-bold select-none transition-colors ${strategyState.addChecked ? "text-sky-700 font-black" : "text-zinc-600"}`}>
-                          加碼
+                        <span className={`text-[11px] font-bold select-none transition-colors truncate px-0.5 ${strategyState.addChecked ? "text-sky-700 font-black" : "text-zinc-600"}`}>
+                          {(() => {
+                            const isBreakout = strategyState.addBreakoutChecked;
+                            const isAveraging = strategyState.addAveragingChecked ?? (strategyState.addChecked && !strategyState.addBreakoutChecked);
+                            if (isBreakout && isAveraging) return "加碼";
+                            if (isBreakout) return "突破加碼";
+                            if (isAveraging) return "攤平加碼";
+                            return "加碼";
+                          })()}
                         </span>
                       </label>
 
@@ -7701,6 +7913,53 @@ export default function Dashboard() {
                         </span>
                       </label>
                     </div>
+
+                    {/* 加碼動態細項展開列 (可以勾選 攤平加碼 | 突破加碼) */}
+                    {strategyState.addChecked && (
+                      <div className="mt-2.5 pt-2 border-t border-zinc-200/70 flex items-center justify-between px-2 py-1.5 bg-sky-50/70 border border-sky-200/80 rounded-xl animate-fadeIn">
+                        <span className="text-[11px] font-black text-sky-950 flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-sky-500 inline-block animate-pulse"></span>
+                          加碼模式：
+                        </span>
+                        <div className="flex items-center gap-2">
+                          {/* 攤平加碼 */}
+                          <label
+                            onClick={(e) => e.stopPropagation()}
+                            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer transition-all border select-none ${
+                              (strategyState.addAveragingChecked ?? (strategyState.addChecked && !strategyState.addBreakoutChecked))
+                                ? "bg-emerald-600 text-white border-emerald-600 shadow-2xs font-black"
+                                : "bg-white border-zinc-200 text-zinc-600 hover:bg-zinc-50"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={!!(strategyState.addAveragingChecked ?? (strategyState.addChecked && !strategyState.addBreakoutChecked))}
+                              onChange={(e) => handleUpdateAddSubOption(currentActionTab.id, "averaging", e.target.checked)}
+                              className="h-3.5 w-3.5 rounded border border-zinc-300 checked:bg-emerald-600 checked:border-emerald-600 accent-emerald-600 cursor-pointer"
+                            />
+                            <span>攤平加碼</span>
+                          </label>
+
+                          {/* 突破加碼 */}
+                          <label
+                            onClick={(e) => e.stopPropagation()}
+                            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer transition-all border select-none ${
+                              strategyState.addBreakoutChecked
+                                ? "bg-sky-600 text-white border-sky-700 shadow-2xs font-black"
+                                : "bg-white border-zinc-200 text-zinc-600 hover:bg-zinc-50"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={!!strategyState.addBreakoutChecked}
+                              onChange={(e) => handleUpdateAddSubOption(currentActionTab.id, "breakout", e.target.checked)}
+                              className="h-3.5 w-3.5 rounded border border-zinc-300 checked:bg-sky-600 checked:border-sky-600 accent-sky-600 cursor-pointer"
+                            />
+                            <span>突破加碼</span>
+                          </label>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* 3. SPLIT TRADE STAGES (拆分交易階段) */}
@@ -8154,6 +8413,7 @@ export default function Dashboard() {
                       { key: "Alt + Z", desc: "Primial 分批進場金字塔動態互動圖表" },
                       { key: "Alt + W", desc: "動態視覺圖示標籤" },
                       { key: "Alt + Q", desc: "顯示 / 隱藏數據統計" },
+                      { key: "Alt + I", desc: "管理持有中股票 (定位當前目錄)" },
                       { key: "Alt + ← / →", desc: "橫向滾動卡片" },
                     ].map((item, i) => (
                       <div
@@ -8395,8 +8655,8 @@ export default function Dashboard() {
                           <InteractiveButton
                             noGlow
                             as="button"
-                            onClick={() => setIsManageHiddenOpen(true)}
-                            title="管理持有中股票"
+                            onClick={handleOpenManageHoldings}
+                            title="管理持有中股票 (Alt + I)"
                             className="w-8 h-8 p-0 bg-white hover:bg-cyan-50/80 border border-zinc-200/80 hover:border-cyan-300 text-cyan-500 hover:text-cyan-600 rounded-full transition-all cursor-pointer flex items-center justify-center shrink-0 shadow-2xs hover:shadow-xs"
                           >
                             <Settings2 className="w-4 h-4 text-cyan-500" />
@@ -8560,9 +8820,9 @@ export default function Dashboard() {
                           <InteractiveButton
                             noGlow
                             as="button"
-                            onClick={() => setIsManageHiddenOpen(true)}
+                            onClick={handleOpenManageHoldings}
                             className="px-2 py-1 bg-white border border-zinc-200 hover:border-cyan-300 text-zinc-700 hover:text-cyan-700 hover:bg-cyan-50/80 rounded-lg transition-all text-[11px] flex items-center gap-1 font-extrabold cursor-pointer shadow-2xs"
-                            title="管理持有中股票"
+                            title="管理持有中股票 (Alt + I)"
                           >
                             <Settings2 className="w-3 h-3 text-cyan-500" />
                             <span>管理</span>
@@ -8834,6 +9094,55 @@ export default function Dashboard() {
                                                 {stockName}
                                               </span>
                                             )}
+                                            {/* 策略標記狀態 (選取 | 止盈 | 止損 | 突破/攤平加碼 | 平倉 | 觀察) */}
+                                            {(() => {
+                                              const strat = activeTabStrategies[tab.id] || (tab as any).strategy || {};
+                                              const hasAny = Boolean(strat.notesHighlighted || strat.tpChecked || strat.slChecked || strat.addChecked || strat.closeChecked || strat.observeChecked);
+                                              if (!hasAny) return null;
+                                              return (
+                                                <span className="inline-flex items-center gap-0.5 ml-0.5 font-sans shrink-0">
+                                                  {strat.notesHighlighted && (
+                                                    <span className="text-[9px] font-bold px-1 py-0.2 rounded bg-amber-500/20 text-amber-800 border border-amber-400/60 leading-none">
+                                                      選取
+                                                    </span>
+                                                  )}
+                                                  {strat.tpChecked && (
+                                                    <span className="text-[9px] font-bold px-1 py-0.2 rounded bg-emerald-500/20 text-emerald-800 border border-emerald-400/60 leading-none">
+                                                      止盈
+                                                    </span>
+                                                  )}
+                                                  {strat.slChecked && (
+                                                    <span className="text-[9px] font-bold px-1 py-0.2 rounded bg-rose-500/20 text-rose-800 border border-rose-400/60 leading-none">
+                                                      止損
+                                                    </span>
+                                                  )}
+                                                  {strat.addChecked && (
+                                                    <>
+                                                      {strat.addBreakoutChecked && (
+                                                        <span className="text-[9px] font-bold px-1 py-0.2 rounded bg-sky-500/20 text-sky-800 border border-sky-400/60 leading-none">
+                                                          突破
+                                                        </span>
+                                                      )}
+                                                      {(strat.addAveragingChecked ?? (!strat.addBreakoutChecked)) && (
+                                                        <span className="text-[9px] font-bold px-1 py-0.2 rounded bg-teal-500/20 text-teal-800 border border-teal-400/60 leading-none">
+                                                          攤平
+                                                        </span>
+                                                      )}
+                                                    </>
+                                                  )}
+                                                  {strat.closeChecked && (
+                                                    <span className="text-[9px] font-bold px-1 py-0.2 rounded bg-violet-500/20 text-violet-800 border border-violet-400/60 leading-none">
+                                                      平倉
+                                                    </span>
+                                                  )}
+                                                  {strat.observeChecked && (
+                                                    <span className="text-[9px] font-bold px-1 py-0.2 rounded bg-zinc-200 text-zinc-700 border border-zinc-300 leading-none">
+                                                      觀察
+                                                    </span>
+                                                  )}
+                                                </span>
+                                              );
+                                            })()}
                                           </button>
                                         );
                                       })}
@@ -8902,6 +9211,54 @@ export default function Dashboard() {
                                             真實
                                           </Badge>
                                         )}
+
+                                        {/* 策略標記狀態 (選取 | 止盈 | 止損 | 突破/攤平加碼 | 平倉 | 觀察) */}
+                                        {(() => {
+                                          const cardStrat = activeTabStrategies[tab.id] || (tab as any).strategy || {};
+                                          return (
+                                            <>
+                                              {cardStrat.notesHighlighted && (
+                                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-700 border border-amber-400/80">
+                                                  選取
+                                                </span>
+                                              )}
+                                              {cardStrat.tpChecked && (
+                                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-emerald-500/15 text-emerald-700 border border-emerald-400/80">
+                                                  止盈
+                                                </span>
+                                              )}
+                                              {cardStrat.slChecked && (
+                                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-rose-500/15 text-rose-700 border border-rose-400/80">
+                                                  止損
+                                                </span>
+                                              )}
+                                              {cardStrat.addChecked && (
+                                                <>
+                                                  {cardStrat.addBreakoutChecked && (
+                                                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-sky-500/15 text-sky-700 border border-sky-400/80">
+                                                      突破加碼
+                                                    </span>
+                                                  )}
+                                                  {(cardStrat.addAveragingChecked ?? (!cardStrat.addBreakoutChecked)) && (
+                                                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-teal-500/15 text-teal-700 border border-teal-400/80">
+                                                      攤平加碼
+                                                    </span>
+                                                  )}
+                                                </>
+                                              )}
+                                              {cardStrat.closeChecked && (
+                                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-violet-500/15 text-violet-700 border border-violet-400/80">
+                                                  平倉
+                                                </span>
+                                              )}
+                                              {cardStrat.observeChecked && (
+                                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-zinc-200 text-zinc-700 border border-zinc-300">
+                                                  觀察
+                                                </span>
+                                              )}
+                                            </>
+                                          );
+                                        })()}
                                       </div>
                                       <div className="flex items-center gap-1.5">
                                         <button
@@ -10132,12 +10489,21 @@ export default function Dashboard() {
 
                                   const sym = group.symbol;
                                   // 本股所有版本（Original 與 New，排除關聯 ETF 標籤）
-                                  let sameSymbolTabs = group.tabs.filter((t: any) => (t.symbol || "").trim().toUpperCase() === sym && !t.tags?.includes("ETF"));
+                                  let sameSymbolTabs = group.tabs.filter((t: any) => {
+                                    const tSym = (t.symbol || "").trim().toUpperCase();
+                                    if (tSym !== sym) return false;
+                                    const isEtf = t.tags?.includes("ETF") || (t.parentSymbol && t.parentSymbol.trim().toUpperCase() !== tSym) || (t.companyName || "").includes("ETF");
+                                    return !isEtf;
+                                  });
                                   if (sameSymbolTabs.length === 0) {
                                     sameSymbolTabs = group.tabs.filter((t: any) => (t.symbol || "").trim().toUpperCase() === sym);
                                   }
-                                  // 關聯 ETF：代號不同於本股之 ETF（如 TSLR, SPY 等）
-                                  const etfTabs = group.tabs.filter((t: any) => (t.symbol || "").trim().toUpperCase() !== sym);
+                                  // 關聯 ETF：代號不同於本股之 ETF（如 TSLR, SPY, INTW 等）或標記為關聯 ETF 之分頁
+                                  const etfTabs = group.tabs.filter((t: any) => {
+                                    const tSym = (t.symbol || "").trim().toUpperCase();
+                                    if (tSym !== sym) return true;
+                                    return t.tags?.includes("ETF") || (t.parentSymbol && t.parentSymbol.trim().toUpperCase() !== tSym) || (t.companyName || "").includes("ETF");
+                                  });
 
                                   // 僅當在該層級分類目錄中有設定為區塊的兩個相同股票名稱時，才顯示 New 分頁
                                   const hasMultipleVersions = sameSymbolTabs.length > 1;
@@ -10160,6 +10526,8 @@ export default function Dashboard() {
                                     originalTab = sameSymbolTabs[0] || group.tabs[0];
                                     newTab = null;
                                   }
+
+                                  const primaryCardStockTab = originalTab || sameSymbolTabs[0] || group.tabs.find((t: any) => (t.symbol || "").trim().toUpperCase() === sym) || group.tabs[0];
 
                                   const currentSubTabId =
                                     cardSubTabSelection[group.id] ||
@@ -10292,7 +10660,7 @@ export default function Dashboard() {
                                               type="button"
                                               onClick={(e) => {
                                                 e.stopPropagation();
-                                                handleRemoveEtf(originalTab || displayTab, etf);
+                                                handleRemoveEtf(primaryCardStockTab, etf);
                                               }}
                                               className="opacity-0 group-hover/etftab:opacity-100 max-sm:opacity-80 pointer-events-none group-hover/etftab:pointer-events-auto -ml-2 z-20 p-0.5 rounded-full bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200 transition-opacity cursor-pointer shadow-xs"
                                               title={`解除關聯 ${etf.symbol}`}
@@ -10307,7 +10675,7 @@ export default function Dashboard() {
                                           type="button"
                                           onClick={(e) => {
                                             e.stopPropagation();
-                                            setAddEtfTargetTab(originalTab || displayTab);
+                                            setAddEtfTargetTab(primaryCardStockTab);
                                             setIsAddEtfModalOpen(true);
                                           }}
                                           className="flex items-center px-2 group-hover/siderail:px-2.5 py-1.5 rounded-r-xl border border-dashed border-zinc-300 bg-white/70 hover:bg-indigo-50/60 text-zinc-500 hover:text-indigo-600 text-xs font-bold transition-all duration-200 cursor-pointer shadow-2xs hover:border-indigo-400"

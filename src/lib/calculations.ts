@@ -389,8 +389,9 @@ export function calculateBatchPlanning(params: BatchPlanningParams): {
   } = safeParams;
 
   // 1. 資金池與可用資金推算 (完全對齊個股頁面 StockTabDetail 核心邏輯)
-  const effectiveCapital = (tradeType === 'simulated' ? virtualCapital : totalCapital) || totalCapital || 1000000;
-  const riskPool = (typeof maxStrategyRiskPool60 === 'number' && maxStrategyRiskPool60 > 0)
+  const isSimulated = tradeType === 'simulated';
+  const effectiveCapital = (isSimulated ? virtualCapital : totalCapital) || totalCapital || 1000000;
+  const riskPool = (typeof maxStrategyRiskPool60 === 'number' && maxStrategyRiskPool60 > 0 && !isSimulated)
     ? maxStrategyRiskPool60
     : (effectiveCapital * 2) * 0.6;
 
@@ -400,14 +401,14 @@ export function calculateBatchPlanning(params: BatchPlanningParams): {
 
   const effectiveUsableCapital = pct > 0 ? riskPool * (pct / 100) : (usableCapital || 0);
 
-  // 2. 推算預計購買總股數 plannedQty (以個股頁面規則為主: 優先由 usableCapital / currentPrice 換算)
+  // 2. 推算預計購買總股數 plannedQty (以個股頁面規則為主: 優先採用存檔之 plannedBuyQty，次由 usableCapital / currentPrice 換算)
   let effPlanned = 0;
-  if (currentPrice > 0 && effectiveUsableCapital > 0) {
-    effPlanned = Math.floor(effectiveUsableCapital / currentPrice);
+  if (plannedBuyQty && Number(plannedBuyQty) > 0) {
+    effPlanned = Number(plannedBuyQty);
   } else if (safeParams.plannedQty && safeParams.plannedQty > 0) {
     effPlanned = safeParams.plannedQty;
-  } else if (plannedBuyQty && Number(plannedBuyQty) > 0) {
-    effPlanned = Number(plannedBuyQty);
+  } else if (currentPrice > 0 && effectiveUsableCapital > 0) {
+    effPlanned = Math.floor(effectiveUsableCapital / currentPrice);
   } else if (averagingRowsSys2 && averagingRowsSys2.length > 0) {
     const rowsSum = averagingRowsSys2.reduce((acc, r) => {
       const q1 = r?.quantity ? parseFloat(r.quantity) : 0;
@@ -505,9 +506,11 @@ export function calculateBatchPlanning(params: BatchPlanningParams): {
   const isRow0Bought = Boolean(averagingRowsSys2?.[0]?.bought);
   const bought1 = Math.max(isRow0Bought ? size1 : (cascade1_a + cascade1_b), tradeBatchSharesSys2[0]);
   const remaining1 = Math.max(0, size1 - bought1);
-  const bought1_a = Math.max(cascade1_a, tradeSplitShares[0][0], Math.min(bought1, size1_a));
+  const rawBought1_a = Math.max(cascade1_a, tradeSplitShares[0][0], Math.min(bought1, size1_a));
+  const bought1_a = Math.min(bought1, rawBought1_a);
   const remaining1_a = Math.max(0, size1_a - bought1_a);
-  const bought1_b = Math.max(cascade1_b, tradeSplitShares[0][1], Math.min(Math.max(0, bought1 - size1_a), size1_b));
+  const rawBought1_b = Math.max(cascade1_b, tradeSplitShares[0][1], Math.min(Math.max(0, bought1 - bought1_a), size1_b));
+  const bought1_b = Math.min(Math.max(0, bought1 - bought1_a), rawBought1_b);
   const remaining1_b = Math.max(0, size1_b - bought1_b);
 
   // 第二批
@@ -518,9 +521,11 @@ export function calculateBatchPlanning(params: BatchPlanningParams): {
   const isRow1Bought = Boolean(averagingRowsSys2?.[1]?.bought);
   const bought2 = Math.max(isRow1Bought ? size2 : (cascade2_a + cascade2_b), tradeBatchSharesSys2[1]);
   const remaining2 = Math.max(0, size2 - bought2);
-  const bought2_a = Math.max(cascade2_a, tradeSplitShares[1][0], Math.min(bought2, size2_a));
+  const rawBought2_a = Math.max(cascade2_a, tradeSplitShares[1][0], Math.min(bought2, size2_a));
+  const bought2_a = Math.min(bought2, rawBought2_a);
   const remaining2_a = Math.max(0, size2_a - bought2_a);
-  const bought2_b = Math.max(cascade2_b, tradeSplitShares[1][1], Math.min(Math.max(0, bought2 - size2_a), size2_b));
+  const rawBought2_b = Math.max(cascade2_b, tradeSplitShares[1][1], Math.min(Math.max(0, bought2 - bought2_a), size2_b));
+  const bought2_b = Math.min(Math.max(0, bought2 - bought2_a), rawBought2_b);
   const remaining2_b = Math.max(0, size2_b - bought2_b);
 
   // 第三批
@@ -531,9 +536,11 @@ export function calculateBatchPlanning(params: BatchPlanningParams): {
   const isRow2Bought = Boolean(averagingRowsSys2?.[2]?.bought);
   const bought3 = Math.max(isRow2Bought ? size3 : (cascade3_a + cascade3_b), tradeBatchSharesSys2[2]);
   const remaining3 = Math.max(0, size3 - bought3);
-  const bought3_a = Math.max(cascade3_a, tradeSplitShares[2][0], Math.min(bought3, size3_a));
+  const rawBought3_a = Math.max(cascade3_a, tradeSplitShares[2][0], Math.min(bought3, size3_a));
+  const bought3_a = Math.min(bought3, rawBought3_a);
   const remaining3_a = Math.max(0, size3_a - bought3_a);
-  const bought3_b = Math.max(cascade3_b, tradeSplitShares[2][1], Math.min(Math.max(0, bought3 - size3_a), size3_b));
+  const rawBought3_b = Math.max(cascade3_b, tradeSplitShares[2][1], Math.min(Math.max(0, bought3 - bought3_a), size3_b));
+  const bought3_b = Math.min(Math.max(0, bought3 - bought3_a), rawBought3_b);
   const remaining3_b = Math.max(0, size3_b - bought3_b);
 
   // 第四批
@@ -544,9 +551,11 @@ export function calculateBatchPlanning(params: BatchPlanningParams): {
   const isRow3Bought = Boolean(averagingRowsSys2?.[3]?.bought);
   const bought4 = Math.max(isRow3Bought ? size4 : (cascade4_a + cascade4_b), tradeBatchSharesSys2[3]);
   const remaining4 = Math.max(0, size4 - bought4);
-  const bought4_a = Math.max(cascade4_a, tradeSplitShares[3][0], Math.min(bought4, size4_a));
+  const rawBought4_a = Math.max(cascade4_a, tradeSplitShares[3][0], Math.min(bought4, size4_a));
+  const bought4_a = Math.min(bought4, rawBought4_a);
   const remaining4_a = Math.max(0, size4_a - bought4_a);
-  const bought4_b = Math.max(cascade4_b, tradeSplitShares[3][1], Math.min(Math.max(0, bought4 - size4_a), size4_b));
+  const rawBought4_b = Math.max(cascade4_b, tradeSplitShares[3][1], Math.min(Math.max(0, bought4 - bought4_a), size4_b));
+  const bought4_b = Math.min(Math.max(0, bought4 - bought4_a), rawBought4_b);
   const remaining4_b = Math.max(0, size4_b - bought4_b);
 
   // 7. 組合輸出最終的批次與拆分交易物件陣列

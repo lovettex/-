@@ -1,6 +1,6 @@
 {
-  "summary":  "規劃建立專屬的「Primial 分批進場金字塔動態互動圖表」全螢幕/滿版清單檢視（PrimialPyramidViewModal），取代原本卡片內置替換的方式。此檢視頂部整合專屬功能導航列（包含行權價、攤平/突破價位、卡片分隔線、支撐、壓力、全部展開/收合及個股快速跳轉膠囊標籤），並在頂部內建「獲利/虧損%分級階梯軸篩選列」，即時篩選與切換個股；主體垂直滾動展示寬版金字塔互動圖表，與主看板卡片保持獨立與聯動。",
-  "updatedAt":  "2026-10-29T17:02:04.753132376Z",
-  "requestFeedback":  true,
-  "userFacing":  true
+  "summary": "Fixed discrepancies in the Primial batch entry dynamic pyramid chart (System2PlanningChart & PrimialPyramidViewModal) to strictly match the individual stock page's batch entry ratios, planned purchase quantities, and bought/remaining shares.",
+  "updatedAt": "2026-11-02T17:50:51.272197217Z",
+  "requestFeedback": true,
+  "userFacing": true
 }
