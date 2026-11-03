@@ -2513,7 +2513,19 @@ export default function Dashboard() {
   const [newTradeType, setNewTradeType] = useState<"simulated" | "real">(
     "simulated",
   );
+  const [newHoldingStatus, setNewHoldingStatus] = useState<
+    "觀察中" | "候選名單" | "買進操作" | "賣出操作" | "平倉操作" | "乖離名單"
+  >("候選名單");
   const [isAddOpen, setIsAddOpen] = useState(false);
+
+  useEffect(() => {
+    if (isAddOpen) {
+      if (activeHoldingSubTab) {
+        setNewHoldingStatus(activeHoldingSubTab);
+      }
+      setNewTradeType(activeViewTab === "real" ? "real" : "simulated");
+    }
+  }, [isAddOpen, activeHoldingSubTab, activeViewTab]);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [helpDialogTab, setHelpDialogTab] = useState<"shortcuts" | "priceImport">("shortcuts");
   const [isManageHiddenOpen, setIsManageHiddenOpen] = useState(false);
@@ -2538,8 +2550,14 @@ export default function Dashboard() {
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (newSymbol.trim()) {
-      addTab(newSymbol.trim(), newCompany.trim(), newTradeType);
+      addTab(newSymbol.trim(), newCompany.trim(), newTradeType, newHoldingStatus);
       playAddStockSound();
+      if (newTradeType === "real") {
+        setActiveViewTab("real");
+      } else {
+        setActiveViewTab("active");
+      }
+      setActiveHoldingSubTab(newHoldingStatus);
       setNewSymbol("");
       setNewCompany("");
       setNewTradeType("simulated");
@@ -3290,32 +3308,53 @@ export default function Dashboard() {
   const handleSearchSelect = useCallback(
     (tabId: string) => {
       setIsSearchOpen(false);
-      setActiveViewTab("active");
 
-      const selectedTab = tabs.find((t) => t.id === tabId);
-      if (selectedTab) {
-        setActiveHoldingSubTab(
-          getDisplayHoldingStatus(selectedTab.holdingStatus),
-        );
+      const targetTab = tabs.find((t) => t.id === tabId);
+      if (!targetTab) return;
+
+      if (targetTab.isHidden) {
+        updateTabHidden(targetTab.id, false);
       }
 
-      // Slight delay to ensure tab is switched
-      setTimeout(() => {
-        const element = document.getElementById(`stock-card-${tabId}`);
-        if (element && carouselRef.current) {
-          element.scrollIntoView({
-            behavior: "smooth",
-            block: "center",
-          });
-          // Flash effect or scale up feedback
-          element.style.transform = "scale(1.05)";
+      if (targetTab.status === "COMPLETED") {
+        setActiveViewTab("completed");
+      } else if (targetTab.tradeType === "real") {
+        setActiveViewTab("real");
+        setMetricsTradeTab("real");
+        setActiveHoldingSubTab(getDisplayHoldingStatus(targetTab.holdingStatus));
+      } else {
+        setActiveViewTab("active");
+        setMetricsTradeTab("simulated");
+        setActiveHoldingSubTab(getDisplayHoldingStatus(targetTab.holdingStatus));
+      }
+
+      setActiveCardDefinitionFilter("all");
+
+      let attempts = 0;
+      const attemptScroll = () => {
+        const el = document.getElementById(`stock-card-${targetTab.id}`);
+        if (el) {
+          scrollToElement(el, -120);
+          el.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+          el.classList.add("ring-4", "ring-emerald-500", "ring-offset-2", "scale-[1.02]", "transition-all", "duration-500");
           setTimeout(() => {
-            element.style.transform = "";
-          }, 1000);
+            el.classList.remove("ring-4", "ring-emerald-500", "ring-offset-2", "scale-[1.02]");
+          }, 2500);
+        } else if (attempts < 30) {
+          attempts++;
+          setTimeout(attemptScroll, 80);
         }
-      }, 100);
+      };
+      setTimeout(attemptScroll, 100);
+
+      const categoryName = getDisplayHoldingStatus(targetTab.holdingStatus);
+      const tradeModeName = targetTab.tradeType === "real" ? "真實交易" : "虛擬交易";
+      toast.info(`已跳轉至「${targetTab.symbol}」個股卡片（${tradeModeName} · ${categoryName}）`, {
+        id: `jump-card-${targetTab.id}`,
+        duration: 2500,
+      });
     },
-    [tabs],
+    [tabs, scrollToElement, updateTabHidden],
   );
 
   const handleToggleTabHighlight = useCallback(
@@ -6417,6 +6456,75 @@ export default function Dashboard() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="space-y-2">
+              <Label className="font-medium text-zinc-700 text-base sm:text-sm">
+                目錄層級
+              </Label>
+              <Select
+                value={newHoldingStatus}
+                onValueChange={(val: any) => setNewHoldingStatus(val)}
+              >
+                <SelectTrigger className="w-full bg-zinc-50 border-zinc-200 text-zinc-800 focus-visible:ring-emerald-500/20 focus-visible:border-emerald-500 h-[48px] text-base">
+                  <SelectValue placeholder="選擇目錄層級" />
+                </SelectTrigger>
+                <SelectContent className="bg-white border-zinc-200 text-zinc-800 outline-none rounded-xl shadow-lg">
+                  <SelectItem
+                    value="觀察中"
+                    className="font-medium focus:bg-zinc-100 focus:text-zinc-900 cursor-pointer text-zinc-700 px-4 text-base sm:text-sm py-2.5"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Eye className="h-4 w-4 text-sky-500" />
+                      <span>{newTradeType === "simulated" ? "虛擬交易 (觀察中)" : "觀察中"}</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem
+                    value="候選名單"
+                    className="font-medium focus:bg-zinc-100 focus:text-zinc-900 cursor-pointer text-zinc-700 px-4 text-base sm:text-sm py-2.5"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Star className="h-4 w-4 text-amber-500" />
+                      <span>候選名單</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem
+                    value="買進操作"
+                    className="font-medium focus:bg-zinc-100 focus:text-zinc-900 cursor-pointer text-zinc-700 px-4 text-base sm:text-sm py-2.5"
+                  >
+                    <div className="flex items-center gap-3">
+                      <TrendingUp className="h-4 w-4 text-emerald-500" />
+                      <span>買進操作</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem
+                    value="賣出操作"
+                    className="font-medium focus:bg-zinc-100 focus:text-zinc-900 cursor-pointer text-zinc-700 px-4 text-base sm:text-sm py-2.5"
+                  >
+                    <div className="flex items-center gap-3">
+                      <TrendingDown className="h-4 w-4 text-rose-500" />
+                      <span>賣出操作</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem
+                    value="平倉操作"
+                    className="font-medium focus:bg-zinc-100 focus:text-zinc-900 cursor-pointer text-zinc-700 px-4 text-base sm:text-sm py-2.5"
+                  >
+                    <div className="flex items-center gap-3">
+                      <CheckCircle2 className="h-4 w-4 text-fuchsia-500" />
+                      <span>平倉操作</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem
+                    value="乖離名單"
+                    className="font-medium focus:bg-zinc-100 focus:text-zinc-900 cursor-pointer text-zinc-700 px-4 text-base sm:text-sm py-2.5"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Activity className="h-4 w-4 text-indigo-500" />
+                      <span>乖離名單</span>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <DialogFooter className="pt-4 pb-2">
               <button
                 type="submit"
@@ -7638,7 +7746,7 @@ export default function Dashboard() {
       <div className="space-y-6">
         {/* Search Dialog */}
         <Dialog open={isSearchOpen} onOpenChange={setIsSearchOpen}>
-          <DialogContent className="border border-zinc-200/50 shadow-2xl bg-white/90 backdrop-blur-xl text-zinc-900 max-w-[400px] w-[92%] p-6 rounded-2xl">
+          <DialogContent className="border border-zinc-200/50 shadow-2xl bg-white/95 backdrop-blur-xl text-zinc-900 max-w-[480px] w-[94%] p-6 rounded-2xl">
             <DialogHeader>
               <DialogTitle className="font-extrabold text-xl text-zinc-900 flex items-center gap-2">
                 <Search className="h-5 w-5 text-emerald-600" />
@@ -7648,21 +7756,20 @@ export default function Dashboard() {
             <div className="space-y-4">
               <Input
                 autoFocus
-                placeholder="輸入代號或名稱..."
+                placeholder="輸入代號、名稱、交易模式或目錄..."
                 className="bg-zinc-50 border-zinc-200 text-zinc-900 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 placeholder:text-zinc-400 font-medium"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
+                    const q = searchQuery.toLowerCase().trim();
                     const filtered = tabs.filter(
                       (t) =>
                         t.status === "ACTIVE" &&
-                        (t.symbol
-                          .toLowerCase()
-                          .includes(searchQuery.toLowerCase()) ||
-                          t.companyName
-                            ?.toLowerCase()
-                            .includes(searchQuery.toLowerCase())),
+                        (t.symbol.toLowerCase().includes(q) ||
+                          t.companyName?.toLowerCase().includes(q) ||
+                          (t.tradeType === "real" ? "真實交易 real" : "虛擬交易 simulated 模擬").toLowerCase().includes(q) ||
+                          getDisplayHoldingStatus(t.holdingStatus).toLowerCase().includes(q)),
                     );
                     if (filtered.length > 0) {
                       handleSearchSelect(filtered[0].id);
@@ -7670,44 +7777,76 @@ export default function Dashboard() {
                   }
                 }}
               />
-              <div className="max-h-[300px] overflow-y-auto space-y-1.5 pr-1 scrollbar-hide">
+              <div className="max-h-[360px] overflow-y-auto space-y-2 pr-1 scrollbar-hide">
                 {tabs
                   .filter(
-                     (t) =>
-                       t.status === "ACTIVE" &&
-                       (t.symbol
-                         .toLowerCase()
-                         .includes(searchQuery.toLowerCase()) ||
-                         t.companyName
-                           ?.toLowerCase()
-                           .includes(searchQuery.toLowerCase())),
+                     (t) => {
+                       const q = searchQuery.toLowerCase().trim();
+                       if (!q) return t.status === "ACTIVE";
+                       const cat = getDisplayHoldingStatus(t.holdingStatus);
+                       const tradeTypeName = t.tradeType === "real" ? "真實交易 real" : "虛擬交易 simulated 模擬";
+                       return (
+                         t.status === "ACTIVE" &&
+                         (t.symbol.toLowerCase().includes(q) ||
+                           t.companyName?.toLowerCase().includes(q) ||
+                           tradeTypeName.toLowerCase().includes(q) ||
+                           cat.toLowerCase().includes(q))
+                       );
+                     }
                   )
-                  .map((t) => (
-                    <button
-                      key={t.id}
-                      onClick={() => handleSearchSelect(t.id)}
-                      className="w-full flex items-center justify-between p-3 rounded-xl bg-zinc-50 hover:bg-zinc-100/80 border border-zinc-100 hover:border-zinc-200/80 transition-all text-left group active:scale-[0.98] cursor-pointer"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 flex items-center justify-center font-extrabold text-[10px] rounded bg-zinc-200/70 text-zinc-650 group-hover:bg-emerald-50 group-hover:text-emerald-700 transition-colors">
-                          {t.symbol.slice(0, 2).toUpperCase()}
+                  .map((t) => {
+                    const cat = getDisplayHoldingStatus(t.holdingStatus);
+                    const cfg = holdingTabConfig[cat];
+                    const CatIcon = cfg?.icon || Star;
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => handleSearchSelect(t.id)}
+                        className="w-full flex items-center justify-between p-3 rounded-xl bg-zinc-50 hover:bg-emerald-50/40 border border-zinc-100 hover:border-emerald-200/80 transition-all text-left group active:scale-[0.98] cursor-pointer"
+                      >
+                        <div className="flex items-center gap-3 min-w-0 pr-2">
+                          <div className="w-9 h-9 shrink-0 flex items-center justify-center font-extrabold text-[11px] rounded-lg bg-zinc-200/70 text-zinc-700 group-hover:bg-emerald-100 group-hover:text-emerald-800 transition-colors">
+                            {t.symbol.slice(0, 2).toUpperCase()}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-extrabold text-sm text-zinc-900 group-hover:text-emerald-700 transition-colors">
+                                {t.symbol}
+                              </span>
+                              {/* 交易模式備註 */}
+                              {t.tradeType === "real" ? (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/80">
+                                  <ShieldCheck className="h-2.5 w-2.5 text-emerald-600" />
+                                  真實交易
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200/80">
+                                  <Gamepad2 className="h-2.5 w-2.5 text-amber-600" />
+                                  虛擬交易
+                                </span>
+                              )}
+                              {/* 所屬目錄備註 */}
+                              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold border ${cfg?.bgClass || 'bg-zinc-100'} ${cfg?.borderClass || 'border-zinc-200'} ${cfg?.colorClass || 'text-zinc-700'}`}>
+                                <CatIcon className="h-2.5 w-2.5" />
+                                {cat}
+                              </span>
+                            </div>
+                            <p className="text-[11px] font-medium text-zinc-400 truncate max-w-[220px] mt-0.5">
+                              {t.companyName || t.symbol}
+                            </p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-extrabold text-sm text-zinc-900 group-hover:text-emerald-600 transition-colors">
-                            {t.symbol}
+                        <div className="text-right shrink-0">
+                          <p className="text-xs font-black text-zinc-800 group-hover:text-emerald-700 transition-colors font-mono">
+                            {t.currentPrice !== undefined && t.currentPrice > 0 ? `$${t.currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "-"}
                           </p>
-                          <p className="text-[10px] font-bold text-zinc-400 truncate max-w-[150px]">
-                            {t.companyName}
-                          </p>
+                          <span className="text-[10px] font-bold text-zinc-400 group-hover:text-emerald-600 transition-colors inline-flex items-center gap-0.5">
+                            跳轉卡片 →
+                          </span>
                         </div>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-xs font-black text-zinc-750 group-hover:text-emerald-600 transition-colors">
-                          ${t.currentPrice?.toLocaleString()}
-                        </p>
-                      </div>
-                    </button>
-                  ))}
+                      </button>
+                    );
+                  })}
                 {tabs.filter((t) => t.status === "ACTIVE").length === 0 && (
                   <p className="text-center py-8 text-zinc-400 text-sm font-semibold italic">
                     尚無持有中的個股

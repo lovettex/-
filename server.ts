@@ -12,7 +12,10 @@ async function generateContentWithRetry(ai: GoogleGenAI, params: any, maxRetries
   let attempt = 0;
   const originalModel = params.model;
   // Recommended reliable models for text, vision, and tool-use tasks
-  const fallbackList = ["gemini-2.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
+  const hasGoogleSearch = params?.config?.tools?.some((t: any) => t.googleSearch);
+  const fallbackList = hasGoogleSearch
+    ? ["gemini-2.5-flash", "gemini-flash-latest"]
+    : ["gemini-2.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
   
   // Normalize gemini-3.8-flash to gemini-2.5-flash to avoid 503 high demand spikes on attempt 1
   if (params.model === "gemini-3.8-flash") {

@@ -129,7 +129,12 @@ export function useStockTabs() {
     };
   }, [user?.uid]);
 
-  const addTab = useCallback(async (symbol: string, companyName: string, tradeType: 'simulated' | 'real' = 'simulated') => {
+  const addTab = useCallback(async (
+    symbol: string,
+    companyName: string,
+    tradeType: 'simulated' | 'real' = 'simulated',
+    holdingStatus: '觀察中' | '候選名單' | '買進操作' | '賣出操作' | '平倉操作' | '乖離名單' = '候選名單'
+  ) => {
     if (!user) return;
     try {
       await addDoc(collection(db, 'stockTabs'), {
@@ -138,6 +143,7 @@ export function useStockTabs() {
         companyName,
         status: 'ACTIVE',
         tradeType,
+        holdingStatus,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
