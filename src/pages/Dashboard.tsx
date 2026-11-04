@@ -1377,6 +1377,9 @@ export default function Dashboard() {
   const [completedMainTab, setCompletedMainTab] = useState<"all" | "real" | "simulated">("all");
   const [completedResultFilter, setCompletedResultFilter] = useState<"all" | "win" | "lose">("all");
   const [completedSearchQuery, setCompletedSearchQuery] = useState<string>("");
+  const [completedSortOrder, setCompletedSortOrder] = useState<"time_desc" | "time_asc" | "pnl_desc" | "pnl_asc">("time_desc");
+  const [completedDateFilter, setCompletedDateFilter] = useState<string>("all");
+  const [tabToDeleteCompleted, setTabToDeleteCompleted] = useState<any | null>(null);
 
   // 上方區塊保持正常顯示，不隱藏、不折疊、不閃爍
   const [isTopBannerVisible] = useState(true);
@@ -6231,8 +6234,25 @@ export default function Dashboard() {
     return completedTabs;
   }, [completedMainTab, completedTabs, realCompletedTabs, simulatedCompletedTabs]);
 
+  // Extract available unique Year/Months for filtering
+  const availableCompletedMonths = useMemo(() => {
+    const monthCounts: Record<string, number> = {};
+    baseCompletedTabs.forEach((tab) => {
+      const d = getTimestampDate(tab.updatedAt || tab.createdAt);
+      if (d) {
+        const ym = format(d, "yyyy/MM");
+        monthCounts[ym] = (monthCounts[ym] || 0) + 1;
+      } else {
+        monthCounts["未知時間"] = (monthCounts["未知時間"] || 0) + 1;
+      }
+    });
+    return Object.entries(monthCounts)
+      .sort((a, b) => b[0].localeCompare(a[0])) // latest month first
+      .map(([ym, count]) => ({ ym, count }));
+  }, [baseCompletedTabs]);
+
   const displayCompletedTabs = useMemo(() => {
-    return baseCompletedTabs.filter((tab) => {
+    const filtered = baseCompletedTabs.filter((tab) => {
       const pnl = tab.finalPnL || 0;
       if (completedResultFilter === "win" && pnl < 0) return false;
       if (completedResultFilter === "lose" && pnl >= 0) return false;
@@ -6244,9 +6264,34 @@ export default function Dashboard() {
         if (!symbolMatch && !companyMatch) return false;
       }
 
+      if (completedDateFilter !== "all") {
+        const d = getTimestampDate(tab.updatedAt || tab.createdAt);
+        const ym = d ? format(d, "yyyy/MM") : "未知時間";
+        if (ym !== completedDateFilter) return false;
+      }
+
       return true;
     });
-  }, [baseCompletedTabs, completedResultFilter, completedSearchQuery]);
+
+    // Sort according to completedSortOrder (default: latest completion time first)
+    return [...filtered].sort((a, b) => {
+      const timeA = getTimestampMillis(a.updatedAt || a.createdAt);
+      const timeB = getTimestampMillis(b.updatedAt || b.createdAt);
+      const pnlA = a.finalPnL || 0;
+      const pnlB = b.finalPnL || 0;
+
+      if (completedSortOrder === "time_desc") {
+        return timeB - timeA;
+      } else if (completedSortOrder === "time_asc") {
+        return timeA - timeB;
+      } else if (completedSortOrder === "pnl_desc") {
+        return pnlB - pnlA;
+      } else if (completedSortOrder === "pnl_asc") {
+        return pnlA - pnlB;
+      }
+      return timeB - timeA;
+    });
+  }, [baseCompletedTabs, completedResultFilter, completedSearchQuery, completedDateFilter, completedSortOrder]);
 
   if (loading && tabs.length === 0) {
     return (
@@ -11201,32 +11246,81 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-                {/* Stats Summary Strip */}
-                <div className="px-4 sm:px-6 py-2.5 bg-zinc-50/50 border-b border-zinc-200/60 flex flex-wrap items-center justify-between text-xs gap-3">
-                  <div className="flex flex-wrap items-center gap-4 text-zinc-600 font-semibold">
+                {/* Stats & Secondary Filters Strip (Month/Year Filter + Sort Order) */}
+                <div className="px-4 sm:px-6 py-2.5 bg-zinc-50/80 border-b border-zinc-200/60 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+                  {/* Left: Sorting & Date Selectors */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {/* Month/Year Filter */}
+                    <div className="flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-xl border border-zinc-200 shadow-2xs">
+                      <Calendar className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                      <span className="text-[11px] font-bold text-zinc-500">月份:</span>
+                      <select
+                        value={completedDateFilter}
+                        onChange={(e) => setCompletedDateFilter(e.target.value)}
+                        className="bg-transparent text-zinc-800 text-xs font-bold focus:outline-none cursor-pointer pr-1"
+                      >
+                        <option value="all">📅 全部月份 ({baseCompletedTabs.length})</option>
+                        {availableCompletedMonths.map(({ ym, count }) => (
+                          <option key={ym} value={ym}>
+                            {ym === "未知時間" ? "未知時間" : `${ym.replace("/", " 年 ")} 月`} ({count} 筆)
+                          </option>
+                        ))}
+                      </select>
+                      {completedDateFilter !== "all" && (
+                        <button
+                          type="button"
+                          onClick={() => setCompletedDateFilter("all")}
+                          className="text-zinc-400 hover:text-zinc-600 p-0.5 rounded cursor-pointer"
+                          title="重設月份篩選"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Sort Order Selector */}
+                    <div className="flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-xl border border-zinc-200 shadow-2xs">
+                      <Clock className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                      <span className="text-[11px] font-bold text-zinc-500">排序:</span>
+                      <select
+                        value={completedSortOrder}
+                        onChange={(e) => setCompletedSortOrder(e.target.value as any)}
+                        className="bg-transparent text-zinc-800 text-xs font-bold focus:outline-none cursor-pointer pr-1"
+                      >
+                        <option value="time_desc">結束時間：由新到舊 (最新優先)</option>
+                        <option value="time_asc">結束時間：由舊到新 (最舊優先)</option>
+                        <option value="pnl_desc">結算損益：由高到低</option>
+                        <option value="pnl_asc">結算損益：由低到高</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Right: Summary Stats */}
+                  <div className="flex flex-wrap items-center gap-3 text-zinc-600 font-semibold md:ml-auto">
                     <span className="flex items-center gap-1.5">
                       <span className="font-mono font-bold text-zinc-800">{displayCompletedTabs.length} 筆</span>
                     </span>
                     <div className="w-[1px] h-3 bg-zinc-300 shrink-0" />
                     <span className="flex items-center gap-1.5">
-                      <span className="text-zinc-400">勝率:</span>
+                      <span className="text-zinc-400 font-medium">勝率:</span>
                       <span className="font-mono font-black text-emerald-700 bg-emerald-50 border border-emerald-200/80 px-2 py-0.5 rounded-md">
                         {displayWinRate}% ({displayWinCount}勝 / {displayLoseCount}敗)
                       </span>
                     </span>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <span className="text-zinc-400 font-medium">小計損益:</span>
-                    <span className={`font-mono text-sm font-black px-2.5 py-0.5 rounded-lg border ${
-                      displayCompletedPnL >= 0
-                        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                        : "bg-rose-50 text-rose-700 border-rose-200"
-                    }`}>
-                      {displayCompletedPnL >= 0 ? "+" : ""}${displayCompletedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </span>
+                    <div className="w-[1px] h-3 bg-zinc-300 shrink-0" />
+                    <div className="flex items-center gap-2">
+                      <span className="text-zinc-400 font-medium">小計損益:</span>
+                      <span className={`font-mono text-sm font-black px-2.5 py-0.5 rounded-lg border ${
+                        displayCompletedPnL >= 0
+                          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                          : "bg-rose-50 text-rose-700 border-rose-200"
+                      }`}>
+                        {displayCompletedPnL >= 0 ? "+" : ""}${displayCompletedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
                   </div>
                 </div>
+
                 {/* Cards Grid - High Density Responsive Layout */}
                 <div className="p-4 sm:p-5 flex flex-col min-h-[220px]">
                   <AnimatePresence mode="wait">
@@ -11244,7 +11338,7 @@ export default function Dashboard() {
                           尚無符合條件的已完成交易紀錄
                         </p>
                         <p className="text-xs text-zinc-400 mt-1 text-center max-w-xs leading-relaxed">
-                          請切換頂部分類 Tab (全部 / 真實 / 模擬) 或調整 WIN / LOSE 損益篩選條件。
+                          請切換頂部分類 Tab (全部 / 真實 / 模擬) 或調整月份/年份與 WIN / LOSE 損益篩選條件。
                         </p>
                       </motion.div>
                     ) : (
@@ -11253,6 +11347,7 @@ export default function Dashboard() {
                           const val = tab.finalPnL || 0;
                           const isProfit = val >= 0;
                           const isReal = tab.tradeType === "real";
+                          const endDate = getTimestampDate(tab.updatedAt || tab.createdAt) || new Date();
 
                           return (
                             <motion.div
@@ -11272,9 +11367,9 @@ export default function Dashboard() {
                                 playClickSound();
                               }}
                               onMouseEnter={() => tab.symbol && prefetchStockPrice(tab.symbol)}
-                              className="bg-white border border-zinc-200 hover:border-zinc-350 shadow-2xs hover:shadow-md p-3.5 rounded-xl cursor-pointer relative overflow-hidden group flex flex-col justify-between transition-all duration-200 gap-2.5"
+                              className="bg-white border border-zinc-200 hover:border-zinc-350 shadow-2xs hover:shadow-md p-3.5 rounded-xl cursor-pointer relative overflow-hidden group flex flex-col justify-between transition-all duration-200 gap-2"
                             >
-                              {/* Top row: Symbol + Badges */}
+                              {/* Top row: Symbol + Badges + Delete Button */}
                               <div className="flex items-start justify-between gap-1.5">
                                 <div className="min-w-0">
                                   <div className="font-mono font-black text-base sm:text-lg tracking-tight text-zinc-900 group-hover:text-blue-600 transition-colors truncate">
@@ -11285,29 +11380,53 @@ export default function Dashboard() {
                                   </div>
                                 </div>
 
-                                <div className="flex flex-col items-end gap-1 shrink-0">
-                                  {/* Type badge */}
-                                  <span className={`text-[9px] font-black px-1.5 py-0.2 rounded border ${
-                                    isReal
-                                      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                                      : "bg-amber-50 text-amber-700 border-amber-200"
-                                  }`}>
-                                    {isReal ? "真實" : "模擬"}
-                                  </span>
-                                  
-                                  {/* WIN/LOSE badge */}
-                                  <span className={`text-[9px] font-mono font-black px-1.5 py-0.2 rounded ${
-                                    isProfit
-                                      ? "bg-emerald-500 text-white"
-                                      : "bg-rose-500 text-white"
-                                  }`}>
-                                    {isProfit ? "WIN" : "LOSE"}
-                                  </span>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <div className="flex flex-col items-end gap-1">
+                                    {/* Type badge */}
+                                    <span className={`text-[9px] font-black px-1.5 py-0.2 rounded border ${
+                                      isReal
+                                        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                        : "bg-amber-50 text-amber-700 border-amber-200"
+                                    }`}>
+                                      {isReal ? "真實" : "模擬"}
+                                    </span>
+                                    
+                                    {/* WIN/LOSE badge */}
+                                    <span className={`text-[9px] font-mono font-black px-1.5 py-0.2 rounded ${
+                                      isProfit
+                                        ? "bg-emerald-500 text-white"
+                                        : "bg-rose-500 text-white"
+                                    }`}>
+                                      {isProfit ? "WIN" : "LOSE"}
+                                    </span>
+                                  </div>
+
+                                  {/* Delete Button */}
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setTabToDeleteCompleted(tab);
+                                      playClickSound();
+                                    }}
+                                    className="p-1 rounded-lg text-zinc-350 hover:text-rose-600 hover:bg-rose-50 sm:opacity-0 sm:group-hover:opacity-100 transition-all border border-transparent hover:border-rose-200 cursor-pointer shrink-0 ml-0.5"
+                                    title="刪除此筆已完成交易紀錄"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
                                 </div>
                               </div>
 
+                              {/* Middle row: Completion Date */}
+                              <div className="flex items-center justify-between text-[10px] text-zinc-400 font-mono pt-1 border-t border-zinc-100/80">
+                                <span className="flex items-center gap-1 text-zinc-500">
+                                  <Calendar className="w-3 h-3 text-zinc-400 shrink-0" />
+                                  <span>結算: {format(endDate, "yyyy/MM/dd")}</span>
+                                </span>
+                              </div>
+
                               {/* Bottom row: PnL Display */}
-                              <div className="pt-2 border-t border-zinc-100 flex items-center justify-between">
+                              <div className="pt-1.5 border-t border-zinc-100 flex items-center justify-between">
                                 <span className="text-[10px] font-bold text-zinc-400">
                                   {isReal ? "實盤損益" : "預估損益"}
                                 </span>
@@ -11324,12 +11443,76 @@ export default function Dashboard() {
                         })}
                       </div>
                     )}
-                          </AnimatePresence>
-                        </div>
-                      </div>
-                    </ScrollIn>
-                  </div>
-                )}
+                  </AnimatePresence>
+                </div>
+              </div>
+            </ScrollIn>
+          </div>
+        )}
+
+      {/* Delete Completed Trade Confirmation Dialog */}
+      <Dialog open={!!tabToDeleteCompleted} onOpenChange={(open) => !open && setTabToDeleteCompleted(null)}>
+        <DialogContent className="border border-zinc-200/80 shadow-2xl bg-white/95 backdrop-blur-xl text-zinc-900 max-w-[420px] w-[92%] p-6 rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="font-extrabold text-lg text-zinc-900 flex items-center gap-2">
+              <div className="w-8 h-8 rounded-full bg-rose-100 flex items-center justify-center text-rose-600">
+                <Trash2 className="w-4 h-4" />
+              </div>
+              <span>刪除已完成交易紀錄</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs text-zinc-500 pt-2 leading-relaxed">
+              確定要刪除 <span className="font-bold text-zinc-900">{tabToDeleteCompleted?.symbol}</span> ({tabToDeleteCompleted?.companyName || "已結算個股"}) 的這筆交易紀錄嗎？此操作將永久自資料庫中移除，無法復原。
+            </DialogDescription>
+          </DialogHeader>
+
+          {tabToDeleteCompleted && (
+            <div className="my-3 p-3 rounded-xl bg-zinc-50 border border-zinc-200 flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2">
+                <span className={`text-[10px] font-black px-1.5 py-0.5 rounded border ${
+                  tabToDeleteCompleted.tradeType === "real"
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                    : "bg-amber-50 text-amber-700 border-amber-200"
+                }`}>
+                  {tabToDeleteCompleted.tradeType === "real" ? "真實交易" : "模擬交易"}
+                </span>
+                <span className="font-mono text-zinc-500 text-[11px]">
+                  結算: {format(getTimestampDate(tabToDeleteCompleted.updatedAt || tabToDeleteCompleted.createdAt) || new Date(), "yyyy/MM/dd")}
+                </span>
+              </div>
+              <span className={`font-mono font-bold ${
+                (tabToDeleteCompleted.finalPnL || 0) >= 0 ? "text-emerald-700" : "text-rose-700"
+              }`}>
+                {(tabToDeleteCompleted.finalPnL || 0) >= 0 ? "+" : ""}${Number(tabToDeleteCompleted.finalPnL || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+            </div>
+          )}
+
+          <DialogFooter className="flex items-center justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setTabToDeleteCompleted(null)}
+              className="px-4 py-2 rounded-xl border border-zinc-200 text-zinc-600 hover:bg-zinc-100 font-bold text-xs transition-colors cursor-pointer"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                if (tabToDeleteCompleted) {
+                  const sym = tabToDeleteCompleted.symbol;
+                  await deleteTab(tabToDeleteCompleted.id);
+                  playClickSound();
+                  toast.success(`已刪除「${sym}」已完成交易紀錄`);
+                  setTabToDeleteCompleted(null);
+                }
+              }}
+              className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-xs transition-colors cursor-pointer shadow-sm"
+            >
+              確認刪除
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
         {activeViewTab === "notes" && (() => {
           return (
