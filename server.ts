@@ -918,6 +918,12 @@ async function startServer() {
     res.status(404).json({ error: `API route not found: ${req.method} ${req.originalUrl}` });
   });
 
+  // Handle AI Studio internal /_/upload or platform health/upload requests cleanly
+  app.all('/_/*', (req, res) => {
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.status(200).json({ ok: true, message: "AI Studio platform route received" });
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

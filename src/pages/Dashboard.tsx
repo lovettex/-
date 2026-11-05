@@ -76,6 +76,7 @@ import {
   Eye,
   Search,
   Settings2,
+  ArrowRightLeft,
   ArrowUp,
   ArrowDown,
   Calendar,
@@ -290,6 +291,7 @@ export default function Dashboard() {
     updateTabHidden,
     updateTabOrder,
     updateTab,
+    updateTradeType,
     deleteTab,
   } = useStockTabs();
   const navigate = useNavigate();
@@ -2534,6 +2536,51 @@ export default function Dashboard() {
   const [isManageHiddenOpen, setIsManageHiddenOpen] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [manageTradeType, setManageTradeType] = useState<"simulated" | "real">("simulated");
+  const [cascadeMoveData, setCascadeMoveData] = useState<{
+    tab: any;
+    targetCat: '觀察中' | '候選名單' | '買進操作' | '賣出操作' | '平倉操作' | '乖離名單';
+    relatedTabs: any[];
+  } | null>(null);
+  const [cascadeTradeTypeData, setCascadeTradeTypeData] = useState<{
+    tab: any;
+    targetType: 'simulated' | 'real';
+    relatedTabs: any[];
+  } | null>(null);
+
+  const getCardSidebarTabs = useCallback((targetTab: any) => {
+    if (!targetTab) return [];
+    const targetSym = (targetTab.symbol || "").trim().toUpperCase();
+    const targetParentSym = (targetTab.parentSymbol || "").trim().toUpperCase();
+    const targetGroupId = targetTab.groupId;
+    const targetEtfSymbols = new Set(
+      (Array.isArray(targetTab.etfSymbols) ? targetTab.etfSymbols : []).map((s: string) => s.trim().toUpperCase())
+    );
+
+    return tabs.filter((t) => {
+      if (t.id === targetTab.id) return false;
+      const tSym = (t.symbol || "").trim().toUpperCase();
+      const tParentSym = (t.parentSymbol || "").trim().toUpperCase();
+
+      // 1. Direct parent/child link via parentTabId
+      if (t.parentTabId && t.parentTabId === targetTab.id) return true;
+      if (targetTab.parentTabId && t.id === targetTab.parentTabId) return true;
+
+      // 2. Attached as sidebar ETF via parentSymbol
+      if (tParentSym && tParentSym === targetSym) return true;
+      if (targetParentSym && (tSym === targetParentSym || tParentSym === targetParentSym)) return true;
+
+      // 3. Listed in parent's etfSymbols list
+      if (targetEtfSymbols.has(tSym)) return true;
+
+      // 4. Shares the exact same symbol (e.g. multiple card tabs / versions)
+      if (tSym === targetSym) return true;
+
+      // 5. Part of the same custom linked block / group
+      if (targetGroupId && t.groupId === targetGroupId) return true;
+
+      return false;
+    });
+  }, [tabs]);
   const [isEditingCapital, setIsEditingCapital] = useState(false);
   const [editCapitalVal, setEditCapitalVal] = useState("");
   const [isEditingVirtualCapital, setIsEditingVirtualCapital] = useState(false);
@@ -9386,15 +9433,69 @@ export default function Dashboard() {
                                             已勾選
                                           </span>
                                         )}
-                                        {tab.tradeType === "simulated" ? (
-                                          <Badge className="bg-amber-50 border border-amber-200 text-amber-700 font-extrabold rounded-md shadow-xs">
-                                            模擬
-                                          </Badge>
-                                        ) : (
-                                          <Badge className="bg-emerald-50 border border-emerald-200 text-emerald-700 font-extrabold rounded-md shadow-xs">
-                                            真實
-                                          </Badge>
-                                        )}
+                                        {/* 交易模式切換器 (模擬 / 真實) */}
+                                        <div className="inline-flex items-center rounded-lg border border-zinc-250 bg-zinc-100 p-0.5 shadow-2xs">
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              const targetType = "simulated";
+                                              if ((tab.tradeType || "simulated") === targetType) return;
+                                              const related = getCardSidebarTabs(tab);
+                                              const relatedToMove = related.filter(
+                                                (r) => (r.tradeType || "simulated") !== targetType
+                                              );
+                                              if (relatedToMove.length > 0) {
+                                                setCascadeTradeTypeData({
+                                                  tab,
+                                                  targetType,
+                                                  relatedTabs: relatedToMove,
+                                                });
+                                              } else {
+                                                updateTradeType(tab.id, targetType);
+                                              }
+                                            }}
+                                            className={`px-2 py-0.5 text-[11px] font-black rounded-md transition-all cursor-pointer flex items-center gap-1 ${
+                                              (tab.tradeType || "simulated") === "simulated"
+                                                ? "bg-amber-500 text-white shadow-xs font-bold"
+                                                : "text-zinc-600 hover:text-zinc-900 hover:bg-white/60"
+                                            }`}
+                                            title="切換為模擬交易 (simulated)"
+                                          >
+                                            <Gamepad2 className="w-3 h-3 shrink-0" />
+                                            <span>模擬</span>
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              const targetType = "real";
+                                              if (tab.tradeType === targetType) return;
+                                              const related = getCardSidebarTabs(tab);
+                                              const relatedToMove = related.filter(
+                                                (r) => (r.tradeType || "simulated") !== targetType
+                                              );
+                                              if (relatedToMove.length > 0) {
+                                                setCascadeTradeTypeData({
+                                                  tab,
+                                                  targetType,
+                                                  relatedTabs: relatedToMove,
+                                                });
+                                              } else {
+                                                updateTradeType(tab.id, targetType);
+                                              }
+                                            }}
+                                            className={`px-2 py-0.5 text-[11px] font-black rounded-md transition-all cursor-pointer flex items-center gap-1 ${
+                                              tab.tradeType === "real"
+                                                ? "bg-emerald-600 text-white shadow-xs font-bold"
+                                                : "text-zinc-600 hover:text-zinc-900 hover:bg-white/60"
+                                            }`}
+                                            title="切換為真實交易 (real)"
+                                          >
+                                            <ShieldCheck className="w-3 h-3 shrink-0" />
+                                            <span>真實</span>
+                                          </button>
+                                        </div>
 
                                         {/* 策略標記狀態 (選取 | 止盈 | 止損 | 突破/攤平加碼 | 平倉 | 觀察) */}
                                         {(() => {
@@ -9479,11 +9580,28 @@ export default function Dashboard() {
                                         return (
                                           <button
                                             key={cat}
-                                            onClick={() =>
-                                              updateTab(tab.id, {
-                                                holdingStatus: cat,
-                                              })
-                                            }
+                                            onClick={() => {
+                                              const currentCat = getDisplayHoldingStatus(tab.holdingStatus);
+                                              if (currentCat === cat) return;
+
+                                              // Check if this card has sidebar tabs that need to be moved
+                                              const related = getCardSidebarTabs(tab);
+                                              const relatedToMove = related.filter(
+                                                (r) => getDisplayHoldingStatus(r.holdingStatus) !== cat
+                                              );
+
+                                              if (relatedToMove.length > 0) {
+                                                setCascadeMoveData({
+                                                  tab,
+                                                  targetCat: cat,
+                                                  relatedTabs: relatedToMove,
+                                                });
+                                              } else {
+                                                updateTab(tab.id, {
+                                                  holdingStatus: cat,
+                                                });
+                                              }
+                                            }}
                                             className={`flex-1 py-1.5 rounded-lg text-xs font-black transition-all border cursor-pointer ${
                                               isSelected
                                                 ? "bg-emerald-500 text-white border-emerald-600 shadow-xs"
@@ -9594,6 +9712,256 @@ export default function Dashboard() {
                             </div>
                           )}
                         </div>
+                      </DialogContent>
+                    </Dialog>
+
+                    {/* 連帶轉移側邊分頁確認對話窗 */}
+                    <Dialog
+                      open={!!cascadeMoveData}
+                      onOpenChange={(open) => {
+                        if (!open) setCascadeMoveData(null);
+                      }}
+                    >
+                      <DialogContent className="border border-zinc-200 shadow-2xl bg-white text-zinc-800 outline-none w-[92vw] sm:max-w-md !rounded-2xl p-6 z-[100050]">
+                        <DialogHeader>
+                          <DialogTitle className="font-black text-lg text-zinc-900 flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center justify-center shrink-0">
+                              <ArrowRightLeft className="w-4 h-4 text-emerald-600" />
+                            </div>
+                            <span>連帶轉移側邊分頁確認</span>
+                          </DialogTitle>
+                          <DialogDescription className="text-xs text-zinc-500 pt-1">
+                            偵測到此股票卡片具有多個側邊分頁標的
+                          </DialogDescription>
+                        </DialogHeader>
+
+                        {cascadeMoveData && (
+                          <div className="space-y-4 py-2">
+                            <div className="p-3.5 bg-zinc-50 rounded-xl border border-zinc-200 text-xs space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-zinc-500 font-bold">主股票標的：</span>
+                                <span className="font-black text-sm text-zinc-900 bg-white px-2 py-0.5 rounded border border-zinc-200">
+                                  {cascadeMoveData.tab.symbol}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center justify-between">
+                                <span className="text-zinc-500 font-bold">目標目錄層級：</span>
+                                <span className="font-black text-sm text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                                  {cascadeMoveData.targetCat === "觀察中" && cascadeMoveData.tab.tradeType === "simulated"
+                                    ? "虛擬交易"
+                                    : cascadeMoveData.targetCat}
+                                </span>
+                              </div>
+
+                              <div className="pt-1.5 border-t border-zinc-200/80">
+                                <div className="text-zinc-500 font-bold mb-1.5 flex items-center gap-1">
+                                  <span>側邊分頁標的 ({cascadeMoveData.relatedTabs.length} 檔)：</span>
+                                </div>
+                                <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pr-1">
+                                  {cascadeMoveData.relatedTabs.map((rTab) => (
+                                    <span
+                                      key={rTab.id}
+                                      className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white border border-zinc-200 font-bold text-xs text-zinc-800 shadow-2xs"
+                                    >
+                                      <span className="w-1.5 h-1.5 rounded-full bg-cyan-500" />
+                                      <span>{rTab.symbol}</span>
+                                      <span className="text-[10px] text-zinc-400">
+                                        ({getDisplayHoldingStatus(rTab.holdingStatus)})
+                                      </span>
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+
+                            <p className="text-xs text-zinc-600 font-medium leading-relaxed">
+                              是否將卡片內所有側邊分頁標的連帶一起轉移至【
+                              <span className="font-bold text-zinc-900">
+                                {cascadeMoveData.targetCat === "觀察中" && cascadeMoveData.tab.tradeType === "simulated"
+                                  ? "虛擬交易"
+                                  : cascadeMoveData.targetCat}
+                              </span>
+                              】？
+                            </p>
+
+                            <div className="flex flex-col sm:flex-row gap-2 pt-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => setCascadeMoveData(null)}
+                                className="flex-1 text-xs font-bold text-zinc-600 border-zinc-250 cursor-pointer"
+                              >
+                                取消
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={async () => {
+                                  const targetCat = cascadeMoveData.targetCat;
+                                  const targetLabel = targetCat === "觀察中" && cascadeMoveData.tab.tradeType === "simulated"
+                                    ? "虛擬交易"
+                                    : targetCat;
+                                  await updateTab(cascadeMoveData.tab.id, { holdingStatus: targetCat });
+                                  toast.success(`僅將 ${cascadeMoveData.tab.symbol} 轉移至 ${targetLabel}`);
+                                  setCascadeMoveData(null);
+                                }}
+                                className="flex-1 text-xs font-bold text-zinc-700 hover:text-zinc-900 border-zinc-300 hover:bg-zinc-50 cursor-pointer"
+                              >
+                                僅轉移此股票
+                              </Button>
+                              <Button
+                                type="button"
+                                onClick={async () => {
+                                  const targetCat = cascadeMoveData.targetCat;
+                                  const targetLabel = targetCat === "觀察中" && cascadeMoveData.tab.tradeType === "simulated"
+                                    ? "虛擬交易"
+                                    : targetCat;
+                                  await updateTab(cascadeMoveData.tab.id, { holdingStatus: targetCat });
+                                  for (const rTab of cascadeMoveData.relatedTabs) {
+                                    await updateTab(rTab.id, { holdingStatus: targetCat });
+                                  }
+                                  toast.success(
+                                    `已將 ${cascadeMoveData.tab.symbol} 及 ${cascadeMoveData.relatedTabs.length} 個側邊分頁連帶轉移至 ${targetLabel}`
+                                  );
+                                  setCascadeMoveData(null);
+                                }}
+                                className="flex-1 text-xs font-black bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer"
+                              >
+                                連帶全部轉移 ({cascadeMoveData.relatedTabs.length + 1})
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </DialogContent>
+                    </Dialog>
+
+                    {/* 連帶切換交易模式確認對話窗 */}
+                    <Dialog
+                      open={!!cascadeTradeTypeData}
+                      onOpenChange={(open) => {
+                        if (!open) setCascadeTradeTypeData(null);
+                      }}
+                    >
+                      <DialogContent className="border border-zinc-200 shadow-2xl bg-white text-zinc-800 outline-none w-[92vw] sm:max-w-md !rounded-2xl p-6 z-[100050]">
+                        <DialogHeader>
+                          <DialogTitle className="font-black text-lg text-zinc-900 flex items-center gap-2">
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border ${
+                              cascadeTradeTypeData?.targetType === 'real'
+                                ? 'bg-emerald-50 border-emerald-200 text-emerald-600'
+                                : 'bg-amber-50 border-amber-200 text-amber-600'
+                            }`}>
+                              {cascadeTradeTypeData?.targetType === 'real' ? (
+                                <ShieldCheck className="w-4 h-4" />
+                              ) : (
+                                <Gamepad2 className="w-4 h-4" />
+                              )}
+                            </div>
+                            <span>連帶切換交易模式確認</span>
+                          </DialogTitle>
+                          <DialogDescription className="text-xs text-zinc-500 pt-1">
+                            偵測到此股票卡片具有多個側邊分頁標的
+                          </DialogDescription>
+                        </DialogHeader>
+
+                        {cascadeTradeTypeData && (
+                          <div className="space-y-4 py-2">
+                            <div className="p-3.5 bg-zinc-50 rounded-xl border border-zinc-200 text-xs space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-zinc-500 font-bold">主股票標的：</span>
+                                <span className="font-black text-sm text-zinc-900 bg-white px-2 py-0.5 rounded border border-zinc-200">
+                                  {cascadeTradeTypeData.tab.symbol}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center justify-between">
+                                <span className="text-zinc-500 font-bold">目標交易模式：</span>
+                                <span className={`font-black text-sm px-2 py-0.5 rounded border ${
+                                  cascadeTradeTypeData.targetType === 'real'
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                    : 'bg-amber-50 text-amber-700 border-amber-200'
+                                }`}>
+                                  {cascadeTradeTypeData.targetType === 'real' ? '真實交易 (Real)' : '虛擬交易 (Simulated)'}
+                                </span>
+                              </div>
+
+                              <div className="pt-1.5 border-t border-zinc-200/80">
+                                <div className="text-zinc-500 font-bold mb-1.5 flex items-center gap-1">
+                                  <span>側邊分頁標的 ({cascadeTradeTypeData.relatedTabs.length} 檔)：</span>
+                                </div>
+                                <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pr-1">
+                                  {cascadeTradeTypeData.relatedTabs.map((rTab) => (
+                                    <span
+                                      key={rTab.id}
+                                      className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white border border-zinc-200 font-bold text-xs text-zinc-800 shadow-2xs"
+                                    >
+                                      <span className="w-1.5 h-1.5 rounded-full bg-cyan-500" />
+                                      <span>{rTab.symbol}</span>
+                                      <span className="text-[10px] text-zinc-400">
+                                        ({rTab.tradeType === 'real' ? '真實' : '模擬'})
+                                      </span>
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+
+                            <p className="text-xs text-zinc-600 font-medium leading-relaxed">
+                              是否將卡片內所有側邊分頁標的連帶一起轉移至【
+                              <span className="font-bold text-zinc-900">
+                                {cascadeTradeTypeData.targetType === 'real' ? '真實交易' : '虛擬交易'}
+                              </span>
+                              】目錄下？
+                            </p>
+
+                            <div className="flex flex-col sm:flex-row gap-2 pt-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => setCascadeTradeTypeData(null)}
+                                className="flex-1 text-xs font-bold text-zinc-600 border-zinc-250 cursor-pointer"
+                              >
+                                取消
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={async () => {
+                                  const targetType = cascadeTradeTypeData.targetType;
+                                  const targetLabel = targetType === 'real' ? '真實交易' : '虛擬交易';
+                                  await updateTradeType(cascadeTradeTypeData.tab.id, targetType);
+                                  toast.success(`僅將 ${cascadeTradeTypeData.tab.symbol} 轉移至 ${targetLabel}`);
+                                  setCascadeTradeTypeData(null);
+                                }}
+                                className="flex-1 text-xs font-bold text-zinc-700 hover:text-zinc-900 border-zinc-300 hover:bg-zinc-50 cursor-pointer"
+                              >
+                                僅轉移此股票
+                              </Button>
+                              <Button
+                                type="button"
+                                onClick={async () => {
+                                  const targetType = cascadeTradeTypeData.targetType;
+                                  const targetLabel = targetType === 'real' ? '真實交易' : '虛擬交易';
+                                  await updateTradeType(cascadeTradeTypeData.tab.id, targetType);
+                                  for (const rTab of cascadeTradeTypeData.relatedTabs) {
+                                    await updateTradeType(rTab.id, targetType);
+                                  }
+                                  toast.success(
+                                    `已將 ${cascadeTradeTypeData.tab.symbol} 及 ${cascadeTradeTypeData.relatedTabs.length} 個側邊分頁連帶轉移至 ${targetLabel}`
+                                  );
+                                  setCascadeTradeTypeData(null);
+                                }}
+                                className={`flex-1 text-xs font-black text-white shadow-xs cursor-pointer ${
+                                  cascadeTradeTypeData.targetType === 'real'
+                                    ? 'bg-teal-600 hover:bg-teal-700'
+                                    : 'bg-amber-600 hover:bg-amber-700'
+                                }`}
+                              >
+                                連帶全部轉移 ({cascadeTradeTypeData.relatedTabs.length + 1})
+                              </Button>
+                            </div>
+                          </div>
+                        )}
                       </DialogContent>
                     </Dialog>
 

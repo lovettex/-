@@ -15,6 +15,23 @@ export default defineConfig(({mode}) => {
         '@': path.resolve(__dirname, './src'),
       },
     },
+    optimizeDeps: {
+      include: [
+        'react',
+        'react-dom',
+        'react-router-dom',
+        'lucide-react',
+        'motion/react',
+        'date-fns',
+        'clsx',
+        'tailwind-merge',
+        'sonner',
+        'three',
+        'firebase/app',
+        'firebase/firestore',
+        'firebase/auth',
+      ],
+    },
     server: {
       proxy: {
         '/api': {

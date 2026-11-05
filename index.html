@@ -11,7 +11,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Anton&display=swap" rel="stylesheet" />
     <script>
-      // Automatically recover if a browser (e.g. Edge) requests invalidated prebundled chunk hashes
+      // Automatically recover if a browser requests invalidated prebundled chunk hashes or hits a transient gateway error
       window.addEventListener('vite:preloadError', function(event) {
         console.warn('Vite preload error detected, auto-refreshing...', event);
         window.location.reload();
@@ -19,15 +19,22 @@
       window.addEventListener('error', function(event) {
         var msg = (event && (event.message || '')) + '';
         var src = (event && (event.filename || '')) + '';
-        if (msg.indexOf('chunk-') !== -1 || src.indexOf('chunk-') !== -1 || msg.indexOf('Failed to fetch dynamically imported module') !== -1) {
-          var key = 'vite_chunk_recover_' + Math.floor(Date.now() / 10000);
+        var targetSrc = event && event.target && event.target.src ? (event.target.src + '') : '';
+        if (
+          msg.indexOf('chunk-') !== -1 ||
+          src.indexOf('chunk-') !== -1 ||
+          msg.indexOf('Failed to fetch') !== -1 ||
+          targetSrc.indexOf('.tsx') !== -1 ||
+          targetSrc.indexOf('.ts') !== -1
+        ) {
+          var key = 'vite_chunk_recover_' + Math.floor(Date.now() / 8000);
           if (!sessionStorage.getItem(key)) {
             sessionStorage.setItem(key, '1');
-            console.warn('Recovering from stale chunk cache...');
-            window.location.reload();
+            console.warn('Recovering from transient load failure, refreshing...');
+            setTimeout(function() { window.location.reload(); }, 300);
           }
         }
-      });
+      }, true);
     </script>
   </head>
   <body style="margin: 0; background-color: #f5f5f7; color: #18181b; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">

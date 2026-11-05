@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
 import { format } from 'date-fns';
 import { Timestamp, collection, writeBatch, doc, serverTimestamp, addDoc, getDocs, deleteDoc, getDoc, getDocFromCache, setDoc, updateDoc } from 'firebase/firestore';
-import { Trash2, BarChart3, ChevronDown, ChevronUp, Gamepad2, ShieldCheck, Upload, Download, ChevronLeft, CheckCircle2, RotateCcw, Loader2, HelpCircle, AlertTriangle, Save, Calculator, History, RefreshCw, Layers, TrendingDown, TrendingUp, Split, ShieldAlert, DollarSign, Wallet, Coins, Target, Activity, Compass, LineChart, ArrowRightLeft } from 'lucide-react';
+import { Trash2, BarChart3, ChevronDown, ChevronUp, Gamepad2, ShieldCheck, Upload, Download, ChevronLeft, CheckCircle2, RotateCcw, Loader2, HelpCircle, AlertTriangle, Save, Calculator, History, RefreshCw, Layers, TrendingDown, TrendingUp, Split, ShieldAlert, DollarSign, Wallet, Coins, Target, Activity, Compass, LineChart, ArrowRightLeft, Check } from 'lucide-react';
 import { toast } from "sonner";
 import { motion, AnimatePresence } from 'motion/react';
 import { db, auth } from '../lib/firebase';
@@ -127,6 +127,28 @@ export default function StockTabDetail() {
   const subTabListRef = useRef<HTMLDivElement>(null);
   const subTabRefs = useRef<{ [key: string]: HTMLButtonElement | null }>({});
   const [subIndicatorStyle, setSubIndicatorStyle] = useState<{ left: number; width: number }>({ left: 0, width: 0 });
+
+  const [isTradeTypeDropdownOpen, setIsTradeTypeDropdownOpen] = useState(false);
+  const tradeTypeDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (tradeTypeDropdownRef.current && !tradeTypeDropdownRef.current.contains(e.target as Node)) {
+        setIsTradeTypeDropdownOpen(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsTradeTypeDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
 
   const updateMainTabIndicator = useCallback(() => {
     const activeEl = mainTabRefs.current[activeTab];
@@ -2456,7 +2478,7 @@ export default function StockTabDetail() {
       <ScrollIn>
         <div className="space-y-2.5">
           {/* 正上方 區塊: AI 評分矩陣與核心操作工具列 (Rating Matrix & Action Controls) */}
-          <div className="glass-panel border border-zinc-200/90 dark:border-zinc-800 bg-white/95 dark:bg-zinc-900/95 p-2.5 sm:px-4 sm:py-2 rounded-xl sm:rounded-2xl shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 lg:gap-4 overflow-visible relative">
+          <div className="glass-panel border border-zinc-200/90 dark:border-zinc-800 bg-white/95 dark:bg-zinc-900/95 p-2.5 sm:px-4 sm:py-2 rounded-xl sm:rounded-2xl shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 lg:gap-4 overflow-visible relative z-30">
             
             {/* 左側: AI 多維評分與多空動能模組 (評分, Quality, Value, Crash Sim, Buy Rate, Sell Rate, 波動性, POS/NEG VALUE) */}
             <div className="flex items-center gap-1.5 sm:gap-2 flex-nowrap overflow-x-auto scrollbar-hide py-0.5 shrink-0">
@@ -2592,7 +2614,7 @@ export default function StockTabDetail() {
             </div>
 
             {/* 右側: 匯出 JSON、匯入 JSON 及操作按鈕群 */}
-            <div className="flex items-center gap-2 shrink-0 overflow-x-auto scrollbar-hide py-0.5">
+            <div className="flex items-center gap-2 shrink-0 overflow-visible py-0.5 relative z-40">
               <input
                 type="file"
                 accept=".json"
@@ -2620,25 +2642,81 @@ export default function StockTabDetail() {
               </button>
 
               {/* 交易模式切換器 (simulated / real) */}
-              <Select value={tab.tradeType} onValueChange={(val: any) => updateTradeType(tab.id, val)}>
-                <SelectTrigger className="h-7 sm:h-8 px-2.5 bg-white border border-zinc-200 text-zinc-800 text-xs font-bold focus:ring-emerald-500/50 rounded-lg shadow-2xs hover:border-zinc-300 transition-colors shrink-0">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="glass-panel border-zinc-200 text-zinc-800 bg-white min-w-[110px]">
-                  <SelectItem value="simulated" className="text-xs font-semibold focus:bg-zinc-100">
-                    <div className="flex items-center gap-1.5">
-                      <Gamepad2 className="h-3.5 w-3.5 text-amber-600" />
-                      <span>simulated</span>
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="real" className="text-xs font-semibold focus:bg-zinc-100">
-                    <div className="flex items-center gap-1.5">
-                      <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
-                      <span>real</span>
-                    </div>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="relative shrink-0 z-50" ref={tradeTypeDropdownRef}>
+                <button
+                  type="button"
+                  onClick={() => setIsTradeTypeDropdownOpen((prev) => !prev)}
+                  className={`h-7 sm:h-8 px-2.5 bg-white hover:bg-zinc-50 border text-xs font-bold rounded-lg shadow-2xs transition-all flex items-center gap-1.5 cursor-pointer select-none ${
+                    isTradeTypeDropdownOpen
+                      ? 'border-zinc-400 ring-2 ring-emerald-500/20'
+                      : 'border-zinc-200 hover:border-zinc-300'
+                  }`}
+                  title="切換交易模式 (simulated 虛擬交易 / real 真實交易)"
+                >
+                  {(tab.tradeType || 'simulated') === 'real' ? (
+                    <>
+                      <ShieldCheck className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                      <span className="font-bold text-emerald-700">real</span>
+                    </>
+                  ) : (
+                    <>
+                      <Gamepad2 className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                      <span className="font-bold text-amber-700">simulated</span>
+                    </>
+                  )}
+                  <ChevronDown
+                    className={`w-3.5 h-3.5 text-zinc-400 transition-transform duration-200 shrink-0 ${
+                      isTradeTypeDropdownOpen ? 'rotate-180 text-zinc-700' : ''
+                    }`}
+                  />
+                </button>
+
+                {isTradeTypeDropdownOpen && (
+                  <div className="absolute right-0 top-full mt-1.5 w-36 bg-white border border-zinc-200/90 rounded-xl shadow-2xl z-[99999] p-1 animate-in fade-in-0 zoom-in-95">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        updateTradeType(tab.id, 'simulated');
+                        setIsTradeTypeDropdownOpen(false);
+                      }}
+                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                        (tab.tradeType || 'simulated') === 'simulated'
+                          ? 'bg-amber-50 text-amber-800 font-bold'
+                          : 'text-zinc-700 hover:bg-zinc-100'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <Gamepad2 className="h-3.5 w-3.5 text-amber-600" />
+                        <span>simulated</span>
+                      </div>
+                      {(tab.tradeType || 'simulated') === 'simulated' && (
+                        <Check className="w-3.5 h-3.5 text-amber-600 stroke-[3]" />
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        updateTradeType(tab.id, 'real');
+                        setIsTradeTypeDropdownOpen(false);
+                      }}
+                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer mt-0.5 ${
+                        tab.tradeType === 'real'
+                          ? 'bg-emerald-50 text-emerald-800 font-bold'
+                          : 'text-zinc-700 hover:bg-zinc-100'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
+                        <span>real</span>
+                      </div>
+                      {tab.tradeType === 'real' && (
+                        <Check className="w-3.5 h-3.5 text-emerald-600 stroke-[3]" />
+                      )}
+                    </button>
+                  </div>
+                )}
+              </div>
 
               {/* 完成交易 Dialog 按鈕 */}
               {tab.status === 'ACTIVE' ? (
@@ -2734,7 +2812,7 @@ export default function StockTabDetail() {
           </div>
 
           {/* 下方 區塊: 個股識別與行情成本看板 (Symbol, Price, Average Cost, Shares, Option Portfolio) */}
-          <div className="glass-panel border border-zinc-200/90 dark:border-zinc-800 bg-white/95 dark:bg-zinc-900/95 p-3 sm:py-2.5 sm:px-4 rounded-xl sm:rounded-2xl shadow-xs flex flex-wrap items-center justify-between gap-3.5 sm:gap-5 overflow-visible relative">
+          <div className="glass-panel border border-zinc-200/90 dark:border-zinc-800 bg-white/95 dark:bg-zinc-900/95 p-3 sm:py-2.5 sm:px-4 rounded-xl sm:rounded-2xl shadow-xs flex flex-wrap items-center justify-between gap-3.5 sm:gap-5 overflow-visible relative z-10">
             
             {/* Zone 1: 個股識別與行情成本 (股票代號、公司名稱、即時現價、平均成本、持股數、期權金額與當前損益) */}
             <div className="flex flex-wrap items-center gap-3.5 sm:gap-4 shrink-0">

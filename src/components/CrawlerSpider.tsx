@@ -603,7 +603,6 @@ export const CrawlerSpider: React.FC<CrawlerSpiderProps> = ({ isActive, onToggle
       canvas,
       alpha: true,
       antialias: true,
-      powerPreference: 'high-performance',
     });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
