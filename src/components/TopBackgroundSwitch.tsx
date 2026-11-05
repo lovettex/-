@@ -1,9 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { whiteNoiseEngine, WhiteNoiseState } from '../lib/whiteNoiseEngine';
 import { PS5_THEMES } from '../types/ps5Themes';
-import { Sparkles, Video, Film, Eye, EyeOff } from 'lucide-react';
+import { Video, Film, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 
+/**
+ * TopBackgroundSwitch
+ * Exclusively displays switch buttons for Theme 1 and Theme 2.
+ * Hidden whenever PS5 dynamic background is OFF.
+ */
 export function TopBackgroundSwitch() {
   const [state, setState] = useState<WhiteNoiseState>(whiteNoiseEngine.getState());
 
@@ -14,22 +19,17 @@ export function TopBackgroundSwitch() {
     return () => unsub();
   }, []);
 
-  const handleSelect = (themeId: string) => {
-    if (!state.bgEnabled) {
-      whiteNoiseEngine.toggleBgEnabled();
-    }
+  // Hide completely when PS5 dynamic background is OFF
+  if (!state.bgEnabled) {
+    return null;
+  }
+
+  const handleSelect = (themeId: 'texture-overlay-video' | 'anton-cinematic-video') => {
     whiteNoiseEngine.setBgTheme(themeId);
     const themeObj = PS5_THEMES.find((t) => t.id === themeId);
     toast.success(`已切換動態背景：${themeObj?.name || themeId}`, {
       description: themeObj?.nameEn || 'Dynamic background theme active',
       duration: 2000,
-    });
-  };
-
-  const handleToggleBg = () => {
-    whiteNoiseEngine.toggleBgEnabled();
-    toast.info(!state.bgEnabled ? '已啟用動態背景' : '已關閉動態背景', {
-      duration: 1800,
     });
   };
 
@@ -39,24 +39,15 @@ export function TopBackgroundSwitch() {
   return (
     <div
       role="region"
-      aria-label="動態背景切換控制"
-      className="inline-flex items-center gap-1 sm:gap-1.5 p-1 sm:p-1.5 rounded-full bg-black/60 hover:bg-black/75 backdrop-blur-xl border border-white/20 shadow-[0_8px_32px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.15)] transition-all select-none"
+      aria-label="動態背景主題切換 (主題 1 與 主題 2)"
+      className="inline-flex items-center gap-1 p-1 rounded-full bg-zinc-950/85 hover:bg-zinc-950/95 backdrop-blur-xl border border-white/20 shadow-[0_8px_32px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.18)] transition-all select-none animate-fadeIn pointer-events-auto"
     >
-      {/* On/Off Toggle Button */}
-      <button
-        type="button"
-        onClick={handleToggleBg}
-        className={`px-2 sm:px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
-          state.bgEnabled
-            ? 'bg-emerald-500/25 text-emerald-300 border border-emerald-400/50 shadow-[0_0_10px_rgba(16,185,129,0.3)]'
-            : 'bg-white/10 text-zinc-400 hover:text-white border border-white/10'
-        }`}
-        title={state.bgEnabled ? '點擊關閉動態背景' : '點擊啟用動態背景'}
-      >
-        <Sparkles className={`w-3 h-3 ${state.bgEnabled ? 'text-emerald-400 animate-pulse' : 'text-zinc-400'}`} />
-        <span className="hidden xs:inline">動態背景</span>
-        <span className="text-[10px] font-mono opacity-80">{state.bgEnabled ? 'ON' : 'OFF'}</span>
-      </button>
+      <div className="flex items-center gap-1 pl-2.5 pr-1 text-emerald-400">
+        <Sparkles className="w-3.5 h-3.5 animate-pulse" />
+        <span className="text-[10px] font-black tracking-wider uppercase text-emerald-300 hidden md:inline">
+          PS5 背景
+        </span>
+      </div>
 
       <span className="w-[1px] h-3.5 bg-white/20 mx-0.5" />
 
@@ -64,8 +55,8 @@ export function TopBackgroundSwitch() {
       <button
         type="button"
         onClick={() => handleSelect('texture-overlay-video')}
-        className={`px-2.5 sm:px-3 py-1 rounded-full text-[11.5px] font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-          isTheme1 && state.bgEnabled
+        className={`px-3 py-1 rounded-full text-[11.5px] font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+          isTheme1
             ? 'bg-gradient-to-r from-emerald-500 to-teal-400 text-zinc-950 font-black shadow-[0_2px_12px_rgba(16,185,129,0.5),inset_0_1px_0_rgba(255,255,255,0.7)] scale-[1.02]'
             : 'text-zinc-300 hover:text-white hover:bg-white/12'
         }`}
@@ -80,8 +71,8 @@ export function TopBackgroundSwitch() {
       <button
         type="button"
         onClick={() => handleSelect('anton-cinematic-video')}
-        className={`px-2.5 sm:px-3 py-1 rounded-full text-[11.5px] font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-          isTheme2 && state.bgEnabled
+        className={`px-3 py-1 rounded-full text-[11.5px] font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+          isTheme2
             ? 'bg-gradient-to-r from-sky-400 to-blue-500 text-zinc-950 font-black shadow-[0_2px_12px_rgba(56,189,248,0.5),inset_0_1px_0_rgba(255,255,255,0.7)] scale-[1.02]'
             : 'text-zinc-300 hover:text-white hover:bg-white/12'
         }`}

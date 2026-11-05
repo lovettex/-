@@ -159,12 +159,14 @@ export default function Layout() {
       </div>
 
       <main className="flex-1 relative z-10 focus:outline-none w-full">
-        {/* Switch Button on Top */}
-        <div className="sticky top-0 z-40 w-full pointer-events-none">
-          <div className="w-full max-w-[1920px] mx-auto px-2 sm:px-4 md:px-6 py-2 flex justify-end items-center pointer-events-auto">
-            <TopBackgroundSwitch />
+        {/* Switch Button on Top - only shown when PS5 Dynamic Background is ON */}
+        {ambientState.bgEnabled && (
+          <div className="sticky top-0 z-[60] w-full pointer-events-none">
+            <div className="w-full max-w-[1920px] mx-auto px-2 sm:px-4 md:px-6 py-2 flex justify-end items-center pointer-events-auto">
+              <TopBackgroundSwitch />
+            </div>
           </div>
-        </div>
+        )}
 
         <div className="w-full mx-auto px-2 sm:px-4 md:px-6 pb-20 md:pb-24 max-w-[1920px]">
           <Outlet />
