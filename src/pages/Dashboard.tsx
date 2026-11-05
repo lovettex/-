@@ -10266,19 +10266,30 @@ export default function Dashboard() {
                                     const nonSimRawOrders = rawTabOrders.filter(
                                       (o: any) => !isSimulatedPreOrderLike(o)
                                     );
+                                    const baseTargetOrders =
+                                      strategyTargets.length > 0
+                                        ? strategyTargets.map((t) => ({
+                                            ...t,
+                                            category: t.categoryType,
+                                            direction:
+                                              t.categoryType === "止損設定" ||
+                                              t.categoryType === "止盈設定" ||
+                                              t.categoryType === "壓力門檻"
+                                                ? "SELL"
+                                                : "BUY",
+                                            isManualHighlight: !!strategyHighlights[`${tab.id}-${t.id}`],
+                                          }))
+                                        : nonSimRawOrders;
+                                    const seenOrderKeys = new Set<string>();
+                                    const dedupedBaseOrders = baseTargetOrders.filter((o: any) => {
+                                      const pNum = Number(o.price);
+                                      const key = `${o.category || ""}_${!isNaN(pNum) && pNum > 0 ? pNum.toFixed(2) : String(o.price)}`;
+                                      if (seenOrderKeys.has(key)) return false;
+                                      seenOrderKeys.add(key);
+                                      return true;
+                                    });
                                     plannedOrders = [
-                                      ...strategyTargets.map((t) => ({
-                                        ...t,
-                                        category: t.categoryType,
-                                        direction:
-                                          t.categoryType === "止損設定" ||
-                                          t.categoryType === "止盈設定" ||
-                                          t.categoryType === "壓力門檻"
-                                            ? "SELL"
-                                            : "BUY",
-                                        isManualHighlight: !!strategyHighlights[`${tab.id}-${t.id}`],
-                                      })),
-                                      ...nonSimRawOrders,
+                                      ...dedupedBaseOrders,
                                       ...cardSimPreOrders.map((po) => ({
                                         id: po.id,
                                         price: po.price,

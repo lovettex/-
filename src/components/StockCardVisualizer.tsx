@@ -2340,17 +2340,39 @@ export const StockCardVisualizer: React.FC<Props> = ({
       })
       .filter((o) => !isNaN(o.price) && o.price > 0);
 
-    const supports = validOrders.filter((o) => o.category?.includes("支撐"));
-    const resistances = validOrders.filter((o) => o.category?.includes("壓力"));
-    const tps = validOrders
-      .filter((o) => o.category?.includes("止盈"))
-      .sort((a, b) => a.price - b.price);
-    const sls = validOrders
-      .filter((o) => o.category?.includes("止損"))
-      .sort((a, b) => b.price - a.price);
-    const entries = validOrders
-      .filter((o) => o.category?.includes("進出"))
-      .sort((a, b) => a.price - b.price);
+    const dedupeByPrice = (items: any[]) => {
+      const seen = new Set<string>();
+      return items.filter((item) => {
+        const p = Number(item.price);
+        if (isNaN(p) || p <= 0) return false;
+        const key = p.toFixed(2);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    };
+
+    const supports = dedupeByPrice(
+      validOrders.filter((o) => o.category?.includes("支撐"))
+    );
+    const resistances = dedupeByPrice(
+      validOrders.filter((o) => o.category?.includes("壓力"))
+    );
+    const tps = dedupeByPrice(
+      validOrders
+        .filter((o) => o.category?.includes("止盈"))
+        .sort((a, b) => a.price - b.price)
+    );
+    const sls = dedupeByPrice(
+      validOrders
+        .filter((o) => o.category?.includes("止損"))
+        .sort((a, b) => b.price - a.price)
+    );
+    const entries = dedupeByPrice(
+      validOrders
+        .filter((o) => o.category?.includes("進出"))
+        .sort((a, b) => a.price - b.price)
+    );
 
     // 預計購買總股數與集中規劃計算 (分批進場金字塔，完全參照個股頁面核心計算)
     const currentHoldingQty = holdingQuantity !== undefined ? holdingQuantity : (averageCostQuantity || 0);
@@ -3452,19 +3474,6 @@ export const StockCardVisualizer: React.FC<Props> = ({
                       }
                     }}
                   />
-                  {axisLetter && (
-                    <text
-                      x={Math.max(ann.x1, ann.x2) - 1.5}
-                      y={((ann.y1 + ann.y2) / 2) - 1.2}
-                      textAnchor="end"
-                      fill="#9ca3af"
-                      fontSize="3.8"
-                      fontWeight="800"
-                      className="select-none pointer-events-none font-mono tracking-wider opacity-85"
-                    >
-                      {axisLetter}
-                    </text>
-                  )}
                 </g>
               );
             }
@@ -3560,19 +3569,6 @@ export const StockCardVisualizer: React.FC<Props> = ({
                       }
                     }}
                   />
-                  {axisLetter && (
-                    <text
-                      x="98.5"
-                      y={dividerY - 1.2}
-                      textAnchor="end"
-                      fill={isBeingDragged ? '#f59e0b' : (activePs5Mode ? '#ffffff' : '#9ca3af')}
-                      fontSize={activePs5Mode ? "4.2" : "3.8"}
-                      fontWeight="900"
-                      className={`select-none pointer-events-none font-mono tracking-wider ${activePs5Mode ? "stock-card-axis-text-3d opacity-100" : "opacity-90"}`}
-                    >
-                      {axisLetter} {ann.price && ann.price > 0 ? `$${ann.price.toFixed(2)}` : ''}
-                    </text>
-                  )}
                 </g>
               );
             }
@@ -4097,16 +4093,17 @@ export const StockCardVisualizer: React.FC<Props> = ({
                   style={{
                     right: '6px',
                     top: `${dividerY}%`,
-                    transform: 'translateY(-50%)',
+                    transform: 'translateY(-100%)',
+                    marginTop: '-3px',
                   }}
-                  className={`absolute z-30 pointer-events-none select-none text-[11px] sm:text-[12px] font-black font-mono tracking-wider leading-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)] flex items-center gap-1 ${
-                    isBeingDragged ? 'text-amber-400 scale-110' : 'text-zinc-400'
+                  className={`absolute z-30 pointer-events-none select-none text-[11px] sm:text-[12px] font-black font-mono tracking-wider leading-none flex items-center gap-1 ${
+                    isBeingDragged ? 'text-amber-500 scale-110' : 'text-zinc-500'
                   }`}
                   title={`${axisLetter}軸 (${ann.color}) ${ann.price ? `$${ann.price}` : ''}`}
                 >
                   <span>{axisLetter}</span>
                   {ann.price && ann.price > 0 && (
-                    <span className="text-[9px] sm:text-[10px] opacity-85 font-mono">
+                    <span className="text-[10px] sm:text-[11.5px] font-mono font-extrabold">
                       ${ann.price.toFixed(2)}
                     </span>
                   )}
@@ -4129,16 +4126,17 @@ export const StockCardVisualizer: React.FC<Props> = ({
                     style={{
                       left: `${Math.min(96, rightX)}%`,
                       top: `${dividerY}%`,
-                      transform: 'translate(-100%, -50%)',
+                      transform: 'translate(-100%, -100%)',
+                      marginTop: '-3px',
                     }}
-                    className={`absolute z-30 pointer-events-none select-none text-[11px] sm:text-[12px] font-black font-mono tracking-wider leading-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)] flex items-center gap-1 ${
-                      isBeingDragged ? 'text-amber-400 scale-110' : 'text-zinc-400'
+                    className={`absolute z-30 pointer-events-none select-none text-[11px] sm:text-[12px] font-black font-mono tracking-wider leading-none flex items-center gap-1 ${
+                      isBeingDragged ? 'text-amber-500 scale-110' : 'text-zinc-500'
                     }`}
                     title={`${axisLetter}軸 (${ann.color}) ${ann.price ? `$${ann.price}` : ''}`}
                   >
                     <span>{axisLetter}</span>
                     {ann.price && ann.price > 0 && (
-                      <span className="text-[9px] sm:text-[10px] opacity-85 font-mono">
+                      <span className="text-[10px] sm:text-[11.5px] font-mono font-extrabold">
                         ${ann.price.toFixed(2)}
                       </span>
                     )}
@@ -4314,50 +4312,37 @@ export const StockCardVisualizer: React.FC<Props> = ({
               const plannedVal = planResult?.plannedQty || effPlannedQty || 0;
               const progressPct = plannedVal > 0 ? Math.min(100, Math.round((boughtVal / plannedVal) * 100)) : 0;
               return (
-                <div className="flex items-center justify-between w-full gap-2 text-zinc-100">
-                  <div className="flex items-center gap-1.5 font-bold min-w-0">
+                <div className="flex items-center justify-between w-full gap-1.5 text-zinc-100 overflow-hidden">
+                  <div className="flex items-center gap-1.5 font-bold min-w-0 overflow-hidden shrink">
                     <span className="relative flex h-2 w-2 shrink-0">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                       <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400 shadow-xs shadow-emerald-500" />
                     </span>
-                    <Layers className="w-3.5 h-3.5 text-emerald-400 shrink-0 hidden xs:inline-block" />
-                    <span className="text-zinc-100 font-bold tracking-tight shrink-0">分批進場金字塔</span>
+                    <Layers className="w-3.5 h-3.5 text-emerald-400 shrink-0 hidden sm:inline-block" />
+                    <span className="text-zinc-100 font-bold tracking-tight shrink-0 truncate">分批進場金字塔</span>
                     <div className="hud-pill flex items-center gap-1 bg-white/[0.07] border border-white/10 rounded-md px-1.5 py-0.5 font-mono text-[10.5px] tabular-nums shrink-0">
                       <span className="text-emerald-300 font-extrabold">{boughtVal}</span>
                       <span className="text-white/35 font-bold">/</span>
                       <span className="text-white font-bold">{plannedVal}股</span>
+                      <span className="text-emerald-300 font-black ml-0.5">({progressPct}%)</span>
                     </div>
-                    <div className="hidden sm:flex items-center gap-1.5 ml-0.5 shrink-0">
-                      <div className="w-10 md:w-14 h-1.5 bg-white/10 rounded-full overflow-hidden p-[1px]">
-                        <div
-                          className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-300 transition-all duration-300"
-                          style={{ width: `${Math.max(progressPct > 0 ? 8 : 0, progressPct)}%` }}
-                        />
-                      </div>
-                      <span className="text-emerald-300 font-black font-mono text-[10.5px] tabular-nums">
-                        {progressPct}%
-                      </span>
-                    </div>
-                    <span className="sm:hidden text-emerald-300 font-black font-mono text-[10.5px] tabular-nums">
-                      ({progressPct}%)
-                    </span>
                   </div>
-                  <div className="text-[11px] text-zinc-200 flex items-center gap-2 truncate font-medium shrink-0">
-                    <div className="hud-pill flex items-center gap-1 bg-white/[0.06] border border-white/10 rounded-md px-1.5 py-0.5">
+                  <div className="text-[11px] text-zinc-200 flex items-center gap-1.5 truncate font-medium shrink-0">
+                    <div className="hud-pill flex items-center gap-1 bg-white/[0.06] border border-white/10 rounded-md px-1.5 py-0.5 shrink-0">
                       <History className="w-3 h-3 text-cyan-400 shrink-0" />
                       <span className="text-zinc-300 text-[10.5px]">歷史買入</span>
                       <strong className="text-cyan-300 font-extrabold font-mono tabular-nums">{buyTrades?.length || 0}</strong>
                       <span className="text-zinc-300 text-[10px]">筆</span>
                     </div>
                     {sellTrades && sellTrades.length > 0 && (
-                      <div className="flex items-center gap-1 bg-pink-500/20 border border-pink-400/40 rounded-md px-1.5 py-0.5">
+                      <div className="flex items-center gap-1 bg-pink-500/20 border border-pink-400/40 rounded-md px-1.5 py-0.5 shrink-0">
                         <span className="text-[10px]">🔻</span>
                         <span className="text-pink-200 text-[10.5px]">歷史賣出</span>
                         <strong className="text-pink-300 font-extrabold font-mono tabular-nums">{sellTrades.length}</strong>
                         <span className="text-pink-200 text-[10px]">筆</span>
                       </div>
                     )}
-                    <span className="text-zinc-400 text-[10px] hidden lg:inline tracking-tight">
+                    <span className="text-zinc-400 text-[10px] hidden xl:inline tracking-tight truncate">
                       懸停階梯或買賣點檢視詳細細節
                     </span>
                   </div>
