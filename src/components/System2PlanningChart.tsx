@@ -18,8 +18,18 @@ import {
   Split,
   Maximize2,
   Minimize2,
+  Plus,
+  Trash2,
+  X,
 } from 'lucide-react';
 import { calculateBatchPlanning, calculateLiveOptionTradeMetrics } from '../lib/calculations';
+import {
+  getSimulatedPreOrders,
+  addSimulatedPreOrder,
+  deleteSimulatedPreOrder,
+  mergeAndSyncPreOrders,
+  clearAllSimulatedPreOrders,
+} from '../utils/simulatedPreOrdersStorage';
 
 // Register all Chart.js components and controllers
 ChartJS.register(...registerables);
@@ -66,6 +76,15 @@ export interface AveragingRowData {
   riskFlag?: boolean;
 }
 
+export interface SimulatedPreOrderItem {
+  id: string;
+  price: number;
+  quantity?: number;
+  direction?: 'BUY' | 'SELL';
+  notes?: string;
+  createdAt?: any;
+}
+
 interface System2PlanningChartProps {
   currentPrice: number;
   holdingAvgPrice: number;
@@ -90,6 +109,10 @@ interface System2PlanningChartProps {
   onToggleCardDividers?: () => void;
   showStrikePrices?: boolean;
   onToggleStrikePrices?: () => void;
+  showPreOrders?: boolean;
+  onTogglePreOrders?: () => void;
+  preOrders?: SimulatedPreOrderItem[];
+  onAddPreOrder?: () => void;
   selectedLevelTypes?: {
     support: boolean;
     stopLoss: boolean;
@@ -134,6 +157,10 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
   onToggleCardDividers,
   showStrikePrices: propShowStrikePrices,
   onToggleStrikePrices,
+  showPreOrders: propShowPreOrders,
+  onTogglePreOrders,
+  preOrders: propPreOrders = [],
+  onAddPreOrder,
   selectedLevelTypes: propSelectedLevelTypes,
   onToggleLevelType,
   onSelectAllLevelTypes,
@@ -174,6 +201,86 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
     } else {
       setShowStrikePricesLocal((prev) => !prev);
     }
+  };
+
+  // 模擬預購單 (#00F5E2) 開關狀態 (預設開啟，繪製於軸下方如同目前價格與平均成本)
+  const [showPreOrdersLocal, setShowPreOrdersLocal] = useState<boolean>(true);
+  const showPreOrders = propShowPreOrders !== undefined ? propShowPreOrders : showPreOrdersLocal;
+  const handleTogglePreOrders = () => {
+    if (onTogglePreOrders) {
+      onTogglePreOrders();
+    } else {
+      setShowPreOrdersLocal((prev) => !prev);
+    }
+  };
+
+  // 即時連動與讀取該標的之模擬預購單
+  const [preOrdersSyncTick, setPreOrdersSyncTick] = useState(0);
+  const [isLocalPreOrderModalOpen, setIsLocalPreOrderModalOpen] = useState(false);
+  const [localPreOrderPrice, setLocalPreOrderPrice] = useState('');
+  const [localPreOrderQty, setLocalPreOrderQty] = useState('100');
+  const [localPreOrderNotes, setLocalPreOrderNotes] = useState('');
+
+  useEffect(() => {
+    const update = () => {
+      setPreOrdersSyncTick((t) => t + 1);
+    };
+    window.addEventListener('simulated-preorders-updated', update);
+    return () => window.removeEventListener('simulated-preorders-updated', update);
+  }, []);
+
+  const effectivePreOrders = useMemo(() => {
+    void preOrdersSyncTick;
+    if (symbol) {
+      return mergeAndSyncPreOrders(symbol, propPreOrders);
+    }
+    const list = propPreOrders || [];
+    const map = new Map<string, any>();
+    list.forEach((po: any, idx) => {
+      if (!po || po.price === undefined || isNaN(Number(po.price)) || Number(po.price) <= 0) return;
+      const key = String(po.id || `pre-${po.price}-${idx}`);
+      map.set(key, {
+        id: key,
+        price: Number(po.price),
+        quantity: Number(po.quantity) || 0,
+        direction: po.direction || 'BUY',
+        notes: po.notes || '',
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => b.price - a.price);
+  }, [propPreOrders, symbol, preOrdersSyncTick]);
+
+  const handleOpenPreOrderManager = () => {
+    if (onAddPreOrder) {
+      onAddPreOrder();
+      return;
+    }
+    if (currentPrice > 0 && !localPreOrderPrice) {
+      setLocalPreOrderPrice((currentPrice * 0.97).toFixed(2));
+    }
+    setIsLocalPreOrderModalOpen(true);
+  };
+
+  const handleLocalAddPreOrder = () => {
+    if (!symbol) return;
+    const p = parseFloat(localPreOrderPrice);
+    if (isNaN(p) || p <= 0) return;
+    const q = parseInt(localPreOrderQty) || 100;
+    addSimulatedPreOrder(symbol, {
+      price: p,
+      quantity: q,
+      direction: 'BUY',
+      notes: localPreOrderNotes ? `[模擬預購單] ${localPreOrderNotes}` : '[模擬預購單]',
+    });
+    setLocalPreOrderPrice('');
+    setLocalPreOrderNotes('');
+    setPreOrdersSyncTick((t) => t + 1);
+  };
+
+  const handleLocalDeletePreOrder = (orderId: string, price?: number) => {
+    if (!symbol) return;
+    deleteSimulatedPreOrder(symbol, orderId, price);
+    setPreOrdersSyncTick((t) => t + 1);
   };
 
   // 關鍵防線四種類別獨立複選狀態 (支撐、止損、壓力、止盈)
@@ -267,12 +374,12 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
 
   const [yAxisMode, setYAxisMode] = useState<'shares' | 'percent'>('shares');
   const [hoveredItem, setHoveredItem] = useState<{
-    type: 'step' | 'trade' | 'visualLevel' | 'avgCost' | 'currentPrice' | 'optionTrade';
+    type: 'step' | 'trade' | 'visualLevel' | 'avgCost' | 'currentPrice' | 'optionTrade' | 'simulatedPreOrder';
     data: any;
   } | null>(null);
   const lastHoverKeyRef = useRef<string>('');
   const [selectedItem, setSelectedItem] = useState<{
-    type: 'step' | 'trade' | 'visualLevel' | 'avgCost' | 'currentPrice' | 'optionTrade';
+    type: 'step' | 'trade' | 'visualLevel' | 'avgCost' | 'currentPrice' | 'optionTrade' | 'simulatedPreOrder';
     data: any;
   } | null>(null);
   const [showAllSplits, setShowAllSplits] = useState<boolean>(false);
@@ -709,6 +816,14 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
         }
       });
     }
+    if (showPreOrders && effectivePreOrders && effectivePreOrders.length > 0) {
+      effectivePreOrders.forEach((po) => {
+        const p = typeof po.price === 'number' ? po.price : parseFloat(String(po.price));
+        if (!isNaN(p) && p > 0 && isFinite(p)) {
+          allPrices.push(p);
+        }
+      });
+    }
 
     if (allPrices.length === 0) return { minX: 60, maxX: 100 };
     const min = Math.min(...allPrices);
@@ -729,7 +844,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
       minX: calculatedMin,
       maxX: calculatedMax,
     };
-  }, [currentPriceNum, holdingAvgPriceNum, showAvgCost, stepItems, validTrades, optionPurchaseRecords, showTrades, showStrikePrices, displayedVisualLevels, isAllLevelsSelected]);
+  }, [currentPriceNum, holdingAvgPriceNum, showAvgCost, stepItems, validTrades, optionPurchaseRecords, showTrades, showStrikePrices, showPreOrders, effectivePreOrders, displayedVisualLevels, isAllLevelsSelected]);
 
   // Sorted step items by price ascending
   const sortedStepItems = useMemo(() => {
@@ -880,6 +995,8 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
     optionPurchaseRecords,
     isAllLevelsSelected,
     hoveredItem,
+    showPreOrders,
+    preOrders: effectivePreOrders,
   });
 
   drawDataRef.current = {
@@ -897,6 +1014,8 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
     optionPurchaseRecords,
     isAllLevelsSelected,
     hoveredItem,
+    showPreOrders,
+    preOrders: effectivePreOrders,
   };
 
   useEffect(() => {
@@ -929,6 +1048,8 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
     sellTrades,
     optionPurchaseRecords,
     isAllLevelsSelected,
+    showPreOrders,
+    effectivePreOrders,
   ]);
 
   // Custom Chart.js annotation plugin:
@@ -963,6 +1084,8 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
           sellTrades,
           optionPurchaseRecords,
           isAllLevelsSelected,
+          showPreOrders,
+          preOrders,
         } = drawDataRef.current;
 
         // Collect all active vertical dashed lines & their labels
@@ -1019,6 +1142,31 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
               rawItem: { price: holdingAvgPriceNum, quantity: holdingQty, currentPrice: currentPriceNum },
             });
           }
+        }
+
+        // 2.5 模擬預購單 (Simulated Pre-Orders) - #00F5E2 虛線與軸下方標籤 (呈現方式如同目前價格與平均成本)
+        if (showPreOrders && preOrders && preOrders.length > 0) {
+          preOrders.forEach((order, idx) => {
+            const price = typeof order.price === 'number' ? order.price : parseFloat(String(order.price));
+            if (isNaN(price) || price <= 0) return;
+            const xPos = xScale.getPixelForValue(price);
+            if (xPos >= chartArea.left - 5 && xPos <= chartArea.right + 5) {
+              const isTriggered = currentPriceNum > 0 && (order.direction === 'SELL' ? currentPriceNum >= price : currentPriceNum <= price);
+              const qtyLabel = order.quantity && order.quantity > 0 ? ` (${order.quantity}股)` : '';
+              lineConfigs.push({
+                id: `preorder-${order.id || idx}`,
+                type: 'simulatedPreOrder',
+                xPos,
+                price,
+                fullText: `模擬預購單 $${price.toFixed(2)}${qtyLabel}`,
+                lineColor: '#00F5E2',
+                textColor: '#008f84', // 深藍綠色提升明度反差，外圍有柔和光暈保護，搭配 #00F5E2 虛線
+                priority: 4.8,
+                isTriggered,
+                rawItem: order,
+              });
+            }
+          });
         }
 
         // 3. Visual levels (支撐 / 止損 / 壓力 / 止盈) - 彩色虛線 (依下拉複選型別分別顯示)
@@ -1247,6 +1395,8 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
             lineWidth = 2.5; // 平均成本虛線
           } else if (item.type === 'currentPrice') {
             lineWidth = 2.4; // 現價虛線
+          } else if (item.type === 'simulatedPreOrder') {
+            lineWidth = 2.4; // 模擬預購單 (#00F5E2) 虛線
           } else if (item.type === 'optionTrade') {
             lineWidth = 2.2; // 期權購買紀錄：黑色虛線
           } else if (isCardDivider) {
@@ -1559,7 +1709,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
       onHover: (event, elements, chart) => {
         try {
           let nextHover: {
-            type: 'step' | 'trade' | 'visualLevel' | 'avgCost' | 'currentPrice' | 'optionTrade';
+            type: 'step' | 'trade' | 'visualLevel' | 'avgCost' | 'currentPrice' | 'optionTrade' | 'simulatedPreOrder';
             data: any;
           } | null = null;
           let hoverKey = '';
@@ -1621,6 +1771,12 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
                     },
                   };
                   hoverKey = `avg_${holdingAvgPriceNum}_${holdingQty}_${currentPriceNum}`;
+                } else if (hitLine.type === 'simulatedPreOrder') {
+                  nextHover = {
+                    type: 'simulatedPreOrder',
+                    data: hitLine.data,
+                  };
+                  hoverKey = `pre_${hitLine.data.id || ''}_${hitLine.data.price}`;
                 } else if (hitLine.type === 'optionTrade') {
                   nextHover = {
                     type: 'optionTrade',
@@ -1759,7 +1915,7 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
         },
       },
     };
-  }, [sortedStepItems, buyTrades, sellTrades, minX, maxX, maxYValue, displayedVisualLevels, showAvgCost, holdingAvgPriceNum, currentPriceNum, holdingQty, showStrikePrices, optionPurchaseRecords, chartContainerHeight]);
+  }, [sortedStepItems, buyTrades, sellTrades, minX, maxX, maxYValue, displayedVisualLevels, showAvgCost, holdingAvgPriceNum, currentPriceNum, holdingQty, showStrikePrices, optionPurchaseRecords, chartContainerHeight, showPreOrders, effectivePreOrders]);
 
   return (
     <div
@@ -1864,6 +2020,29 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
               </div>
             )}
 
+            {/* 模擬預購單 Card (#00F5E2) */}
+            {showPreOrders && effectivePreOrders && effectivePreOrders.length > 0 && (
+              <div
+                className={`bg-[#00F5E2]/10 border border-[#00F5E2]/40 text-right flex flex-col justify-center items-end shadow-2xs ${
+                  isFullscreen || compact
+                    ? "px-2 py-0.5 sm:px-2.5 sm:py-1 min-w-[76px] sm:min-w-[84px] rounded-lg"
+                    : "px-4 py-2 min-w-[120px] rounded-2xl"
+                }`}
+              >
+                <span className={`font-medium text-[#007a70] dark:text-[#00F5E2] flex items-center gap-1 ${isFullscreen || compact ? "text-[9px]" : "text-[10px]"}`}>
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#00F5E2] shadow-[0_0_6px_#00F5E2]" />
+                  模擬預購單
+                </span>
+                <span
+                  className={`font-semibold font-mono text-[#007a70] dark:text-[#00F5E2] leading-tight ${
+                    isFullscreen || compact ? "text-base sm:text-lg" : "text-2xl sm:text-3xl"
+                  }`}
+                >
+                  ${effectivePreOrders[0].price.toFixed(2)}
+                </span>
+              </div>
+            )}
+
             {/* Fullscreen Toggle */}
             {onToggleFullscreen && (
               <button
@@ -1898,6 +2077,43 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
             }`}
           >
             <div className="flex items-center gap-2 flex-wrap">
+              {/* 模擬預購單 (#00F5E2) 開關 */}
+              <div className="flex items-center rounded-lg border border-[#00F5E2]/50 overflow-hidden shadow-2xs">
+                <button
+                  type="button"
+                  onClick={handleTogglePreOrders}
+                  className={`inline-flex items-center gap-1.5 font-medium transition-all cursor-pointer ${
+                    compact ? "px-2 sm:px-2.5 py-1 text-[11px]" : "px-3 py-1.5 text-xs"
+                  } ${
+                    showPreOrders
+                      ? 'bg-[#00F5E2]/25 text-[#006e64] dark:text-[#00F5E2]'
+                      : 'bg-zinc-100/90 text-zinc-600 hover:text-zinc-900'
+                  }`}
+                  title="開啟/關閉圖表上的模擬預購單 (#00F5E2)"
+                >
+                  <span className="w-2.5 h-0 border-t-2 border-[#00F5E2] shrink-0" />
+                  <span>模擬預購單{effectivePreOrders.length > 0 ? ` (${effectivePreOrders.length} 筆)` : ''}</span>
+                  <span
+                    className={`${compact ? "w-1.5 h-1.5" : "w-2 h-2"} rounded-full ${
+                      showPreOrders ? "bg-[#00F5E2] shadow-[0_0_6px_#00F5E2]" : "bg-zinc-400"
+                    }`}
+                  />
+                </button>
+                {(onAddPreOrder || symbol) && (
+                  <button
+                    type="button"
+                    onClick={handleOpenPreOrderManager}
+                    className={`px-2 py-1 bg-[#00F5E2]/20 hover:bg-[#00F5E2]/35 text-[#006e64] font-bold border-l border-[#00F5E2]/40 transition-colors cursor-pointer flex items-center gap-0.5 ${
+                      compact ? "text-[11px]" : "text-xs"
+                    }`}
+                    title="管理或新增刪除模擬預購單"
+                  >
+                    <Plus className="w-3 h-3 stroke-[2.5]" />
+                    <span>{effectivePreOrders.length > 0 ? '管理' : '新增'}</span>
+                  </button>
+                )}
+              </div>
+
               {/* 行權價 (新增) - 預設關閉 */}
               <button
                 type="button"
@@ -2207,6 +2423,52 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
                         {hoveredItem.data.operator || '人'} ・ {hoveredItem.data.purpose || '加碼'}
                       </span>
                     </div>
+                  </div>
+                </div>
+              ) : hoveredItem.type === 'simulatedPreOrder' ? (
+                <div className="flex items-center justify-between w-full gap-2 min-w-0">
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="px-2 py-0.5 rounded-md font-bold text-xs bg-[#00F5E2] text-zinc-950 shadow-xs">
+                      模擬預購單
+                    </span>
+                    <span className="text-xs sm:text-sm font-bold font-mono text-[#00F5E2]">
+                      ${hoveredItem.data.price.toFixed(2)}
+                    </span>
+                    {hoveredItem.data.quantity > 0 && (
+                      <span className="text-xs font-normal text-emerald-100 hidden sm:inline">
+                        ({hoveredItem.data.quantity} 股)
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2.5 sm:gap-4 text-xs font-mono shrink-0">
+                    {currentPriceNum > 0 && (
+                      <div className="flex items-center gap-1">
+                        <span className="text-emerald-200 font-sans font-normal text-[10px] sm:text-xs">距現價:</span>
+                        <span className={`font-bold text-xs sm:text-sm ${hoveredItem.data.price <= currentPriceNum ? 'text-emerald-300' : 'text-amber-300'}`}>
+                          {hoveredItem.data.price >= currentPriceNum ? '+' : ''}
+                          ${(hoveredItem.data.price - currentPriceNum).toFixed(2)} ({(((hoveredItem.data.price - currentPriceNum) / currentPriceNum) * 100).toFixed(2)}%)
+                        </span>
+                      </div>
+                    )}
+                    {hoveredItem.data.quantity > 0 && (
+                      <div className="flex items-center gap-1 hidden sm:flex">
+                        <span className="text-emerald-200 font-sans font-normal text-[10px] sm:text-xs">預計金額:</span>
+                        <span className="font-bold text-xs sm:text-sm text-cyan-200">
+                          ${(hoveredItem.data.price * hoveredItem.data.quantity).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                        </span>
+                      </div>
+                    )}
+                    {symbol && (
+                      <button
+                        type="button"
+                        onClick={() => handleLocalDeletePreOrder(hoveredItem.data.id, hoveredItem.data.price)}
+                        className="px-2 py-0.5 rounded bg-rose-600/90 hover:bg-rose-500 text-white text-[10px] font-sans font-bold cursor-pointer flex items-center gap-1 transition-colors"
+                        title="刪除此筆模擬預購單"
+                      >
+                        <Trash2 className="w-2.5 h-2.5" />
+                        <span>刪除</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               ) : hoveredItem.type === 'avgCost' ? (
@@ -2858,6 +3120,170 @@ export const System2PlanningChart: React.FC<System2PlanningChartProps> = ({
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* 內建模擬預購單管理對話窗 (支援在 Primial 視窗或任何獨立圖表內直接新增與刪除預購單) */}
+          {isLocalPreOrderModalOpen && (
+            <div
+              className="fixed inset-0 z-[300] bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
+              onClick={() => setIsLocalPreOrderModalOpen(false)}
+            >
+              <div
+                className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-zinc-200 p-5 text-zinc-900 space-y-4 animate-in fade-in zoom-in-95 duration-150"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between border-b border-zinc-100 pb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="w-3 h-3 rounded-full bg-[#00F5E2] shadow-[0_0_8px_#00F5E2]" />
+                    <h4 className="font-bold text-base text-zinc-900">
+                      模擬預購單管理 {symbol ? `(${symbol})` : ''}
+                    </h4>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsLocalPreOrderModalOpen(false)}
+                    className="p-1 rounded-full text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {currentPrice > 0 && (
+                  <div className="space-y-1">
+                    <span className="text-xs font-semibold text-zinc-500">快速填入參考價位 (現價 ${currentPrice.toFixed(2)})：</span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {[
+                        { label: '-3%', factor: 0.97 },
+                        { label: '-6%', factor: 0.94 },
+                        { label: '-9%', factor: 0.91 },
+                        { label: '現價', factor: 1.0 },
+                        { label: '+2%', factor: 1.02 },
+                        { label: '+4%', factor: 1.04 },
+                      ].map((preset) => {
+                        const val = (currentPrice * preset.factor).toFixed(2);
+                        return (
+                          <button
+                            key={preset.label}
+                            type="button"
+                            onClick={() => setLocalPreOrderPrice(val)}
+                            className={`px-2 py-1 text-xs rounded-lg border font-mono cursor-pointer transition-all ${
+                              localPreOrderPrice === val
+                                ? 'bg-[#00F5E2]/25 border-[#00F5E2] text-[#006e64] font-bold'
+                                : 'bg-zinc-50 border-zinc-200 text-zinc-700 hover:bg-zinc-100'
+                            }`}
+                          >
+                            {preset.label} (${val})
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="text-xs font-bold text-zinc-700 block mb-1">預購價格 ($) *</label>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      placeholder="例如 75.50"
+                      value={localPreOrderPrice}
+                      onChange={(e) => setLocalPreOrderPrice(e.target.value)}
+                      className="w-full px-3 py-1.5 rounded-xl border border-zinc-300 font-mono text-sm font-bold focus:outline-none focus:ring-2 focus:ring-[#00F5E2]"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-zinc-700 block mb-1">預購股數 (股)</label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="1"
+                      placeholder="100"
+                      value={localPreOrderQty}
+                      onChange={(e) => setLocalPreOrderQty(e.target.value)}
+                      className="w-full px-3 py-1.5 rounded-xl border border-zinc-300 font-mono text-sm font-bold focus:outline-none focus:ring-2 focus:ring-[#00F5E2]"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-zinc-600 block mb-1">備註 (選填)</label>
+                  <input
+                    type="text"
+                    placeholder="例如：第一批回踩支撐預購"
+                    value={localPreOrderNotes}
+                    onChange={(e) => setLocalPreOrderNotes(e.target.value)}
+                    className="w-full px-3 py-1.5 rounded-xl border border-zinc-300 text-xs focus:outline-none focus:ring-2 focus:ring-[#00F5E2]"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleLocalAddPreOrder}
+                  disabled={!localPreOrderPrice || parseFloat(localPreOrderPrice) <= 0}
+                  className="w-full py-2 rounded-xl bg-[#008f84] hover:bg-[#007065] disabled:opacity-40 text-white font-bold text-xs transition-all cursor-pointer"
+                >
+                  + 新增插入模擬預購單
+                </button>
+
+                <div className="pt-2 border-t border-zinc-100 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-zinc-700">
+                      目前已設定預購單 ({effectivePreOrders.length} 筆)：
+                    </span>
+                    {effectivePreOrders.length > 1 && symbol && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          clearAllSimulatedPreOrders(symbol, effectivePreOrders);
+                          setPreOrdersSyncTick((t) => t + 1);
+                        }}
+                        className="text-[11px] font-bold text-rose-600 hover:underline cursor-pointer flex items-center gap-1"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>全部清除</span>
+                      </button>
+                    )}
+                  </div>
+                  {effectivePreOrders.length === 0 ? (
+                    <div className="text-xs text-zinc-400 py-3 text-center bg-zinc-50 rounded-xl border border-dashed border-zinc-200">
+                      尚無模擬預購單
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                      {effectivePreOrders.map((item) => (
+                        <div
+                          key={item.id}
+                          className="flex items-center justify-between p-2 rounded-xl bg-cyan-50/60 border border-[#00F5E2]/40 text-xs"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="w-2 h-2 rounded-full bg-[#00F5E2] shrink-0" />
+                            <span className="font-bold font-mono text-zinc-900">${item.price.toFixed(2)}</span>
+                            {item.quantity > 0 && (
+                              <span className="text-zinc-500 font-mono">({item.quantity} 股)</span>
+                            )}
+                            {item.notes && (
+                              <span className="text-[11px] text-zinc-400 truncate max-w-[120px]">
+                                {String(item.notes).replace(/^\[模擬預購單\]\s*/, '')}
+                              </span>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleLocalDeletePreOrder(item.id, item.price)}
+                            className="px-2 py-1 rounded-lg bg-rose-50 hover:bg-rose-600 text-rose-600 hover:text-white border border-rose-200 font-bold text-[11px] flex items-center gap-1 transition-colors cursor-pointer shrink-0"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            <span>刪除</span>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
         </div>

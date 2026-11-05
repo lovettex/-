@@ -149,6 +149,7 @@ export const PrimialPyramidViewModal: React.FC<PrimialPyramidViewModalProps> = (
   // 全域防線與線條控制開關
   const [pyramidShowStrikePrices, setPyramidShowStrikePrices] = useState<boolean>(false);
   const [pyramidShowCardDividers, setPyramidShowCardDividers] = useState<boolean>(false);
+  const [pyramidShowPreOrders, setPyramidShowPreOrders] = useState<boolean>(true);
   const [pyramidCalcMode, setPyramidCalcMode] = useState<"averaging" | "breakout">("averaging");
   const [pyramidLevelTypes, setPyramidLevelTypes] = useState<{
     support: boolean;
@@ -1061,6 +1062,31 @@ export const PrimialPyramidViewModal: React.FC<PrimialPyramidViewModalProps> = (
 
         {/* 右側：防線/分隔線快捷開關 + 攤平/突破價位 + 全部展開/收合 + 關閉 */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-wrap">
+          {/* 模擬預購單 (#00F5E2) 開關 */}
+          <button
+            type="button"
+            onClick={() => {
+              playClickSound();
+              setPyramidShowPreOrders((prev) => !prev);
+            }}
+            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-normal transition-all cursor-pointer border active:scale-95 shrink-0 select-none ${
+              pyramidShowPreOrders
+                ? "bg-[#00F5E2]/25 text-[#00F5E2] border-[#00F5E2] shadow-[0_0_8px_rgba(0,245,226,0.35)] ring-1 ring-[#00F5E2]"
+                : "bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white border-zinc-700/60"
+            }`}
+            title="開啟/關閉圖表上的模擬預購單 (#00F5E2)"
+          >
+            <span className="w-2.5 h-0 border-t-2 border-[#00F5E2] shrink-0" />
+            <span>模擬預購單</span>
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                pyramidShowPreOrders
+                  ? "bg-[#00F5E2] shadow-[0_0_6px_#00F5E2]"
+                  : "bg-zinc-500"
+              }`}
+            />
+          </button>
+
           {/* 行權價開關 */}
           <button
             type="button"
@@ -1763,6 +1789,9 @@ export const PrimialPyramidViewModal: React.FC<PrimialPyramidViewModalProps> = (
                       onToggleCardDividers={() => setPyramidShowCardDividers((prev) => !prev)}
                       showStrikePrices={pyramidShowStrikePrices}
                       onToggleStrikePrices={() => setPyramidShowStrikePrices((prev) => !prev)}
+                      showPreOrders={pyramidShowPreOrders}
+                      onTogglePreOrders={() => setPyramidShowPreOrders((prev) => !prev)}
+                      preOrders={stock.plannedOrders || []}
                       selectedLevelTypes={pyramidLevelTypes}
                       onToggleLevelType={(type) => {
                         setPyramidLevelTypes((prev) => ({

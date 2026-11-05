@@ -128,6 +128,12 @@ import { getVisualLinesDataSync, saveVisualLinesDataOptimistic } from "../utils/
 import { ChartAnnotation } from "../types";
 import { ReturnRateStepFilter, getStepBracketBounds, getStepBracketLabel } from "../components/ReturnRateStepFilter";
 import { PrimialPyramidViewModal } from "../components/PrimialPyramidViewModal";
+import {
+  getSimulatedPreOrders,
+  mergeAndSyncPreOrders,
+  deleteSimulatedPreOrder,
+  isSimulatedPreOrderLike,
+} from "../utils/simulatedPreOrdersStorage";
 
 const EMPTY_CHART_ANNOTATIONS: ChartAnnotation[] = [];
 
@@ -782,6 +788,15 @@ export default function Dashboard() {
   const [editingPromptNote, setEditingPromptNote] = useState("");
   const [confirmDeletePromptId, setConfirmDeletePromptId] = useState<string | null>(null);
   const [confirmDeleteFileId, setConfirmDeleteFileId] = useState<number | null>(null);
+  const [draggedPromptIndex, setDraggedPromptIndex] = useState<number | null>(null);
+  const [dragOverPromptIndex, setDragOverPromptIndex] = useState<number | null>(null);
+  const [, setPreOrdersTick] = useState(0);
+
+  useEffect(() => {
+    const handlePreOrderUpdate = () => setPreOrdersTick((t) => t + 1);
+    window.addEventListener("simulated-preorders-updated", handlePreOrderUpdate);
+    return () => window.removeEventListener("simulated-preorders-updated", handlePreOrderUpdate);
+  }, []);
 
   // 檢索式個股下拉選單狀態 (支援持有中與真實交易分類)
   const [isStockDropdownOpen, setIsStockDropdownOpen] = useState(false);
@@ -793,32 +808,127 @@ export default function Dashboard() {
   const targetStockForJumpRef = useRef<{ tabId?: string; symbol?: string; tradeType?: string } | null>(null);
 
   const handleSavePrompts = async (updated: typeof dynamicPrompts) => {
+    const nowTs = Date.now();
     setDynamicPrompts(updated);
     safeLocalStorage.setItem("custom_prompt_templates", JSON.stringify(updated));
+    safeLocalStorage.setItem("custom_prompt_templates_updated_at", String(nowTs));
     try {
       await fetch("/api/user-prompts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: user?.uid || "default", prompts: updated }),
+        body: JSON.stringify({
+          userId: user?.uid || "default",
+          prompts: updated,
+          updatedAt: nowTs,
+        }),
       });
     } catch (err) {
       console.error("Failed to sync prompts to server:", err);
     }
+    if (user?.uid) {
+      try {
+        await setDoc(
+          doc(db, "userSettings", user.uid),
+          { customPrompts: updated, updatedAt: serverTimestamp() },
+          { merge: true }
+        );
+        await setDoc(
+          doc(db, "userSettings", "shared_workspace"),
+          { customPrompts: updated, updatedAt: serverTimestamp() },
+          { merge: true }
+        );
+      } catch (err) {
+        console.warn("Failed to sync prompts to Firestore:", err);
+      }
+    }
   };
 
-  // 跨裝置同步指令模版：確保電腦版、平板與手機的下拉選單模版資料完全一致
+  const handleMovePrompt = (index: number, direction: "up" | "down" | "top") => {
+    if (index < 0 || index >= dynamicPrompts.length) return;
+    const targetIndex =
+      direction === "top" ? 0 : direction === "up" ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= dynamicPrompts.length || targetIndex === index) return;
+    const updated = [...dynamicPrompts];
+    const [moved] = updated.splice(index, 1);
+    updated.splice(targetIndex, 0, moved);
+    handleSavePrompts(updated);
+    playClickSound();
+  };
+
+  const handleReorderPrompts = (fromIndex: number, toIndex: number) => {
+    if (
+      fromIndex < 0 ||
+      toIndex < 0 ||
+      fromIndex >= dynamicPrompts.length ||
+      toIndex >= dynamicPrompts.length ||
+      fromIndex === toIndex
+    ) {
+      return;
+    }
+    const updated = [...dynamicPrompts];
+    const [moved] = updated.splice(fromIndex, 1);
+    updated.splice(toIndex, 0, moved);
+    handleSavePrompts(updated);
+    playClickSound();
+  };
+
+  // 跨裝置同步指令模版：確保不會用舊的預設值覆蓋使用者剛新增或排序的本機模版
   useEffect(() => {
     let isMounted = true;
     const syncPromptsCrossDevice = async () => {
       try {
+        const localSaved = safeLocalStorage.getItem("custom_prompt_templates");
+        const localUpdatedAt = Number(safeLocalStorage.getItem("custom_prompt_templates_updated_at") || 0);
+        let localPrompts: typeof dynamicPrompts | null = null;
+        if (localSaved) {
+          try {
+            const parsed = JSON.parse(localSaved);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              localPrompts = parsed;
+            }
+          } catch {}
+        }
+
+        // 1. Check Firestore if user is logged in
+        if (user?.uid) {
+          try {
+            const snap = await getDoc(doc(db, "userSettings", user.uid));
+            if (snap.exists()) {
+              const fsData = snap.data();
+              if (Array.isArray(fsData.customPrompts) && fsData.customPrompts.length > 0) {
+                if (!localUpdatedAt && isMounted) {
+                  setDynamicPrompts(fsData.customPrompts);
+                  safeLocalStorage.setItem("custom_prompt_templates", JSON.stringify(fsData.customPrompts));
+                }
+              }
+            }
+          } catch {}
+        }
+
+        // 2. Sync with backend API
         const userIdParam = user?.uid ? encodeURIComponent(user.uid) : "default";
         const res = await fetch(`/api/user-prompts?userId=${userIdParam}`);
         if (res.ok) {
           const data = await res.json();
+          const remoteUpdatedAt = Number(data.updatedAt || 0);
           if (data.success && Array.isArray(data.prompts) && data.prompts.length > 0) {
-            if (isMounted) {
+            if (localPrompts && localUpdatedAt > remoteUpdatedAt) {
+              // Local is newer than server — push local to server
+              await fetch("/api/user-prompts", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  userId: user?.uid || "default",
+                  prompts: localPrompts,
+                  updatedAt: localUpdatedAt,
+                }),
+              });
+            } else if (isMounted) {
               setDynamicPrompts(data.prompts);
               safeLocalStorage.setItem("custom_prompt_templates", JSON.stringify(data.prompts));
+              if (remoteUpdatedAt > 0) {
+                safeLocalStorage.setItem("custom_prompt_templates_updated_at", String(remoteUpdatedAt));
+              }
               setAiSelectedPromptId((curr) => {
                 if (!data.prompts.some((p: any) => p.id === curr)) {
                   return data.prompts[0].id;
@@ -827,14 +937,17 @@ export default function Dashboard() {
               });
             }
           } else {
-            // 後端尚未有儲存紀錄時，將本機已存在的模版（例如電腦版現有模版）自動上傳至後端備份
-            const localSaved = safeLocalStorage.getItem("custom_prompt_templates");
-            const promptsToUpload = localSaved ? JSON.parse(localSaved) : defaultPromptTemplates;
+            // 後端尚未有儲存紀錄時，將本機已存在的模版自動上傳至後端備份
+            const promptsToUpload = localPrompts || defaultPromptTemplates;
             if (Array.isArray(promptsToUpload) && promptsToUpload.length > 0) {
               await fetch("/api/user-prompts", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ userId: user?.uid || "default", prompts: promptsToUpload }),
+                body: JSON.stringify({
+                  userId: user?.uid || "default",
+                  prompts: promptsToUpload,
+                  updatedAt: localUpdatedAt || Date.now(),
+                }),
               });
             }
           }
@@ -10036,8 +10149,27 @@ export default function Dashboard() {
                                       return { text: statusName, color };
                                     };
 
-                                    let plannedOrders =
-                                    activeTabOrders[tab.id] || [];
+                                    const rawTabOrders = activeTabOrders[tab.id] || [];
+                                    const cleanCardSym = (tab.symbol || "").trim().toUpperCase();
+                                    const sameSymbolRawOrders: any[] = [...rawTabOrders];
+                                    if (cleanCardSym) {
+                                      tabs.forEach((otherTab) => {
+                                        if (
+                                          otherTab.id !== tab.id &&
+                                          (otherTab.symbol || "").trim().toUpperCase() === cleanCardSym
+                                        ) {
+                                          const otherOrders = activeTabOrders[otherTab.id];
+                                          if (Array.isArray(otherOrders) && otherOrders.length > 0) {
+                                            sameSymbolRawOrders.push(...otherOrders);
+                                          }
+                                        }
+                                      });
+                                    }
+                                    const cardSimPreOrders = mergeAndSyncPreOrders(
+                                      cleanCardSym,
+                                      sameSymbolRawOrders
+                                    );
+                                    let plannedOrders = rawTabOrders;
                                     const getStrategyTargets = (tabId: string) => {
                                       const strat = activeTabStrategies[tabId] || {};
                                       const targets: {
@@ -10130,7 +10262,33 @@ export default function Dashboard() {
                                       return targets;
                                     };
 
-                                    const strategyTargets = getStrategyTargets(tab.id); plannedOrders = strategyTargets.map(t => ({ ...t, category: t.categoryType, direction: t.categoryType === "止損設定" || t.categoryType === "止盈設定" || t.categoryType === "壓力門檻" ? "SELL" : "BUY", isManualHighlight: !!strategyHighlights[`${tab.id}-${t.id}`] }));
+                                    const strategyTargets = getStrategyTargets(tab.id);
+                                    const nonSimRawOrders = rawTabOrders.filter(
+                                      (o: any) => !isSimulatedPreOrderLike(o)
+                                    );
+                                    plannedOrders = [
+                                      ...strategyTargets.map((t) => ({
+                                        ...t,
+                                        category: t.categoryType,
+                                        direction:
+                                          t.categoryType === "止損設定" ||
+                                          t.categoryType === "止盈設定" ||
+                                          t.categoryType === "壓力門檻"
+                                            ? "SELL"
+                                            : "BUY",
+                                        isManualHighlight: !!strategyHighlights[`${tab.id}-${t.id}`],
+                                      })),
+                                      ...nonSimRawOrders,
+                                      ...cardSimPreOrders.map((po) => ({
+                                        id: po.id,
+                                        price: po.price,
+                                        quantity: po.quantity,
+                                        direction: "BUY",
+                                        category: "模擬預購單",
+                                        notes: `模擬預購: ${po.quantity}股`,
+                                        isSimulatedPreOrder: true,
+                                      })),
+                                    ];
                                     const groupedTargets = strategyTargets.reduce((acc: Record<string, any[]>, target) => {
                                       const displayCategory = `[${target.categoryType}]`;
                                       if (!acc[displayCategory]) {
@@ -10227,12 +10385,13 @@ export default function Dashboard() {
 
                                   const isCardExpanded = isCinemaModeActive ? true : (tab.groupId ? (expandedCards[tab.groupId] !== false) : (expandedCards[tab.id] !== false));
                                   const isHoldingActive = effectiveHoldingQuantity > 0;
+                                  const hasCol3Content = isHoldingActive || trades.length > 0 || cardSimPreOrders.length > 0;
 
                                   return (
                                     <div
                                       key={tab.id}
                                       id={`stock-card-${tab.id}`}
-                                      className={`card-wrapper w-[calc(100vw-24px)] ${isHoldingActive ? "sm:w-[617px] md:w-[617px] lg:w-[617px] xl:w-[617px] 2xl:w-[617px]" : "sm:w-[480px] md:w-[480px] lg:w-[480px] xl:w-[480px] 2xl:w-[480px]"} shrink-0 flex flex-col transition-all duration-300 ${isCardExpanded ? "h-[646px] min-h-[566px] sm:min-h-[646px] max-h-[calc(100dvh-56px)] sm:max-h-none select-none" : "min-h-[135px] h-[135px]"}`}
+                                      className={`card-wrapper w-[calc(100vw-24px)] ${hasCol3Content ? "sm:w-[617px] md:w-[617px] lg:w-[617px] xl:w-[617px] 2xl:w-[617px]" : "sm:w-[480px] md:w-[480px] lg:w-[480px] xl:w-[480px] 2xl:w-[480px]"} shrink-0 flex flex-col transition-all duration-300 ${isCardExpanded ? "h-[646px] min-h-[566px] sm:min-h-[646px] max-h-[calc(100dvh-56px)] sm:max-h-none select-none" : "min-h-[135px] h-[135px]"}`}
                                       onContextMenu={(e) => {
                                         e.preventDefault();
                                         setSelectedActionTab(tab);
@@ -10913,6 +11072,48 @@ export default function Dashboard() {
                                                 } else {
                                                   handleToggleOrderHighlight(tab.id, orderId, isManual);
                                                 }
+                                              }}
+                                              onDeletePreOrder={async (orderId, price) => {
+                                                const sym = (tab.symbol || "").trim().toUpperCase();
+                                                if (sym) {
+                                                  deleteSimulatedPreOrder(sym, orderId, price);
+                                                }
+                                                const matchingTabs = tabs.filter(
+                                                  (t) => (t.symbol || "").trim().toUpperCase() === sym
+                                                );
+                                                setActiveTabOrders((prev) => {
+                                                  const next = { ...prev };
+                                                  matchingTabs.forEach((mt) => {
+                                                    const list = next[mt.id] || [];
+                                                    next[mt.id] = list.filter((o: any) => {
+                                                      if (!isSimulatedPreOrderLike(o)) return true;
+                                                      const idMatch = o.id === orderId || `fs_${o.id}` === orderId;
+                                                      const priceMatch =
+                                                        price !== undefined &&
+                                                        Math.abs((Number(o.price) || 0) - price) < 0.001;
+                                                      return !(idMatch || priceMatch);
+                                                    });
+                                                  });
+                                                  return next;
+                                                });
+                                                for (const mt of matchingTabs) {
+                                                  const list = activeTabOrders[mt.id] || [];
+                                                  for (const o of list) {
+                                                    if (!isSimulatedPreOrderLike(o)) continue;
+                                                    const idMatch = o.id === orderId || `fs_${o.id}` === orderId;
+                                                    const priceMatch =
+                                                      price !== undefined &&
+                                                      Math.abs((Number(o.price) || 0) - price) < 0.001;
+                                                    if ((idMatch || priceMatch) && o.id) {
+                                                      try {
+                                                        await deleteDoc(doc(db, "stockTabs", mt.id, "plannedOrders", String(o.id).replace(/^fs_/, "")));
+                                                      } catch (err) {
+                                                        console.warn("Failed to delete pre-order doc:", err);
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                                toast.success("已刪除模擬預購單");
                                               }}
                                               tabId={tab.id}
                                               annotations={tab.chartAnnotations || EMPTY_CHART_ANNOTATIONS}
@@ -13739,12 +13940,49 @@ export default function Dashboard() {
                   /* Prompt Manager Mode */
                   <div className="flex flex-col gap-4 animate-fadeIn">
                     <div className="flex items-center justify-between border-b border-white/5 pb-2">
-                      <div className="flex items-center gap-1.5 text-xs font-bold text-amber-400 tracking-wider">
-                        <Settings className="w-3.5 h-3.5 text-amber-400 animate-spin" />
-                        <span>管理指令模版 PROMPT TEMPLATES</span>
+                      <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-amber-400 tracking-wider">
+                          <Settings className="w-3.5 h-3.5 text-amber-400 animate-spin" />
+                          <span>管理指令模版 PROMPT TEMPLATES</span>
+                        </div>
+                        <span className="text-[10px] text-zinc-400 bg-white/5 px-2 py-0.5 rounded-full border border-white/10">
+                          共 {dynamicPrompts.length} 個模版 (支援拖曳與上下排序)
+                        </span>
                       </div>
                       <button
                         onClick={() => {
+                          // 若使用者有輸入內容但還沒按「確認新增模版」或「儲存修改」，自動幫他儲存！
+                          if (editingPromptId && editingPromptTemplate.trim()) {
+                            const autoName =
+                              editingPromptName.trim() ||
+                              editingPromptTemplate.trim().slice(0, 18);
+                            const updated = dynamicPrompts.map((p) =>
+                              p.id === editingPromptId
+                                ? {
+                                    ...p,
+                                    name: autoName,
+                                    template: editingPromptTemplate.trim(),
+                                    note: editingPromptNote.trim() || undefined,
+                                  }
+                                : p
+                            );
+                            handleSavePrompts(updated);
+                            toast.success(`已自動儲存模版「${autoName}」`);
+                          } else if (newPromptTemplate.trim()) {
+                            const autoName =
+                              newPromptName.trim() ||
+                              newPromptTemplate.trim().replace(/\s+/g, " ").slice(0, 18);
+                            const newP = {
+                              id: `prompt_${Date.now()}`,
+                              name: autoName,
+                              template: newPromptTemplate.trim(),
+                              note: newPromptNote.trim() || undefined,
+                            };
+                            const updated = [newP, ...dynamicPrompts];
+                            handleSavePrompts(updated);
+                            setAiSelectedPromptId(newP.id);
+                            toast.success(`已自動保存新模版「${autoName}」`);
+                          }
                           setIsPromptManagerOpen(false);
                           setEditingPromptId(null);
                           setNewPromptName("");
@@ -13812,15 +14050,18 @@ export default function Dashboard() {
                           <button
                             type="button"
                             onClick={() => {
-                              if (!editingPromptName.trim() || !editingPromptTemplate.trim()) {
-                                toast.error("請填寫模版名稱與內容");
+                              if (!editingPromptTemplate.trim()) {
+                                toast.error("請填寫模版內容");
                                 return;
                               }
+                              const finalName =
+                                editingPromptName.trim() ||
+                                editingPromptTemplate.trim().replace(/\s+/g, " ").slice(0, 18);
                               const updated = dynamicPrompts.map((p) =>
                                 p.id === editingPromptId
                                   ? {
                                       ...p,
-                                      name: editingPromptName.trim(),
+                                      name: finalName,
                                       template: editingPromptTemplate.trim(),
                                       note: editingPromptNote.trim() || undefined,
                                     }
@@ -13828,7 +14069,7 @@ export default function Dashboard() {
                               );
                               handleSavePrompts(updated);
                               setEditingPromptId(null);
-                              toast.success("模版已更新");
+                              toast.success(`模版「${finalName}」已更新並保存`);
                               playClickSound();
                             }}
                             className="flex-1 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-lg transition-all cursor-pointer"
@@ -13853,7 +14094,7 @@ export default function Dashboard() {
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                           <input
                             type="text"
-                            placeholder="模版名稱 (例：總經面分析)"
+                            placeholder="模版名稱 (例：總經面分析，未填將自動取自內容)"
                             value={newPromptName}
                             onChange={(e) => setNewPromptName(e.target.value)}
                             className="w-full bg-[#18181b] border border-white/10 text-white rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[#e5484d]"
@@ -13889,110 +14130,234 @@ export default function Dashboard() {
                         <button
                           type="button"
                           onClick={() => {
-                            if (!newPromptName.trim() || !newPromptTemplate.trim()) {
-                              toast.error("請填寫模版名稱與內容");
+                            if (!newPromptTemplate.trim()) {
+                              toast.error("請輸入指令內容");
                               return;
                             }
+                            const finalName =
+                              newPromptName.trim() ||
+                              newPromptTemplate.trim().replace(/\s+/g, " ").slice(0, 18);
                             const newP = {
                               id: `prompt_${Date.now()}`,
-                              name: newPromptName.trim(),
+                              name: finalName,
                               template: newPromptTemplate.trim(),
                               note: newPromptNote.trim() || undefined,
                             };
-                            const updated = [...dynamicPrompts, newP];
+                            const updated = [newP, ...dynamicPrompts];
                             handleSavePrompts(updated);
                             setNewPromptName("");
                             setNewPromptTemplate("");
                             setNewPromptNote("");
                             setAiSelectedPromptId(newP.id);
-                            toast.success("已新增指令模版");
+                            toast.success(`已新增並保存指令模版「${finalName}」`);
                             playClickSound();
                           }}
-                          className="w-full py-2 bg-white/10 hover:bg-white/15 text-white text-xs font-bold rounded-lg transition-all cursor-pointer border border-white/10"
+                          className="w-full py-2 bg-gradient-to-r from-[#e5484d]/80 to-rose-600/80 hover:from-[#e5484d] hover:to-rose-600 text-white text-xs font-bold rounded-lg transition-all cursor-pointer border border-white/15 shadow-md"
                         >
                           確認新增模版
                         </button>
                       </div>
                     )}
 
-                    {/* Template list */}
+                    {/* Template list with full sorting (Drag & Drop + Top / Up / Down) */}
                     <div
                       data-lenis-prevent
                       onWheel={(e) => e.stopPropagation()}
-                      className="flex flex-col gap-2 max-h-60 overflow-y-auto overscroll-contain pr-1"
+                      className="flex flex-col gap-2 max-h-72 overflow-y-auto overscroll-contain pr-1"
                     >
-                      {dynamicPrompts.map((prompt) => (
-                        <div
-                          key={prompt.id}
-                          className="p-3 bg-white/[0.03] hover:bg-white/[0.06] border border-white/5 rounded-xl flex items-start justify-between gap-3 transition-all"
-                        >
-                          <div className="flex flex-col gap-1 flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs font-bold text-white truncate">{prompt.name}</span>
-                              {prompt.note && (
-                                <span className="text-[10px] text-zinc-400 bg-white/5 px-2 py-0.5 rounded border border-white/5 truncate">
-                                  {prompt.note}
-                                </span>
-                              )}
+                      {dynamicPrompts.map((prompt, index) => {
+                        const isDragging = draggedPromptIndex === index;
+                        const isDragOver = dragOverPromptIndex === index && draggedPromptIndex !== index;
+                        return (
+                          <div
+                            key={prompt.id}
+                            draggable
+                            onDragStart={(e) => {
+                              setDraggedPromptIndex(index);
+                              e.dataTransfer.effectAllowed = "move";
+                            }}
+                            onDragOver={(e) => {
+                              e.preventDefault();
+                              if (dragOverPromptIndex !== index) {
+                                setDragOverPromptIndex(index);
+                              }
+                            }}
+                            onDragLeave={() => {
+                              if (dragOverPromptIndex === index) {
+                                setDragOverPromptIndex(null);
+                              }
+                            }}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              if (draggedPromptIndex !== null && draggedPromptIndex !== index) {
+                                handleReorderPrompts(draggedPromptIndex, index);
+                              }
+                              setDraggedPromptIndex(null);
+                              setDragOverPromptIndex(null);
+                            }}
+                            onDragEnd={() => {
+                              setDraggedPromptIndex(null);
+                              setDragOverPromptIndex(null);
+                            }}
+                            className={`p-3 rounded-xl flex items-start justify-between gap-2.5 transition-all select-none ${
+                              isDragging
+                                ? "opacity-40 bg-amber-500/10 border border-amber-400/50 scale-[0.99]"
+                                : isDragOver
+                                  ? "bg-amber-500/15 border-2 border-amber-400 shadow-lg"
+                                  : prompt.id === aiSelectedPromptId
+                                    ? "bg-white/[0.06] border border-amber-400/30"
+                                    : "bg-white/[0.03] hover:bg-white/[0.06] border border-white/5"
+                            }`}
+                          >
+                            {/* Left: Drag Handle & Order Number */}
+                            <div
+                              className="flex flex-col items-center gap-1 pt-0.5 cursor-grab active:cursor-grabbing text-zinc-500 hover:text-zinc-300 shrink-0"
+                              title="按住拖曳可調整排序"
+                            >
+                              <span className="text-[10px] font-mono font-bold text-amber-400/90 bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20">
+                                #{index + 1}
+                              </span>
+                              <span className="text-[11px] leading-none tracking-tighter select-none">⋮⋮</span>
                             </div>
-                            <p className="text-[11px] text-zinc-400 line-clamp-2 leading-relaxed font-mono">
-                              {prompt.template}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-1 shrink-0">
-                            <button
-                              type="button"
+
+                            {/* Center: Prompt Info */}
+                            <div
                               onClick={() => {
-                                setEditingPromptId(prompt.id);
-                                setEditingPromptName(prompt.name);
-                                setEditingPromptTemplate(prompt.template);
-                                setEditingPromptNote(prompt.note || "");
+                                setAiSelectedPromptId(prompt.id);
                                 playClickSound();
                               }}
-                              className="p-1.5 text-zinc-400 hover:text-amber-400 rounded-lg hover:bg-white/5 transition-all"
-                              title="編輯"
+                              className="flex flex-col gap-1 flex-1 min-w-0 cursor-pointer"
                             >
-                              <Edit3 className="w-3.5 h-3.5" />
-                            </button>
-                            {confirmDeletePromptId === prompt.id ? (
-                              <div className="flex items-center gap-1">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const updated = dynamicPrompts.filter((p) => p.id !== prompt.id);
-                                    handleSavePrompts(updated);
-                                    if (aiSelectedPromptId === prompt.id && updated.length > 0) {
-                                      setAiSelectedPromptId(updated[0].id);
-                                    }
-                                    setConfirmDeletePromptId(null);
-                                    toast.success("已刪除模版");
-                                    playClickSound();
-                                  }}
-                                  className="px-2 py-1 bg-red-600 hover:bg-red-500 text-[10px] text-white font-bold rounded"
-                                >
-                                  確定
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setConfirmDeletePromptId(null)}
-                                  className="px-2 py-1 bg-zinc-700 text-[10px] text-zinc-300 rounded"
-                                >
-                                  取消
-                                </button>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold text-white truncate">{prompt.name}</span>
+                                {prompt.id === aiSelectedPromptId && (
+                                  <span className="text-[9px] text-emerald-400 bg-emerald-500/15 px-1.5 py-0.5 rounded border border-emerald-500/30 font-bold shrink-0">
+                                    目前選用
+                                  </span>
+                                )}
+                                {prompt.note && (
+                                  <span className="text-[10px] text-zinc-400 bg-white/5 px-2 py-0.5 rounded border border-white/5 truncate">
+                                    {prompt.note}
+                                  </span>
+                                )}
                               </div>
-                            ) : (
+                              <p className="text-[11px] text-zinc-400 line-clamp-2 leading-relaxed font-mono">
+                                {prompt.template}
+                              </p>
+                            </div>
+
+                            {/* Right: Sort Controls (Top, Up, Down) + Edit + Delete */}
+                            <div className="flex items-center gap-0.5 shrink-0">
                               <button
                                 type="button"
-                                onClick={() => setConfirmDeletePromptId(prompt.id)}
-                                className="p-1.5 text-zinc-400 hover:text-red-400 rounded-lg hover:bg-white/5 transition-all"
-                                title="刪除"
+                                disabled={index === 0}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleMovePrompt(index, "top");
+                                }}
+                                className={`px-1.5 py-1 text-[10px] font-bold rounded-md transition-all ${
+                                  index === 0
+                                    ? "text-zinc-600 cursor-not-allowed opacity-40"
+                                    : "text-zinc-400 hover:text-amber-300 hover:bg-amber-400/10 cursor-pointer"
+                                }`}
+                                title="置頂"
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                置頂
                               </button>
-                            )}
+                              <button
+                                type="button"
+                                disabled={index === 0}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleMovePrompt(index, "up");
+                                }}
+                                className={`p-1.5 rounded-lg transition-all ${
+                                  index === 0
+                                    ? "text-zinc-600 cursor-not-allowed opacity-40"
+                                    : "text-zinc-400 hover:text-white hover:bg-white/10 cursor-pointer"
+                                }`}
+                                title="上移"
+                              >
+                                <ArrowUp className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={index === dynamicPrompts.length - 1}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleMovePrompt(index, "down");
+                                }}
+                                className={`p-1.5 rounded-lg transition-all ${
+                                  index === dynamicPrompts.length - 1
+                                    ? "text-zinc-600 cursor-not-allowed opacity-40"
+                                    : "text-zinc-400 hover:text-white hover:bg-white/10 cursor-pointer"
+                                }`}
+                                title="下移"
+                              >
+                                <ArrowDown className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingPromptId(prompt.id);
+                                  setEditingPromptName(prompt.name);
+                                  setEditingPromptTemplate(prompt.template);
+                                  setEditingPromptNote(prompt.note || "");
+                                  playClickSound();
+                                }}
+                                className="p-1.5 text-zinc-400 hover:text-amber-400 rounded-lg hover:bg-white/5 transition-all cursor-pointer"
+                                title="編輯"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              {confirmDeletePromptId === prompt.id ? (
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const updated = dynamicPrompts.filter((p) => p.id !== prompt.id);
+                                      handleSavePrompts(updated);
+                                      if (aiSelectedPromptId === prompt.id && updated.length > 0) {
+                                        setAiSelectedPromptId(updated[0].id);
+                                      }
+                                      setConfirmDeletePromptId(null);
+                                      toast.success("已刪除模版");
+                                      playClickSound();
+                                    }}
+                                    className="px-2 py-1 bg-red-600 hover:bg-red-500 text-[10px] text-white font-bold rounded cursor-pointer"
+                                  >
+                                    確定
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setConfirmDeletePromptId(null);
+                                    }}
+                                    className="px-2 py-1 bg-zinc-700 text-[10px] text-zinc-300 rounded cursor-pointer"
+                                  >
+                                    取消
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setConfirmDeletePromptId(prompt.id);
+                                  }}
+                                  className="p-1.5 text-zinc-400 hover:text-red-400 rounded-lg hover:bg-white/5 transition-all cursor-pointer"
+                                  title="刪除"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 ) : (
@@ -14014,7 +14379,7 @@ export default function Dashboard() {
                           className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1.5 font-bold transition-all cursor-pointer px-2 py-0.5 rounded hover:bg-amber-400/10"
                         >
                           <Settings className="w-3.5 h-3.5" />
-                          <span>管理模版</span>
+                          <span>管理 / 排序模版</span>
                         </button>
                       </div>
 
@@ -14043,7 +14408,7 @@ export default function Dashboard() {
                           />
                         </button>
 
-                        {/* Dropdown Menu Popup - 比例適中、嚴格鎖定寬度不外溢、文字單行截斷 */}
+                        {/* Dropdown Menu Popup - 支援快速上下排序與選取 */}
                         {isAiPromptDropdownOpen && (
                           <>
                             {/* Backdrop for click outside */}
@@ -14054,32 +14419,69 @@ export default function Dashboard() {
                             <div
                               data-lenis-prevent
                               onWheel={(e) => e.stopPropagation()}
-                              className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-[#18181b] border border-white/20 rounded-xl shadow-2xl py-1 max-h-56 overflow-y-auto overscroll-contain divide-y divide-white/5 backdrop-blur-xl"
+                              className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-[#18181b] border border-white/20 rounded-xl shadow-2xl py-1 max-h-60 overflow-y-auto overscroll-contain divide-y divide-white/5 backdrop-blur-xl"
                             >
-                              {dynamicPrompts.map((t) => {
+                              {dynamicPrompts.map((t, idx) => {
                                 const isSelected = t.id === aiSelectedPromptId;
                                 return (
-                                  <button
+                                  <div
                                     key={t.id}
-                                    type="button"
-                                    onClick={() => {
-                                      setAiSelectedPromptId(t.id);
-                                      setIsAiPromptDropdownOpen(false);
-                                      playClickSound();
-                                    }}
-                                    className={`w-full text-left px-3.5 py-2 text-xs sm:text-sm flex items-center justify-between gap-2 transition-colors cursor-pointer ${
+                                    className={`w-full px-3 py-2 text-xs sm:text-sm flex items-center justify-between gap-2 transition-colors ${
                                       isSelected
                                         ? "bg-[#e5484d]/15 text-[#ff7176] font-semibold"
                                         : "text-zinc-200 hover:bg-white/10 hover:text-white"
                                     }`}
                                   >
-                                    <span className="truncate flex-1" title={t.name}>
-                                      {t.name}
-                                    </span>
-                                    {isSelected && (
-                                      <Check className="w-3.5 h-3.5 text-[#ff7176] shrink-0" />
-                                    )}
-                                  </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setAiSelectedPromptId(t.id);
+                                        setIsAiPromptDropdownOpen(false);
+                                        playClickSound();
+                                      }}
+                                      className="flex items-center gap-2 flex-1 min-w-0 text-left cursor-pointer"
+                                    >
+                                      <span className="text-[10px] font-mono text-zinc-500 shrink-0">
+                                        {idx + 1}.
+                                      </span>
+                                      <span className="truncate flex-1" title={t.name}>
+                                        {t.name}
+                                      </span>
+                                      {isSelected && (
+                                        <Check className="w-3.5 h-3.5 text-[#ff7176] shrink-0" />
+                                      )}
+                                    </button>
+                                    <div className="flex items-center gap-0.5 shrink-0 pl-1 border-l border-white/10">
+                                      <button
+                                        type="button"
+                                        disabled={idx === 0}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleMovePrompt(idx, "up");
+                                        }}
+                                        className={`p-1 rounded hover:bg-white/10 ${
+                                          idx === 0 ? "opacity-25 cursor-not-allowed" : "text-zinc-400 hover:text-white cursor-pointer"
+                                        }`}
+                                        title="上移"
+                                      >
+                                        <ArrowUp className="w-3 h-3" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={idx === dynamicPrompts.length - 1}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleMovePrompt(idx, "down");
+                                        }}
+                                        className={`p-1 rounded hover:bg-white/10 ${
+                                          idx === dynamicPrompts.length - 1 ? "opacity-25 cursor-not-allowed" : "text-zinc-400 hover:text-white cursor-pointer"
+                                        }`}
+                                        title="下移"
+                                      >
+                                        <ArrowDown className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                  </div>
                                 );
                               })}
                             </div>
@@ -14102,15 +14504,65 @@ export default function Dashboard() {
 
                     {/* Prompt Preview & Edit Textarea */}
                     <div className="flex flex-col gap-1.5">
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between flex-wrap gap-1.5">
                         <label className="text-xs font-bold text-zinc-300 flex items-center gap-1.5">
                           <span>指令預覽與編輯</span>
                           <span className="text-[10px] text-zinc-500 font-normal">PROMPT CONTENT</span>
                         </label>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="text-[10px] font-mono text-zinc-500">
                             {aiPromptText.length} 字元
                           </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!aiPromptText.trim()) {
+                                toast.error("指令內容不能為空");
+                                return;
+                              }
+                              const currentPrompt = dynamicPrompts.find((p) => p.id === aiSelectedPromptId);
+                              if (currentPrompt) {
+                                const updated = dynamicPrompts.map((p) =>
+                                  p.id === currentPrompt.id
+                                    ? { ...p, template: aiPromptText.trim() }
+                                    : p
+                                );
+                                handleSavePrompts(updated);
+                                toast.success(`已將內容更新保存至模版「${currentPrompt.name}」`);
+                                playClickSound();
+                              }
+                            }}
+                            className="text-xs text-amber-300 hover:text-white flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 transition-all cursor-pointer"
+                            title="將目前編輯區的指令覆蓋保存至當前選用的模版"
+                          >
+                            <Save className="w-3 h-3" />
+                            <span>儲存至當前模版</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!aiPromptText.trim()) {
+                                toast.error("請先輸入指令內容");
+                                return;
+                              }
+                              const autoName = aiPromptText.trim().replace(/\s+/g, " ").slice(0, 18);
+                              const newP = {
+                                id: `prompt_${Date.now()}`,
+                                name: autoName,
+                                template: aiPromptText.trim(),
+                              };
+                              const updated = [newP, ...dynamicPrompts];
+                              handleSavePrompts(updated);
+                              setAiSelectedPromptId(newP.id);
+                              toast.success(`已另存為新模版「${autoName}」`);
+                              playClickSound();
+                            }}
+                            className="text-xs text-emerald-300 hover:text-white flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 transition-all cursor-pointer"
+                            title="將目前編輯區的指令直接新增為一個新的模版"
+                          >
+                            <Plus className="w-3 h-3" />
+                            <span>另存新模版</span>
+                          </button>
                           <button
                             type="button"
                             onClick={() => {

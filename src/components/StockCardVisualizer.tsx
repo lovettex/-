@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { PlannedOrder, ChartAnnotation, Trade } from "../types";
-import { MousePointer, Minus, Square, Type, Trash2, Eraser, Undo2, ArrowUpRight, Move, Download, Share2, Camera, Loader2, SeparatorHorizontal, Check, Layers, History, Crosshair } from "lucide-react";
+import { MousePointer, Minus, Square, Type, Trash2, Eraser, Undo2, ArrowUpRight, Move, Download, Share2, Camera, Loader2, SeparatorHorizontal, Check, Layers, History, Crosshair, Plus, X } from "lucide-react";
 import html2canvas from "html2canvas";
 import { toast } from "sonner";
 import { getAxisLetterForColor } from "../utils/visualLinesSync";
@@ -10,6 +10,13 @@ import { formatTimestamp } from "../lib/dateUtils";
 import { safeSessionStorage } from "../lib/utils";
 import { playClickSound } from "../lib/audio";
 import { whiteNoiseEngine } from "../lib/whiteNoiseEngine";
+import {
+  getSimulatedPreOrders,
+  addSimulatedPreOrder,
+  deleteSimulatedPreOrder,
+  mergeAndSyncPreOrders,
+  clearAllSimulatedPreOrders,
+} from "../utils/simulatedPreOrdersStorage";
 import {
   Chart as ChartJS,
   registerables,
@@ -22,6 +29,7 @@ interface Props {
   plannedOrders: PlannedOrder[];
   currentPrice?: number;
   onToggleHighlight?: (orderId: string, currentStatus: boolean) => void;
+  onDeletePreOrder?: (orderId: string, price?: number) => void;
   tabId?: string;
   annotations?: ChartAnnotation[];
   onUpdateAnnotations?: (annotations: ChartAnnotation[]) => void;
@@ -439,6 +447,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
   plannedOrders,
   currentPrice = 0,
   onToggleHighlight,
+  onDeletePreOrder,
   tabId,
   annotations = EMPTY_ANNOTATIONS,
   onUpdateAnnotations,
@@ -507,6 +516,52 @@ export const StockCardVisualizer: React.FC<Props> = ({
   const activeSplitTrade = selectedSplitTrade || strategy?.selectedSplitTrade;
   const { price: dynamicPrice, isLoading: isCardLoading } = useStockPrice(stockName, currentPrice);
 
+  const [preOrdersSyncTick, setPreOrdersSyncTick] = useState(0);
+  const [isCardPreOrderModalOpen, setIsCardPreOrderModalOpen] = useState(false);
+  const [cardPreOrderPrice, setCardPreOrderPrice] = useState("");
+  const [cardPreOrderQty, setCardPreOrderQty] = useState("100");
+  const [cardPreOrderNotes, setCardPreOrderNotes] = useState("");
+
+  useEffect(() => {
+    const handleUpdate = () => setPreOrdersSyncTick((t) => t + 1);
+    window.addEventListener("simulated-preorders-updated", handleUpdate);
+    return () => window.removeEventListener("simulated-preorders-updated", handleUpdate);
+  }, []);
+
+  const cleanCardSymbol = useMemo(() => {
+    const raw = stockName || tabId || "";
+    return raw.trim().split(/[\s(/]/)[0].toUpperCase();
+  }, [stockName, tabId]);
+
+  const handleCardAddPreOrder = () => {
+    if (!cleanCardSymbol) return;
+    const p = parseFloat(cardPreOrderPrice);
+    if (isNaN(p) || p <= 0) {
+      toast.error("請輸入有效的模擬預購單價格");
+      return;
+    }
+    const q = parseInt(cardPreOrderQty) || 100;
+    addSimulatedPreOrder(cleanCardSymbol, {
+      price: p,
+      quantity: q,
+      direction: "BUY",
+      notes: cardPreOrderNotes ? `[模擬預購單] ${cardPreOrderNotes}` : "[模擬預購單]",
+    });
+    setCardPreOrderPrice("");
+    setCardPreOrderNotes("");
+    setPreOrdersSyncTick((t) => t + 1);
+    toast.success(`已新增 ${cleanCardSymbol} 模擬預購單 $${p.toFixed(2)} (${q}股)`);
+  };
+
+  const handleCardDeletePreOrder = (orderId: string, price?: number) => {
+    if (cleanCardSymbol) {
+      deleteSimulatedPreOrder(cleanCardSymbol, orderId, price);
+    }
+    onDeletePreOrder?.(orderId, price);
+    setPreOrdersSyncTick((t) => t + 1);
+    toast.success("已刪除該筆模擬預購單");
+  };
+
   const lastCpTapTime = useRef<number>(0);
 
   const ratingVal = rating !== undefined ? rating : 5;
@@ -521,7 +576,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
 
   const [hoveredLabel, setHoveredLabel] = useState<any>(null);
   const [hoveredDetail, setHoveredDetail] = useState<{
-    type: "pyramid" | "trade" | "price" | "order";
+    type: "pyramid" | "trade" | "price" | "order" | "simulatedPreOrder";
     data: any;
   } | null>(null);
 
@@ -2446,12 +2501,49 @@ export const StockCardVisualizer: React.FC<Props> = ({
     const pyramidPrices = pyramidStepItems.map((s) => s.price).filter((p) => p > 0);
     const tradePrices = [...buyTrades, ...sellTrades].map((t) => t.price).filter((p) => p > 0);
 
+    // 取得該個股之模擬預購單 (#00F5E2)，並與歷史買賣價同列 (Column 3) 顯示
+    const getCleanSym = (s?: string) => {
+      if (!s) return "";
+      return s.trim().split(/[\s(/]/)[0].toUpperCase();
+    };
+    const cleanSymFromStockName = getCleanSym(stockName);
+    const cleanSymFromTabId = getCleanSym(tabId);
+    const primarySym = cleanSymFromStockName || cleanSymFromTabId;
+
+    const mergedFromPrimary = primarySym ? mergeAndSyncPreOrders(primarySym, plannedOrders) : [];
+    const extraFromTab =
+      cleanSymFromTabId && cleanSymFromTabId !== primarySym
+        ? getSimulatedPreOrders(cleanSymFromTabId)
+        : [];
+
+    const combinedPreOrderMap = new Map<string, any>();
+    [...mergedFromPrimary, ...extraFromTab].forEach((po) => {
+      if (!po || isNaN(Number(po.price)) || Number(po.price) <= 0) return;
+      const priceKey = Number(po.price).toFixed(2);
+      if (!combinedPreOrderMap.has(priceKey)) {
+        combinedPreOrderMap.set(priceKey, {
+          id: po.id || `pre-${priceKey}`,
+          price: Number(po.price),
+          quantity: Number(po.quantity) || 0,
+          notes: po.notes || "[模擬預購單]",
+          direction: po.direction || "BUY",
+          isPreOrder: true,
+        });
+      }
+    });
+
+    const allSimulatedPreOrders = Array.from(combinedPreOrderMap.values()).filter(
+      (po) => po && typeof po.price === "number" && !isNaN(po.price) && po.price > 0
+    );
+    const preOrderPrices = allSimulatedPreOrders.map((po) => po.price);
+
     const allPrices = [
       dynamicPrice,
       ...(averageCost && averageCost > 0 ? [averageCost] : []),
       ...validOrders.map((o) => o.price),
       ...pyramidPrices,
       ...tradePrices,
+      ...preOrderPrices,
     ].filter((p) => typeof p === "number" && !isNaN(p) && p > 0);
 
     if (allPrices.length === 0) return null;
@@ -2560,17 +2652,34 @@ export const StockCardVisualizer: React.FC<Props> = ({
       })),
     ];
 
-    // 第三欄位：歷史買賣交易標籤 (買入藍色、賣出淡粉色)
-    const allTradeItemsRaw = (isHoldingActive || buyTrades.length > 0 || sellTrades.length > 0 ? [...buyTrades, ...sellTrades] : [])
-      .filter((t: any) => t.price > 0)
-      .map((t: any, idx: number) => ({
-        ...t,
-        id: t.id || `trade-${idx}`,
-        price: t.price,
-        rawY: getYPct(t.price),
-        column: 3,
-        isSell: Boolean(t.isSell || t.tradeType === 'SELL' || t.type === 'SELL'),
-      }));
+    const preOrderItemsRaw = allSimulatedPreOrders.map((po: any, idx: number) => ({
+      ...po,
+      id: po.id || `preorder-${idx}`,
+      price: po.price,
+      rawY: getYPct(po.price),
+      column: 3,
+      isPreOrder: true,
+      quantity: Number(po.quantity) || 0,
+    }));
+
+    // 第三欄位：歷史買賣交易標籤 (買入藍色、賣出淡粉色) 與 模擬預購單 (#00F5E2) (同列顯示)
+    const allTradeItemsRaw = [
+      ...(isHoldingActive || buyTrades.length > 0 || sellTrades.length > 0 || preOrderItemsRaw.length > 0
+        ? [...buyTrades, ...sellTrades]
+        : []
+      )
+        .filter((t: any) => t.price > 0)
+        .map((t: any, idx: number) => ({
+          ...t,
+          id: t.id || `trade-${idx}`,
+          price: t.price,
+          rawY: getYPct(t.price),
+          column: 3,
+          isSell: Boolean(t.isSell || t.tradeType === 'SELL' || t.type === 'SELL'),
+          isPreOrder: false,
+        })),
+      ...preOrderItemsRaw,
+    ];
 
     // 第四欄位（持有 > 0 時）或 第三欄位（持有 = 0 時）：現價、均本與攤平交易標籤
     const col4ItemsRaw = [
@@ -2654,11 +2763,12 @@ export const StockCardVisualizer: React.FC<Props> = ({
       effPlannedQty,
       currentHoldingQty,
       isHoldingActive,
+      simulatedPreOrders: allSimulatedPreOrders,
       getYPct,
       getPriceFromYPct,
       uniqueSortedPrices,
     };
-  }, [plannedOrders, dynamicPrice, currentPrice, averageCost, averageCostQuantity, averagingRows, averagingRowsSys2, pyramidRows, pyramidRowsSys2, plannedBuyQty, plannedBuyPercent, holdingQuantity, liveTrades, totalCapital, virtualCapital, tradeType, maxStrategyRiskPool60, batchCalcMode]);
+  }, [plannedOrders, dynamicPrice, currentPrice, averageCost, averageCostQuantity, averagingRows, averagingRowsSys2, pyramidRows, pyramidRowsSys2, plannedBuyQty, plannedBuyPercent, holdingQuantity, liveTrades, totalCapital, virtualCapital, tradeType, maxStrategyRiskPool60, batchCalcMode, preOrdersSyncTick, stockName, tabId]);
 
   if (!data)
     return (
@@ -2684,6 +2794,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
     effPlannedQty,
     currentHoldingQty,
     isHoldingActive,
+    simulatedPreOrders,
     getYPct,
     getPriceFromYPct,
     uniqueSortedPrices,
@@ -3004,40 +3115,64 @@ export const StockCardVisualizer: React.FC<Props> = ({
             )}
           </div>
 
-          {/* Top-Right Corner Mode Switch: (突破加碼 | 分批攤平) */}
-          <div className="flex items-center gap-1 bg-zinc-100/95 hover:bg-zinc-100 backdrop-blur-md p-0.5 rounded-lg border border-zinc-200/90 shadow-2xs pointer-events-auto transition-all select-none shrink-0">
+          {/* Top-Right Corner Mode Switch: (預購單管理 + 突破加碼 | 分批攤平) */}
+          <div className="flex items-center gap-1 pointer-events-auto select-none shrink-0">
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                setBatchCalcMode("breakout");
                 playClickSound();
+                const refP = dynamicPrice > 0 ? dynamicPrice : currentPrice;
+                if (refP > 0 && !cardPreOrderPrice) {
+                  setCardPreOrderPrice((refP * 0.97).toFixed(2));
+                }
+                setIsCardPreOrderModalOpen(true);
               }}
-              className={`px-2 py-0.5 rounded-md text-[10.5px] sm:text-[11px] font-bold transition-all cursor-pointer select-none leading-tight flex items-center gap-1 ${
-                batchCalcMode === "breakout"
-                  ? "bg-indigo-600 text-white shadow-2xs font-black"
-                  : "text-zinc-600 hover:text-zinc-900 hover:bg-white/80"
+              className={`px-2 py-0.5 rounded-lg text-[10.5px] sm:text-[11px] font-bold transition-all cursor-pointer select-none leading-tight flex items-center gap-1 border shadow-2xs ${
+                simulatedPreOrders && simulatedPreOrders.length > 0
+                  ? "bg-[#00F5E2]/25 hover:bg-[#00F5E2]/40 text-zinc-900 border-[#00c4b4]"
+                  : "bg-zinc-100/95 hover:bg-zinc-200/80 text-zinc-700 border-zinc-200/90"
               }`}
-              title="股價向上突破加碼試算 (顯示系統一的標籤價格 +2%, +4%, +6%, +8%)"
+              title="管理或新增/刪除模擬預購單 (#00F5E2)"
             >
-              <span>突破加碼</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-[#00F5E2] shadow-[0_0_4px_#00F5E2]" />
+              <span>預購單{simulatedPreOrders && simulatedPreOrders.length > 0 ? ` (${simulatedPreOrders.length})` : "+"}</span>
             </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setBatchCalcMode("averaging");
-                playClickSound();
-              }}
-              className={`px-2 py-0.5 rounded-md text-[10.5px] sm:text-[11px] font-bold transition-all cursor-pointer select-none leading-tight flex items-center gap-1 ${
-                batchCalcMode === "averaging"
-                  ? "bg-emerald-600 text-white shadow-2xs font-black"
-                  : "text-zinc-600 hover:text-zinc-900 hover:bg-white/80"
-              }`}
-              title="股價向下攤平試算 (顯示系統二的標籤價格 -3%, -6%, -9%, -12%)"
-            >
-              <span>分批攤平</span>
-            </button>
+
+            <div className="flex items-center gap-1 bg-zinc-100/95 hover:bg-zinc-100 backdrop-blur-md p-0.5 rounded-lg border border-zinc-200/90 shadow-2xs transition-all">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setBatchCalcMode("breakout");
+                  playClickSound();
+                }}
+                className={`px-2 py-0.5 rounded-md text-[10.5px] sm:text-[11px] font-bold transition-all cursor-pointer select-none leading-tight flex items-center gap-1 ${
+                  batchCalcMode === "breakout"
+                    ? "bg-indigo-600 text-white shadow-2xs font-black"
+                    : "text-zinc-600 hover:text-zinc-900 hover:bg-white/80"
+                }`}
+                title="股價向上突破加碼試算 (顯示系統一的標籤價格 +2%, +4%, +6%, +8%)"
+              >
+                <span>突破加碼</span>
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setBatchCalcMode("averaging");
+                  playClickSound();
+                }}
+                className={`px-2 py-0.5 rounded-md text-[10.5px] sm:text-[11px] font-bold transition-all cursor-pointer select-none leading-tight flex items-center gap-1 ${
+                  batchCalcMode === "averaging"
+                    ? "bg-emerald-600 text-white shadow-2xs font-black"
+                    : "text-zinc-600 hover:text-zinc-900 hover:bg-white/80"
+                }`}
+                title="股價向下攤平試算 (顯示系統二的標籤價格 -3%, -6%, -9%, -12%)"
+              >
+                <span>分批攤平</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -3119,6 +3254,21 @@ export const StockCardVisualizer: React.FC<Props> = ({
             />
           )}
 
+          {simulatedPreOrders && simulatedPreOrders.map((po: any, idx: number) => (
+            <line
+              key={`preorder-line-${po.id || idx}`}
+              x1="0"
+              y1={getYPct(po.price)}
+              x2="100"
+              y2={getYPct(po.price)}
+              vectorEffect="non-scaling-stroke"
+              stroke="#00F5E2"
+              strokeWidth={activePs5Mode ? "2" : "1.6"}
+              strokeDasharray="3 3"
+              opacity={activePs5Mode ? "0.95" : "0.75"}
+            />
+          ))}
+
           {/* Optional trade paths omitted to maintain clear visualization without curve clutter */}
 
           {/* Connector lines for collision-adjusted labels */}
@@ -3154,7 +3304,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
               />
             ) : null,
           )}
-          {isHoldingActive ? (
+          {isHoldingActive || (buyTradeLabels && buyTradeLabels.length > 0) ? (
             <>
               {buyTradeLabels.map((l: any, i: number) =>
                 Math.abs(l.y - l.rawY) > 0.5 ? (
@@ -3164,7 +3314,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
                     y1={l.rawY}
                     x2="45"
                     y2={l.y}
-                    stroke="#3b82f6"
+                    stroke={l.isPreOrder ? "#00F5E2" : "#3b82f6"}
                     strokeWidth="1"
                     strokeDasharray="1 2"
                     opacity="0.6"
@@ -3736,6 +3886,55 @@ export const StockCardVisualizer: React.FC<Props> = ({
               <div className={mode === 'cursor' ? "pointer-events-auto" : "pointer-events-none"}>
                 {buyTradeLabels && buyTradeLabels.map((trade: any, idx: number) => {
                   if (!trade.price || trade.price <= 0) return null;
+
+                  if (trade.isPreOrder) {
+                    const isHovered = (hoveredDetail?.type === 'simulatedPreOrder' && hoveredDetail?.data?.id === trade.id) || hoveredLabel?.id === trade.id;
+                    return (
+                      <div
+                        key={`preorder-badge-${trade.id || idx}`}
+                        style={{
+                          top: `${trade.y}%`,
+                          transform: "translateY(-50%)",
+                        }}
+                        className={`group/prebadge absolute z-30 transition-all duration-150 cursor-pointer select-none whitespace-nowrap hover:scale-105 hover:z-40 left-[138px] xs:left-[156px] sm:left-[180px] md:left-[215px] lg:left-[263px] ${
+                          isHovered ? "scale-105 ring-2 ring-[#00F5E2] shadow-lg z-40" : ""
+                        }`}
+                        onMouseEnter={() => {
+                          setHoveredDetail({ type: 'simulatedPreOrder', data: trade });
+                          setHoveredLabel(trade);
+                        }}
+                        onMouseLeave={() => {
+                          setHoveredDetail(null);
+                          setHoveredLabel(null);
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setIsCardPreOrderModalOpen(true);
+                        }}
+                        title="點擊管理模擬預購單，或點擊右側 × 刪除此預購單"
+                      >
+                        <div className="flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2 py-0.5 rounded-md bg-[#00F5E2] text-zinc-950 border border-[#00d0c1] text-[10.5px] sm:text-[13px] font-mono font-extrabold shadow-xs leading-tight">
+                          <span>🛒</span>
+                          <span>${trade.price.toFixed(1)}</span>
+                          {trade.quantity > 0 && (
+                            <span className="text-[9.5px] sm:text-[12px] opacity-90 font-bold">({trade.quantity}股)</span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCardDeletePreOrder(trade.id, trade.price);
+                            }}
+                            className="ml-0.5 w-3.5 h-3.5 rounded-full bg-black/15 hover:bg-rose-600 text-zinc-900 hover:text-white inline-flex items-center justify-center text-[9px] font-black transition-colors cursor-pointer"
+                            title="刪除此筆模擬預購單"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  }
+
                   const isHovered = (hoveredDetail?.type === 'trade' && hoveredDetail?.data?.id === trade.id) || hoveredLabel?.id === trade.id;
                   const isSell = Boolean(trade.isSell || trade.tradeType === 'SELL' || trade.type === 'SELL');
 
@@ -4030,6 +4229,30 @@ export const StockCardVisualizer: React.FC<Props> = ({
               </div>
               <div className="hud-pill shrink-0 text-[10px] text-zinc-100 bg-white/[0.08] px-2 py-0.5 rounded-md border border-white/15 font-mono font-bold tabular-nums">
                 拆分: {hoveredDetail.data.split1.percent}({hoveredDetail.data.split1.bought}/{hoveredDetail.data.split1.size}) + {hoveredDetail.data.split2.percent}({hoveredDetail.data.split2.bought}/{hoveredDetail.data.split2.size})
+              </div>
+            </div>
+          ) : hoveredDetail?.type === 'simulatedPreOrder' ? (
+            <div className="flex items-center justify-between w-full gap-2 animate-fadeIn">
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className="px-2 py-0.5 rounded text-[10px] font-black bg-[#00F5E2] text-zinc-950 shadow-xs flex items-center gap-1">
+                  <span>🛒</span>
+                  <span>模擬預購單</span>
+                </span>
+                <span className="font-mono text-[#00F5E2] font-extrabold text-xs">
+                  ${hoveredDetail.data.price?.toFixed(2)}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 truncate text-zinc-100 font-medium">
+                {hoveredDetail.data.quantity > 0 && (
+                  <>
+                    <span>預購數量 <strong className="font-mono text-white font-bold tabular-nums">{hoveredDetail.data.quantity}</strong> 股</span>
+                    <span className="w-[1px] h-3 bg-white/15 shrink-0" />
+                    <span>預估金額 <strong className="font-mono text-emerald-300 font-bold tabular-nums">${(hoveredDetail.data.price * hoveredDetail.data.quantity).toLocaleString(undefined, { maximumFractionDigits: 0 })}</strong></span>
+                  </>
+                )}
+              </div>
+              <div className="hud-pill shrink-0 text-[10px] text-[#00F5E2] bg-white/[0.08] px-2 py-0.5 rounded-md border border-[#00F5E2]/30 font-medium">
+                {hoveredDetail.data.notes || '模擬預購單'}
               </div>
             </div>
           ) : hoveredDetail?.type === 'trade' ? (
@@ -4499,6 +4722,182 @@ export const StockCardVisualizer: React.FC<Props> = ({
           </div>
         </div>
       )}
+
+      {/* 個股卡片內建模擬預購單管理對話窗 (支援新增與刪除預購單) */}
+      {isCardPreOrderModalOpen &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[9999] bg-black/65 backdrop-blur-xs flex items-center justify-center p-4"
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsCardPreOrderModalOpen(false);
+            }}
+          >
+            <div
+              className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-zinc-200 p-5 text-zinc-900 space-y-4 animate-in fade-in zoom-in-95 duration-150"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b border-zinc-100 pb-3">
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 rounded-full bg-[#00F5E2] shadow-[0_0_8px_#00F5E2]" />
+                  <h4 className="font-bold text-base text-zinc-900">
+                    模擬預購單管理 ({cleanCardSymbol || stockName})
+                  </h4>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsCardPreOrderModalOpen(false)}
+                  className="p-1 rounded-full text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {(dynamicPrice > 0 || currentPrice > 0) && (
+                <div className="space-y-1">
+                  <span className="text-xs font-semibold text-zinc-500">
+                    快速填入參考價位 (現價 ${(dynamicPrice > 0 ? dynamicPrice : currentPrice).toFixed(2)})：
+                  </span>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {[
+                      { label: "-3%", factor: 0.97 },
+                      { label: "-6%", factor: 0.94 },
+                      { label: "-9%", factor: 0.91 },
+                      { label: "現價", factor: 1.0 },
+                      { label: "+2%", factor: 1.02 },
+                      { label: "+4%", factor: 1.04 },
+                    ].map((preset) => {
+                      const baseP = dynamicPrice > 0 ? dynamicPrice : currentPrice;
+                      const val = (baseP * preset.factor).toFixed(2);
+                      return (
+                        <button
+                          key={preset.label}
+                          type="button"
+                          onClick={() => setCardPreOrderPrice(val)}
+                          className={`px-2 py-1 text-xs rounded-lg border font-mono cursor-pointer transition-all ${
+                            cardPreOrderPrice === val
+                              ? "bg-[#00F5E2]/25 border-[#00F5E2] text-[#006e64] font-bold"
+                              : "bg-zinc-50 border-zinc-200 text-zinc-700 hover:bg-zinc-100"
+                          }`}
+                        >
+                          {preset.label} (${val})
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="text-xs font-bold text-zinc-700 block mb-1">預購價格 ($) *</label>
+                  <input
+                    type="number"
+                    step="any"
+                    min="0"
+                    placeholder="例如 75.50"
+                    value={cardPreOrderPrice}
+                    onChange={(e) => setCardPreOrderPrice(e.target.value)}
+                    className="w-full px-3 py-1.5 rounded-xl border border-zinc-300 font-mono text-sm font-bold focus:outline-none focus:ring-2 focus:ring-[#00F5E2]"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-zinc-700 block mb-1">預購股數 (股)</label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="1"
+                    placeholder="100"
+                    value={cardPreOrderQty}
+                    onChange={(e) => setCardPreOrderQty(e.target.value)}
+                    className="w-full px-3 py-1.5 rounded-xl border border-zinc-300 font-mono text-sm font-bold focus:outline-none focus:ring-2 focus:ring-[#00F5E2]"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-zinc-600 block mb-1">備註 (選填)</label>
+                <input
+                  type="text"
+                  placeholder="例如：第一批回踩支撐預購"
+                  value={cardPreOrderNotes}
+                  onChange={(e) => setCardPreOrderNotes(e.target.value)}
+                  className="w-full px-3 py-1.5 rounded-xl border border-zinc-300 text-xs focus:outline-none focus:ring-2 focus:ring-[#00F5E2]"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={handleCardAddPreOrder}
+                disabled={!cardPreOrderPrice || parseFloat(cardPreOrderPrice) <= 0}
+                className="w-full py-2 rounded-xl bg-[#008f84] hover:bg-[#007065] disabled:opacity-40 text-white font-bold text-xs transition-all cursor-pointer flex items-center justify-center gap-1"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>新增插入模擬預購單</span>
+              </button>
+
+              <div className="pt-2 border-t border-zinc-100 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-zinc-700">
+                    目前已設定預購單 ({simulatedPreOrders?.length || 0} 筆)：
+                  </span>
+                  {simulatedPreOrders && simulatedPreOrders.length > 1 && cleanCardSymbol && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        simulatedPreOrders.forEach((po: any) => onDeletePreOrder?.(po.id, po.price));
+                        clearAllSimulatedPreOrders(cleanCardSymbol, simulatedPreOrders);
+                        setPreOrdersSyncTick((t) => t + 1);
+                        toast.success("已清除全部模擬預購單");
+                      }}
+                      className="text-[11px] font-bold text-rose-600 hover:underline cursor-pointer flex items-center gap-1"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      <span>全部清除</span>
+                    </button>
+                  )}
+                </div>
+                {!simulatedPreOrders || simulatedPreOrders.length === 0 ? (
+                  <div className="text-xs text-zinc-400 py-3 text-center bg-zinc-50 rounded-xl border border-dashed border-zinc-200">
+                    目前尚無模擬預購單
+                  </div>
+                ) : (
+                  <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                    {simulatedPreOrders.map((item: any) => (
+                      <div
+                        key={item.id}
+                        className="flex items-center justify-between p-2 rounded-xl bg-cyan-50/60 border border-[#00F5E2]/40 text-xs"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="w-2.5 h-2.5 rounded-full bg-[#00F5E2] shrink-0" />
+                          <span className="font-bold font-mono text-zinc-900">${item.price.toFixed(2)}</span>
+                          {item.quantity > 0 && (
+                            <span className="text-zinc-500 font-mono">({item.quantity} 股)</span>
+                          )}
+                          {item.notes && (
+                            <span className="text-[11px] text-zinc-400 truncate max-w-[120px]">
+                              {String(item.notes).replace(/^\[模擬預購單\]\s*/, "")}
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleCardDeletePreOrder(item.id, item.price)}
+                          className="px-2 py-1 rounded-lg bg-rose-50 hover:bg-rose-600 text-rose-600 hover:text-white border border-rose-200 font-bold text-[11px] flex items-center gap-1 transition-colors cursor-pointer shrink-0"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          <span>刪除</span>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 };

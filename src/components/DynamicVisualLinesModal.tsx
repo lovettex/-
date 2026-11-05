@@ -4073,6 +4073,20 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
     setCollapsedCards(nextState);
   }, [displayPyramidSymbols, collapsedCards]);
 
+  // 快捷切換 Primial 金字塔圖表 模擬預購單 (#00F5E2)
+  const [pyramidShowPreOrders, setPyramidShowPreOrders] = useState<boolean>(true);
+  const handleTogglePyramidPreOrders = useCallback(() => {
+    playClickSound();
+    setPyramidShowPreOrders((prev) => {
+      const next = !prev;
+      toast.info(next ? "已開啟「模擬預購單」(#00F5E2)" : "已關閉「模擬預購單」(#00F5E2)", {
+        id: "pyramid-preorders-toggle",
+        duration: 1200,
+      });
+      return next;
+    });
+  }, []);
+
   // 快捷切換 Primial 金字塔圖表卡片分隔線 (Alt + D)
   const handleTogglePyramidCardDividers = useCallback(() => {
     playClickSound();
@@ -6765,6 +6779,26 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
 
             {/* 右側：防線/分隔線快捷開關 + 攤平/突破價位 + 全部展開/收合 + 關閉 */}
             <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+              {/* 模擬預購單 (#00F5E2) 開關 */}
+              <button
+                type="button"
+                onClick={handleTogglePyramidPreOrders}
+                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-normal transition-all cursor-pointer border active:scale-95 shrink-0 select-none ${
+                  pyramidShowPreOrders
+                    ? "bg-[#00F5E2]/25 text-[#00F5E2] border-[#00F5E2] shadow-[0_0_8px_rgba(0,245,226,0.35)] ring-1 ring-[#00F5E2]"
+                    : "bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white border-zinc-700/60"
+                }`}
+                title="開啟/關閉圖表上的模擬預購單 (#00F5E2)"
+              >
+                <span className="w-2.5 h-0 border-t-2 border-[#00F5E2] shrink-0" />
+                <span>模擬預購單</span>
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    pyramidShowPreOrders ? "bg-[#00F5E2] shadow-[0_0_6px_#00F5E2]" : "bg-zinc-500"
+                  }`}
+                />
+              </button>
+
               {/* 行權價 (新增) - 預設關閉 */}
               <button
                 type="button"
@@ -6965,6 +6999,9 @@ export const DynamicVisualLinesModal: React.FC<DynamicVisualLinesModalProps> = (
                         onToggleCardDividers={handleTogglePyramidCardDividers}
                         showStrikePrices={pyramidShowStrikePrices}
                         onToggleStrikePrices={handleTogglePyramidStrikePrices}
+                        showPreOrders={pyramidShowPreOrders}
+                        onTogglePreOrders={handleTogglePyramidPreOrders}
+                        preOrders={(pData.tab as any)?.plannedOrders || []}
                         selectedLevelTypes={pyramidLevelTypes}
                         onToggleLevelType={(type) => {
                           setPyramidLevelTypes((prev) => ({

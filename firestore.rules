@@ -136,6 +136,8 @@ service cloud.firestore {
         && ( !('virtualCapital' in data) || (data.virtualCapital is number && data.virtualCapital >= 0) )
         && ( !('bankAccountBalance' in data) || (data.bankAccountBalance is number && data.bankAccountBalance >= 0) )
         && ( !('selectedCardIds' in data) || data.selectedCardIds is list )
+        && ( !('customPrompts' in data) || data.customPrompts is list )
+        && ( !('simulatedPreOrders' in data) || data.simulatedPreOrders is map )
         && ( !('updatedAt' in data) || data.updatedAt is timestamp || data.updatedAt == request.time || data.updatedAt is string );
     }
 

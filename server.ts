@@ -82,6 +82,17 @@ async function startServer() {
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
+  // Intercept and cleanly respond to all AI Studio internal /_/* platform/upload routes immediately
+  app.use((req, res, next) => {
+    const rawUrl = req.url || "";
+    const origUrl = req.originalUrl || "";
+    if (rawUrl.startsWith("/_") || origUrl.startsWith("/_")) {
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      return res.status(200).json({ ok: true, status: "ok", message: "AI Studio platform route handled" });
+    }
+    next();
+  });
+
   // HTML Files Upload Endpoint
   app.post("/api/html-files", async (req, res) => {
     try {
@@ -191,7 +202,7 @@ async function startServer() {
   // Cross-device User AI Prompt Templates Storage
   const PROMPTS_FILE = path.join(process.cwd(), "data", "user_prompts.json");
 
-  function getUserPromptsData(): Record<string, any[]> {
+  function getUserPromptsData(): Record<string, any> {
     try {
       if (fs.existsSync(PROMPTS_FILE)) {
         const raw = fs.readFileSync(PROMPTS_FILE, "utf-8");
@@ -203,7 +214,7 @@ async function startServer() {
     return {};
   }
 
-  function saveUserPromptsData(data: Record<string, any[]>) {
+  function saveUserPromptsData(data: Record<string, any>) {
     try {
       const dir = path.dirname(PROMPTS_FILE);
       if (!fs.existsSync(dir)) {
@@ -219,11 +230,14 @@ async function startServer() {
     try {
       const { userId } = req.query;
       const data = getUserPromptsData();
-      let prompts = (userId && typeof userId === "string") ? data[userId] : null;
+      let prompts = (userId && typeof userId === "string" && Array.isArray(data[userId])) ? data[userId] : null;
+      let updatedAt = (userId && typeof userId === "string" && typeof data[`${userId}_updatedAt`] === "number")
+        ? data[`${userId}_updatedAt`]
+        : (typeof data["default_updatedAt"] === "number" ? data["default_updatedAt"] : 0);
       if (!prompts || prompts.length === 0) {
-        prompts = data["default"] || Object.values(data)[0] || [];
+        prompts = Array.isArray(data["default"]) ? data["default"] : [];
       }
-      res.json({ success: true, prompts });
+      res.json({ success: true, prompts, updatedAt });
     } catch (err: any) {
       console.error("Error fetching user prompts:", err);
       res.status(500).json({ error: "讀取指令模版時出錯: " + err.message });
@@ -232,18 +246,78 @@ async function startServer() {
 
   app.post("/api/user-prompts", (req, res) => {
     try {
-      const { userId, prompts } = req.body;
+      const { userId, prompts, updatedAt } = req.body;
       if (!userId || !Array.isArray(prompts)) {
         return res.status(400).json({ error: "缺少必要欄位：userId, prompts (陣列)" });
       }
       const data = getUserPromptsData();
+      const ts = typeof updatedAt === "number" ? updatedAt : Date.now();
       data[userId] = prompts;
+      data[`${userId}_updatedAt`] = ts;
       data["default"] = prompts;
+      data["default_updatedAt"] = ts;
       saveUserPromptsData(data);
-      res.json({ success: true, prompts });
+      res.json({ success: true, prompts, updatedAt: ts });
     } catch (err: any) {
       console.error("Error saving user prompts:", err);
       res.status(500).json({ error: "儲存指令模版時出錯: " + err.message });
+    }
+  });
+
+  // Cross-device Simulated Pre-Orders Storage
+  const SIM_PREORDERS_FILE = path.join(process.cwd(), "data", "simulated_preorders.json");
+
+  function getSimPreOrdersData(): Record<string, any[]> {
+    try {
+      if (fs.existsSync(SIM_PREORDERS_FILE)) {
+        const raw = fs.readFileSync(SIM_PREORDERS_FILE, "utf-8");
+        return JSON.parse(raw);
+      }
+    } catch (err) {
+      console.error("Failed to read simulated preorders file:", err);
+    }
+    return {};
+  }
+
+  function saveSimPreOrdersData(data: Record<string, any[]>) {
+    try {
+      const dir = path.dirname(SIM_PREORDERS_FILE);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(SIM_PREORDERS_FILE, JSON.stringify(data, null, 2), "utf-8");
+    } catch (err) {
+      console.error("Failed to write simulated preorders file:", err);
+    }
+  }
+
+  app.get("/api/simulated-preorders", (req, res) => {
+    try {
+      const data = getSimPreOrdersData();
+      const { symbol } = req.query;
+      if (symbol && typeof symbol === "string") {
+        const cleanSym = symbol.trim().toUpperCase();
+        return res.json({ success: true, orders: data[cleanSym] || [] });
+      }
+      res.json({ success: true, preOrdersBySymbol: data });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/simulated-preorders", (req, res) => {
+    try {
+      const { symbol, orders } = req.body;
+      if (!symbol || !Array.isArray(orders)) {
+        return res.status(400).json({ error: "缺少 symbol 或 orders" });
+      }
+      const cleanSym = String(symbol).trim().toUpperCase();
+      const data = getSimPreOrdersData();
+      data[cleanSym] = orders;
+      saveSimPreOrdersData(data);
+      res.json({ success: true, symbol: cleanSym, orders });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 

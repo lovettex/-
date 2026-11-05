@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, useLayoutEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useStockTabs } from '../hooks/useStockTabs';
 import { playClickSound, playSuccessSound, playPriceImportSound } from '../lib/audio';
@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
 import { format } from 'date-fns';
 import { Timestamp, collection, writeBatch, doc, serverTimestamp, addDoc, getDocs, deleteDoc, getDoc, getDocFromCache, setDoc, updateDoc } from 'firebase/firestore';
-import { Trash2, BarChart3, ChevronDown, ChevronUp, Gamepad2, ShieldCheck, Upload, Download, ChevronLeft, CheckCircle2, RotateCcw, Loader2, HelpCircle, AlertTriangle, Save, Calculator, History, RefreshCw, Layers, TrendingDown, TrendingUp, Split, ShieldAlert, DollarSign, Wallet, Coins, Target, Activity, Compass, LineChart, ArrowRightLeft, Check } from 'lucide-react';
+import { Trash2, BarChart3, ChevronDown, ChevronUp, Gamepad2, ShieldCheck, Upload, Download, ChevronLeft, CheckCircle2, RotateCcw, Loader2, HelpCircle, AlertTriangle, Save, Calculator, History, RefreshCw, Layers, TrendingDown, TrendingUp, Split, ShieldAlert, DollarSign, Wallet, Coins, Target, Activity, Compass, LineChart, ArrowRightLeft, Check, Plus } from 'lucide-react';
 import { toast } from "sonner";
 import { motion, AnimatePresence } from 'motion/react';
 import { db, auth } from '../lib/firebase';
@@ -31,6 +31,7 @@ import { usePlannedOrders } from '../hooks/usePlannedOrders';
 import { useStrategy } from '../hooks/useStrategy';
 import { getVisualPriceLevels } from '../lib/visualLevels';
 import { OptionsCalculatorTab } from '../components/OptionsCalculatorTab';
+import { getSimulatedPreOrders, addSimulatedPreOrder, deleteSimulatedPreOrder, mergeAndSyncPreOrders, clearAllSimulatedPreOrders, isSimulatedPreOrderLike } from '../utils/simulatedPreOrdersStorage';
 
 function AnimatedNumber({
   value,
@@ -86,7 +87,7 @@ export default function StockTabDetail() {
   const navigate = useNavigate();
   const { tabs, loading: tabsLoading, updateTabStatus, updateCurrentPrice, updateTradeType, updateTab, deleteTab } = useStockTabs();
   const { trades, addTrade, updateTrade, deleteTrade } = useTrades(id);
-  const { orders: plannedOrders } = usePlannedOrders(id);
+  const { orders: plannedOrders, addOrder: addPlannedOrder, deleteOrder: deletePlannedOrder } = usePlannedOrders(id);
   const { strategy } = useStrategy(id);
 
   const tab = tabs.find(t => t.id === id);
@@ -349,6 +350,137 @@ export default function StockTabDetail() {
       return next;
     });
   }, [playClickSound]);
+
+  // 模擬預購單 (#00F5E2) 開關與新增狀態 (呈現於軸下方如同目前價格與平均成本)
+  const [pyramidShowPreOrders, setPyramidShowPreOrders] = useState<boolean>(true);
+  const [isInsertPreOrderOpen, setIsInsertPreOrderOpen] = useState<boolean>(false);
+  const [preOrderPriceInput, setPreOrderPriceInput] = useState<string>('');
+  const [preOrderQtyInput, setPreOrderQtyInput] = useState<string>('100');
+  const [preOrderNotesInput, setPreOrderNotesInput] = useState<string>('');
+  const [localSimulatedPreOrders, setLocalSimulatedPreOrders] = useState<Array<{
+    id: string;
+    price: number;
+    quantity: number;
+    direction?: 'BUY' | 'SELL';
+    notes?: string;
+    createdAt?: number;
+  }>>(() => {
+    return tab?.symbol ? getSimulatedPreOrders(tab.symbol) : [];
+  });
+
+  useEffect(() => {
+    if (!tab?.symbol) return;
+    const syncOrders = () => {
+      setLocalSimulatedPreOrders(getSimulatedPreOrders(tab.symbol));
+    };
+    syncOrders();
+    window.addEventListener('simulated-preorders-updated', syncOrders);
+    return () => window.removeEventListener('simulated-preorders-updated', syncOrders);
+  }, [tab?.symbol]);
+
+  const handleTogglePyramidPreOrders = useCallback(() => {
+    playClickSound();
+    setPyramidShowPreOrders((prev) => {
+      const next = !prev;
+      toast.info(next ? "已開啟「模擬預購單」(#00F5E2) 顯示" : "已關閉「模擬預購單」顯示", {
+        id: "pyramid-preorders-toggle",
+        duration: 1500,
+      });
+      return next;
+    });
+  }, [playClickSound]);
+
+  // 合併 Firestore 與本機即時插入之模擬預購單，並自動同步至本機儲存供個股卡片即時讀取
+  const activeSimulatedPreOrders = useMemo(() => {
+    if (!tab?.symbol) return localSimulatedPreOrders;
+    return mergeAndSyncPreOrders(tab.symbol, plannedOrders);
+  }, [plannedOrders, localSimulatedPreOrders, tab?.symbol]);
+
+  const handleInsertSimulatedPreOrder = async () => {
+    const priceNum = parseFloat(preOrderPriceInput);
+    if (isNaN(priceNum) || priceNum <= 0) {
+      toast.error('請輸入有效的模擬預購單價格');
+      return;
+    }
+    const qtyNum = parseInt(preOrderQtyInput) || 100;
+    try {
+      playSuccessSound();
+      if (tab?.symbol) {
+        addSimulatedPreOrder(tab.symbol, {
+          price: priceNum,
+          quantity: qtyNum,
+          direction: 'BUY',
+          notes: preOrderNotesInput ? `[模擬預購單] ${preOrderNotesInput}` : '[模擬預購單]',
+        });
+        setLocalSimulatedPreOrders(getSimulatedPreOrders(tab.symbol));
+      }
+      if (id && addPlannedOrder && user) {
+        try {
+          await addPlannedOrder({
+            direction: 'BUY',
+            price: priceNum,
+            quantity: qtyNum,
+            category: '模擬預購單' as any,
+            notes: preOrderNotesInput ? `[模擬預購單] ${preOrderNotesInput}` : '[模擬預購單]',
+            status: 'PENDING',
+          });
+        } catch (err) {
+          // Fallback to local storage
+        }
+      }
+      setPyramidShowPreOrders(true);
+      setPreOrderPriceInput('');
+      setPreOrderNotesInput('');
+      toast.success(`已插入模擬預購單: $${priceNum.toFixed(2)} (${qtyNum}股)`);
+    } catch (e) {
+      console.error(e);
+      toast.error('新增模擬預購單失敗');
+    }
+  };
+
+  const handleDeleteSimulatedPreOrder = async (orderId: string, price?: number) => {
+    try {
+      if (tab?.symbol) {
+        deleteSimulatedPreOrder(tab.symbol, orderId, price);
+        setLocalSimulatedPreOrders(getSimulatedPreOrders(tab.symbol));
+      }
+      if (id && deletePlannedOrder && user) {
+        const matchingOrders = (plannedOrders || []).filter(
+          (o) =>
+            o.id === orderId ||
+            (isSimulatedPreOrderLike(o) && price !== undefined && Math.abs(Number(o.price) - Number(price)) < 0.005)
+        );
+        for (const mo of matchingOrders) {
+          try {
+            await deletePlannedOrder(mo.id);
+          } catch (err) {}
+        }
+      }
+      toast.success('已刪除該筆模擬預購單');
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleClearAllSimulatedPreOrders = async () => {
+    try {
+      if (tab?.symbol) {
+        clearAllSimulatedPreOrders(tab.symbol, activeSimulatedPreOrders);
+        setLocalSimulatedPreOrders([]);
+      }
+      if (id && deletePlannedOrder && user) {
+        const matchingOrders = (plannedOrders || []).filter((o) => isSimulatedPreOrderLike(o));
+        for (const mo of matchingOrders) {
+          try {
+            await deletePlannedOrder(mo.id);
+          } catch (err) {}
+        }
+      }
+      toast.success('已清除全部模擬預購單');
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   // 籌碼管理 未實現損益是否含期權開關 (Toggle 開關，預設開啟)
   const [includeOptionsInPnL, setIncludeOptionsInPnL] = useState<boolean>(true);
@@ -3084,7 +3216,7 @@ export default function StockTabDetail() {
         <TabsContent value="trades" id="main-panel-trades" className="space-y-4 pb-20 outline-none">
           {/* Stats Summary & Chips Management */}
           <ScrollIn delay={0.1}>
-            <div className="w-full glass-panel bg-white/95 dark:bg-zinc-900/90 border border-zinc-200/90 dark:border-zinc-800 rounded-2xl p-4 sm:p-5.5 space-y-4 transition-all duration-300 shadow-[0_4px_24px_rgba(0,0,0,0.03)] chips-summary-panel">
+            <div className="w-full glass-panel bg-white/95 dark:bg-zinc-900/90 border border-zinc-200/90 dark:border-zinc-800 rounded-2xl p-4 sm:p-6 space-y-4 transition-all duration-300 shadow-[0_4px_24px_rgba(0,0,0,0.03)] chips-summary-panel overflow-hidden">
           <div 
             className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer group select-none"
             onClick={() => setIsStatsOpen(!isStatsOpen)}
@@ -3689,35 +3821,79 @@ export default function StockTabDetail() {
 
                     {/* 子分頁 1: 籌碼試算與規劃 */}
                     <TabsContent value="calc" className="pt-2 space-y-3 outline-none">
-                      {/* Primial 分批進場金字塔快捷功能工具列 (完全對齊 Primial 頁面上的功能按鈕) */}
+                      {/* Primial 分批進場金字塔快捷功能工具列 (完全對齊 Primial 頁面上的功能按鈕，無縫填滿左右兩側) */}
                       <div 
-                        className="w-[calc(100%+2rem)] sm:w-[calc(100%+2.75rem)] -mx-4 sm:-mx-5.5 bg-[#ABE2FF] border-y border-[#89d1f7] rounded-none px-4 sm:px-5.5 py-2 sm:py-2.5 flex flex-wrap items-center justify-between gap-2.5 shadow-xs"
+                        className="w-[calc(100%+2rem)] sm:w-[calc(100%+3rem)] -mx-4 sm:-mx-6 bg-[#ABE2FF] border-y border-[#89d1f7] px-4 sm:px-6 py-2 sm:py-2.5 flex flex-wrap items-center justify-between gap-2.5 shadow-xs"
                         style={{ backgroundColor: "#ABE2FF" }}
                       >
-                        {/* 左側：Primial 標籤與提示 */}
+                        {/* 左側：Primial 標籤與提示 (細體文字) */}
                         <div className="flex items-center gap-2">
-                          <span className="text-xs sm:text-sm font-black text-zinc-950 tracking-tight flex items-center gap-1.5">
-                            <Layers className="w-4 h-4 text-amber-600" />
-                            <span>Primial</span>
-                            <span className="hidden sm:inline text-xs font-bold text-zinc-800">分批進場金字塔動態互動圖表</span>
+                          <span className="text-xs sm:text-sm font-normal text-zinc-900 tracking-tight flex items-center gap-1.5">
+                            <Layers className="w-4 h-4 text-amber-600 shrink-0" strokeWidth={1.75} />
+                            <span className="font-medium text-zinc-950">Primial</span>
+                            <span className="hidden sm:inline text-xs font-normal text-zinc-700">分批進場金字塔動態互動圖表</span>
                           </span>
                           {tab?.symbol && (
-                            <span className="px-2 py-0.5 bg-amber-400/25 border border-amber-500/40 text-amber-950 text-[11px] font-mono font-black rounded-full shadow-2xs">
+                            <span className="px-2 py-0.5 bg-amber-400/20 border border-amber-500/30 text-amber-950 text-[11px] font-mono font-normal rounded-full shadow-2xs">
                               {tab.symbol}
                             </span>
                           )}
                         </div>
 
-                        {/* 右側：防線/分隔線快捷開關 + 攤平/突破價位 (同 Primial 頂部按鈕) */}
+                        {/* 右側：防線/分隔線快捷開關 + 攤平/突破價位 + 模擬預購單 (#00F5E2) (細體文字) */}
                         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-wrap">
+                          {/* 模擬預購單 (#00F5E2) 開關與插入按鈕 */}
+                          <div className="flex items-center bg-[#E0F2FE] border border-[#7BC4ED] rounded-full p-0.5 shadow-2xs shrink-0 select-none">
+                            <button
+                              type="button"
+                              onClick={handleTogglePyramidPreOrders}
+                              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full text-xs font-normal transition-all cursor-pointer border active:scale-95 select-none ${
+                                pyramidShowPreOrders
+                                  ? "bg-[#00F5E2]/25 text-[#006e64] dark:text-[#00F5E2] border-[#00F5E2] shadow-[0_0_8px_rgba(0,245,226,0.35)] ring-1 ring-[#00F5E2]"
+                                  : "bg-transparent hover:bg-[#CFEBFC] text-zinc-700 hover:text-black border-transparent"
+                              }`}
+                              title="開啟/關閉圖表上的模擬預購單 (#00F5E2) 顯示"
+                            >
+                              <span className="w-2.5 h-0 border-t-2 border-[#00F5E2] shrink-0" />
+                              <span>模擬預購單</span>
+                              {activeSimulatedPreOrders.length > 0 && (
+                                <span className={`px-1.5 py-0.2 text-[10px] font-mono rounded-full ${
+                                  pyramidShowPreOrders ? "bg-[#00F5E2] text-zinc-950 font-normal" : "bg-zinc-300 text-zinc-700"
+                                }`}>
+                                  {activeSimulatedPreOrders.length}
+                                </span>
+                              )}
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full ${
+                                  pyramidShowPreOrders ? "bg-[#00F5E2] shadow-[0_0_6px_#00F5E2]" : "bg-zinc-400"
+                                }`}
+                              />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (tab?.currentPrice && !preOrderPriceInput) {
+                                  setPreOrderPriceInput((tab.currentPrice * 0.97).toFixed(2));
+                                }
+                                setIsInsertPreOrderOpen(true);
+                              }}
+                              className="px-2.5 py-1 text-xs font-normal text-[#007065] hover:text-[#00524a] hover:bg-[#00F5E2]/20 rounded-full transition-all cursor-pointer flex items-center gap-1 border-l border-[#7BC4ED]/60 shrink-0"
+                              title="新增或管理刪除模擬預購單 (#00F5E2)"
+                            >
+                              <Plus className="w-3.5 h-3.5 stroke-[2]" />
+                              <span>{activeSimulatedPreOrders.length > 0 ? "管理 / 新增" : "插入"}</span>
+                            </button>
+                          </div>
+
                           {/* 行權價 (新增) - 預設關閉 */}
                           <button
                             type="button"
                             onClick={handleTogglePyramidStrikePrices}
-                            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-black transition-all cursor-pointer border active:scale-95 shrink-0 select-none ${
+                            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-normal transition-all cursor-pointer border active:scale-95 shrink-0 select-none ${
                               pyramidShowStrikePrices
                                 ? "bg-zinc-950 text-white border-zinc-400 shadow-[0_0_8px_rgba(255,255,255,0.25)] ring-1 ring-zinc-400"
-                                : "bg-[#E0F2FE] hover:bg-[#CFEBFC] text-black hover:text-black border-[#7BC4ED] shadow-2xs"
+                                : "bg-[#E0F2FE] hover:bg-[#CFEBFC] text-zinc-800 hover:text-black border-[#7BC4ED] shadow-2xs"
                             }`}
                             title="開啟/關閉期權行權價與合約金額黑色虛線 (預設關閉)"
                           >
@@ -3735,10 +3911,10 @@ export default function StockTabDetail() {
                             <button
                               type="button"
                               onClick={() => handleTogglePyramidCalcMode("averaging")}
-                              className={`flex items-center gap-1 px-2.5 sm:px-3 py-1 rounded-full text-xs font-black transition-all cursor-pointer border active:scale-95 select-none ${
+                              className={`flex items-center gap-1 px-2.5 sm:px-3 py-1 rounded-full text-xs font-normal transition-all cursor-pointer border active:scale-95 select-none ${
                                 pyramidCalcMode === "averaging"
                                   ? "bg-emerald-600 text-white border-emerald-400/60 shadow-[0_0_8px_rgba(16,185,129,0.4)]"
-                                  : "bg-transparent hover:bg-[#CFEBFC] text-black hover:text-black border-transparent"
+                                  : "bg-transparent hover:bg-[#CFEBFC] text-zinc-800 hover:text-black border-transparent"
                               }`}
                               title="向下分批攤平價位試算 (-3%, -6%, -9%, -12%) [快捷鍵 Alt + T]"
                             >
@@ -3754,10 +3930,10 @@ export default function StockTabDetail() {
                             <button
                               type="button"
                               onClick={() => handleTogglePyramidCalcMode("breakout")}
-                              className={`flex items-center gap-1 px-2.5 sm:px-3 py-1 rounded-full text-xs font-black transition-all cursor-pointer border active:scale-95 select-none ${
+                              className={`flex items-center gap-1 px-2.5 sm:px-3 py-1 rounded-full text-xs font-normal transition-all cursor-pointer border active:scale-95 select-none ${
                                 pyramidCalcMode === "breakout"
                                   ? "bg-indigo-600 text-white border-indigo-400/60 shadow-[0_0_8px_rgba(99,102,241,0.4)]"
-                                  : "bg-transparent hover:bg-[#CFEBFC] text-black hover:text-black border-transparent"
+                                  : "bg-transparent hover:bg-[#CFEBFC] text-zinc-800 hover:text-black border-transparent"
                               }`}
                               title="向上突破加碼價位試算 (+2%, +4%, +6%, +8%) [快捷鍵 Alt + B]"
                             >
@@ -3777,46 +3953,38 @@ export default function StockTabDetail() {
                           <button
                             type="button"
                             onClick={handleTogglePyramidCardDividers}
-                            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-black transition-all cursor-pointer border active:scale-95 shrink-0 select-none ${
+                            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-normal transition-all cursor-pointer border active:scale-95 shrink-0 select-none ${
                               pyramidShowCardDividers
-                                ? "bg-indigo-500/20 text-indigo-300 border-indigo-400/60 shadow-[0_0_8px_rgba(99,102,241,0.3)] ring-1 ring-indigo-400/50"
-                                : "bg-[#E0F2FE] hover:bg-[#CFEBFC] text-black hover:text-black border-[#7BC4ED] shadow-2xs"
+                                ? "bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border-indigo-400/60 shadow-[0_0_8px_rgba(99,102,241,0.3)] ring-1 ring-indigo-400/50"
+                                : "bg-[#E0F2FE] hover:bg-[#CFEBFC] text-zinc-800 hover:text-black border-[#7BC4ED] shadow-2xs"
                             }`}
                             title="快速打開/關閉卡片分隔線 (Alt + D)"
                           >
-                            <Split className={`w-3.5 h-3.5 ${pyramidShowCardDividers ? "text-indigo-400" : "text-zinc-700"}`} />
+                            <Split className={`w-3.5 h-3.5 ${pyramidShowCardDividers ? "text-indigo-500" : "text-zinc-700"}`} strokeWidth={1.75} />
                             <span className="hidden sm:inline">分隔線</span>
                             <span className="sm:hidden">分</span>
-                            <span className={`text-[10px] font-mono font-normal ${pyramidShowCardDividers ? "text-zinc-400" : "text-zinc-600"}`}>Alt+D</span>
+                            <span className={`text-[10px] font-mono font-normal ${pyramidShowCardDividers ? "text-indigo-600 dark:text-zinc-400" : "text-zinc-600"}`}>Alt+D</span>
                             <span
                               className={`w-1.5 h-1.5 rounded-full ${
-                                pyramidShowCardDividers ? "bg-indigo-400 shadow-[0_0_6px_#818cf8]" : "bg-zinc-400"
+                                pyramidShowCardDividers ? "bg-indigo-500 shadow-[0_0_6px_#818cf8]" : "bg-zinc-400"
                               }`}
                             />
                           </button>
 
-                          {/* 支撐 (Alt + R) - 背景與其他按鈕保持一致 */}
+                          {/* 支撐 (Alt + R) */}
                           <button
                             type="button"
                             onClick={handleTogglePyramidSupport}
-                            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-black transition-all cursor-pointer border active:scale-95 shrink-0 select-none ${
+                            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-normal transition-all cursor-pointer border active:scale-95 shrink-0 select-none ${
                               pyramidLevelTypes.support
                                 ? "bg-[#E0F2FE] text-amber-900 border-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.25)] ring-1 ring-amber-400"
-                                : "bg-[#E0F2FE] hover:bg-[#CFEBFC] text-black hover:text-black border-[#7BC4ED] shadow-2xs"
+                                : "bg-[#E0F2FE] hover:bg-[#CFEBFC] text-zinc-800 hover:text-black border-[#7BC4ED] shadow-2xs"
                             }`}
-                            style={
-                              pyramidLevelTypes.support
-                                ? {
-                                    textShadow: "0 0 1px #64748b, -0.5px 0 0.5px #64748b, 0.5px 0 0.5px #64748b, 0 -0.5px 0.5px #64748b, 0 0.5px 0.5px #64748b",
-                                    WebkitTextStroke: "0.4px #64748b",
-                                  }
-                                : undefined
-                            }
                             title="快速打開/關閉支撐防線 (Alt + R)"
                           >
                             <span className="w-2.5 h-0 border-t-2 border-dashed border-amber-500 shrink-0" />
-                            <span style={pyramidLevelTypes.support ? { WebkitTextStroke: "0.35px #64748b" } : undefined}>支撐</span>
-                            <span className={`text-[10px] font-mono font-bold ${pyramidLevelTypes.support ? "text-amber-800" : "text-zinc-600"}`}>Alt+R</span>
+                            <span>支撐</span>
+                            <span className={`text-[10px] font-mono font-normal ${pyramidLevelTypes.support ? "text-amber-800" : "text-zinc-600"}`}>Alt+R</span>
                             <span
                               className={`w-1.5 h-1.5 rounded-full ${
                                 pyramidLevelTypes.support ? "bg-amber-500 shadow-[0_0_6px_#f59e0b]" : "bg-zinc-400"
@@ -3828,16 +3996,16 @@ export default function StockTabDetail() {
                           <button
                             type="button"
                             onClick={handleTogglePyramidResistance}
-                            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-black transition-all cursor-pointer border active:scale-95 shrink-0 select-none ${
+                            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-normal transition-all cursor-pointer border active:scale-95 shrink-0 select-none ${
                               pyramidLevelTypes.resistance
                                 ? "bg-[#E0F2FE] text-rose-800 border-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.25)] ring-1 ring-rose-400"
-                                : "bg-[#E0F2FE] hover:bg-[#CFEBFC] text-black hover:text-black border-[#7BC4ED] shadow-2xs"
+                                : "bg-[#E0F2FE] hover:bg-[#CFEBFC] text-zinc-800 hover:text-black border-[#7BC4ED] shadow-2xs"
                             }`}
                             title="快速打開/關閉壓力防線 (Alt + P)"
                           >
                             <span className="w-2.5 h-0 border-t-2 border-dashed border-rose-500 shrink-0" />
                             <span>壓力</span>
-                            <span className={`text-[10px] font-mono font-bold ${pyramidLevelTypes.resistance ? "text-rose-800" : "text-zinc-600"}`}>Alt+P</span>
+                            <span className={`text-[10px] font-mono font-normal ${pyramidLevelTypes.resistance ? "text-rose-800" : "text-zinc-600"}`}>Alt+P</span>
                             <span
                               className={`w-1.5 h-1.5 rounded-full ${
                                 pyramidLevelTypes.resistance ? "bg-rose-500 shadow-[0_0_6px_#fb7185]" : "bg-zinc-400"
@@ -3870,6 +4038,15 @@ export default function StockTabDetail() {
                         onToggleCardDividers={handleTogglePyramidCardDividers}
                         showStrikePrices={pyramidShowStrikePrices}
                         onToggleStrikePrices={handleTogglePyramidStrikePrices}
+                        showPreOrders={pyramidShowPreOrders}
+                        onTogglePreOrders={handleTogglePyramidPreOrders}
+                        preOrders={activeSimulatedPreOrders}
+                        onAddPreOrder={() => {
+                          if (tab?.currentPrice) {
+                            setPreOrderPriceInput((tab.currentPrice * 0.97).toFixed(2));
+                          }
+                          setIsInsertPreOrderOpen(true);
+                        }}
                         selectedLevelTypes={pyramidLevelTypes}
                         onToggleLevelType={(type) => {
                           setPyramidLevelTypes((prev) => ({
@@ -6534,12 +6711,191 @@ export default function StockTabDetail() {
             </div>
           </div>
 
-          <DialogFooter className="pt-3 border-t border-zinc-100">
+          <DialogFooter className="pt-3 border-t border-zinc-100 dark:border-zinc-800">
             <Button 
               onClick={() => setIsAveragingHelpOpen(false)}
               className="w-full sm:w-auto bg-zinc-900 hover:bg-black text-white font-bold rounded-xl px-6 py-2 text-xs"
             >
               了解並遵守紀律
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 插入模擬預購單 (#00F5E2) 對話窗 */}
+      <Dialog open={isInsertPreOrderOpen} onOpenChange={setIsInsertPreOrderOpen}>
+        <DialogContent className="w-[92vw] sm:max-w-lg max-h-[90vh] overflow-y-auto bg-white dark:bg-zinc-900 rounded-2xl p-5 sm:p-6 shadow-2xl border border-zinc-200 dark:border-zinc-800">
+          <DialogHeader className="border-b border-zinc-100 dark:border-zinc-800 pb-3">
+            <DialogTitle className="flex items-center gap-2 text-base sm:text-lg font-bold text-zinc-900 dark:text-zinc-100">
+              <span className="w-3 h-3 rounded-full bg-[#00F5E2] shadow-[0_0_8px_#00F5E2] shrink-0" />
+              <span>插入模擬預購單</span>
+              <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-[#00F5E2]/20 text-[#007065] dark:text-[#00F5E2] font-bold">
+                #00F5E2
+              </span>
+            </DialogTitle>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+              模擬預購單將以 <strong className="text-[#008f84] dark:text-[#00F5E2] font-semibold">#00F5E2</strong> 虛線與標籤呈現於圖表的軸下方（如同目前價格與平均成本）。
+            </p>
+          </DialogHeader>
+
+          <div className="space-y-4 my-2 text-sm text-zinc-700 dark:text-zinc-300">
+            {/* 快速填入參考價位按鈕 */}
+            {tab?.currentPrice && tab.currentPrice > 0 && (
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">快速填入預購價位：</label>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {[
+                    { label: '-3%', factor: 0.97 },
+                    { label: '-6%', factor: 0.94 },
+                    { label: '-9%', factor: 0.91 },
+                    { label: '現價', factor: 1.0 },
+                    { label: '+2%', factor: 1.02 },
+                    { label: '+4%', factor: 1.04 },
+                  ].map((preset) => {
+                    const priceVal = (tab.currentPrice! * preset.factor).toFixed(2);
+                    return (
+                      <button
+                        key={preset.label}
+                        type="button"
+                        onClick={() => setPreOrderPriceInput(priceVal)}
+                        className={`px-2.5 py-1 text-xs rounded-lg border transition-all cursor-pointer font-mono font-medium ${
+                          preOrderPriceInput === priceVal
+                            ? 'bg-[#00F5E2]/25 border-[#00F5E2] text-[#006e64] dark:text-[#00F5E2] shadow-xs'
+                            : 'bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 text-zinc-700 dark:text-zinc-300'
+                        }`}
+                      >
+                        {preset.label} (${priceVal})
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* 預購目標價格 */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300 flex items-center justify-between">
+                <span>預購目標價格 ($) <span className="text-rose-500">*</span></span>
+                {tab?.currentPrice && (
+                  <span className="text-[11px] text-zinc-400 font-normal">現價: ${tab.currentPrice.toFixed(2)}</span>
+                )}
+              </label>
+              <Input
+                type="number"
+                step="any"
+                min="0"
+                placeholder="例如 75.50"
+                value={preOrderPriceInput}
+                onChange={(e) => setPreOrderPriceInput(e.target.value)}
+                className="font-mono text-base font-bold bg-zinc-50 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700 focus-visible:ring-[#00F5E2]"
+                autoFocus
+              />
+            </div>
+
+            {/* 預購股數 */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                預計購買數量 (股)
+              </label>
+              <Input
+                type="number"
+                step="1"
+                min="1"
+                placeholder="例如 100"
+                value={preOrderQtyInput}
+                onChange={(e) => setPreOrderQtyInput(e.target.value)}
+                className="font-mono text-base font-bold bg-zinc-50 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700 focus-visible:ring-[#00F5E2]"
+              />
+            </div>
+
+            {/* 備註說明 */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">
+                預購備註 / 觸發條件 (選填)
+              </label>
+              <Input
+                type="text"
+                placeholder="例如：第一批回踩支撐預購、破線反彈預購"
+                value={preOrderNotesInput}
+                onChange={(e) => setPreOrderNotesInput(e.target.value)}
+                className="text-xs bg-zinc-50 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700"
+              />
+            </div>
+
+            {/* 目前已建立的模擬預購單清單 (可個別刪除或全部清除) */}
+            <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                  目前已設定的模擬預購單 ({activeSimulatedPreOrders.length} 筆)：
+                </span>
+                {activeSimulatedPreOrders.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={handleClearAllSimulatedPreOrders}
+                    className="text-[11px] font-bold text-rose-600 hover:text-rose-700 hover:underline cursor-pointer flex items-center gap-1"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    <span>全部清除</span>
+                  </button>
+                )}
+              </div>
+              {activeSimulatedPreOrders.length === 0 ? (
+                <div className="text-xs text-zinc-400 py-3 text-center bg-zinc-50 dark:bg-zinc-800/50 rounded-xl border border-dashed border-zinc-200 dark:border-zinc-700">
+                  目前尚無模擬預購單，可於上方輸入目標價後點擊「確認插入圖表」
+                </div>
+              ) : (
+                <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                  {activeSimulatedPreOrders.map((item) => (
+                    <div
+                      key={item.id}
+                      className="flex items-center justify-between p-2.5 rounded-xl bg-cyan-50/60 dark:bg-cyan-950/25 border border-[#00F5E2]/40 text-xs"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="w-2.5 h-2.5 rounded-full bg-[#00F5E2] shadow-[0_0_6px_#00F5E2] shrink-0" />
+                        <span className="font-bold font-mono text-zinc-900 dark:text-zinc-100 text-sm">
+                          ${item.price.toFixed(2)}
+                        </span>
+                        {item.quantity && item.quantity > 0 ? (
+                          <span className="text-zinc-600 dark:text-zinc-400 font-mono font-semibold">({item.quantity} 股)</span>
+                        ) : null}
+                        {item.notes && (
+                          <span className="text-[11px] text-zinc-500 truncate max-w-[140px]">
+                            {item.notes.replace(/^\[模擬預購單\]\s*/, '')}
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteSimulatedPreOrder(item.id, item.price)}
+                        className="px-2 py-1 text-rose-600 hover:text-white bg-rose-50 hover:bg-rose-600 dark:bg-rose-950/50 dark:hover:bg-rose-600 border border-rose-200 dark:border-rose-800 rounded-lg transition-colors cursor-pointer shrink-0 flex items-center gap-1 font-bold text-[11px]"
+                        title="刪除此筆模擬預購單"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>刪除</span>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter className="pt-3 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-between gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsInsertPreOrderOpen(false)}
+              className="text-xs"
+            >
+              關閉視窗
+            </Button>
+            <Button
+              type="button"
+              onClick={handleInsertSimulatedPreOrder}
+              disabled={!preOrderPriceInput || parseFloat(preOrderPriceInput) <= 0}
+              className="bg-[#008f84] hover:bg-[#007065] text-white font-medium text-xs rounded-xl shadow-xs px-5"
+            >
+              + 確認插入預購單
             </Button>
           </DialogFooter>
         </DialogContent>
