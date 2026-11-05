@@ -1610,40 +1610,36 @@ export default function Dashboard() {
       const targetSubTab = getDisplayHoldingStatus(targetTab.holdingStatus);
       setActiveHoldingSubTab(targetSubTab);
 
-      // 3. Reset card definition filter so card is not filtered out
+      // 3. Reset card definition filter & PnL filter so card is not filtered out
       setActiveCardDefinitionFilter("all");
+      setPnlPercentFilter(null);
 
-      // 4. Poll and scroll into view once DOM element is rendered
-      let attempts = 0;
-      const attemptScroll = () => {
-        const el = document.getElementById(`stock-card-${targetTab.id}`) || document.getElementById(`notes-row-${targetTab.id}`);
-        if (el) {
-          // Vertical scroll to section/card
-          scrollToElement(el, -120);
-
-          // Horizontal scroll in carousel container
-          el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
-
-          // Visual highlight animation ring
-          el.classList.add("ring-4", "ring-emerald-500", "ring-offset-2", "scale-[1.03]", "transition-all", "duration-300");
-          setTimeout(() => {
-            el.classList.remove("ring-4", "ring-emerald-500", "ring-offset-2", "scale-[1.03]");
-          }, 2000);
-        } else if (attempts < 30) {
-          attempts++;
-          setTimeout(attemptScroll, 100);
-        }
-      };
-
-      setTimeout(attemptScroll, 100);
+      // 4. Trigger unified jump after state settles
+      setTimeout(() => {
+        window.dispatchEvent(
+          new CustomEvent("jump_to_stock_card", {
+            detail: {
+              tabId: targetTab.id,
+              symbol: targetTab.symbol,
+              tradeType: targetTab.tradeType,
+              silentToast: true,
+            },
+          })
+        );
+      }, 60);
     }
   }, [location.state, tabs, loading, scrollToElement, updateTabHidden]);
 
   // Global listener for jump_to_stock_card CustomEvent
   useEffect(() => {
     const handleJumpToCardEvent = (e: Event) => {
-      const customEvent = e as CustomEvent<{ tabId?: string; symbol?: string; tradeType?: string }>;
-      const { tabId, symbol, tradeType } = customEvent.detail || {};
+      const customEvent = e as CustomEvent<{
+        tabId?: string;
+        symbol?: string;
+        tradeType?: string;
+        silentToast?: boolean;
+      }>;
+      const { tabId, symbol, tradeType, silentToast } = customEvent.detail || {};
       const cleanSym = symbol ? symbol.trim().toUpperCase() : "";
 
       let targetTab = tabs.find((t) => {
@@ -1668,53 +1664,211 @@ export default function Dashboard() {
 
       if (!targetTab) return;
 
+      // Find parent stock if targetTab is an associated ETF side-tab
+      const tSym = (targetTab.symbol || "").trim().toUpperCase();
+      const parentSym = (targetTab.parentSymbol || "").trim().toUpperCase();
+      const parentStockTab =
+        (targetTab.parentTabId && tabs.find((t) => t.id === targetTab.parentTabId)) ||
+        (parentSym &&
+          parentSym !== tSym &&
+          tabs.find(
+            (t) =>
+              (t.symbol || "").trim().toUpperCase() === parentSym &&
+              (t.tradeType || "simulated") === (targetTab.tradeType || "simulated")
+          )) ||
+        tabs.find(
+          (t) =>
+            (t.symbol || "").trim().toUpperCase() !== tSym &&
+            (t.tradeType || "simulated") === (targetTab.tradeType || "simulated") &&
+            Array.isArray(t.etfSymbols) &&
+            t.etfSymbols.some((s: string) => s.trim().toUpperCase() === tSym)
+        );
+
+      const effectiveGroupOwner = parentStockTab || targetTab;
+      const effectiveTradeType = effectiveGroupOwner.tradeType || targetTab.tradeType || "simulated";
+      const effectiveHoldingStatus = getDisplayHoldingStatus(
+        effectiveGroupOwner.holdingStatus || targetTab.holdingStatus
+      );
+
       if (targetTab.isHidden) {
         updateTabHidden(targetTab.id, false);
       }
+      if (parentStockTab && parentStockTab.isHidden) {
+        updateTabHidden(parentStockTab.id, false);
+      }
+
+      isProgrammaticScrollRef.current = true;
+      if (programmaticScrollTimeoutRef.current) {
+        clearTimeout(programmaticScrollTimeoutRef.current);
+      }
+      programmaticScrollTimeoutRef.current = setTimeout(() => {
+        isProgrammaticScrollRef.current = false;
+      }, 1500);
 
       if (targetTab.status === "COMPLETED") {
         setActiveViewTab("completed");
-      } else if (targetTab.tradeType === "real") {
+      } else if (effectiveTradeType === "real") {
         setActiveViewTab("real");
         setMetricsTradeTab("real");
-        setActiveHoldingSubTab(getDisplayHoldingStatus(targetTab.holdingStatus));
+        setActiveHoldingSubTab(effectiveHoldingStatus);
       } else {
         setActiveViewTab("active");
         setMetricsTradeTab("simulated");
-        setActiveHoldingSubTab(getDisplayHoldingStatus(targetTab.holdingStatus));
+        setActiveHoldingSubTab(effectiveHoldingStatus);
       }
+
+      // Ensure side-rail selection points to targetTab.id so displayTab renders targetTab!
+      const ownerSym = (effectiveGroupOwner.symbol || "").trim().toUpperCase();
+      setCardSubTabSelection((prev) => {
+        const next: Record<string, string> = {
+          ...prev,
+          [tSym]: targetTab.id,
+          [ownerSym]: targetTab.id,
+          [targetTab.id]: targetTab.id,
+          [effectiveGroupOwner.id]: targetTab.id,
+        };
+        if (targetTab.groupId) next[targetTab.groupId] = targetTab.id;
+        if (effectiveGroupOwner.groupId) next[effectiveGroupOwner.groupId] = targetTab.id;
+        tabs.forEach((sib) => {
+          const sibSym = (sib.symbol || "").trim().toUpperCase();
+          if (sibSym === ownerSym || sibSym === tSym) {
+            if (sib.groupId) next[sib.groupId] = targetTab.id;
+            next[`group-${sibSym}-${sib.id}`] = targetTab.id;
+            next[`group-etf-${sibSym}-${sib.id}`] = targetTab.id;
+          }
+        });
+        return next;
+      });
+
+      setExpandedCards((prev) => ({
+        ...prev,
+        [targetTab.id]: true,
+        [effectiveGroupOwner.id]: true,
+        ...(targetTab.groupId ? { [targetTab.groupId]: true } : {}),
+        ...(effectiveGroupOwner.groupId ? { [effectiveGroupOwner.groupId]: true } : {}),
+      }));
+
       setActiveCardTabId(targetTab.id);
+      if (isCinemaModeActive) {
+        setActiveCinemaCardId(targetTab.id);
+      }
       setActiveCardDefinitionFilter("all");
+      setPnlPercentFilter(null);
 
       const effectiveTabId = targetTab.id;
       let attempts = 0;
       const attemptScroll = () => {
-        const el = document.getElementById(`stock-card-${effectiveTabId}`) || document.getElementById(`notes-row-${effectiveTabId}`);
+        // Wait if Dialog is still locking body scroll during close
+        if (
+          (document.body.hasAttribute("data-scroll-locked") ||
+            document.body.style.overflow === "hidden") &&
+          attempts < 8
+        ) {
+          attempts++;
+          setTimeout(attemptScroll, 45);
+          return;
+        }
+        if (document.body.style.overflow === "hidden") {
+          document.body.style.overflow = "";
+        }
+
+        const el =
+          document.getElementById(`stock-card-${effectiveTabId}`) ||
+          document.getElementById(`stock-card-${effectiveGroupOwner.id}`) ||
+          (document.querySelector(`[data-card-symbol="${tSym}"]`) as HTMLElement) ||
+          (document.querySelector(`[data-card-symbol="${ownerSym}"]`) as HTMLElement) ||
+          document.getElementById(`notes-row-${effectiveTabId}`);
+
         if (el) {
-          scrollToElement(el, -120);
-          el.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
-          el.classList.add("ring-4", "ring-emerald-500", "ring-offset-2", "scale-[1.02]", "transition-all", "duration-500");
+          // 1. Vertical page scroll using Lenis or native fallback
+          if (lenisRef.current) {
+            lenisRef.current.start();
+            lenisRef.current.scrollTo(el, {
+              offset: -110,
+              duration: 0.75,
+              force: true,
+              easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
+            });
+          } else {
+            const rect = el.getBoundingClientRect();
+            window.scrollTo({
+              top: Math.max(0, window.scrollY + rect.top - 110),
+              behavior: "smooth",
+            });
+          }
+
+          // 2. Horizontal carousel scroll using custom RAF tween so window.scrollTo never cancels it!
+          const container = carouselRef.current;
+          if (container && container.contains(el)) {
+            const containerRect = container.getBoundingClientRect();
+            const elRect = el.getBoundingClientRect();
+            const startScrollLeft = container.scrollLeft;
+            const targetScrollLeft = Math.max(
+              0,
+              Math.min(
+                container.scrollWidth - container.clientWidth,
+                startScrollLeft +
+                  (elRect.left - containerRect.left) -
+                  containerRect.width / 2 +
+                  elRect.width / 2
+              )
+            );
+            const distance = targetScrollLeft - startScrollLeft;
+            if (Math.abs(distance) > 1) {
+              const duration = 420;
+              const startTime = performance.now();
+              const animateHorizontal = (now: number) => {
+                const elapsed = now - startTime;
+                const progress = Math.min(1, elapsed / duration);
+                const ease = 1 - Math.pow(1 - progress, 3);
+                container.scrollLeft = startScrollLeft + distance * ease;
+                if (progress < 1) {
+                  requestAnimationFrame(animateHorizontal);
+                } else {
+                  container.scrollLeft = targetScrollLeft;
+                }
+              };
+              requestAnimationFrame(animateHorizontal);
+            }
+          }
+
+          // 3. Highlight target card
+          el.classList.add(
+            "ring-4",
+            "ring-emerald-500",
+            "ring-offset-2",
+            "scale-[1.02]",
+            "transition-all",
+            "duration-500"
+          );
           setTimeout(() => {
             el.classList.remove("ring-4", "ring-emerald-500", "ring-offset-2", "scale-[1.02]");
           }, 2500);
-        } else if (attempts < 30) {
+        } else if (attempts < 35) {
           attempts++;
-          setTimeout(attemptScroll, 80);
+          setTimeout(attemptScroll, 70);
         }
       };
-      setTimeout(attemptScroll, 120);
+      setTimeout(attemptScroll, 80);
 
-      toast.info(`已跳轉至「${targetTab.symbol}${targetTab.companyName ? ` (${targetTab.companyName})` : ""}」數據圖示化卡片`, {
-        id: `jump-card-${targetTab.id}`,
-        duration: 2200,
-      });
+      if (!silentToast) {
+        const categoryName = effectiveHoldingStatus;
+        const tradeModeName = effectiveTradeType === "real" ? "真實交易" : "虛擬交易";
+        toast.info(
+          `已跳轉至「${targetTab.symbol}${targetTab.companyName ? ` (${targetTab.companyName})` : ""}」個股卡片（${tradeModeName} · ${categoryName}）`,
+          {
+            id: `jump-card-${targetTab.id}`,
+            duration: 2400,
+          }
+        );
+      }
     };
 
     window.addEventListener("jump_to_stock_card", handleJumpToCardEvent);
     return () => {
       window.removeEventListener("jump_to_stock_card", handleJumpToCardEvent);
     };
-  }, [tabs, scrollToElement, updateTabHidden]);
+  }, [tabs, scrollToElement, updateTabHidden, isCinemaModeActive]);
 
   const [activeManageTab, setActiveManageTab] = useState<
     "觀察中" | "候選名單" | "買進操作" | "賣出操作" | "平倉操作" | "乖離名單" | "持股監控"
@@ -3470,54 +3624,24 @@ export default function Dashboard() {
 
   const handleSearchSelect = useCallback(
     (tabId: string) => {
+      playClickSound();
       setIsSearchOpen(false);
+      setSearchQuery("");
 
       const targetTab = tabs.find((t) => t.id === tabId);
       if (!targetTab) return;
 
-      if (targetTab.isHidden) {
-        updateTabHidden(targetTab.id, false);
-      }
-
-      if (targetTab.status === "COMPLETED") {
-        setActiveViewTab("completed");
-      } else if (targetTab.tradeType === "real") {
-        setActiveViewTab("real");
-        setMetricsTradeTab("real");
-        setActiveHoldingSubTab(getDisplayHoldingStatus(targetTab.holdingStatus));
-      } else {
-        setActiveViewTab("active");
-        setMetricsTradeTab("simulated");
-        setActiveHoldingSubTab(getDisplayHoldingStatus(targetTab.holdingStatus));
-      }
-
-      setActiveCardDefinitionFilter("all");
-
-      let attempts = 0;
-      const attemptScroll = () => {
-        const el = document.getElementById(`stock-card-${targetTab.id}`);
-        if (el) {
-          scrollToElement(el, -120);
-          el.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
-          el.classList.add("ring-4", "ring-emerald-500", "ring-offset-2", "scale-[1.02]", "transition-all", "duration-500");
-          setTimeout(() => {
-            el.classList.remove("ring-4", "ring-emerald-500", "ring-offset-2", "scale-[1.02]");
-          }, 2500);
-        } else if (attempts < 30) {
-          attempts++;
-          setTimeout(attemptScroll, 80);
-        }
-      };
-      setTimeout(attemptScroll, 100);
-
-      const categoryName = getDisplayHoldingStatus(targetTab.holdingStatus);
-      const tradeModeName = targetTab.tradeType === "real" ? "真實交易" : "虛擬交易";
-      toast.info(`已跳轉至「${targetTab.symbol}」個股卡片（${tradeModeName} · ${categoryName}）`, {
-        id: `jump-card-${targetTab.id}`,
-        duration: 2500,
-      });
+      window.dispatchEvent(
+        new CustomEvent("jump_to_stock_card", {
+          detail: {
+            tabId: targetTab.id,
+            symbol: targetTab.symbol,
+            tradeType: targetTab.tradeType,
+          },
+        })
+      );
     },
-    [tabs, scrollToElement, updateTabHidden],
+    [tabs],
   );
 
   const handleToggleTabHighlight = useCallback(
@@ -5633,6 +5757,7 @@ export default function Dashboard() {
   const programmaticScrollTimeoutRef = useRef<any>(null);
 
   useEffect(() => {
+    if (isProgrammaticScrollRef.current) return;
     if (orderedFilteredSubTabVisibleTabs.length > 0) {
       const exists = orderedFilteredSubTabVisibleTabs.some(t => t.id === activeCardTabId);
       if (!exists) {
@@ -5652,6 +5777,29 @@ export default function Dashboard() {
   }, [activeCardTabId]);
 
   const handleTabIndicatorClick = useCallback((tabId: string) => {
+    const targetTab = tabs.find((t) => t.id === tabId);
+    if (targetTab) {
+      const tSym = (targetTab.symbol || "").trim().toUpperCase();
+      const parentSym = (targetTab.parentSymbol || "").trim().toUpperCase();
+      setCardSubTabSelection((prev) => {
+        const next: Record<string, string> = {
+          ...prev,
+          [tSym]: tabId,
+          [tabId]: tabId,
+        };
+        if (targetTab.groupId) next[targetTab.groupId] = tabId;
+        if (parentSym) next[parentSym] = tabId;
+        if (targetTab.parentTabId) next[targetTab.parentTabId] = tabId;
+        tabs.forEach((sib) => {
+          const sibSym = (sib.symbol || "").trim().toUpperCase();
+          if (sibSym === tSym || (parentSym && sibSym === parentSym)) {
+            if (sib.groupId) next[sib.groupId] = tabId;
+            next[`group-${sibSym}-${sib.id}`] = tabId;
+          }
+        });
+        return next;
+      });
+    }
     setActiveCardTabId(tabId);
     isProgrammaticScrollRef.current = true;
     if (programmaticScrollTimeoutRef.current) {
@@ -5659,17 +5807,51 @@ export default function Dashboard() {
     }
     programmaticScrollTimeoutRef.current = setTimeout(() => {
       isProgrammaticScrollRef.current = false;
-    }, 800);
+    }, 900);
 
-    const cardElement = document.getElementById(`stock-card-${tabId}`);
-    if (cardElement && carouselRef.current) {
-      cardElement.scrollIntoView({
-        behavior: "smooth",
-        block: "nearest",
-        inline: "center",
-      });
-    }
-  }, []);
+    setTimeout(() => {
+      const cardElement =
+        document.getElementById(`stock-card-${tabId}`) ||
+        (targetTab
+          ? (document.querySelector(
+              `[data-card-symbol="${(targetTab.symbol || "").trim().toUpperCase()}"]`
+            ) as HTMLElement)
+          : null);
+      const container = carouselRef.current;
+      if (cardElement && container) {
+        const containerRect = container.getBoundingClientRect();
+        const elRect = cardElement.getBoundingClientRect();
+        const startScrollLeft = container.scrollLeft;
+        const targetScrollLeft = Math.max(
+          0,
+          Math.min(
+            container.scrollWidth - container.clientWidth,
+            startScrollLeft +
+              (elRect.left - containerRect.left) -
+              containerRect.width / 2 +
+              elRect.width / 2
+          )
+        );
+        const distance = targetScrollLeft - startScrollLeft;
+        if (Math.abs(distance) > 1) {
+          const duration = 380;
+          const startTime = performance.now();
+          const animateHorizontal = (now: number) => {
+            const elapsed = now - startTime;
+            const progress = Math.min(1, elapsed / duration);
+            const ease = 1 - Math.pow(1 - progress, 3);
+            container.scrollLeft = startScrollLeft + distance * ease;
+            if (progress < 1) {
+              requestAnimationFrame(animateHorizontal);
+            } else {
+              container.scrollLeft = targetScrollLeft;
+            }
+          };
+          requestAnimationFrame(animateHorizontal);
+        }
+      }
+    }, 30);
+  }, [tabs]);
 
   // 底部股票代號導覽列滑鼠拖曳橫向滾動 (Drag and Scroll) 與滾輪橫向滾動
   const bottomNavScrollRef = useRef<HTMLDivElement>(null);
@@ -7951,7 +8133,9 @@ export default function Dashboard() {
       <div className="space-y-6">
         {/* Search Dialog */}
         <Dialog open={isSearchOpen} onOpenChange={setIsSearchOpen}>
-          <DialogContent className="border border-zinc-200/50 shadow-2xl bg-white/95 backdrop-blur-xl text-zinc-900 max-w-[480px] w-[94%] p-6 rounded-2xl">
+          <DialogContent
+            className="border border-zinc-200/50 shadow-2xl bg-white/95 backdrop-blur-xl text-zinc-900 max-w-[480px] w-[94%] p-6 rounded-2xl"
+          >
             <DialogHeader>
               <DialogTitle className="font-extrabold text-xl text-zinc-900 flex items-center gap-2">
                 <Search className="h-5 w-5 text-emerald-600" />
@@ -7967,6 +8151,7 @@ export default function Dashboard() {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
+                    e.preventDefault();
                     const q = searchQuery.toLowerCase().trim();
                     const filtered = tabs.filter(
                       (t) =>
@@ -8006,6 +8191,7 @@ export default function Dashboard() {
                     return (
                       <button
                         key={t.id}
+                        type="button"
                         onClick={() => handleSearchSelect(t.id)}
                         className="w-full flex items-center justify-between p-3 rounded-xl bg-zinc-50 hover:bg-emerald-50/40 border border-zinc-100 hover:border-emerald-200/80 transition-all text-left group active:scale-[0.98] cursor-pointer"
                       >
@@ -8018,6 +8204,16 @@ export default function Dashboard() {
                               <span className="font-extrabold text-sm text-zinc-900 group-hover:text-emerald-700 transition-colors">
                                 {t.symbol}
                               </span>
+                              {t.isNew && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[9.5px] font-black bg-orange-100 text-orange-800 border border-orange-300">
+                                  New
+                                </span>
+                              )}
+                              {t.tags?.includes("ETF") && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[9.5px] font-black bg-indigo-100 text-indigo-800 border border-indigo-300">
+                                  ETF
+                                </span>
+                              )}
                               {/* 交易模式備註 */}
                               {t.tradeType === "real" ? (
                                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/80">
@@ -10402,6 +10598,8 @@ export default function Dashboard() {
                                     <div
                                       key={tab.id}
                                       id={`stock-card-${tab.id}`}
+                                      data-card-symbol={(tab.symbol || "").trim().toUpperCase()}
+                                      data-group-id={group.id}
                                       className={`card-wrapper w-[calc(100vw-24px)] ${hasCol3Content ? "sm:w-[617px] md:w-[617px] lg:w-[617px] xl:w-[617px] 2xl:w-[617px]" : "sm:w-[480px] md:w-[480px] lg:w-[480px] xl:w-[480px] 2xl:w-[480px]"} shrink-0 flex flex-col transition-all duration-300 ${isCardExpanded ? "h-[646px] min-h-[566px] sm:min-h-[646px] max-h-[calc(100dvh-56px)] sm:max-h-none select-none" : "min-h-[135px] h-[135px]"}`}
                                       onContextMenu={(e) => {
                                         e.preventDefault();
