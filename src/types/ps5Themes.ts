@@ -17,6 +17,44 @@ export interface PS5Theme {
 
 export const PS5_THEMES: PS5Theme[] = [
   {
+    id: 'texture-overlay-video',
+    name: '主題 1：質感紋理覆蓋',
+    nameEn: 'Theme 1: Texture Overlay Video',
+    category: 'interactive',
+    iconColor: '#10b981',
+    bgGradient: ['#f8fafc', '#ecfdf5', '#d1fae5'],
+    accentColor: '#059669',
+    particleColor: '#34d399',
+    particleGlow: 'rgba(16, 185, 129, 0.75)',
+    videoSrc:
+      'https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260331_045634_e1c98c76-1265-4f5c-882a-4276f2080894.mp4',
+    cloudFrontUrl:
+      'https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260331_045634_e1c98c76-1265-4f5c-882a-4276f2080894.mp4',
+    sciConcept: 'max-w-[1831px] 居中、底部圓角 rounded-b-[32px] 裁切與 /texture.png 全螢幕輕薄紋理覆蓋 (mix-blend-mode: lighten, opacity: 0.6)',
+    sciFormula: 'mix-blend-mode: lighten, opacity: 0.6, rounded-b-[32px]',
+    sciDescription:
+      'Full-bleed 循環靜音自動播放，外層固定 texture.png 覆蓋層 (z-50) 提供電影感底片顆粒。',
+  },
+  {
+    id: 'anton-cinematic-video',
+    name: '主題 2：Anton 劇院視效',
+    nameEn: 'Theme 2: Anton Cinematic Video',
+    category: 'interactive',
+    iconColor: '#38bdf8',
+    bgGradient: ['#f8fafc', '#eff6ff', '#dbeafe'],
+    accentColor: '#0284c7',
+    particleColor: '#38bdf8',
+    particleGlow: 'rgba(56, 189, 248, 0.75)',
+    videoSrc:
+      'https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260331_151551_992053d1-3d3e-4b8c-abac-45f22158f411.mp4',
+    cloudFrontUrl:
+      'https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260331_151551_992053d1-3d3e-4b8c-abac-45f22158f411.mp4',
+    sciConcept: 'max-w-[1831px] 劇院級容器與 Anton 大寫標題 (32px-60px 響應式)',
+    sciFormula: 'font: Anton, padding: 64px~96px, uppercase',
+    sciDescription:
+      'Full-bleed 循環動態背景，結合 Anton 字體的大氣劇院級頂部標題與 generous vertical padding。',
+  },
+  {
     id: 'fullpage-loop-video',
     name: '全頁無遮罩自動循環動態背景',
     nameEn: 'Full-Page Loop Background Video',

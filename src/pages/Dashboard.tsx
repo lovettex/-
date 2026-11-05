@@ -10978,7 +10978,7 @@ export default function Dashboard() {
                                                 if (bottomNavHasDraggedRef.current) return;
                                                 handleTabIndicatorClick(tab.id);
                                               }}
-                                              className={`stock-card-indicator-btn px-2.5 py-1 text-sm font-medium transition-all duration-200 cursor-pointer outline-none shrink-0 inline-flex items-center gap-1.5 rounded-md hover:bg-zinc-100/60 ${
+                                              className={`stock-card-indicator-btn px-2.5 py-1 text-[15.5px] font-medium transition-all duration-200 cursor-pointer outline-none shrink-0 inline-flex items-center gap-1.5 rounded-md hover:bg-zinc-100/60 ${
                                                 isSelected ? "is-selected font-bold" : "font-normal"
                                               }`}
                                               style={
@@ -10986,14 +10986,15 @@ export default function Dashboard() {
                                                   ? {
                                                       color: "#ffffff",
                                                       WebkitTextFillColor: "#ffffff",
-                                                      WebkitTextStroke: "1px #000000",
-                                                      textShadow:
-                                                        "-1px -1px 0 #000000, 1px -1px 0 #000000, -1px 1px 0 #000000, 1px 1px 0 #000000, 0 1px 2px rgba(0,0,0,0.9)",
-                                                      fontWeight: isSelected ? 800 : 600,
-                                                      opacity: isSelected ? 1 : 0.85,
+                                                      WebkitTextStroke: "0.35px #000000",
+                                                      textShadow: "0 1px 2px rgba(0, 0, 0, 0.75)",
+                                                      fontSize: "15.5px",
+                                                      fontWeight: isSelected ? 750 : 550,
+                                                      opacity: isSelected ? 1 : 0.88,
                                                     }
                                                   : {
                                                       color: isSelected ? "#1a1a1a" : "#71717a",
+                                                      fontSize: "15.5px",
                                                       fontWeight: isSelected ? 600 : 400,
                                                     }
                                               }

@@ -366,10 +366,10 @@ body.ps5-theme-active .glass-header {
 }
 
 /* Generic non-button webpage containers with white/light backgrounds inside main -> 75% background opacity */
-body.ps5-theme-active main div.bg-white:not(button):not([role="button"]):not([data-price-tag="true"]):not(.portfolio-hero-banner *),
-body.ps5-theme-active main div[class*="bg-white/"]:not(button):not([role="button"]):not([data-price-tag="true"]):not(.portfolio-hero-banner *):not([class*="hover:bg-white"]):not([class*="group-hover:bg-white"]):not(.telemetry-metric-item),
-body.ps5-theme-active main section.bg-white:not(.portfolio-hero-banner *),
-body.ps5-theme-active main section[class*="bg-white/"]:not(.portfolio-hero-banner *) {
+body.ps5-theme-active main div.bg-white:not(button):not([role="button"]):not([data-price-tag="true"]):not(.portfolio-hero-banner *):not(.stock-card-hud-bar *):not(.stock-card-hud-bar):not([data-card-hud="true"] *):not([data-card-hud="true"]),
+body.ps5-theme-active main div[class*="bg-white/"]:not(button):not([role="button"]):not([data-price-tag="true"]):not(.portfolio-hero-banner *):not([class*="hover:bg-white"]):not([class*="group-hover:bg-white"]):not(.telemetry-metric-item):not(.stock-card-hud-bar *):not(.stock-card-hud-bar):not([data-card-hud="true"] *):not([data-card-hud="true"]),
+body.ps5-theme-active main section.bg-white:not(.portfolio-hero-banner *):not(.stock-card-hud-bar *):not(.stock-card-hud-bar):not([data-card-hud="true"] *):not([data-card-hud="true"]),
+body.ps5-theme-active main section[class*="bg-white/"]:not(.portfolio-hero-banner *):not(.stock-card-hud-bar *):not(.stock-card-hud-bar):not([data-card-hud="true"] *):not([data-card-hud="true"]) {
   background-color: rgba(255, 255, 255, 0.75) !important;
 }
 
@@ -530,6 +530,35 @@ body.ps5-theme-active .main-tabs-track {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
+
+/* 8. Stock Card Dynamic Detail HUD Bar (個股卡片底部黑色的動態訊息區塊) - Remove frosted glass and keep pure dark HUD aesthetic */
+body.ps5-theme-active .stock-card-hud-bar,
+body.ps5-theme-active [data-card-hud="true"] {
+  background: linear-gradient(to right, #18181b, rgba(24, 24, 27, 0.98), #09090b) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border-color: rgba(63, 63, 70, 0.8) !important;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+}
+
+body.ps5-theme-active .stock-card-hud-bar div,
+body.ps5-theme-active [data-card-hud="true"] div,
+body.ps5-theme-active .stock-card-hud-bar span,
+body.ps5-theme-active [data-card-hud="true"] span {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+body.ps5-theme-active .stock-card-hud-bar .hud-pill,
+body.ps5-theme-active [data-card-hud="true"] .hud-pill,
+body.ps5-theme-active .stock-card-hud-bar div[class*="bg-white/"],
+body.ps5-theme-active [data-card-hud="true"] div[class*="bg-white/"] {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
 
 
 /* =========================================================

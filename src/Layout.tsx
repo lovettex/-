@@ -6,6 +6,7 @@ import { Premium3DGrid } from './components/Premium3DGrid';
 import { WhiteNoisePlayer } from './components/WhiteNoisePlayer';
 import { whiteNoiseEngine, WhiteNoiseState } from './lib/whiteNoiseEngine';
 import { PS5DynamicBackground } from './components/PS5DynamicBackground';
+import { TopBackgroundSwitch } from './components/TopBackgroundSwitch';
 
 const CrawlerSpider = lazy(() =>
   import('./components/CrawlerSpider').then((m) => ({ default: m.CrawlerSpider }))
@@ -158,7 +159,14 @@ export default function Layout() {
       </div>
 
       <main className="flex-1 relative z-10 focus:outline-none w-full">
-        <div className="w-full mx-auto px-2 sm:px-4 md:px-6 pt-3 sm:pt-4 pb-20 md:pb-24 max-w-[1920px]">
+        {/* Switch Button on Top */}
+        <div className="sticky top-0 z-40 w-full pointer-events-none">
+          <div className="w-full max-w-[1920px] mx-auto px-2 sm:px-4 md:px-6 py-2 flex justify-end items-center pointer-events-auto">
+            <TopBackgroundSwitch />
+          </div>
+        </div>
+
+        <div className="w-full mx-auto px-2 sm:px-4 md:px-6 pb-20 md:pb-24 max-w-[1920px]">
           <Outlet />
         </div>
       </main>

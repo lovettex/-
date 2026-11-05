@@ -316,7 +316,7 @@ class WhiteNoiseEngine {
     isMuted: false,
     randomMode: true,
     bgEnabled: true,
-    bgThemeId: 'fullpage-loop-video',
+    bgThemeId: 'texture-overlay-video',
     bgSpeed: 0.5,
   };
 
@@ -341,6 +341,8 @@ class WhiteNoiseEngine {
         }
         const savedBgTheme = localStorage.getItem('ambient_bg_theme_v3');
         if (
+          savedBgTheme === 'texture-overlay-video' ||
+          savedBgTheme === 'anton-cinematic-video' ||
           savedBgTheme === 'fullpage-loop-video' ||
           savedBgTheme === 'native-scrub-video' ||
           savedBgTheme === 'lavender-gaze-heart'

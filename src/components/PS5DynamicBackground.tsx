@@ -3,6 +3,8 @@ import { PS5Theme, PS5_THEMES } from '../types/ps5Themes';
 import { FooterBackground } from './FooterBackground';
 import { NativeScrubBackground } from './NativeScrubBackground';
 import { FullPageVideoBackground } from './FullPageVideoBackground';
+import { TextureOverlayBackground } from './TextureOverlayBackground';
+import { AntonCinematicBackground } from './AntonCinematicBackground';
 
 export type { PS5Theme };
 export { PS5_THEMES };
@@ -15,7 +17,7 @@ interface PS5DynamicBackgroundProps {
 
 export function PS5DynamicBackground({
   isActive,
-  themeId = 'fullpage-loop-video',
+  themeId = 'texture-overlay-video',
 }: PS5DynamicBackgroundProps) {
   const theme = PS5_THEMES.find((t) => t.id === themeId) || PS5_THEMES[0];
 
@@ -35,6 +37,14 @@ export function PS5DynamicBackground({
   }, [isActive, theme]);
 
   if (!isActive) return null;
+
+  if (theme.id === 'texture-overlay-video') {
+    return <TextureOverlayBackground />;
+  }
+
+  if (theme.id === 'anton-cinematic-video') {
+    return <AntonCinematicBackground />;
+  }
 
   if (theme.id === 'lavender-gaze-heart') {
     return <FooterBackground />;

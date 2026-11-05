@@ -4005,7 +4005,8 @@ export const StockCardVisualizer: React.FC<Props> = ({
       >
         {/* Dynamic Detail HUD Panel (卡片正下方動態提示細節, 高對比度清晰顯示) */}
         <div 
-          className="w-full shrink-0 px-3 py-1 rounded-lg bg-gradient-to-r from-zinc-900 via-zinc-900/98 to-zinc-950 text-white border border-zinc-700/80 shadow-[0_2px_10px_rgba(0,0,0,0.12),inset_0_1px_0_rgba(255,255,255,0.08)] flex items-center justify-between min-h-[34px] h-[34px] text-[11px] select-none pointer-events-auto overflow-hidden transition-all"
+          data-card-hud="true"
+          className="stock-card-hud-bar w-full shrink-0 px-3 py-1 rounded-lg bg-gradient-to-r from-zinc-900 via-zinc-900/98 to-zinc-950 text-white border border-zinc-700/80 shadow-[0_2px_10px_rgba(0,0,0,0.12),inset_0_1px_0_rgba(255,255,255,0.08)] flex items-center justify-between min-h-[34px] h-[34px] text-[11px] select-none pointer-events-auto overflow-hidden transition-all"
         >
           {hoveredDetail?.type === 'pyramid' ? (
             <div className="flex items-center justify-between w-full gap-2 animate-fadeIn">
@@ -4027,7 +4028,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
                 <span className="w-[1px] h-3 bg-white/15 shrink-0" />
                 <span>已購 <strong className="font-mono text-emerald-300 font-bold tabular-nums">{hoveredDetail.data.bought}</strong>股 (<span className="text-emerald-300 font-black font-mono">{hoveredDetail.data.progressPct}%</span>)</span>
               </div>
-              <div className="shrink-0 text-[10px] text-zinc-100 bg-white/[0.08] px-2 py-0.5 rounded-md border border-white/15 font-mono font-bold tabular-nums">
+              <div className="hud-pill shrink-0 text-[10px] text-zinc-100 bg-white/[0.08] px-2 py-0.5 rounded-md border border-white/15 font-mono font-bold tabular-nums">
                 拆分: {hoveredDetail.data.split1.percent}({hoveredDetail.data.split1.bought}/{hoveredDetail.data.split1.size}) + {hoveredDetail.data.split2.percent}({hoveredDetail.data.split2.bought}/{hoveredDetail.data.split2.size})
               </div>
             </div>
@@ -4056,7 +4057,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
                 <span className="w-[1px] h-3 bg-white/15 shrink-0" />
                 <span>總額 <strong className="font-mono text-emerald-300 font-bold tabular-nums">${(hoveredDetail.data.price * hoveredDetail.data.quantity).toLocaleString(undefined, { maximumFractionDigits: 0 })}</strong></span>
               </div>
-              <div className="shrink-0 text-[10px] text-zinc-100 bg-white/[0.08] px-2 py-0.5 rounded-md border border-white/15 font-medium">
+              <div className="hud-pill shrink-0 text-[10px] text-zinc-100 bg-white/[0.08] px-2 py-0.5 rounded-md border border-white/15 font-medium">
                 {hoveredDetail.data.batch || (hoveredDetail.data.isSell ? '獲利了結/減倉' : '一般進場')}{hoveredDetail.data.purpose ? ` · ${hoveredDetail.data.purpose}` : ''}
               </div>
             </div>
@@ -4098,7 +4099,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
                     </span>
                     <Layers className="w-3.5 h-3.5 text-emerald-400 shrink-0 hidden xs:inline-block" />
                     <span className="text-zinc-100 font-bold tracking-tight shrink-0">分批進場金字塔</span>
-                    <div className="flex items-center gap-1 bg-white/[0.07] border border-white/10 rounded-md px-1.5 py-0.5 font-mono text-[10.5px] tabular-nums shrink-0">
+                    <div className="hud-pill flex items-center gap-1 bg-white/[0.07] border border-white/10 rounded-md px-1.5 py-0.5 font-mono text-[10.5px] tabular-nums shrink-0">
                       <span className="text-emerald-300 font-extrabold">{boughtVal}</span>
                       <span className="text-white/35 font-bold">/</span>
                       <span className="text-white font-bold">{plannedVal}股</span>
@@ -4119,7 +4120,7 @@ export const StockCardVisualizer: React.FC<Props> = ({
                     </span>
                   </div>
                   <div className="text-[11px] text-zinc-200 flex items-center gap-2 truncate font-medium shrink-0">
-                    <div className="flex items-center gap-1 bg-white/[0.06] border border-white/10 rounded-md px-1.5 py-0.5">
+                    <div className="hud-pill flex items-center gap-1 bg-white/[0.06] border border-white/10 rounded-md px-1.5 py-0.5">
                       <History className="w-3 h-3 text-cyan-400 shrink-0" />
                       <span className="text-zinc-300 text-[10.5px]">歷史買入</span>
                       <strong className="text-cyan-300 font-extrabold font-mono tabular-nums">{buyTrades?.length || 0}</strong>
